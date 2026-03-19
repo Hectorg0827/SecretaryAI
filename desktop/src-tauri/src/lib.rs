@@ -1,5 +1,6 @@
 mod credentials;
 mod db;
+mod screen_capture;
 mod sync;
 mod tray;
 mod watcher;
@@ -26,6 +27,7 @@ pub fn run() {
             sync::trigger_sync,
             sync::get_sync_status,
             db::query_local,
+            screen_capture::capture_screen,
         ])
         .setup(|app| {
             // Initialize local encrypted database

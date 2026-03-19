@@ -43,6 +43,7 @@ anyhow = "1"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 notify = "6"       # Cross-platform filesystem watching
+base64 = "0.22"   # For screen capture encoding (also used in credentials)
 
 # Cross-platform credential storage
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     api_key_rotation_hours: int = 24
 
+    # Google APIs (Gmail + Sheets)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+
+    # Computer Use safety
+    computer_use_enabled: bool = True
+    computer_use_max_steps: int = 50
+    computer_use_screenshot_width: int = 1280
+    computer_use_screenshot_height: int = 720
+
     # Sentry
     sentry_dsn: str = ""
 

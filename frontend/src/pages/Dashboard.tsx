@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AccountHealthCard } from '../components/dashboard/AccountHealthCard';
 import { InventoryAlerts } from '../components/inventory/InventoryAlerts';
+import { ApprovalQueue } from '../components/actions/ApprovalQueue';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { api } from '../lib/api';
 
@@ -32,6 +33,7 @@ export function Dashboard() {
           <>
             <AccountHealthCard summary={data.accounts} />
             <InventoryAlerts alerts={data.inventory_alerts} />
+            <ApprovalQueue />
           </>
         ) : null}
       </div>

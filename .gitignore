@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+Cargo.lock
+*.lock
+
+# Tauri generated
+src-tauri/gen/
+WixTools/
+
+# macOS
+.DS_Store
+*.xcuserstate
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# SQLite local DB
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets / Keys
+*.pem
+*.key
+*.p12
+*.pfx

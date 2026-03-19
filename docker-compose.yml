@@ -1,0 +1,110 @@
+version: "3.9"
+
+# ─── Shared env_file ──────────────────────────────────────────────────────────
+x-backend-env: &backend-env
+  env_file: ./backend/.env
+  environment:
+    REDIS_URL: redis://redis:6379/0
+
+services:
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── FastAPI backend ───────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    <<: *backend-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app   # live-reload in dev
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Celery worker ────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    <<: *backend-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tasks:/app/tasks
+      - ./backend/celery_app.py:/app/celery_app.py
+    command: >
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --queues=celery,high_priority
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      C_FORCE_ROOT: "true"
+
+  # ─── Celery beat scheduler ────────────────────────────────────────────────
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    <<: *backend-env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tasks:/app/tasks
+      - ./backend/celery_app.py:/app/celery_app.py
+      - beat_schedule:/app/beat
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --schedule=/app/beat/celerybeat-schedule
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+  # ─── Celery Flower (task monitor) — optional ──────────────────────────────
+  flower:
+    image: mher/flower:2.0
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      FLOWER_PORT: 5555
+    depends_on:
+      - redis
+    profiles:
+      - monitoring
+
+volumes:
+  redis_data:
+  beat_schedule:

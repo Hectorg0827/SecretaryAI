@@ -56,6 +56,7 @@ class UnifiedDataAdapter:
                 access_token=cfg["qbo_access_token"],
                 refresh_token=cfg["qbo_refresh_token"],
                 realm_id=cfg["qbo_realm_id"],
+                on_token_refresh=self._persist_qbo_tokens,
             )
 
         # Gmail
@@ -68,6 +69,38 @@ class UnifiedDataAdapter:
 
         # Computer Use Engine — always available for non-API sources
         self._computer_use = ComputerUseEngine(company_config=cfg)
+
+    # ------------------------------------------------------------------
+    # Token persistence callback (called by QBOnlineAdapter after refresh)
+    # ------------------------------------------------------------------
+
+    async def _persist_qbo_tokens(
+        self, access_token: str, refresh_token: str, expires_in: int = 3600
+    ) -> None:
+        """Encrypt and save refreshed QBO tokens back to Supabase."""
+        import logging
+        from datetime import datetime, timezone
+        log = logging.getLogger(__name__)
+
+        company_id = self._config.get("id")
+        if not company_id:
+            return
+
+        try:
+            from supabase import create_client
+            from app.config import get_settings
+            from app.utils.encryption import encrypt
+
+            settings = get_settings()
+            db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+            db.table("companies").update({
+                "qbo_access_token": encrypt(access_token, settings.secret_key),
+                "qbo_refresh_token": encrypt(refresh_token, settings.secret_key),
+                "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", company_id).execute()
+            log.info("QBO tokens refreshed and persisted for company %s", company_id)
+        except Exception as exc:
+            log.error("Failed to persist refreshed QBO tokens for %s: %s", company_id, exc)
 
     # ------------------------------------------------------------------
     # QuickBooks data

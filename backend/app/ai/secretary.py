@@ -83,7 +83,7 @@ def detect_action_in_response(ai_response: str) -> Optional[dict]:
     """
     action_keywords = {
         "draft_email": ["draft an email", "send an email", "write to", "email them"],
-        "draft_po": ["draft a PO", "purchase order", "place an order", "reorder"],
+        "draft_po": ["draft a po", "purchase order", "place an order", "reorder"],
         "generate_report": ["generate a report", "create a report", "export"],
         "send_alert": ["send an alert", "notify", "flag this"],
     }

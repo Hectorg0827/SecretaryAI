@@ -1,0 +1,32 @@
+# Minimal requirements for running tests in CI / headless environments.
+# Excludes desktop-only packages (pyautogui, mss) and packages that
+# require a Rust or C toolchain to build.
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+
+# AI
+anthropic==0.40.0
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==43.0.3
+
+# HTTP
+httpx==0.27.2
+python-multipart==0.0.12
+
+# Config
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.6.0
+
+# Image processing (used in screenshot_manager)
+Pillow==11.0.0
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+anyio[trio]==4.6.0

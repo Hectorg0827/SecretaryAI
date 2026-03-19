@@ -301,7 +301,8 @@ async def test_intent_classification(question: str, expected_intent: str):
             {"name": "Acme Corp", "health_status": "healthy"},
             {"name": "Metro Distributors", "health_status": "dormant"},
         ]},
-        ["Acme Corp", "Metro Distributors"],
+        # Overview shows counts + at-risk/dormant names; healthy accounts are counted not listed
+        ["Metro Distributors", "dormant", "Accounts overview"],
     ),
     (
         "sales_report",
@@ -309,7 +310,8 @@ async def test_intent_classification(question: str, expected_intent: str):
             "accounts": [{"name": "Acme Corp", "health_status": "healthy"}],
             "inventory": [{"product_name": "Widget A", "total_qty": 250, "stock_status": "healthy", "weeks_remaining": 25}],
         },
-        ["Acme Corp"],
+        # Healthy items show as counts; summary includes both accounts + inventory sections
+        ["Accounts overview", "healthy stock levels"],
     ),
     (
         "general_question",
@@ -317,7 +319,7 @@ async def test_intent_classification(question: str, expected_intent: str):
             "accounts": [{"name": "Acme Corp", "health_status": "healthy"}],
             "inventory": [{"product_name": "Widget A", "total_qty": 250, "stock_status": "healthy", "weeks_remaining": 25}],
         },
-        ["Acme Corp"],
+        ["Accounts overview", "healthy stock levels"],
     ),
 ])
 def test_build_query_context_non_empty(intent, data, should_contain):

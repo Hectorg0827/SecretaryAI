@@ -1,13 +1,13 @@
 """
 Unified Data Adapter — single interface for ALL data sources.
 The AI and business logic only talk to this class.
-It routes requests to the right connector (API or Computer Use).
+It routes requests through the AccessRouter (API → Playwright → File Ingestion → Computer Use).
 
 Decision logic:
-  QuickBooks data → QB connector (Desktop or Online)
+  QuickBooks data → QB connector (Desktop or Online) via AccessRouter API path
   Gmail           → Gmail connector
   Google Sheets   → Sheets connector
-  Anything else   → Computer Use Engine (the universal fallback)
+  Portals/files   → AccessRouter selects least-fragile path automatically
 """
 from datetime import date, timedelta
 from typing import Optional
@@ -67,8 +67,13 @@ class UnifiedDataAdapter:
         if cfg.get("google_credentials"):
             self._sheets = GoogleSheetsConnector(credentials=cfg["google_credentials"])
 
-        # Computer Use Engine — always available for non-API sources
+        # Computer Use Engine — kept as last-resort fallback inside AccessRouter
         self._computer_use = ComputerUseEngine(company_config=cfg)
+
+        # Access Router — replaces ad-hoc CU calls for portals and files
+        # Lazy: requires a DB reference; set via set_db() after construction
+        self._router = None
+        self._db = None
 
     # ------------------------------------------------------------------
     # Token persistence callback (called by QBOnlineAdapter after refresh)
@@ -101,6 +106,19 @@ class UnifiedDataAdapter:
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
             log.error("Failed to persist refreshed QBO tokens for %s: %s", company_id, exc)
+
+    def set_db(self, db) -> None:
+        """Attach a DB client so the AccessRouter can log path decisions."""
+        from app.router.access_router import AccessRouter
+        self._db = db
+        self._router = AccessRouter(self._config, db)
+
+    def _get_router(self):
+        if self._router is None:
+            # Fallback: router without DB logging (e.g. in tests or tasks)
+            from app.router.access_router import AccessRouter
+            self._router = AccessRouter(self._config, _NoopDB())
+        return self._router
 
     # ------------------------------------------------------------------
     # QuickBooks data
@@ -137,20 +155,18 @@ class UnifiedDataAdapter:
         Merge QB inventory with any additional warehouse system data.
         QB is authoritative for item definitions; warehouse system
         provides real-time location quantities.
+        Uses AccessRouter: API → FILE_INGESTION → COMPUTER_USE.
         """
         qb_items = await self.get_inventory_qb()
-        qb_by_name = {item.name.lower(): item for item in qb_items}
 
-        warehouse_app = self._config.get("warehouse_app")
+        router = self._get_router()
         warehouse_data: list[dict] = []
-
-        if warehouse_app and self._computer_use:
-            raw = await self._computer_use.extract_data(
-                app_name=warehouse_app,
-                task="Get current inventory quantities for all products by location",
-            )
-            from app.computer_use.data_extractor import DataExtractor
-            warehouse_data = DataExtractor.normalize_inventory(raw)
+        try:
+            result = await router.route("inventory", {})
+            # Router returns raw items; we need only the warehouse quantities
+            warehouse_data = result.data.get("rows", result.data.get("items", []))
+        except Exception:
+            pass  # QB data stands alone if no warehouse source available
 
         merged: list[dict] = []
         for item in qb_items:
@@ -167,11 +183,16 @@ class UnifiedDataAdapter:
                 "source": "qb",
             }
 
-            # Find matching warehouse entry
             for w in warehouse_data:
-                if w["product_name"].lower() in item.name.lower() or item.name.lower() in w["product_name"].lower():
-                    entry["warehouse_qty"] = w["quantity"]
-                    entry["total_qty"] = entry["qb_qty"] + w["quantity"]
+                wname = w.get("product_name", "")
+                if wname.lower() in item.name.lower() or item.name.lower() in wname.lower():
+                    qty = w.get("quantity", 0)
+                    try:
+                        qty = float(qty)
+                    except (TypeError, ValueError):
+                        qty = 0
+                    entry["warehouse_qty"] = qty
+                    entry["total_qty"] = entry["qb_qty"] + qty
                     entry["source"] = "qb+warehouse"
                     break
 
@@ -180,32 +201,26 @@ class UnifiedDataAdapter:
         return merged
 
     # ------------------------------------------------------------------
-    # Non-QB ordering systems (Computer Use fallback)
+    # Non-QB ordering systems — routed via AccessRouter
     # ------------------------------------------------------------------
 
     async def get_ordering_system_data(self, task: str) -> dict:
         """
-        For ordering systems without an API (ScribeBase, distributor portals, etc.),
-        use Computer Use to extract the data.
+        Fetch distributor order data via AccessRouter
+        (Playwright → File Ingestion → Computer Use).
         """
-        ordering_system = self._config.get("ordering_system_app", "the ordering system")
-        if self._computer_use:
-            return await self._computer_use.extract_data(
-                app_name=ordering_system,
-                task=task,
-            )
-        return {}
+        router = self._get_router()
+        result = await router.route("distributor_orders", {"task": task})
+        return result.data
 
     async def get_customs_status(self) -> dict:
-        """Check customs broker portal for container statuses via Computer Use."""
-        portal_url = self._config.get("customs_portal_url")
-        portal_name = self._config.get("customs_portal_name", "Customs Broker Portal")
-        if not self._computer_use:
-            return {}
-        task = "Get the status of all active containers/shipments"
-        if portal_url:
-            task = f"Navigate to {portal_url}. {task}"
-        return await self._computer_use.extract_data(app_name=portal_name, task=task)
+        """
+        Fetch customs container statuses via AccessRouter
+        (Playwright → File Ingestion → Computer Use).
+        """
+        router = self._get_router()
+        result = await router.route("customs_status", {})
+        return result.data
 
     # ------------------------------------------------------------------
     # Email
@@ -235,3 +250,27 @@ class UnifiedDataAdapter:
         if self._sheets:
             results["google_sheets"] = True
         return results
+
+
+class _NoopDB:
+    """Stub DB client for contexts where no real DB is available (e.g. tasks without a request)."""
+    def table(self, _name: str):
+        return self
+
+    def insert(self, _data):
+        return self
+
+    def execute(self):
+        return type("R", (), {"data": []})()
+
+    def select(self, *_):
+        return self
+
+    def eq(self, *_):
+        return self
+
+    def order(self, *_):
+        return self
+
+    def limit(self, *_):
+        return self

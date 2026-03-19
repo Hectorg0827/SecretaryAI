@@ -107,7 +107,13 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
     data: dict = {}
 
     try:
-        if intent == "inventory_check":
+        if intent == "customs_status":
+            data["customs"] = await adapter.get_customs_status()
+
+        elif intent == "distributor_orders":
+            data["distributor_orders"] = await adapter.get_ordering_system_data(message)
+
+        elif intent == "inventory_check":
             items = await adapter.get_inventory_merged()
             # Convert to the format expected by summarize_inventory
             data["inventory"] = [

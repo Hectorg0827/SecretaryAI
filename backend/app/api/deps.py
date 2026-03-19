@@ -60,4 +60,6 @@ def get_adapter(
     cfg.setdefault("qbo_client_secret", settings.intuit_client_secret)
     cfg.setdefault("conductor_api_key", settings.conductor_api_key)
 
-    return UnifiedDataAdapter(cfg)
+    adapter = UnifiedDataAdapter(cfg)
+    adapter.set_db(db)
+    return adapter

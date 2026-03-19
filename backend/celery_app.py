@@ -22,6 +22,7 @@ app = Celery(
         "tasks.sync_check",
         "tasks.account_health",
         "tasks.inventory_alerts",
+        "tasks.file_ingestion",
     ],
 )
 
@@ -68,5 +69,10 @@ app.conf.beat_schedule = {
     "inventory-alerts": {
         "task": "tasks.inventory_alerts.check_all",
         "schedule": crontab(minute=0, hour="*/6"),
+    },
+    # File ingestion — every 30 minutes
+    "file-ingestion": {
+        "task": "tasks.file_ingestion.ingest_watched_files_all",
+        "schedule": crontab(minute="*/30"),
     },
 }

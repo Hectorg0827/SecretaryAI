@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
-from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth
+from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent
 from app.utils.error_handler import register_error_handlers
 
 settings = get_settings()
@@ -45,6 +45,7 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["settin
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(actions.router, prefix="/api/actions", tags=["actions"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
 
 register_error_handlers(app)
 

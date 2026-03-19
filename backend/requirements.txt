@@ -38,6 +38,11 @@ sendgrid==6.11.0
 pypdf2==3.0.1
 openpyxl==3.1.5
 pandas==2.2.3
+watchfiles==0.24.0
+
+# Browser automation (headless portal workflows)
+# Run `playwright install chromium` after pip install
+playwright==1.48.0
 
 # Google APIs (Gmail + Sheets)
 google-auth==2.36.0

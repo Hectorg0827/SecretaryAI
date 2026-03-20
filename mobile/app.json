@@ -39,7 +39,16 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-speech"
+      "expo-speech",
+      "expo-av",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563eb",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

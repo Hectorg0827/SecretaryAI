@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     computer_use_screenshot_width: int = 1280
     computer_use_screenshot_height: int = 720
 
+    # CORS — comma-separated list of allowed origins
+    # Set to "*" to allow all (useful for mobile/dev). In production list explicit origins.
+    cors_origins: str = "http://localhost:5173,https://app.secretaryai.com,http://localhost:8081,http://localhost:19006"
+
+    # OpenAI (optional — used for Whisper speech-to-text transcription)
+    openai_api_key: str = ""
+
     # Sentry
     sentry_dsn: str = ""
 

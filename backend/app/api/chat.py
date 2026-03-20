@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -371,3 +371,42 @@ async def list_conversations(
                 "created_at": row["created_at"],
             })
     return {"conversations": convos}
+
+
+# ─── Voice Transcription ───────────────────────────────────────────────────────
+
+@router.post("/transcribe")
+async def transcribe_audio(
+    audio: UploadFile,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Transcribe an audio file to text using OpenAI Whisper.
+    Accepts any audio format supported by Whisper (m4a, mp3, wav, webm, ogg).
+    Returns: { "text": "transcribed text" }
+    """
+    from app.config import get_settings
+    cfg = get_settings()
+    if not cfg.openai_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Speech-to-text is not configured. Set OPENAI_API_KEY in your environment.",
+        )
+
+    try:
+        import openai
+        client = openai.AsyncOpenAI(api_key=cfg.openai_api_key)
+        audio_bytes = await audio.read()
+        # Whisper requires a file-like object with a name attribute for format detection
+        import io
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = audio.filename or "audio.m4a"
+        transcript = await client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language="en",
+        )
+        return {"text": transcript.text}
+    except Exception as exc:
+        log.exception("Whisper transcription failed")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")

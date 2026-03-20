@@ -11,8 +11,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getAccounts, Account } from '../api/accounts';
+import { AccountsStackParamList } from '../navigation/types';
 import { COLORS, RADIUS, SHADOW } from '../theme';
+
+type Props = NativeStackScreenProps<AccountsStackParamList, 'AccountsList'>;
 
 const HEALTH_CONFIG = {
   healthy: { label: 'Healthy', color: COLORS.success, bg: COLORS.successLight },
@@ -21,10 +25,10 @@ const HEALTH_CONFIG = {
   new: { label: 'New', color: COLORS.primary, bg: COLORS.primaryLight },
 };
 
-function AccountCard({ account }: { account: Account }) {
+function AccountCard({ account, onPress }: { account: Account; onPress: () => void }) {
   const health = HEALTH_CONFIG[account.health_status] ?? HEALTH_CONFIG.healthy;
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.cardRow}>
         <View style={styles.cardLeft}>
           <View style={[styles.dot, { backgroundColor: health.color }]} />
@@ -55,11 +59,11 @@ function AccountCard({ account }: { account: Account }) {
       {account.assigned_rep ? (
         <Text style={styles.rep}>Rep: {account.assigned_rep}</Text>
       ) : null}
-    </View>
+    </TouchableOpacity>
   );
 }
 
-export default function AccountsScreen() {
+export default function AccountsScreen({ navigation }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [filtered, setFiltered] = useState<Account[]>([]);
   const [search, setSearch] = useState('');
@@ -153,7 +157,12 @@ export default function AccountsScreen() {
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <AccountCard account={item} />}
+        renderItem={({ item }) => (
+          <AccountCard
+            account={item}
+            onPress={() => navigation.navigate('AccountDetail', { accountId: item.id, accountName: item.name })}
+          />
+        )}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} />}
         ListEmptyComponent={

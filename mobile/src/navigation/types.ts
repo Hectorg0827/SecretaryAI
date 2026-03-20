@@ -7,19 +7,25 @@ export type RootStackParamList = {
   App: undefined;
 };
 
-// Bottom tab navigator
+// Bottom tab navigator (6 tabs)
 export type AppTabParamList = {
   Dashboard: undefined;
   Chat: { conversationId?: string } | undefined;
+  Reports: undefined;
   Accounts: undefined;
   Inventory: undefined;
   Approvals: undefined;
 };
 
+// Accounts stack (supports drill-down to AccountDetail)
+export type AccountsStackParamList = {
+  AccountsList: undefined;
+  AccountDetail: { accountId: string; accountName: string };
+};
+
 export type LoginScreenProps = NativeStackScreenProps<RootStackParamList, 'Login'>;
-export type AppScreenProps = NativeStackScreenProps<RootStackParamList, 'App'>;
 export type DashboardScreenProps = BottomTabScreenProps<AppTabParamList, 'Dashboard'>;
 export type ChatScreenProps = BottomTabScreenProps<AppTabParamList, 'Chat'>;
-export type AccountsScreenProps = BottomTabScreenProps<AppTabParamList, 'Accounts'>;
+export type ReportsScreenProps = BottomTabScreenProps<AppTabParamList, 'Reports'>;
 export type InventoryScreenProps = BottomTabScreenProps<AppTabParamList, 'Inventory'>;
 export type ApprovalsScreenProps = BottomTabScreenProps<AppTabParamList, 'Approvals'>;

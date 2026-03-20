@@ -77,3 +77,34 @@ export async function getConversations(
   if (!res.ok) throw new Error(`Failed to load conversations: ${res.status}`);
   return res.json();
 }
+
+/**
+ * Upload a recorded audio file URI to the backend Whisper transcription endpoint.
+ * Returns the transcribed text.
+ */
+export async function transcribeAudio(audioUri: string): Promise<string> {
+  const token = await getToken();
+  const formData = new FormData();
+  formData.append('audio', {
+    uri: audioUri,
+    type: 'audio/m4a',
+    name: 'recording.m4a',
+  } as unknown as Blob);
+
+  const res = await fetch(`${API_BASE}/api/chat/transcribe`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Do NOT set Content-Type — let fetch set the multipart boundary automatically
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `Transcription error: ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.text ?? '';
+}

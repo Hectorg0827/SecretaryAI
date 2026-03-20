@@ -10,6 +10,7 @@ alembic==1.13.3
 
 # AI
 anthropic==0.40.0
+openai==1.54.0          # Whisper STT for mobile voice input (optional)
 
 # QuickBooks
 conductor-api==2.1.0

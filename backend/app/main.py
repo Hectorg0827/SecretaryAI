@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
-from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent
+from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications
 from app.utils.error_handler import register_error_handlers
 
 settings = get_settings()
@@ -29,10 +29,13 @@ app = FastAPI(
     redoc_url=None,
 )
 
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+_allow_all = "*" in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://app.secretaryai.com"],
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all else _cors_origins,
+    allow_credentials=not _allow_all,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
@@ -46,6 +49,7 @@ app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(actions.router, prefix="/api/actions", tags=["actions"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 
 register_error_handlers(app)
 

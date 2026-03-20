@@ -286,41 +286,69 @@ jobs:
           TAG="v${VERSION}"
           BASE_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}"
 
-          # Find built artifacts
+          # Find built artifacts — fail fast if any are missing
           WIN_MSI=$(find artifacts/desktop-windows -name "*.msi" | head -1)
           MAC_INTEL=$(find artifacts/desktop-macos-intel -name "*.dmg" | head -1)
           MAC_ARM=$(find artifacts/desktop-macos-arm -name "*.dmg" | head -1)
 
-          WIN_MSI_NAME=$(basename "$WIN_MSI" 2>/dev/null || echo "")
-          MAC_INTEL_NAME=$(basename "$MAC_INTEL" 2>/dev/null || echo "")
-          MAC_ARM_NAME=$(basename "$MAC_ARM" 2>/dev/null || echo "")
+          [ -n "$WIN_MSI" ]    || { echo "ERROR: Windows MSI artifact not found"; exit 1; }
+          [ -n "$MAC_INTEL" ]  || { echo "ERROR: macOS Intel DMG artifact not found"; exit 1; }
+          [ -n "$MAC_ARM" ]    || { echo "ERROR: macOS ARM DMG artifact not found"; exit 1; }
 
-          # Read Tauri-generated .sig files for signatures
-          WIN_SIG=$(cat "${WIN_MSI}.sig" 2>/dev/null || echo "")
-          MAC_INTEL_SIG=$(cat "${MAC_INTEL}.sig" 2>/dev/null || echo "")
-          MAC_ARM_SIG=$(cat "${MAC_ARM}.sig" 2>/dev/null || echo "")
+          WIN_MSI_NAME=$(basename "$WIN_MSI")
+          MAC_INTEL_NAME=$(basename "$MAC_INTEL")
+          MAC_ARM_NAME=$(basename "$MAC_ARM")
 
-          cat > latest.json << EOF
-          {
-            "version": "${VERSION}",
-            "notes": "See release notes at ${BASE_URL}",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "windows-x86_64": {
-                "url": "${BASE_URL}/${WIN_MSI_NAME}",
-                "signature": "${WIN_SIG}"
-              },
-              "darwin-x86_64": {
-                "url": "${BASE_URL}/${MAC_INTEL_NAME}",
-                "signature": "${MAC_INTEL_SIG}"
-              },
-              "darwin-aarch64": {
-                "url": "${BASE_URL}/${MAC_ARM_NAME}",
-                "signature": "${MAC_ARM_SIG}"
-              }
-            }
-          }
-          EOF
+          # Read Tauri-generated .sig files — fail if missing (means signing was skipped)
+          WIN_SIG=""
+          MAC_INTEL_SIG=""
+          MAC_ARM_SIG=""
+
+          if [ -f "${WIN_MSI}.sig" ]; then
+            WIN_SIG=$(cat "${WIN_MSI}.sig")
+          else
+            echo "WARNING: Windows .sig file not found — OTA updater signature will be empty"
+          fi
+          if [ -f "${MAC_INTEL}.sig" ]; then
+            MAC_INTEL_SIG=$(cat "${MAC_INTEL}.sig")
+          else
+            echo "WARNING: macOS Intel .sig file not found — OTA updater signature will be empty"
+          fi
+          if [ -f "${MAC_ARM}.sig" ]; then
+            MAC_ARM_SIG=$(cat "${MAC_ARM}.sig")
+          else
+            echo "WARNING: macOS ARM .sig file not found — OTA updater signature will be empty"
+          fi
+
+          # Fail the release if any signature is missing — prevents broken OTA
+          if [ -z "$WIN_SIG" ] || [ -z "$MAC_INTEL_SIG" ] || [ -z "$MAC_ARM_SIG" ]; then
+            echo "ERROR: One or more update signatures are missing."
+            echo "  Ensure TAURI_SIGNING_PRIVATE_KEY secret is configured in the repo."
+            exit 1
+          fi
+
+          # Write latest.json with no leading whitespace (valid JSON)
+          cat > latest.json <<EOF
+{
+  "version": "${VERSION}",
+  "notes": "See full release notes at ${BASE_URL}",
+  "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "${BASE_URL}/${WIN_MSI_NAME}",
+      "signature": "${WIN_SIG}"
+    },
+    "darwin-x86_64": {
+      "url": "${BASE_URL}/${MAC_INTEL_NAME}",
+      "signature": "${MAC_INTEL_SIG}"
+    },
+    "darwin-aarch64": {
+      "url": "${BASE_URL}/${MAC_ARM_NAME}",
+      "signature": "${MAC_ARM_SIG}"
+    }
+  }
+}
+EOF
           echo "manifest_path=latest.json" >> "$GITHUB_OUTPUT"
 
       # Copy install scripts and compose file into release assets

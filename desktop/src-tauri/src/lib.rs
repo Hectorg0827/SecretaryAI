@@ -48,31 +48,32 @@ fn dirs_next() -> PathBuf {
 fn is_pid_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        // kill(pid, 0) returns 0 if process exists
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        // kill(pid, 0) returns 0 if process exists (does not send a signal)
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
     }
     #[cfg(windows)]
     {
-        use std::ptr;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // STILL_ACTIVE == 259 == STATUS_PENDING — means process has not exited
+        const STILL_ACTIVE: u32 = 259;
         unsafe {
-            let handle = winapi::um::processthreadsapi::OpenProcess(
-                winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION,
-                0,
-                pid,
-            );
-            if handle == ptr::null_mut() {
-                return false;
+            match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                Ok(handle) => {
+                    let mut exit_code: u32 = 0;
+                    let alive = GetExitCodeProcess(handle, &mut exit_code).is_ok()
+                        && exit_code == STILL_ACTIVE;
+                    let _ = CloseHandle(handle);
+                    alive
+                }
+                Err(_) => false,
             }
-            let mut exit_code: u32 = 0;
-            let alive = winapi::um::processthreadsapi::GetExitCodeProcess(handle, &mut exit_code) != 0
-                && exit_code == winapi::um::minwinbase::STILL_ACTIVE;
-            winapi::um::handleapi::CloseHandle(handle);
-            alive
         }
     }
     #[cfg(not(any(unix, windows)))]
     {
-        // Assume alive if we can't check
         let _ = pid;
         true
     }
@@ -200,8 +201,13 @@ pub fn run() {
 
             // Start cloud heartbeat
             // Read config from the store; fall back to env vars
-            let api_url = std::env::var("SECRETARY_API_URL")
-                .unwrap_or_else(|_| "https://api.secretaryai.com".to_string());
+            let api_url = std::env::var("SECRETARY_API_URL").unwrap_or_else(|_| {
+                if cfg!(debug_assertions) {
+                    "http://localhost:8000".to_string()
+                } else {
+                    "https://api.secretaryai.com".to_string()
+                }
+            });
             let company_id = std::env::var("SECRETARY_COMPANY_ID").unwrap_or_default();
             let version = env!("CARGO_PKG_VERSION").to_string();
             tauri::async_runtime::spawn(async move {

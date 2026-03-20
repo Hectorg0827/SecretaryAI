@@ -83,7 +83,11 @@ if (Test-Path "docker-compose.prod.yml") {
     Warn "docker-compose.prod.yml already exists — updating."
 }
 Log "Downloading docker-compose.prod.yml ..."
-Invoke-WebRequest -Uri $ComposeUrl -OutFile "docker-compose.prod.yml" -UseBasicParsing
+try {
+    Invoke-WebRequest -Uri $ComposeUrl -OutFile "docker-compose.prod.yml" -UseBasicParsing -ErrorAction Stop
+} catch {
+    Fail "Failed to download docker-compose.prod.yml — check your internet connection. Error: $_"
+}
 Ok "docker-compose.prod.yml downloaded"
 
 # ── Set up .env ───────────────────────────────────────────────────────────────
@@ -91,17 +95,23 @@ if (Test-Path ".env") {
     Warn ".env already exists — skipping prompt (delete it to reconfigure)."
 } else {
     Log "Downloading .env template ..."
-    Invoke-WebRequest -Uri $EnvExampleUrl -OutFile ".env.example" -UseBasicParsing
+    try {
+        Invoke-WebRequest -Uri $EnvExampleUrl -OutFile ".env.example" -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Fail "Failed to download .env.example — check your internet connection. Error: $_"
+    }
 
     Write-Host ""
     Write-Host "  Configure SecretaryAI" -ForegroundColor White
     Write-Host "  Press Enter to skip optional values."
     Write-Host ""
 
-    # Auto-generate secret key
+    # Auto-generate a cryptographically random 64-char hex secret key
+    $rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create()
     $secretBytes = New-Object Byte[] 32
-    [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($secretBytes)
+    $rng.GetBytes($secretBytes)
     $SecretKey = ($secretBytes | ForEach-Object { $_.ToString("x2") }) -join ""
+    if ($SecretKey.Length -ne 64) { Fail "Secret key generation failed — unexpected length: $($SecretKey.Length)" }
 
     Write-Host "  ---- Required ----------------------------------"
     $AnthropicKey     = Prompt-Required "Anthropic API key (sk-ant-...)"
@@ -171,7 +181,11 @@ for ($i = 1; $i -le 30; $i++) {
     Start-Sleep 2
 }
 if (-not $ready) {
-    Warn "API health check timed out. Check logs with: $ComposeCmd -f docker-compose.prod.yml logs api"
+    Write-Host ""
+    Warn "API did not become healthy in time. Recent logs:"
+    Invoke-Expression "$ComposeCmd -f docker-compose.prod.yml logs --tail=20 api" 2>&1 | Write-Host
+    Write-Host ""
+    Fail "Startup failed. Fix the issue above then run: $ComposeCmd -f docker-compose.prod.yml up -d"
 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────

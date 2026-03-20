@@ -49,11 +49,9 @@ log "Checking prerequisites..."
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Install it from https://docs.docker.com/get-docker/"
 ok "Docker found: $(docker --version | head -1)"
 
-# Check Docker is running
 docker info >/dev/null 2>&1 || fail "Docker daemon is not running. Start Docker and try again."
 ok "Docker daemon is running"
 
-# Check docker compose (v2 plugin or v1 standalone)
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_CMD="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -63,7 +61,6 @@ else
 fi
 ok "Docker Compose found: $($COMPOSE_CMD version --short 2>/dev/null || echo 'v1')"
 
-# curl or wget
 if command -v curl >/dev/null 2>&1; then
   FETCH="curl -fsSL"
 elif command -v wget >/dev/null 2>&1; then
@@ -74,7 +71,8 @@ fi
 
 # ── Install directory ─────────────────────────────────────────────────────────
 log "Installing to $INSTALL_DIR ..."
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" || fail "Cannot create install directory: $INSTALL_DIR"
+[ -w "$INSTALL_DIR" ]   || fail "Install directory is not writable: $INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # ── Download compose file ─────────────────────────────────────────────────────
@@ -82,7 +80,8 @@ if [ -f "docker-compose.prod.yml" ]; then
   warn "docker-compose.prod.yml already exists — updating."
 fi
 log "Downloading docker-compose.prod.yml ..."
-$FETCH "$COMPOSE_URL" > docker-compose.prod.yml
+$FETCH "$COMPOSE_URL" > docker-compose.prod.yml \
+  || fail "Failed to download docker-compose.prod.yml — check your internet connection."
 ok "docker-compose.prod.yml downloaded"
 
 # ── Set up .env ───────────────────────────────────────────────────────────────
@@ -90,43 +89,54 @@ if [ -f ".env" ]; then
   warn ".env already exists — skipping prompt (delete it to reconfigure)."
 else
   log "Downloading .env template ..."
-  $FETCH "$ENV_EXAMPLE_URL" > .env.example
+  $FETCH "$ENV_EXAMPLE_URL" > .env.example \
+    || fail "Failed to download .env.example — check your internet connection."
 
-  echo ""
-  echo -e "${BOLD}Configure SecretaryAI${RESET}"
-  echo -e "Press Enter to skip optional values.\n"
+  cp .env.example .env
+
+  # Safe env setter: uses grep+append instead of sed to avoid injection with
+  # special characters (|, &, \, =, $) in values like API keys and passwords.
+  set_env() {
+    local key="$1" val="$2"
+    # Remove any existing line for this key (handles commented-out lines too)
+    grep -v "^${key}=" .env > .env.tmp 2>/dev/null && mv .env.tmp .env || true
+    # Append the correct value — printf is safe for any content in $val
+    printf '%s=%s\n' "$key" "$val" >> .env
+  }
+
+  # Auto-generate a cryptographically random 64-char hex secret key
+  if command -v openssl >/dev/null 2>&1; then
+    SECRET_KEY=$(openssl rand -hex 32)
+  elif [ -r /dev/urandom ]; then
+    SECRET_KEY=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 64) || true
+    [ "${#SECRET_KEY}" -eq 64 ] \
+      || fail "Failed to generate secret key — please install openssl and retry."
+  else
+    fail "Cannot generate secret key. Please install openssl and retry."
+  fi
+  set_env "SECRET_KEY" "$SECRET_KEY"
 
   # Required
   prompt_required() {
-    local var="$1"; local label="$2"; local val=""
+    local key="$1" label="$2" val=""
     while [ -z "$val" ]; do
       read -rp "  $label: " val
       [ -z "$val" ] && echo "  (required — cannot be empty)"
     done
-    echo "$var=$val" >> .env
+    set_env "$key" "$val"
   }
 
-  # Optional
+  # Optional — only writes to .env if user provides a value
   prompt_optional() {
-    local var="$1"; local label="$2"; local val=""
-    read -rp "  $label (optional): " val
-    echo "$var=${val}" >> .env
+    local key="$1" label="$2" val=""
+    read -rp "  $label (optional, Enter to skip): " val
+    [ -n "$val" ] && set_env "$key" "$val"
   }
-
-  # Auto-generate a secret key
-  if command -v openssl >/dev/null 2>&1; then
-    SECRET_KEY=$(openssl rand -hex 32)
-  else
-    SECRET_KEY=$(cat /dev/urandom | tr -dc 'a-f0-9' | head -c 64)
-  fi
-
-  # Write .env
-  cat .env.example > .env
-
-  # Patch required values interactively
-  echo "SECRET_KEY=${SECRET_KEY}" >> .env.override 2>/dev/null || true
 
   echo ""
+  echo -e "${BOLD}Configure SecretaryAI${RESET}"
+  echo ""
+
   echo "──── Required ────────────────────────────────────"
   prompt_required "ANTHROPIC_API_KEY"          "Anthropic API key (sk-ant-...)"
   prompt_required "SUPABASE_URL"               "Supabase project URL (https://xxx.supabase.co)"
@@ -136,50 +146,50 @@ else
 
   echo ""
   echo "──── Optional integrations ───────────────────────"
-  prompt_optional "CONDUCTOR_API_KEY"      "Conductor API key (QuickBooks Desktop)"
-  prompt_optional "INTUIT_CLIENT_ID"       "Intuit client ID (QuickBooks Online)"
-  prompt_optional "INTUIT_CLIENT_SECRET"   "Intuit client secret (QuickBooks Online)"
-  prompt_optional "SENDGRID_API_KEY"       "SendGrid API key (email reports)"
-  prompt_optional "GOOGLE_CLIENT_ID"       "Google client ID (Gmail/Sheets)"
-  prompt_optional "GOOGLE_CLIENT_SECRET"   "Google client secret"
-  prompt_optional "OPENAI_API_KEY"         "OpenAI API key (voice input)"
+  prompt_optional "CONDUCTOR_API_KEY"    "Conductor API key (QuickBooks Desktop)"
+  prompt_optional "INTUIT_CLIENT_ID"     "Intuit client ID (QuickBooks Online)"
+  prompt_optional "INTUIT_CLIENT_SECRET" "Intuit client secret (QuickBooks Online)"
+  prompt_optional "SENDGRID_API_KEY"     "SendGrid API key (email reports)"
+  prompt_optional "GOOGLE_CLIENT_ID"     "Google client ID (Gmail/Sheets)"
+  prompt_optional "GOOGLE_CLIENT_SECRET" "Google client secret"
+  prompt_optional "OPENAI_API_KEY"       "OpenAI API key (voice input)"
 
-  # Merge overrides into .env — replace placeholder values with user input
-  while IFS='=' read -r key val; do
-    [ -z "$key" ] || [[ "$key" == \#* ]] && continue
-    sed -i.bak "s|^${key}=.*|${key}=${val}|" .env 2>/dev/null || true
-  done < .env.override
-  rm -f .env.override .env.bak .env.example
-
-  # Inject auto-generated secret key
-  sed -i.bak "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env 2>/dev/null || \
-    echo "SECRET_KEY=${SECRET_KEY}" >> .env
-  rm -f .env.bak
-
+  rm -f .env.example
   ok ".env configured"
 fi
 
 # ── Pull images ───────────────────────────────────────────────────────────────
 echo ""
 log "Pulling Docker images (this may take a few minutes on first run)..."
-VERSION="$VERSION" $COMPOSE_CMD -f docker-compose.prod.yml pull
+VERSION="$VERSION" $COMPOSE_CMD -f docker-compose.prod.yml pull \
+  || fail "Failed to pull Docker images. Check your internet connection and try again."
 ok "Images pulled"
 
 # ── Start services ────────────────────────────────────────────────────────────
 log "Starting SecretaryAI..."
-VERSION="$VERSION" $COMPOSE_CMD -f docker-compose.prod.yml up -d
+VERSION="$VERSION" $COMPOSE_CMD -f docker-compose.prod.yml up -d \
+  || fail "Failed to start services. Run: $COMPOSE_CMD -f docker-compose.prod.yml logs"
 ok "Services started"
 
 # ── Health check ──────────────────────────────────────────────────────────────
-log "Waiting for API to be ready..."
+log "Waiting for API to be ready (up to 60s)..."
+HEALTHY=0
 for i in $(seq 1 30); do
   if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+    HEALTHY=1
     ok "API is healthy"
     break
   fi
   sleep 2
-  [ "$i" -eq 30 ] && warn "API health check timed out — check logs with: $COMPOSE_CMD -f docker-compose.prod.yml logs api"
 done
+
+if [ "$HEALTHY" -eq 0 ]; then
+  echo ""
+  warn "API did not become healthy in time. Recent logs:"
+  $COMPOSE_CMD -f docker-compose.prod.yml logs --tail=20 api || true
+  echo ""
+  fail "Startup failed. Fix the issue above and rerun: $COMPOSE_CMD -f docker-compose.prod.yml up -d"
+fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

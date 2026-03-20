@@ -40,7 +40,7 @@ services:
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
-      --workers 2
+      --workers ${UVICORN_WORKERS:-2}
     depends_on:
       redis:
         condition: service_healthy
@@ -58,14 +58,15 @@ services:
     command: >
       celery -A celery_app worker
       --loglevel=info
-      --concurrency=4
+      --concurrency=${CELERY_CONCURRENCY:-4}
       --queues=celery,high_priority
     depends_on:
       redis:
         condition: service_healthy
     environment:
       REDIS_URL: redis://redis:6379/0
-      C_FORCE_ROOT: "true"
+      # Do NOT run as root — the Docker image should create a non-root user.
+      # C_FORCE_ROOT is intentionally omitted here.
 
   # ── Celery beat (scheduler) ────────────────────────────────────────────────
   beat:

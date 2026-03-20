@@ -6,7 +6,7 @@ mod sync;
 mod tray;
 mod watcher;
 
-use log::{info, warn};
+use log::{info, warn, error};
 use std::{
     fs,
     io::{Read, Write},
@@ -133,6 +133,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -170,6 +171,32 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 watcher::start_file_watcher(handle2).await;
             });
+
+            // Check for OTA updates in the background
+            {
+                use tauri_plugin_updater::UpdaterExt;
+                let update_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match update_handle.updater() {
+                        Ok(updater) => match updater.check().await {
+                            Ok(Some(update)) => {
+                                info!("Update available: {}", update.version);
+                                if let Err(e) = update
+                                    .download_and_install(|_, _| {}, || {
+                                        info!("Update downloaded — will apply on next launch");
+                                    })
+                                    .await
+                                {
+                                    error!("Update install failed: {e}");
+                                }
+                            }
+                            Ok(None) => info!("SecretaryAI is up to date"),
+                            Err(e) => warn!("Update check failed: {e}"),
+                        },
+                        Err(e) => warn!("Updater unavailable: {e}"),
+                    }
+                });
+            }
 
             // Start cloud heartbeat
             // Read config from the store; fall back to env vars

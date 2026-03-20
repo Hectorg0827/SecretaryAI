@@ -49,7 +49,7 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": "",
+      "timestampUrl": "http://timestamp.digicert.com",
       "wix": {
         "language": "en-US"
       },
@@ -76,6 +76,16 @@
     "autostart": {
       "mobile": false,
       "desktop": true
+    },
+    "updater": {
+      "pubkey": "PLACEHOLDER_REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "endpoints": [
+        "https://api.secretaryai.com/updates/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

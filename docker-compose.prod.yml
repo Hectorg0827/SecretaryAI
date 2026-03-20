@@ -1,0 +1,116 @@
+version: "3.9"
+
+# ── Production Docker Compose ─────────────────────────────────────────────────
+# Uses pre-built images from GitHub Container Registry.
+# No local source mounts — images are immutable.
+#
+# Usage:
+#   VERSION=1.2.0 docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml up -d   # uses :latest
+
+x-api-image: &api-image
+  image: ghcr.io/secretaryai/secretaryai-api:${VERSION:-latest}
+
+x-backend-env: &backend-env
+  env_file: .env
+  environment:
+    REDIS_URL: redis://redis:6379/0
+
+services:
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI backend ────────────────────────────────────────────────────────
+  api:
+    <<: [*api-image, *backend-env]
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── Celery worker ──────────────────────────────────────────────────────────
+  worker:
+    <<: [*api-image, *backend-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --queues=celery,high_priority
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      C_FORCE_ROOT: "true"
+
+  # ── Celery beat (scheduler) ────────────────────────────────────────────────
+  beat:
+    <<: [*api-image, *backend-env]
+    restart: unless-stopped
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --schedule=/app/beat/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - beat_schedule:/app/beat
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+  # ── React frontend (nginx + built SPA) ────────────────────────────────────
+  frontend:
+    image: ghcr.io/secretaryai/secretaryai-frontend:${VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      # Mount TLS certs if using HTTPS on this host
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+
+  # ── Celery Flower (optional task monitor) ─────────────────────────────────
+  flower:
+    image: mher/flower:2.0
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      FLOWER_PORT: 5555
+    depends_on:
+      - redis
+    profiles:
+      - monitoring
+
+volumes:
+  redis_data:
+  beat_schedule:

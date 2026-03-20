@@ -1,6 +1,6 @@
 """Accounts (customers) API — real QB data."""
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -11,6 +11,50 @@ from app.intelligence.sales_analytics import compute_account_velocity, compute_t
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -> dict:
+    """
+    Normalise a QB Customer object + order history into the shape expected
+    by the frontend Account interface:
+      id, name, email, phone, state, health_status, health_score,
+      last_order_date, current_balance, avg_order_value, assigned_rep
+    """
+    last_order: date | None = None
+    if last_order_str:
+        try:
+            last_order = date.fromisoformat(last_order_str)
+        except ValueError:
+            pass
+
+    cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
+    name = getattr(customer, "name", "") or customer.get("name", "")
+
+    health = score_account(
+        account_id=cid,
+        account_name=name,
+        last_order_date=last_order,
+        avg_order_cycle_days=None,
+        order_history=orders,
+        current_balance=float(getattr(customer, "balance", 0)),
+    )
+
+    total_revenue = sum(o.get("total", 0) for o in orders)
+    avg_order_value = round(total_revenue / len(orders), 2) if orders else 0.0
+
+    return {
+        "id":              cid,           # frontend uses `id`, not `qb_id`
+        "name":            name,
+        "email":           getattr(customer, "email", None) or "",
+        "phone":           getattr(customer, "phone", None) or "",
+        "state":           getattr(customer, "state", None) or "",
+        "health_status":   health.status,
+        "health_score":    health.score,
+        "last_order_date": last_order_str,
+        "current_balance": float(getattr(customer, "balance", 0)),  # was `balance`
+        "avg_order_value": avg_order_value,
+        "assigned_rep":    None,           # not available from QB yet
+    }
 
 
 @router.get("/")
@@ -27,45 +71,18 @@ async def list_accounts(
     for inv in invoices:
         cid = getattr(inv, "customer_id", None) or inv.get("customer_id", "")
         by_customer.setdefault(cid, []).append({
-            "date": str(getattr(inv, "date", None) or inv.get("order_date", "")),
+            "date":  str(getattr(inv, "date", None) or inv.get("order_date", "")),
             "total": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
         })
 
     results = []
     for customer in customers[:limit]:
         cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
-        name = getattr(customer, "name", "") or customer.get("name", "")
         orders = by_customer.get(cid, [])
         dates = [o["date"] for o in orders if o["date"]]
         last_order_str = max(dates, default=None)
-        last_order = None
-        if last_order_str:
-            try:
-                last_order = date.fromisoformat(last_order_str)
-            except ValueError:
-                pass
 
-        health = score_account(
-            account_id=cid,
-            account_name=name,
-            last_order_date=last_order,
-            avg_order_cycle_days=None,
-            order_history=orders,
-            current_balance=float(getattr(customer, "balance", 0)),
-        )
-
-        results.append({
-            "qb_id": cid,
-            "name": name,
-            "email": getattr(customer, "email", None),
-            "state": getattr(customer, "state", None),
-            "balance": float(getattr(customer, "balance", 0)),
-            "total_sales": float(getattr(customer, "total_sales", 0)),
-            "health_status": health.status,
-            "health_score": health.score,
-            "last_order_date": last_order_str,
-            "flags": health.flags,
-        })
+        results.append(_to_account_dict(customer, orders, last_order_str))
 
     return {"accounts": results, "total": len(results)}
 
@@ -93,47 +110,26 @@ async def get_account(
 
     invoice_dicts = [
         {
-            "order_date": str(getattr(inv, "date", "") or inv.get("order_date", "")),
+            "order_date":   str(getattr(inv, "date", "") or inv.get("order_date", "")),
             "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
-            "status": getattr(inv, "status", ""),
-            "items": getattr(inv, "line_items", []) or inv.get("line_items", []),
+            "total":        float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
+            "status":       getattr(inv, "status", ""),
+            "items":        getattr(inv, "line_items", []) or inv.get("line_items", []),
         }
         for inv in account_invoices
     ]
 
     velocity = compute_account_velocity(invoice_dicts) if invoice_dicts else {}
-    trend = compute_trend_comparison(invoice_dicts, days=30) if invoice_dicts else {}
+    trend    = compute_trend_comparison(invoice_dicts, days=30) if invoice_dicts else {}
 
-    last_dates = [d["order_date"] for d in invoice_dicts if d["order_date"]]
-    last_order_str = max(last_dates, default=None)
-    last_order = None
-    if last_order_str:
-        try:
-            last_order = date.fromisoformat(last_order_str)
-        except ValueError:
-            pass
+    dates = [d["order_date"] for d in invoice_dicts if d["order_date"]]
+    last_order_str = max(dates, default=None)
 
-    health = score_account(
-        account_id=account_id,
-        account_name=getattr(customer, "name", ""),
-        last_order_date=last_order,
-        avg_order_cycle_days=velocity.get("avg_days_between_orders"),
-        order_history=[{"date": d["order_date"], "total": d["total_amount"]} for d in invoice_dicts],
-        current_balance=float(getattr(customer, "balance", 0)),
-    )
+    base = _to_account_dict(customer, invoice_dicts, last_order_str)
 
     return {
-        "qb_id": account_id,
-        "name": getattr(customer, "name", ""),
-        "email": getattr(customer, "email", None),
-        "phone": getattr(customer, "phone", None),
-        "state": getattr(customer, "state", None),
-        "balance": float(getattr(customer, "balance", 0)),
-        "total_sales": float(getattr(customer, "total_sales", 0)),
-        "health_status": health.status,
-        "health_score": health.score,
-        "flags": health.flags,
-        "velocity": velocity,
-        "trend_30d": trend,
+        **base,
+        "velocity":       velocity,
+        "trend_30d":      trend,
         "recent_invoices": invoice_dicts[:20],
     }

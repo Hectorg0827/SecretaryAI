@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.auth.jwt import decode_access_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
@@ -44,7 +44,8 @@ def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
         role = user.get("role", "viewer")
         allowed = ROLE_PERMISSIONS.get(role, set())
-        if permission not in allowed:
+        # "view_all" is a super-permission — owner/manager can access everything
+        if permission not in allowed and "view_all" not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{role}' does not have permission: {permission}",

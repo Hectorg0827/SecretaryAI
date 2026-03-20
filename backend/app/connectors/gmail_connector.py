@@ -115,6 +115,20 @@ class GmailConnector:
         ).execute()
         return {"draft_id": draft["id"], "status": "created"}
 
+    async def mark_as_read(self, email_id: str) -> None:
+        """Remove the UNREAD label from a Gmail message."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._mark_as_read_sync, email_id)
+
+    def _mark_as_read_sync(self, email_id: str) -> None:
+        service = self._get_service()
+        service.users().messages().modify(
+            userId="me",
+            id=email_id,
+            body={"removeLabelIds": ["UNREAD"]},
+        ).execute()
+
     async def send_approved_email(self, to: str, subject: str, body: str) -> dict:
         """
         Send an email. ONLY call this after the action engine has confirmed

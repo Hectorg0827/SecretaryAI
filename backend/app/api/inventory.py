@@ -2,7 +2,7 @@
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_adapter
 from app.auth.rbac import require_permission
@@ -13,6 +13,22 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _build_alert_dict(item: dict, status) -> dict:
+    """
+    Normalise a merged inventory item into the InventoryAlert shape
+    expected by the frontend:
+      item_id, product_name, total_qty, weeks_remaining, stock_status, needs_po
+    """
+    return {
+        "item_id":        item.get("qb_id", ""),          # was missing
+        "product_name":   item.get("product_name", ""),
+        "total_qty":      item.get("total_qty", 0),
+        "weeks_remaining": status.weeks_of_stock,          # was weeks_of_stock
+        "stock_status":   status.status,                   # was `status`
+        "needs_po":       status.status in ("critical", "out_of_stock"),
+    }
+
+
 @router.get("/")
 async def list_inventory(
     limit: int = Query(200, ge=1, le=500),
@@ -20,7 +36,10 @@ async def list_inventory(
     user: dict = Depends(require_permission("view_inventory")),
     adapter=Depends(get_adapter),
 ):
-    """List all inventory items with status and weeks-of-stock."""
+    """
+    List all inventory items.
+    Response key is `items` (not `inventory`) to match frontend interface.
+    """
     inventory = await adapter.get_inventory_merged()
     results = []
 
@@ -35,25 +54,26 @@ async def list_inventory(
         )
 
         entry = {
-            "qb_id": item.get("qb_id"),
-            "product_name": item.get("product_name"),
-            "sku": item.get("sku"),
-            "qb_qty": item.get("qb_qty", 0),
-            "warehouse_qty": item.get("warehouse_qty", 0),
-            "total_qty": item.get("total_qty", 0),
-            "reorder_point": item.get("reorder_point"),
-            "unit_price": item.get("unit_price", 0),
-            "purchase_cost": item.get("purchase_cost", 0),
-            "status": status.status,
-            "weeks_of_stock": status.weeks_of_stock,
-            "source": item.get("source", "qb"),
+            "item_id":        item.get("qb_id"),            # frontend expects item_id
+            "product_name":   item.get("product_name"),
+            "sku":            item.get("sku"),
+            "qb_qty":         item.get("qb_qty", 0),
+            "warehouse_qty":  item.get("warehouse_qty", 0),
+            "total_qty":      item.get("total_qty", 0),
+            "reorder_point":  item.get("reorder_point"),
+            "unit_price":     item.get("unit_price", 0),
+            "purchase_cost":  item.get("purchase_cost", 0),
+            "stock_status":   status.status,               # was `status`
+            "weeks_remaining": status.weeks_of_stock,      # was `weeks_of_stock`
+            "needs_po":       status.status in ("critical", "out_of_stock"),
+            "source":         item.get("source", "qb"),
         }
 
-        if status_filter and entry["status"] != status_filter:
+        if status_filter and entry["stock_status"] != status_filter:
             continue
         results.append(entry)
 
-    return {"inventory": results[:limit], "total": len(results)}
+    return {"items": results[:limit], "total": len(results)}  # `items`, not `inventory`
 
 
 @router.get("/alerts")
@@ -75,15 +95,8 @@ async def get_inventory_alerts(
             weekly_sell_rate=sell_rate,
         )
 
-        if status.status in ("critical", "low"):
-            alerts.append({
-                "product_name": item["product_name"],
-                "qb_id": item.get("qb_id"),
-                "status": status.status,
-                "total_qty": item.get("total_qty", 0),
-                "weeks_of_stock": status.weeks_of_stock,
-                "reorder_point": item.get("reorder_point"),
-            })
+        if status.status in ("critical", "low", "out_of_stock"):
+            alerts.append(_build_alert_dict(item, status))
 
     return {"alerts": alerts, "count": len(alerts)}
 
@@ -99,10 +112,8 @@ async def get_item_forecast(
     item = next((i for i in inventory if i.get("qb_id") == item_id), None)
 
     if not item:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Inventory item not found")
 
-    # Build a simple weekly sell history from the QB qty and sell rate
     sell_rate = item.get("weekly_sell_rate", 0)
     historical_weeks = [
         {"week": f"W-{i}", "quantity_sold": sell_rate}
@@ -119,11 +130,11 @@ async def get_item_forecast(
     )
 
     return {
-        "product_name": item["product_name"],
-        "current_stock": item.get("total_qty", 0),
-        "projected_stockout_date": forecast.projected_stockout_date,
-        "recommended_reorder_date": forecast.recommended_reorder_date,
-        "recommended_order_qty": forecast.recommended_order_qty,
-        "weekly_forecast": forecast.weekly_forecast,
-        "confidence": forecast.confidence,
+        "product_name":               item["product_name"],
+        "current_stock":              item.get("total_qty", 0),
+        "projected_stockout_date":    forecast.projected_stockout_date,
+        "recommended_reorder_date":   forecast.recommended_reorder_date,
+        "recommended_order_qty":      forecast.recommended_order_qty,
+        "weekly_forecast":            forecast.weekly_forecast,
+        "confidence":                 forecast.confidence,
     }

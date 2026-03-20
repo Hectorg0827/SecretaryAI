@@ -130,3 +130,22 @@ CREATE TABLE IF NOT EXISTS agent_heartbeats (
 ALTER TABLE agent_heartbeats ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "company_isolation" ON agent_heartbeats
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
+
+-- ============================================================
+-- FOLLOW-UP NOTES  (dashboard notes panel)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS follow_up_notes (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    text         TEXT NOT NULL,
+    account_name TEXT,
+    due_date     DATE,
+    done         BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE follow_up_notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "company_isolation_notes" ON follow_up_notes
+    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
+CREATE INDEX idx_follow_up_notes_company ON follow_up_notes(company_id, created_at DESC);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 
 const NAV_ITEMS = [
@@ -14,6 +14,13 @@ const NAV_ITEMS = [
 
 export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
   const [agent, setAgent] = useState<AgentStatus | null>(null);
+
+  const logout = () => {
+    localStorage.removeItem('secretary_token');
+    localStorage.removeItem('secretary_company_id');
+    localStorage.removeItem('secretary_role');
+    window.location.href = '/login';
+  };
 
   useEffect(() => {
     const poll = () => api.agent.status().then(setAgent).catch(() => null);
@@ -73,7 +80,14 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           )}
         </div>
-        <div className="text-[10px] text-slate-600 mt-2 px-1">v1.0.0</div>
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 w-full mt-2 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
+        >
+          <LogOut size={12} />
+          Sign out
+        </button>
+        <div className="text-[10px] text-slate-600 mt-1 px-1">v1.0.0</div>
       </div>
     </aside>
   );

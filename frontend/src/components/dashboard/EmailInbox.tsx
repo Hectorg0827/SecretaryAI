@@ -74,7 +74,7 @@ function EmailRow({ email, onMarkRead }: EmailRowProps) {
     if (!draft) return;
     setSending(true);
     try {
-      await api.emails.sendReply(email.id, draft, draftSubj);
+      await api.emails.sendReply(email.id, draft, draftSubj, email.from_email);
       toast.success('Reply sent');
       onMarkRead(email.id);
       setShowDraft(false);

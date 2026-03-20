@@ -231,6 +231,18 @@ class UnifiedDataAdapter:
             return []
         return await self._gmail.get_recent_emails(query=query, max_results=max_results)
 
+    async def send_email_reply(self, to: str, subject: str, body: str) -> dict:
+        """Send an email reply via Gmail. User must have reviewed the draft first."""
+        if not self._gmail:
+            raise RuntimeError("Gmail not configured for this company")
+        return await self._gmail.send_approved_email(to=to, subject=subject, body=body)
+
+    async def mark_email_read(self, email_id: str) -> None:
+        """Remove UNREAD label from a Gmail message."""
+        if not self._gmail:
+            return
+        await self._gmail.mark_as_read(email_id)
+
     async def get_customs_email_updates(self) -> list[dict]:
         return await self.get_emails(
             query="subject:(customs OR clearance OR shipment OR container OR arrival)",

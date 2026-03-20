@@ -20,6 +20,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  // Session expired — clear token and redirect to login
+  if (response.status === 401) {
+    localStorage.removeItem('secretary_token');
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail ?? `HTTP ${response.status}`);
@@ -138,8 +145,8 @@ export const api = {
       api.post<{ draft: string; subject: string }>('/api/dashboard/emails/draft-reply', { email_id: emailId }),
     markRead: (emailId: string) =>
       api.post<void>(`/api/dashboard/emails/${emailId}/mark-read`, {}),
-    sendReply: (emailId: string, draft: string, subject: string) =>
-      api.post<void>('/api/dashboard/emails/send-reply', { email_id: emailId, body: draft, subject }),
+    sendReply: (emailId: string, draft: string, subject: string, to: string) =>
+      api.post<void>('/api/dashboard/emails/send-reply', { email_id: emailId, body: draft, subject, to }),
   },
 
   actions: {
@@ -160,6 +167,13 @@ export const api = {
 
   agent: {
     status: () => api.get<AgentStatus>('/api/agent/status'),
+  },
+
+  auth: {
+    login: (email: string, password: string) =>
+      api.post<{ access_token: string; token_type: string; company_id: string; role: string }>(
+        '/auth/login', { email, password }
+      ),
   },
 
   /** Streaming chat — async generator of SSE text chunks */

@@ -1,13 +1,14 @@
 version: "3.9"
 
-# ─── Shared env_file ──────────────────────────────────────────────────────────
+# ── Shared backend env (all services that run Python code) ────────────────────
 x-backend-env: &backend-env
   env_file: ./backend/.env
   environment:
     REDIS_URL: redis://redis:6379/0
 
 services:
-  # ─── Redis ────────────────────────────────────────────────────────────────
+
+  # ── Redis (broker + result backend for Celery) ───────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -21,7 +22,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── FastAPI backend ───────────────────────────────────────────────────────
+  # ── FastAPI backend ───────────────────────────────────────────────────────────
   api:
     build:
       context: ./backend
@@ -34,7 +35,8 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend/app:/app/app   # live-reload in dev
+      # Dev only: live-reload. Remove in production for immutable deploys.
+      - ./backend/app:/app/app
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
@@ -45,8 +47,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
-  # ─── Celery worker ────────────────────────────────────────────────────────
+  # ── Celery worker ────────────────────────────────────────────────────────────
   worker:
     build:
       context: ./backend
@@ -69,7 +72,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       C_FORCE_ROOT: "true"
 
-  # ─── Celery beat scheduler ────────────────────────────────────────────────
+  # ── Celery beat (scheduler) ───────────────────────────────────────────────────
   beat:
     build:
       context: ./backend
@@ -91,7 +94,22 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
 
-  # ─── Celery Flower (task monitor) — optional ──────────────────────────────
+  # ── React frontend (nginx + built SPA) ───────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # VITE_API_URL is baked into the build; use empty string so nginx proxy handles it
+      VITE_API_URL: ""
+
+  # ── Celery Flower (task monitor, optional) ───────────────────────────────────
   flower:
     image: mher/flower:2.0
     restart: unless-stopped

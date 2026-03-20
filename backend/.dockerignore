@@ -1,0 +1,50 @@
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets — NEVER in image ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# ── Test / dev artifacts ──────────────────────────────────────────────────────
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Playwright state (per-user; not part of image) ────────────────────────────
+.playwright_state/
+
+# ── Alembic migrations (schema managed separately) ────────────────────────────
+alembic/
+migrations/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/

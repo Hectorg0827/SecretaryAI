@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.auth.oauth import build_authorization_url, exchange_code_for_tokens, revoke_token
-from app.auth.jwt import create_access_token, verify_password, hash_password
+from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password
 from app.auth.rbac import get_current_user
 from app.config import get_settings
 from app.utils.encryption import encrypt
@@ -27,8 +27,38 @@ settings = get_settings()
 
 router = APIRouter()
 
-# ─── In-memory state store (replace with Redis in production) ─────────────────
-_oauth_states: dict[str, str] = {}  # state → company_id
+# ─── Redis-backed OAuth state store ───────────────────────────────────────────
+_OAUTH_STATE_TTL = 600  # 10 minutes
+
+
+def _redis():
+    import redis as _redis_lib
+    return _redis_lib.from_url(settings.redis_url, decode_responses=True)
+
+
+def _state_set(state: str, company_id: str) -> None:
+    try:
+        r = _redis()
+        r.setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id)
+    except Exception as exc:
+        log.warning("Redis unavailable for OAuth state; using fallback: %s", exc)
+        _oauth_states_fallback[state] = company_id
+
+
+def _state_pop(state: str) -> str | None:
+    try:
+        r = _redis()
+        key = f"oauth_state:{state}"
+        company_id = r.get(key)
+        if company_id:
+            r.delete(key)
+        return company_id
+    except Exception:
+        return _oauth_states_fallback.pop(state, None)
+
+
+# Fallback for when Redis is unreachable (single-worker dev only)
+_oauth_states_fallback: dict[str, str] = {}
 
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
@@ -37,7 +67,7 @@ _oauth_states: dict[str, str] = {}  # state → company_id
 async def qbo_connect(user: dict = Depends(get_current_user)):
     """Initiate QBO OAuth 2.0 — redirect to Intuit consent screen."""
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = user["company_id"]
+    _state_set(state, user["company_id"])
     url = build_authorization_url(state)
     return RedirectResponse(url=url)
 
@@ -60,7 +90,7 @@ async def qbo_callback(
         log.warning("QBO OAuth error: %s", error)
         return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason={error}")
 
-    company_id = _oauth_states.pop(state, None)
+    company_id = _state_pop(state)
     if not company_id:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
@@ -172,6 +202,51 @@ async def login(body: LoginRequest):
         "company_id": user["company_id"],
         "role": user["role"],
     }
+
+
+class RefreshRequest(BaseModel):
+    access_token: str  # the current (possibly expired) token — we re-sign it
+
+
+@router.post("/refresh")
+async def refresh_token(body: RefreshRequest):
+    """
+    Issue a new JWT from a valid-but-expiring token.
+    We decode without checking expiry, verify the user still exists and is active,
+    then issue a fresh access token.
+    """
+    from jose import jwt as jose_jwt, JWTError
+    try:
+        # Decode WITHOUT verifying expiry so a just-expired token still works
+        payload = jose_jwt.decode(
+            body.access_token,
+            settings.secret_key,
+            algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    company_id = payload.get("company_id")
+    role = payload.get("role")
+    if not user_id or not company_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # Verify the user still exists and is active
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        result = db.table("users").select("is_active").eq("id", user_id).execute()
+    except Exception as exc:
+        log.error("Refresh token DB query failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not result.data or not result.data[0].get("is_active", True):
+        raise HTTPException(status_code=401, detail="User not found or disabled")
+
+    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
+    return {"access_token": new_token, "token_type": "bearer"}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

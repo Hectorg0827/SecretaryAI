@@ -168,6 +168,20 @@ class UnifiedDataAdapter:
         except Exception:
             pass  # QB data stands alone if no warehouse source available
 
+        # Load weekly_sell_rate from Supabase inventory table (populated by Celery sync)
+        sell_rate_by_qb_id: dict[str, float] = {}
+        if self._db:
+            try:
+                company_id = self._config.get("id")
+                result = self._db.table("inventory").select("qb_id,weekly_sell_rate").eq(
+                    "company_id", company_id
+                ).execute()
+                for row in (result.data or []):
+                    if row.get("qb_id") and row.get("weekly_sell_rate") is not None:
+                        sell_rate_by_qb_id[row["qb_id"]] = float(row["weekly_sell_rate"])
+            except Exception:
+                pass
+
         merged: list[dict] = []
         for item in qb_items:
             entry = {
@@ -180,6 +194,7 @@ class UnifiedDataAdapter:
                 "reorder_point": float(item.reorder_point) if item.reorder_point else None,
                 "unit_price": float(item.unit_price),
                 "purchase_cost": float(item.purchase_cost),
+                "weekly_sell_rate": sell_rate_by_qb_id.get(item.qb_id, 0.0),
                 "source": "qb",
             }
 

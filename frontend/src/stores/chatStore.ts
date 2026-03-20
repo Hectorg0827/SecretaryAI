@@ -49,11 +49,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
 
     try {
-      for await (const chunk of api.streamChat(text, get().conversationId ?? undefined)) {
+      for await (const event of api.streamChat(text, get().conversationId ?? undefined)) {
+        if (event.conversationId && !get().conversationId) {
+          set({ conversationId: event.conversationId });
+        }
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === assistantMsg.id
-              ? { ...m, content: m.content + chunk }
+              ? { ...m, content: m.content + event.text }
               : m,
           ),
         }));

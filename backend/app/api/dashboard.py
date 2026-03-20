@@ -93,7 +93,7 @@ async def get_dashboard_summary(
                     "item_id":        item.get("qb_id", ""),
                     "product_name":   item["product_name"],
                     "total_qty":      item.get("total_qty", 0),
-                    "weeks_remaining": status.weeks_of_stock,
+                    "weeks_remaining": status.weeks_remaining,
                     "stock_status":   status.status,
                     "needs_po":       True,
                 })

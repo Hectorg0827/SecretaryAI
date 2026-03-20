@@ -1,16 +1,28 @@
 """
 Webhook endpoints — QBO webhooks and Conductor event callbacks.
+Webhooks trigger background Celery tasks to refresh data asynchronously.
 """
 import hashlib
 import hmac
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.config import get_settings
 
+log = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
+
+
+def _dispatch(task_name: str, **kwargs) -> None:
+    """Fire-and-forget Celery task dispatch. Logs but never raises."""
+    try:
+        from celery_app import celery_app
+        celery_app.send_task(task_name, kwargs=kwargs)
+    except Exception as exc:
+        log.warning("Celery dispatch failed for %s: %s", task_name, exc)
 
 
 @router.post("/qbo")
@@ -38,14 +50,14 @@ async def handle_qbo_webhook(
             operation = entity_event.get("operation")  # Create, Update, Delete, Merge, Void
 
             if entity_name == "Invoice":
-                # Refresh account and sales data
-                pass  # TODO: trigger background refresh
+                _dispatch("tasks.qb.sync_orders", company_realm_id=company_id)
+                log.info("QBO Invoice %s/%s → sync_orders dispatched", company_id, entity_id)
             elif entity_name == "Item":
-                # Inventory changed — re-evaluate stock alerts
-                pass  # TODO: trigger inventory check
+                _dispatch("tasks.qb.sync_inventory", company_realm_id=company_id)
+                log.info("QBO Item %s/%s → sync_inventory dispatched", company_id, entity_id)
             elif entity_name == "Customer":
-                # Customer updated — refresh account record
-                pass  # TODO: trigger account refresh
+                _dispatch("tasks.qb.sync_customers", company_realm_id=company_id)
+                log.info("QBO Customer %s/%s → sync_customers dispatched", company_id, entity_id)
 
     return {"status": "received"}
 
@@ -59,13 +71,16 @@ async def handle_conductor_webhook(request: Request):
     event_type = payload.get("event")
 
     if event_type == "sync.completed":
-        # QB Desktop sync finished — process updated data
         company_id = payload.get("endUserId")
-        pass  # TODO: trigger data refresh pipeline
+        _dispatch("tasks.qb.sync_all", company_id=company_id)
+        log.info("Conductor sync.completed for %s → sync_all dispatched", company_id)
 
     elif event_type == "sync.failed":
-        # Alert the user that QB Desktop sync broke
-        pass  # TODO: send sync break alert
+        company_id = payload.get("endUserId")
+        error_msg = payload.get("error", "Unknown sync error")
+        log.error("Conductor sync.failed for %s: %s", company_id, error_msg)
+        # Dispatch a notification task so the user is alerted in-app
+        _dispatch("tasks.notifications.sync_failed_alert", company_id=company_id, error=error_msg)
 
     return {"status": "received"}
 

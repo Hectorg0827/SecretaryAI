@@ -9,6 +9,29 @@ function getToken(): string | null {
   return localStorage.getItem('secretary_token');
 }
 
+let _refreshing: Promise<string | null> | null = null;
+
+async function _tryRefresh(): Promise<string | null> {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem('secretary_token', data.access_token);
+      return data.access_token;
+    }
+  } catch {
+    // network error — fall through
+  }
+  return null;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   const response = await fetch(`${API_BASE}${path}`, {
@@ -20,8 +43,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  // Session expired — clear token and redirect to login
   if (response.status === 401) {
+    // Attempt a silent token refresh once
+    if (!_refreshing) {
+      _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
+    }
+    const newToken = await _refreshing;
+    if (newToken) {
+      // Retry the original request with the new token
+      const retry = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (retry.ok) return retry.json();
+    }
+    // Refresh failed — redirect to login
     localStorage.removeItem('secretary_token');
     window.location.href = '/login';
     throw new Error('Session expired');
@@ -176,8 +213,11 @@ export const api = {
       ),
   },
 
-  /** Streaming chat — async generator of SSE text chunks */
-  async *streamChat(message: string, conversationId?: string): AsyncGenerator<string> {
+  /** Streaming chat — async generator of SSE events with text and conversationId */
+  async *streamChat(
+    message: string,
+    conversationId?: string,
+  ): AsyncGenerator<{ text: string; conversationId?: string }> {
     const token = getToken();
     const response = await fetch(`${API_BASE}/api/chat/message`, {
       method: 'POST',
@@ -194,14 +234,25 @@ export const api = {
 
     const reader  = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const text = decoder.decode(value, { stream: true });
-      for (const line of text.split('\n')) {
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';   // keep incomplete last line
+      for (const line of lines) {
         if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-          yield line.slice(6);
+          try {
+            const payload = JSON.parse(line.slice(6));
+            yield {
+              text: payload.text ?? '',
+              conversationId: payload.conversation_id,
+            };
+          } catch {
+            // non-JSON line — skip
+          }
         }
       }
     }

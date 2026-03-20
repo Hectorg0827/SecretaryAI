@@ -23,7 +23,7 @@ def _build_alert_dict(item: dict, status) -> dict:
         "item_id":        item.get("qb_id", ""),          # was missing
         "product_name":   item.get("product_name", ""),
         "total_qty":      item.get("total_qty", 0),
-        "weeks_remaining": status.weeks_of_stock,          # was weeks_of_stock
+        "weeks_remaining": status.weeks_remaining,
         "stock_status":   status.status,                   # was `status`
         "needs_po":       status.status in ("critical", "out_of_stock"),
     }
@@ -64,7 +64,7 @@ async def list_inventory(
             "unit_price":     item.get("unit_price", 0),
             "purchase_cost":  item.get("purchase_cost", 0),
             "stock_status":   status.status,               # was `status`
-            "weeks_remaining": status.weeks_of_stock,      # was `weeks_of_stock`
+            "weeks_remaining": status.weeks_remaining,
             "needs_po":       status.status in ("critical", "out_of_stock"),
             "source":         item.get("source", "qb"),
         }

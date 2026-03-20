@@ -1,0 +1,26 @@
+# ── Dependencies — reinstalled during build ────────────────────────────────────
+node_modules/
+
+# ── Build output — built during Docker build stage ────────────────────────────
+dist/
+
+# ── Secrets — NEVER in image ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.local
+.env.production
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Logs / coverage ───────────────────────────────────────────────────────────
+*.log
+coverage/

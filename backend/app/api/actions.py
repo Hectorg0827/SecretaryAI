@@ -49,8 +49,8 @@ async def _execute_approved_draft(draft: dict, adapter) -> None:
 
 @router.get("/pending")
 async def list_pending_actions(
-    user: dict = Depends(get_current_user),
-    db=Depends(get_db),                     # ← was `db = None` (bug)
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
 ):
     """List all drafts awaiting approval for this company."""
     company_id = user["company_id"]

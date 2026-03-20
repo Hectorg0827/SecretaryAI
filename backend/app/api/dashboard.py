@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_adapter, get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission, ROLE_PERMISSIONS
 from app.intelligence.account_health import score_account
 from app.intelligence.inventory_monitor import evaluate_inventory
 
@@ -133,8 +133,13 @@ async def get_dashboard_summary(
     except Exception as exc:
         log.warning("Dashboard summary: unread count failed: %s", exc)
 
+    # ── Role-based field filtering ──────────────────────────────────────────
+    role = user.get("role", "viewer")
+    perms = ROLE_PERMISSIONS.get(role, set())
+    has_view_all = "view_all" in perms
+
     return {
-        "company_id":       company_id,
+        "company_id": company_id,
         "accounts": {
             "healthy": health_counts.get("healthy", 0),
             "slowing": health_counts.get("slowing", 0),
@@ -142,10 +147,14 @@ async def get_dashboard_summary(
             "dormant": health_counts.get("dormant", 0),
             "total":   sum(health_counts.values()),
         },
-        "inventory_alerts": inventory_alerts,
-        "sales_30d":        round(sales_30d, 2),
-        "pending_actions":  pending_count,   # ← matches frontend field name
-        "unread_emails":    unread_count,    # ← matches frontend field name
+        # Only roles with inventory access see alerts
+        "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
+        # Financial figures visible to owner + manager only
+        "sales_30d":       round(sales_30d, 2) if ("view_financials" in perms or has_view_all) else None,
+        # Approval count visible to approvers only
+        "pending_actions": pending_count if ("approve_actions" in perms or has_view_all) else None,
+        # Email count visible to roles with trigger_actions only
+        "unread_emails":   unread_count if ("trigger_actions" in perms or has_view_all) else None,
     }
 
 
@@ -227,7 +236,7 @@ async def _ai_analyze_emails(emails: list[dict]) -> list[dict]:
 async def list_emails(
     unread_only: bool = Query(False),
     limit: int = Query(20, ge=1, le=50),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("trigger_actions")),
     adapter=Depends(get_adapter),
 ):
     query = "is:unread" if unread_only else "in:inbox"
@@ -275,7 +284,7 @@ class DraftReplyRequest(BaseModel):
 @router.post("/emails/draft-reply")
 async def draft_email_reply(
     body: DraftReplyRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("trigger_actions")),
     adapter=Depends(get_adapter),
 ):
     """Generate an AI reply draft for a given email."""
@@ -337,7 +346,7 @@ class SendReplyRequest(BaseModel):
 @router.post("/emails/send-reply")
 async def send_email_reply(
     body: SendReplyRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("trigger_actions")),
     adapter=Depends(get_adapter),
     db=Depends(get_db),
 ):
@@ -371,7 +380,7 @@ async def send_email_reply(
 @router.post("/emails/{email_id}/mark-read")
 async def mark_email_read(
     email_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("trigger_actions")),
     adapter=Depends(get_adapter),
 ):
     """Remove the UNREAD label from a Gmail message."""
@@ -387,7 +396,7 @@ async def mark_email_read(
 @router.get("/sales")
 async def get_sales_data(
     days: int = Query(30, ge=7, le=365),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_financials")),
     adapter=Depends(get_adapter),
 ):
     """Sales summary + per-day chart data for the requested period."""
@@ -464,7 +473,7 @@ async def get_sales_data(
 
 @router.get("/notes")
 async def list_notes(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
@@ -491,7 +500,7 @@ class CreateNoteRequest(BaseModel):
 @router.post("/notes")
 async def create_note(
     body: CreateNoteRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
@@ -521,7 +530,7 @@ class UpdateNoteRequest(BaseModel):
 async def update_note(
     note_id: str,
     body: UpdateNoteRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
     company_id = user["company_id"]

@@ -21,6 +21,7 @@ from app.auth.jwt import create_access_token, decode_access_token, verify_passwo
 from app.auth.rbac import get_current_user
 from app.config import get_settings
 from app.utils.encryption import encrypt
+from app.utils.rate_limiter import login_limiter, require_rate_limit
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -165,7 +166,7 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))):
     """
     Authenticate with email + password.
     Returns a short-lived JWT (access token) and company_id.

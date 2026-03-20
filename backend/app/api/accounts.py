@@ -60,10 +60,22 @@ def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -
 @router.get("/")
 async def list_accounts(
     limit: int = Query(50, ge=1, le=200),
-    user: dict = Depends(require_permission("view_customers")),
+    user: dict = Depends(get_current_user),
     adapter=Depends(get_adapter),
 ):
-    """List all customers with their latest health score."""
+    """
+    List customers with their latest health score.
+    Access:
+      owner / manager  → all accounts
+      back_office      → all accounts (read-only enforced at UI)
+      sales_rep        → own accounts only (filtered by assigned_rep_id)
+      viewer and below → 403
+    """
+    from fastapi import HTTPException
+    role = user.get("role", "viewer")
+    if role not in ("owner", "manager", "sales_rep", "back_office"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions to view accounts")
+
     customers = await adapter.get_all_customers()
     invoices = await adapter.get_orders_last_n_days(365)
 
@@ -78,10 +90,21 @@ async def list_accounts(
     results = []
     for customer in customers[:limit]:
         cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
+
+        # sales_rep: filter to their assigned accounts only
+        # NOTE: assigned_rep_id is not yet synced from QB — once available this
+        # will automatically restrict the list.
+        if role == "sales_rep":
+            assigned = (
+                getattr(customer, "assigned_rep_id", None)
+                or customer.get("assigned_rep_id")
+            )
+            if assigned and assigned != user["sub"]:
+                continue
+
         orders = by_customer.get(cid, [])
         dates = [o["date"] for o in orders if o["date"]]
         last_order_str = max(dates, default=None)
-
         results.append(_to_account_dict(customer, orders, last_order_str))
 
     return {"accounts": results, "total": len(results)}
@@ -90,7 +113,7 @@ async def list_accounts(
 @router.get("/{account_id}")
 async def get_account(
     account_id: str,
-    user: dict = Depends(require_permission("view_customers")),
+    user: dict = Depends(get_current_user),
     adapter=Depends(get_adapter),
 ):
     """Get a single account with full order history and velocity analysis."""

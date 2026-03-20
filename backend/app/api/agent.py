@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 class HeartbeatRequest(BaseModel):
-    company_id: str
+    # company_id is intentionally omitted — sourced from the verified JWT instead
     agent_version: str
     platform: str
     timestamp: str
@@ -22,20 +22,23 @@ class HeartbeatRequest(BaseModel):
 @router.post("/heartbeat")
 async def receive_heartbeat(
     payload: HeartbeatRequest,
+    user: dict = Depends(get_current_user),   # authentication required
     db=Depends(get_db),
 ):
     """
     Upsert the desktop agent's last-seen record.
     Called by the Tauri app every 5 minutes.
+    company_id is taken from the verified JWT — never from the request body.
     """
     now = datetime.now(timezone.utc).isoformat()
+    company_id = user["company_id"]           # trust the JWT, not the payload
     db.table("agent_heartbeats").upsert(
         {
-            "company_id": payload.company_id,
-            "last_seen": now,
+            "company_id":    company_id,
+            "last_seen":     now,
             "agent_version": payload.agent_version,
-            "platform": payload.platform,
-            "updated_at": now,
+            "platform":      payload.platform,
+            "updated_at":    now,
         },
         on_conflict="company_id",
     ).execute()
@@ -74,8 +77,8 @@ async def get_agent_status(
             pass
 
     return {
-        "connected": connected,
-        "last_seen": last_seen_str,
+        "connected":     connected,
+        "last_seen":     last_seen_str,
         "agent_version": row.get("agent_version"),
-        "platform": row.get("platform"),
+        "platform":      row.get("platform"),
     }

@@ -63,10 +63,18 @@ async def handle_qbo_webhook(
 
 
 @router.post("/conductor")
-async def handle_conductor_webhook(request: Request):
+async def handle_conductor_webhook(
+    request: Request,
+    x_conductor_secret: str = Header(None, alias="X-Conductor-Secret"),
+):
     """
     Receive event notifications from Conductor (QB Desktop sync events).
+    Requires X-Conductor-Secret header matching settings.conductor_api_key.
     """
+    expected = settings.conductor_api_key
+    if not expected or not x_conductor_secret or not hmac.compare_digest(expected, x_conductor_secret):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
+
     payload = await request.json()
     event_type = payload.get("event")
 
@@ -89,8 +97,11 @@ def _verify_qbo_signature(body: bytes, signature: str | None) -> bool:
     if not signature:
         return False
     # QBO uses HMAC-SHA256 with the webhook verifier token
-    verifier = settings.intuit_webhook_verifier_token if hasattr(settings, "intuit_webhook_verifier_token") else ""
+    verifier = getattr(settings, "intuit_webhook_verifier_token", "")
     if not verifier:
-        return True  # Skip verification in dev if token not configured
+        # Fail closed — never skip verification, even in dev.
+        # Set INTUIT_WEBHOOK_VERIFIER_TOKEN in .env to enable QBO webhooks.
+        log.warning("QBO webhook received but INTUIT_WEBHOOK_VERIFIER_TOKEN is not set — rejecting")
+        return False
     expected = hmac.new(verifier.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)

@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.api.deps import get_adapter, get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission
 from app.ai.secretary import classify_intent, stream_chat, chat as ai_chat, detect_action_in_response
 from app.ai.data_summarizer import build_query_context
 
@@ -262,7 +262,7 @@ def _weeks_remaining(item: dict):
 @router.post("/message")
 async def send_message(
     request: ChatRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     adapter=Depends(get_adapter),
     db=Depends(get_db),
 ):
@@ -333,6 +333,7 @@ async def get_conversation_history(
         .select("id, role, content, created_at")
         .eq("conversation_id", conversation_id)
         .eq("company_id", user["company_id"])
+        .eq("user_id", user["sub"])        # prevent cross-user history access
         .order("created_at", desc=False)
         .limit(limit)
         .execute()

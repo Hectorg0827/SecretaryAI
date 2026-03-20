@@ -25,7 +25,7 @@ class CompanySettings(BaseModel):
 
 @router.get("/")
 async def get_settings(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_users")),
     db=Depends(get_db),
 ):
     company_id = user["company_id"]

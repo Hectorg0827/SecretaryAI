@@ -43,9 +43,10 @@ class SlidingWindowRateLimiter:
 
 
 # Pre-configured limiters
-chat_limiter = SlidingWindowRateLimiter(max_calls=30, window_seconds=60)       # 30 msgs/min
+chat_limiter = SlidingWindowRateLimiter(max_calls=30, window_seconds=60)        # 30 msgs/min
 computer_use_limiter = SlidingWindowRateLimiter(max_calls=5, window_seconds=60) # 5 CU tasks/min
 api_limiter = SlidingWindowRateLimiter(max_calls=120, window_seconds=60)        # 120 req/min
+login_limiter = SlidingWindowRateLimiter(max_calls=5, window_seconds=60)        # 5 login attempts/min per IP
 
 
 def get_client_key(request: Request) -> str:

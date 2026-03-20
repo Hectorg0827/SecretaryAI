@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Secretary AI",
+    "slug": "secretary-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "secretaryai",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2563eb"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.secretaryai.mobile",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Secretary AI uses the microphone to let you speak questions to the AI assistant.",
+        "NSSpeechRecognitionUsageDescription": "Secretary AI uses speech recognition to transcribe your voice messages."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2563eb"
+      },
+      "package": "com.secretaryai.mobile",
+      "permissions": [
+        "RECORD_AUDIO",
+        "INTERNET"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-speech"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

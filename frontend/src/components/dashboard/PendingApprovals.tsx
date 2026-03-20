@@ -4,6 +4,7 @@ import { CheckCircle, XCircle, Mail, ShoppingCart, FileText, Loader2, ClipboardL
 import toast from 'react-hot-toast';
 import { api, Draft } from '../../lib/api';
 import { Card, CardHeader } from '../ui/Card';
+import { useAuth } from '../../hooks/useAuth';
 
 const ACTION_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
   draft_customer_email:    { label: 'Email',          icon: Mail,          color: 'text-blue-600'   },
@@ -33,7 +34,7 @@ function DraftPreview({ draft }: { draft: Draft }) {
   return null;
 }
 
-function DraftCard({ draft, onRemove }: { draft: Draft; onRemove: (id: string) => void }) {
+function DraftCard({ draft, onRemove, canApprove }: { draft: Draft; onRemove: (id: string) => void; canApprove: boolean }) {
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const meta = ACTION_META[draft.action_type] ?? { label: draft.action_type, icon: FileText, color: 'text-slate-600' };
   const Icon = meta.icon;
@@ -67,24 +68,26 @@ function DraftCard({ draft, onRemove }: { draft: Draft; onRemove: (id: string) =
         </span>
       </div>
       <DraftPreview draft={draft} />
-      <div className="flex gap-2 mt-2.5">
-        <button
-          onClick={approve}
-          disabled={!!busy}
-          className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
-        >
-          {busy === 'approve' ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
-          Approve
-        </button>
-        <button
-          onClick={reject}
-          disabled={!!busy}
-          className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
-        >
-          {busy === 'reject' ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
-          Reject
-        </button>
-      </div>
+      {canApprove && (
+        <div className="flex gap-2 mt-2.5">
+          <button
+            onClick={approve}
+            disabled={!!busy}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {busy === 'approve' ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+            Approve
+          </button>
+          <button
+            onClick={reject}
+            disabled={!!busy}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {busy === 'reject' ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
+            Reject
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -92,6 +95,7 @@ function DraftCard({ draft, onRemove }: { draft: Draft; onRemove: (id: string) =
 export function PendingApprovals() {
   const [drafts,  setDrafts]  = useState<Draft[]>([]);
   const [loading, setLoading] = useState(true);
+  const { canApprove } = useAuth();
 
   const fetch = () => {
     api.actions.pending()
@@ -122,7 +126,7 @@ export function PendingApprovals() {
         </div>
       ) : (
         <div className="divide-y divide-slate-100">
-          {drafts.map((d) => <DraftCard key={d.id} draft={d} onRemove={remove} />)}
+          {drafts.map((d) => <DraftCard key={d.id} draft={d} onRemove={remove} canApprove={canApprove} />)}
         </div>
       )}
     </Card>

@@ -249,6 +249,28 @@ async def refresh_token(body: RefreshRequest):
     return {"access_token": new_token, "token_type": "bearer"}
 
 
+@router.get("/me")
+async def get_me(user: dict = Depends(get_current_user)):
+    """Return the current user's profile (id, name, email, role)."""
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        result = (
+            db.table("users")
+            .select("id, name, email, role")
+            .eq("id", user["sub"])
+            .execute()
+        )
+    except Exception as exc:
+        log.error("GET /auth/me DB query failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return result.data[0]
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _app_base_url() -> str:

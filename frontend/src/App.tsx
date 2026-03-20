@@ -8,6 +8,7 @@ import { Accounts } from './pages/Accounts';
 import { Inventory } from './pages/Inventory';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
+import { useAuth, Role } from './hooks/useAuth';
 
 /** Guard: redirects to /login if no JWT is stored. */
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,18 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('secretary_token');
   if (!token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  return <>{children}</>;
+}
+
+/**
+ * Role guard: redirects to / if the user's role is not in the allowed list.
+ * Must be used inside PrivateRoute (token already confirmed).
+ */
+function RoleGuard({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
+  const { role } = useAuth();
+  if (!roles.includes(role)) {
+    return <Navigate to="/" replace />;
   }
   return <>{children}</>;
 }
@@ -28,13 +41,41 @@ function AppShell() {
       <Sidebar unreadCount={unreadCount} />
       <main className="flex-1 overflow-hidden">
         <Routes>
-          <Route path="/"          element={<Dashboard onUnreadChange={setUnreadCount} />} />
-          <Route path="/chat"      element={<Chat />} />
-          <Route path="/accounts"  element={<Accounts />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/settings"  element={<Settings />} />
+          <Route path="/" element={<Dashboard onUnreadChange={setUnreadCount} />} />
+          <Route
+            path="/chat"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep']}>
+                <Chat />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/accounts"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <Accounts />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/inventory"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <Inventory />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RoleGuard roles={['owner', 'manager']}>
+                <Settings />
+              </RoleGuard>
+            }
+          />
           {/* Catch-all → dashboard */}
-          <Route path="*"          element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

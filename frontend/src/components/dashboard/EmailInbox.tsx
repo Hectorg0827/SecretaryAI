@@ -22,6 +22,7 @@ import { api, PriorityEmail } from '../../lib/api';
 import { Badge } from '../ui/Badge';
 import { Card, CardHeader } from '../ui/Card';
 import { SkeletonCard } from '../ui/Skeleton';
+import { useAuth } from '../../hooks/useAuth';
 
 // ─── Priority config ──────────────────────────────────────────────────────────
 
@@ -36,9 +37,10 @@ const PRIORITY_BORDER: Record<string, string> = {
 interface EmailRowProps {
   email: PriorityEmail;
   onMarkRead: (id: string) => void;
+  canReply: boolean;
 }
 
-function EmailRow({ email, onMarkRead }: EmailRowProps) {
+function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
   const [open,        setOpen]        = useState(false);
   const [draft,       setDraft]       = useState<string | null>(null);
   const [draftSubj,   setDraftSubj]   = useState('');
@@ -122,14 +124,16 @@ function EmailRow({ email, onMarkRead }: EmailRowProps) {
           <div className="text-xs text-slate-400 truncate mt-0.5">{email.ai_summary || email.snippet}</div>
         </div>
 
-        {/* Quick draft button — stops propagation so it doesn't toggle expand */}
-        <button
-          onClick={(e) => { e.stopPropagation(); setOpen(true); loadDraft(); }}
-          className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1 bg-blue-50 hover:bg-blue-100 transition-colors whitespace-nowrap"
-        >
-          <Sparkles size={11} />
-          Draft reply
-        </button>
+        {/* Quick draft button — only shown to roles with trigger_actions */}
+        {canReply && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen(true); loadDraft(); }}
+            className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1 bg-blue-50 hover:bg-blue-100 transition-colors whitespace-nowrap"
+          >
+            <Sparkles size={11} />
+            Draft reply
+          </button>
+        )}
       </button>
 
       {/* Expanded body */}
@@ -188,17 +192,19 @@ function EmailRow({ email, onMarkRead }: EmailRowProps) {
 
           {/* Actions bar */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={loadDraft}
-              disabled={loadingDraft}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {loadingDraft
-                ? <Loader2 size={12} className="animate-spin" />
-                : <Sparkles size={12} />
-              }
-              {showDraft ? 'Regenerate' : 'Draft Smart Reply'}
-            </button>
+            {canReply && (
+              <button
+                onClick={loadDraft}
+                disabled={loadingDraft}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {loadingDraft
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Sparkles size={12} />
+                }
+                {showDraft ? 'Regenerate' : 'Draft Smart Reply'}
+              </button>
+            )}
 
             {!email.is_read && (
               <button
@@ -222,6 +228,7 @@ export function EmailInbox() {
   const [emails,  setEmails]  = useState<PriorityEmail[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter,  setFilter]  = useState<'all' | 'unread'>('unread');
+  const { canTriggerActions } = useAuth();
 
   const fetchEmails = async () => {
     try {
@@ -291,7 +298,7 @@ export function EmailInbox() {
       ) : (
         <div className="divide-y divide-slate-100">
           {visible.map((email) => (
-            <EmailRow key={email.id} email={email} onMarkRead={handleMarkRead} />
+            <EmailRow key={email.id} email={email} onMarkRead={handleMarkRead} canReply={canTriggerActions} />
           ))}
         </div>
       )}

@@ -1,19 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
+import { useAuth, Role } from '../../hooks/useAuth';
 
-const NAV_ITEMS = [
-  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare },
-  { to: '/accounts',  label: 'Accounts',  icon: Users },
-  { to: '/inventory', label: 'Inventory', icon: Package },
-  { to: '/settings',  label: 'Settings',  icon: Settings },
-];
+const ROLE_LABELS: Record<Role, string> = {
+  owner:       'Owner',
+  manager:     'Manager',
+  sales_rep:   'Sales Rep',
+  back_office: 'Back Office',
+  viewer:      'Viewer',
+};
+
+const ALL_NAV_ITEMS = [
+  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'] },
+  { to: '/chat',      label: 'Chat',      icon: MessageSquare,                  roles: ['owner', 'manager', 'sales_rep'] },
+  { to: '/accounts',  label: 'Accounts',  icon: Users,                          roles: ['owner', 'manager', 'sales_rep', 'back_office'] },
+  { to: '/inventory', label: 'Inventory', icon: Package,                        roles: ['owner', 'manager', 'sales_rep', 'back_office'] },
+  { to: '/settings',  label: 'Settings',  icon: Settings,                       roles: ['owner', 'manager'] },
+] as const;
 
 export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
+  const { role } = useAuth();
   const [agent, setAgent] = useState<AgentStatus | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
 
   const logout = () => {
     localStorage.removeItem('secretary_token');
@@ -29,7 +40,14 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    api.get<{ name: string }>('/auth/me')
+      .then((u) => setUserName(u.name))
+      .catch(() => null);
+  }, []);
+
   const connected = agent?.connected ?? false;
+  const visibleItems = ALL_NAV_ITEMS.filter((item) => (item.roles as readonly string[]).includes(role));
 
   return (
     <aside className="w-56 flex-shrink-0 bg-slate-900 text-white flex flex-col h-screen">
@@ -43,7 +61,7 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {NAV_ITEMS.map(({ to, label, icon: Icon, exact }) => (
+        {visibleItems.map(({ to, label, icon: Icon, exact }) => (
           <NavLink
             key={to}
             to={to}
@@ -68,8 +86,20 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
         ))}
       </nav>
 
-      {/* Footer — agent status */}
-      <div className="px-4 py-4 border-t border-slate-800">
+      {/* Footer */}
+      <div className="px-4 py-4 border-t border-slate-800 space-y-2">
+        {/* User badge */}
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/60">
+          <UserCircle size={14} className="text-slate-400 flex-shrink-0" />
+          <div className="min-w-0">
+            {userName && (
+              <div className="text-xs font-medium text-slate-200 truncate">{userName}</div>
+            )}
+            <div className="text-[10px] text-slate-500 capitalize">{ROLE_LABELS[role]}</div>
+          </div>
+        </div>
+
+        {/* Agent status */}
         <div className={clsx(
           'flex items-center gap-2 text-xs px-3 py-2 rounded-lg',
           connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-500',
@@ -80,14 +110,15 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           )}
         </div>
+
         <button
           onClick={logout}
-          className="flex items-center gap-2 w-full mt-2 px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
         >
           <LogOut size={12} />
           Sign out
         </button>
-        <div className="text-[10px] text-slate-600 mt-1 px-1">v1.0.0</div>
+        <div className="text-[10px] text-slate-600 px-1">v1.0.0</div>
       </div>
     </aside>
   );

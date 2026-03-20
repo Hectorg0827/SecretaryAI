@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { Package, AlertTriangle, XCircle, ShoppingCart, Search, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, InventoryAlert } from '../lib/api';
+import { useAuth } from '../hooks/useAuth';
 
 const STATUS_CFG = {
   out_of_stock: { label: 'Out of Stock', icon: XCircle,       border: 'border-l-red-500',    bg: 'bg-red-50',     text: 'text-red-700',    badge: 'bg-red-100 text-red-700'      },
@@ -13,7 +14,7 @@ const STATUS_CFG = {
 const FILTERS = ['all', 'out_of_stock', 'critical', 'low'] as const;
 type FilterType = typeof FILTERS[number];
 
-function InventoryRow({ alert, onDraftPO }: { alert: InventoryAlert; onDraftPO: (id: string, name: string) => void }) {
+function InventoryRow({ alert, onDraftPO, canDraftPO }: { alert: InventoryAlert; onDraftPO: (id: string, name: string) => void; canDraftPO: boolean }) {
   const cfg  = STATUS_CFG[alert.stock_status];
   const Icon = cfg.icon;
 
@@ -40,7 +41,7 @@ function InventoryRow({ alert, onDraftPO }: { alert: InventoryAlert; onDraftPO: 
         {alert.weeks_remaining != null ? `~${alert.weeks_remaining.toFixed(1)} wks` : '—'}
       </td>
       <td className="px-5 py-3.5">
-        {alert.needs_po ? (
+        {alert.needs_po && canDraftPO ? (
           <button
             onClick={() => onDraftPO(alert.item_id, alert.product_name)}
             className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors font-medium"
@@ -48,9 +49,9 @@ function InventoryRow({ alert, onDraftPO }: { alert: InventoryAlert; onDraftPO: 
             <ShoppingCart size={11} />
             Draft PO
           </button>
-        ) : (
+        ) : !alert.needs_po ? (
           <span className="text-xs text-emerald-600 font-medium">PO exists</span>
-        )}
+        ) : null}
       </td>
     </tr>
   );
@@ -62,6 +63,7 @@ export function Inventory() {
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState<FilterType>('all');
   const [drafting, setDrafting] = useState<string | null>(null);
+  const { canDraftPO } = useAuth();
 
   useEffect(() => {
     api.inventory.list()
@@ -167,6 +169,7 @@ export function Inventory() {
                   key={a.item_id}
                   alert={a}
                   onDraftPO={draftPO}
+                  canDraftPO={canDraftPO}
                 />
               ))}
             </tbody>

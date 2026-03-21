@@ -164,7 +164,11 @@ class ActionEngine:
 
         handler = handlers.get(action_type)
         if handler:
-            return await handler(payload, company_id)
+            import asyncio
+            result = handler(payload, company_id)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
         return {"status": "no_handler", "action_type": action_type}
 
     async def _create_draft(self, action_type: str, payload: dict, company_id: str) -> dict:

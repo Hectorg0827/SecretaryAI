@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { TrendingUp, TrendingDown, AlertTriangle, Clock, Search, Users } from 'lucide-react';
 import { api, Account } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
+import { AccountDetail } from '../components/accounts/AccountDetail';
 
 const HEALTH_CFG = {
   healthy: { label: 'Healthy', icon: TrendingUp,    color: 'text-emerald-600', bg: 'bg-emerald-50' },
@@ -21,12 +22,15 @@ function fmt(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 
-function AccountRow({ account }: { account: Account }) {
+function AccountRow({ account, onClick }: { account: Account; onClick: () => void }) {
   const cfg  = HEALTH_CFG[account.health_status] ?? HEALTH_CFG.unknown;
   const Icon = cfg.icon;
 
   return (
-    <tr className="hover:bg-slate-50 transition-colors group">
+    <tr
+      onClick={onClick}
+      className="hover:bg-slate-50 transition-colors group cursor-pointer"
+    >
       <td className="px-5 py-3.5">
         <div className="flex items-center gap-3">
           <div className={clsx('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0', cfg.bg)}>
@@ -56,10 +60,11 @@ function AccountRow({ account }: { account: Account }) {
 }
 
 export function Accounts() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [search,   setSearch]   = useState('');
-  const [params, setParams]     = useSearchParams();
+  const [accounts, setAccounts]           = useState<Account[]>([]);
+  const [loading,  setLoading]            = useState(true);
+  const [search,   setSearch]             = useState('');
+  const [selectedAccount, setSelected]    = useState<Account | null>(null);
+  const [params, setParams]               = useSearchParams();
   const filter = (params.get('filter') ?? 'all') as typeof FILTERS[number];
 
   useEffect(() => {
@@ -81,7 +86,8 @@ export function Accounts() {
   }), {} as Record<string, number>);
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -141,11 +147,22 @@ export function Accounts() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filtered.map((a) => <AccountRow key={a.id} account={a} />)}
+              {filtered.map((a) => <AccountRow key={a.id} account={a} onClick={() => setSelected(a)} />)}
             </tbody>
           </table>
         )}
       </div>
+    </div>
+
+      {/* Account detail drawer */}
+      {selectedAccount && (
+        <div className="w-96 flex-shrink-0 border-l border-slate-200 overflow-hidden">
+          <AccountDetail
+            account={selectedAccount}
+            onClose={() => setSelected(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }

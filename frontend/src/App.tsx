@@ -8,6 +8,8 @@ import { Accounts } from './pages/Accounts';
 import { Inventory } from './pages/Inventory';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
+import { Inbox } from './pages/Inbox';
+import { Work } from './pages/Work';
 import { useAuth, Role } from './hooks/useAuth';
 
 /** Guard: redirects to /login if no JWT is stored. */
@@ -42,6 +44,22 @@ function AppShell() {
       <main className="flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<Dashboard onUnreadChange={setUnreadCount} />} />
+          <Route
+            path="/inbox"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <Inbox />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/work"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <Work />
+              </RoleGuard>
+            }
+          />
           <Route
             path="/chat"
             element={

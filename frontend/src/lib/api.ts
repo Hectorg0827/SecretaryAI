@@ -158,6 +158,19 @@ export interface FollowUpNote {
   created_at: string;
 }
 
+export interface InboxItem {
+  id: string;
+  type: 'email' | 'approval' | 'alert' | 'health_event';
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  body: string;
+  source_id?: string;
+  account_name?: string;
+  is_read: boolean;
+  created_at: string;
+  metadata?: Record<string, unknown>;
+}
+
 // ─── API surface ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -192,6 +205,14 @@ export const api = {
       api.post<void>(`/api/actions/approve/${id}`, edits ?? {}),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
+  },
+
+  inbox: {
+    feed:     (filter?: string) =>
+      api.get<{ items: InboxItem[]; unread_count: number }>(
+        `/api/inbox${filter && filter !== 'all' ? `?type=${filter}` : ''}`,
+      ),
+    markRead: (id: string) => api.patch<void>(`/api/inbox/${id}/read`, {}),
   },
 
   accounts: {

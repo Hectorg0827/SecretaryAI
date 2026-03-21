@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
+import { useInboxStore } from '../../stores/inboxStore';
 
 const ROLE_LABELS: Record<Role, string> = {
   owner:       'Owner',
@@ -14,17 +15,20 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
-  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'] },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare,                  roles: ['owner', 'manager', 'sales_rep'] },
-  { to: '/accounts',  label: 'Accounts',  icon: Users,                          roles: ['owner', 'manager', 'sales_rep', 'back_office'] },
-  { to: '/inventory', label: 'Inventory', icon: Package,                        roles: ['owner', 'manager', 'sales_rep', 'back_office'] },
-  { to: '/settings',  label: 'Settings',  icon: Settings,                       roles: ['owner', 'manager'] },
+  { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
+  { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
+  { to: '/accounts',  label: 'Accounts',  icon: Users,                        roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/inventory', label: 'Inventory', icon: Package,                      roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/chat',      label: 'Chat',      icon: MessageSquare,                roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
+  { to: '/settings',  label: 'Settings',  icon: Settings,                     roles: ['owner', 'manager'],                            badge: null        },
 ] as const;
 
 export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
   const { role } = useAuth();
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const inboxUnread = useInboxStore((s) => s.unread_count);
 
   const logout = () => {
     localStorage.removeItem('secretary_token');
@@ -61,29 +65,32 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {visibleItems.map(({ to, label, icon: Icon, exact }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={exact}
-            className={({ isActive }) =>
-              clsx(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800',
-              )
-            }
-          >
-            <Icon size={16} />
-            {label}
-            {label === 'Dashboard' && unreadCount > 0 && (
-              <span className="ml-auto bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </NavLink>
-        ))}
+        {visibleItems.map(({ to, label, icon: Icon, exact, badge }) => {
+          const badgeCount = badge === 'inbox' ? (inboxUnread || unreadCount) : 0;
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={exact}
+              className={({ isActive }) =>
+                clsx(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
+                  isActive
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                )
+              }
+            >
+              <Icon size={16} />
+              {label}
+              {badgeCount > 0 && (
+                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {/* Footer */}

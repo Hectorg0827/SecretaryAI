@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     # OpenAI (optional — used for Whisper speech-to-text transcription)
     openai_api_key: str = ""
 
+    # Industry Module — controls which intelligence module is loaded
+    # Set to a registered slug (see app/industry_modules/loader._REGISTRY)
+    # Companies can override this per-company in the DB companies.industry_module column
+    default_industry_module: str = "wholesale_distribution"
+
     # Sentry
     sentry_dsn: str = ""
 

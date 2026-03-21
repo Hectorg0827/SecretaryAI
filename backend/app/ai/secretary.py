@@ -1,21 +1,41 @@
 """
 Main conversational AI handler.
 Orchestrates intent classification → data summarization → Claude API call → action detection.
+
+Industry module is loaded per company — the AI automatically speaks the right language,
+uses the right terminology, and understands the right compliance context for each industry.
 """
-import json
 from typing import AsyncGenerator, Optional
 
 import anthropic
 
 from app.config import get_settings
-from app.ai.system_prompts import SECRETARY_SYSTEM_PROMPT, INTENT_CLASSIFIER_PROMPT
+from app.ai.system_prompts import (
+    build_secretary_prompt,
+    build_intent_classifier_prompt,
+    SECRETARY_SYSTEM_PROMPT,
+    INTENT_CLASSIFIER_PROMPT,
+)
 
 settings = get_settings()
 _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
-async def classify_intent(message: str) -> str:
-    prompt = INTENT_CLASSIFIER_PROMPT.format(message=message)
+def _get_module(company_config: Optional[dict] = None):
+    """Load the industry module for a company, falling back to system default."""
+    from app.industry_modules.loader import get_module_for_company, get_module
+    if company_config:
+        return get_module_for_company(company_config)
+    return get_module(settings.default_industry_module)
+
+
+async def classify_intent(message: str, company_config: Optional[dict] = None) -> str:
+    """
+    Classify the user's message intent using industry-aware categories.
+    Accepts an optional company_config to load the appropriate industry module.
+    """
+    module = _get_module(company_config)
+    prompt = build_intent_classifier_prompt(message, module)
     response = await _client.messages.create(
         model=settings.claude_model,
         max_tokens=20,
@@ -29,19 +49,19 @@ async def chat(
     conversation_history: list[dict],
     data_summary: str,
     company_context: dict,
+    company_config: Optional[dict] = None,
 ) -> str:
     """
     Single-turn AI response with full conversation history.
 
     company_context keys: company_name, business_type, user_role, timezone, preferred_language
+    company_config: full company record from DB (used to load industry module)
     """
-    system_prompt = SECRETARY_SYSTEM_PROMPT.format(**company_context)
+    module = _get_module(company_config)
+    system_prompt = build_secretary_prompt(company_context, module)
 
-    # Inject the current data summary as the first user turn context
-    augmented_history = list(conversation_history)
     augmented_message = f"[Context data for this query]\n{data_summary}\n\n[User message]\n{user_message}"
-
-    messages = augmented_history + [{"role": "user", "content": augmented_message}]
+    messages = list(conversation_history) + [{"role": "user", "content": augmented_message}]
 
     response = await _client.messages.create(
         model=settings.claude_model,
@@ -57,12 +77,14 @@ async def stream_chat(
     conversation_history: list[dict],
     data_summary: str,
     company_context: dict,
+    company_config: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming version — yields text chunks as they arrive from Claude.
     Use with Server-Sent Events or WebSocket for real-time UX.
     """
-    system_prompt = SECRETARY_SYSTEM_PROMPT.format(**company_context)
+    module = _get_module(company_config)
+    system_prompt = build_secretary_prompt(company_context, module)
     augmented_message = f"[Context data for this query]\n{data_summary}\n\n[User message]\n{user_message}"
     messages = list(conversation_history) + [{"role": "user", "content": augmented_message}]
 

@@ -26,13 +26,33 @@ DEFAULT_LEAD_TIME_WEEKS = 6   # Time from PO to delivery (importer's typical lea
 DEFAULT_REORDER_WEEKS = 8     # How many weeks of stock to order at a time
 
 
+def _load_forecast_config(industry_module=None) -> tuple[int, int]:
+    """
+    Load lead time and reorder quantity weeks from the industry module.
+    Returns (lead_time_weeks, target_weeks_stock).
+    Falls back to wholesale distribution defaults when no module is provided.
+    """
+    if industry_module is None:
+        return DEFAULT_LEAD_TIME_WEEKS, DEFAULT_REORDER_WEEKS
+
+    kpis = industry_module.get_kpi_definitions()
+    lead_kpi = kpis.get("lead_time_weeks")
+    reorder_kpi = kpis.get("reorder_quantity_weeks")
+
+    lead_time = int(lead_kpi.warning_threshold) if lead_kpi else DEFAULT_LEAD_TIME_WEEKS
+    reorder_weeks = int(reorder_kpi.critical_threshold) if reorder_kpi else DEFAULT_REORDER_WEEKS
+
+    return lead_time, reorder_weeks
+
+
 def forecast_product(
     product_name: str,
     current_qty: float,
     weekly_sell_history: list[float],  # oldest first, each entry = units sold that week
-    lead_time_weeks: int = DEFAULT_LEAD_TIME_WEEKS,
-    target_weeks_stock: int = DEFAULT_REORDER_WEEKS,
+    lead_time_weeks: Optional[int] = None,
+    target_weeks_stock: Optional[int] = None,
     today: Optional[date] = None,
+    industry_module=None,
 ) -> DemandForecast:
     """
     Forecast demand and reorder timing for a single product.
@@ -41,6 +61,11 @@ def forecast_product(
     Needs at least 4 weeks for a useful forecast.
     """
     today = today or date.today()
+    _default_lead, _default_reorder = _load_forecast_config(industry_module)
+    if lead_time_weeks is None:
+        lead_time_weeks = _default_lead
+    if target_weeks_stock is None:
+        target_weeks_stock = _default_reorder
 
     if not weekly_sell_history:
         return DemandForecast(

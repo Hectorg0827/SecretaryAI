@@ -158,6 +158,20 @@ export interface FollowUpNote {
   created_at: string;
 }
 
+export interface IntegrationStatus {
+  connected: boolean;
+  connected_at?: string | null;
+  realm_id?: string | null;
+  end_user_id?: string | null;
+}
+
+export interface IntegrationsResponse {
+  quickbooks_online:  IntegrationStatus;
+  quickbooks_desktop: IntegrationStatus;
+  gmail:              IntegrationStatus;
+  google_sheets:      IntegrationStatus;
+}
+
 export interface InboxItem {
   id: string;
   type: 'email' | 'approval' | 'alert' | 'health_event';
@@ -225,6 +239,17 @@ export const api = {
 
   agent: {
     status: () => api.get<AgentStatus>('/api/agent/status'),
+  },
+
+  settings: {
+    integrations: () => api.get<IntegrationsResponse>('/api/settings/integrations'),
+    qboConnectUrl: () => api.get<{ url: string }>('/auth/qbo/connect-url'),
+    qboDisconnect: () => api.delete<{ status: string }>('/auth/qbo/disconnect'),
+    gmailConnectUrl: () => api.get<{ url: string }>('/auth/gmail/connect-url'),
+    gmailDisconnect: () => api.delete<{ status: string }>('/auth/gmail/disconnect'),
+    saveQBD: (endUserId: string) =>
+      api.post<{ status: string; end_user_id: string }>('/api/settings/integrations/qbd', { end_user_id: endUserId }),
+    disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),
   },
 
   auth: {

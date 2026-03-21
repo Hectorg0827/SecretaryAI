@@ -16,7 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app.auth.oauth import build_authorization_url, exchange_code_for_tokens, revoke_token
+from app.auth.oauth import (
+    build_authorization_url, exchange_code_for_tokens, revoke_token,
+    build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
+)
 from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password
 from app.auth.rbac import get_current_user
 from app.config import get_settings
@@ -63,6 +66,15 @@ _oauth_states_fallback: dict[str, str] = {}
 
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
+
+@router.get("/qbo/connect-url")
+async def qbo_connect_url(user: dict = Depends(get_current_user)):
+    """Return the QBO OAuth consent URL as JSON (frontend handles the redirect)."""
+    state = secrets.token_urlsafe(32)
+    _state_set(state, user["company_id"])
+    url = build_authorization_url(state)
+    return {"url": url}
+
 
 @router.get("/qbo/connect")
 async def qbo_connect(user: dict = Depends(get_current_user)):
@@ -154,6 +166,91 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
     except Exception as exc:
         log.error("QBO disconnect failed for %s: %s", company_id, exc)
         raise HTTPException(status_code=500, detail="Failed to disconnect QuickBooks")
+
+    return {"status": "disconnected"}
+
+
+# ─── Google OAuth (Gmail + Sheets) ───────────────────────────────────────────
+
+@router.get("/gmail/connect-url")
+async def gmail_connect_url(user: dict = Depends(get_current_user)):
+    """Return the Google OAuth consent URL as JSON (frontend handles the redirect)."""
+    state = secrets.token_urlsafe(32)
+    _state_set(state, user["company_id"])
+    url = build_google_authorization_url(state)
+    return {"url": url}
+
+
+@router.get("/gmail/callback")
+async def gmail_callback(
+    code: Annotated[str, Query()] = "",
+    state: Annotated[str, Query()] = "",
+    error: Annotated[str, Query()] = "",
+):
+    """
+    Google redirects here after the user approves or denies access.
+    Stores encrypted access + refresh tokens, then redirects back to the app.
+    """
+    if error:
+        log.warning("Google OAuth error: %s", error)
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason={error}")
+
+    company_id = _state_pop(state)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code from Google")
+
+    try:
+        tokens = await exchange_google_code_for_tokens(code)
+    except Exception as exc:
+        log.error("Google token exchange failed: %s", exc)
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason=token_exchange")
+
+    encrypted_access = encrypt(tokens["access_token"], settings.secret_key)
+    encrypted_refresh = encrypt(tokens["refresh_token"], settings.secret_key) if tokens["refresh_token"] else None
+
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        db.table("companies").update({
+            "google_access_token":  encrypted_access,
+            "google_refresh_token": encrypted_refresh,
+            "google_connected_at":  datetime.now(timezone.utc).isoformat(),
+        }).eq("id", company_id).execute()
+        log.info("Google tokens stored for company %s", company_id)
+    except Exception as exc:
+        log.error("Failed to store Google tokens for company %s: %s", company_id, exc)
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason=db_write")
+
+    return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=connected")
+
+
+@router.delete("/gmail/disconnect")
+async def gmail_disconnect(user: dict = Depends(get_current_user)):
+    """Revoke Google tokens and clear connection in DB."""
+    company_id = user["company_id"]
+
+    try:
+        from supabase import create_client
+        from app.utils.encryption import decrypt
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        result = db.table("companies").select("google_access_token").eq("id", company_id).execute()
+        company = result.data[0] if result.data else {}
+
+        if company.get("google_access_token"):
+            token = decrypt(company["google_access_token"], settings.secret_key)
+            await revoke_google_token(token)
+
+        db.table("companies").update({
+            "google_access_token":  None,
+            "google_refresh_token": None,
+            "google_connected_at":  None,
+        }).eq("id", company_id).execute()
+    except Exception as exc:
+        log.error("Google disconnect failed for %s: %s", company_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to disconnect Google")
 
     return {"status": "disconnected"}
 

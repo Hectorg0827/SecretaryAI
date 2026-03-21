@@ -11,6 +11,12 @@ build/
 .mypy_cache/
 .ruff_cache/
 
+# Coverage reports
+.coverage
+coverage.json
+coverage.xml
+htmlcov/
+
 # Environment
 .env
 .env.local

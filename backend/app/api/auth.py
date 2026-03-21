@@ -275,6 +275,8 @@ async def get_me(user: dict = Depends(get_current_user)):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _app_base_url() -> str:
+    if settings.frontend_url:
+        return settings.frontend_url.rstrip("/")
     if settings.debug:
         return "http://localhost:5173"
     return "https://app.secretaryai.com"

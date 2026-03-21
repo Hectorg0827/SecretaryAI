@@ -16,11 +16,11 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.auth.dependencies import get_current_user
+from app.auth.rbac import get_current_user
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+router = APIRouter(tags=["inbox"])
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 

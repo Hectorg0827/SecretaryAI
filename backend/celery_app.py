@@ -39,6 +39,10 @@ app.conf.update(
 )
 
 # ─── Beat schedule ─────────────────────────────────────────────────────────────
+# Alias used by app/api/actions.py and app/api/webhooks.py
+celery_app = app
+
+# ─── Beat schedule ─────────────────────────────────────────────────────────────
 app.conf.beat_schedule = {
     # Full overnight scan — 2 AM UTC every night
     "overnight-scan": {

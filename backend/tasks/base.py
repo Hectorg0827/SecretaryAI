@@ -37,6 +37,18 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
         cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
     if cfg.get("google_access_token"):
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
+    if cfg.get("google_refresh_token"):
+        cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+
+    # Build gmail_credentials dict that GmailConnector expects
+    if cfg.get("google_access_token") and cfg.get("google_refresh_token"):
+        cfg["gmail_credentials"] = {
+            "token":         cfg["google_access_token"],
+            "refresh_token": cfg["google_refresh_token"],
+            "client_id":     settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "token_uri":     "https://oauth2.googleapis.com/token",
+        }
 
     # Map column names to adapter config keys
     cfg.setdefault("qbo_client_id", settings.intuit_client_id)

@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Companies can override this per-company in the DB companies.industry_module column
     default_industry_module: str = "wholesale_distribution"
 
+    # Frontend base URL — used for OAuth redirect responses (QBO callback)
+    # Set to your public domain in production, e.g. https://app.yourcompany.com
+    frontend_url: str = ""
+
     # Sentry
     sentry_dsn: str = ""
 

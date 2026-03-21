@@ -9,6 +9,7 @@ from datetime import date, timedelta
 import anthropic
 
 from app.config import get_settings
+from app.ai.model_router import model_for
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -44,7 +45,7 @@ Business data:
 {data_summary}"""
 
     response = await client.messages.create(
-        model=settings.claude_model,
+        model=model_for("weekly_report"),
         max_tokens=700,
         messages=[{"role": "user", "content": prompt}],
     )

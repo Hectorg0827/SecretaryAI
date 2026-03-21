@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     # Anthropic / Claude
     anthropic_api_key: str
+    # claude_model pins the Sonnet-tier version. Haiku tier is always pinned to
+    # claude-haiku-4-5-20251001 via model_router.py and is not overridable here
+    # (prevents accidental cost blowout from operator misconfiguration).
     claude_model: str = "claude-sonnet-4-6"
 
     # Conductor (QB Desktop)

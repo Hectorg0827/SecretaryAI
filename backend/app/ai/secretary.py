@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Optional
 import anthropic
 
 from app.config import get_settings
+from app.ai.model_router import model_for
 from app.ai.system_prompts import (
     build_secretary_prompt,
     build_intent_classifier_prompt,
@@ -37,7 +38,7 @@ async def classify_intent(message: str, company_config: Optional[dict] = None) -
     module = _get_module(company_config)
     prompt = build_intent_classifier_prompt(message, module)
     response = await _client.messages.create(
-        model=settings.claude_model,
+        model=model_for("classify_intent"),
         max_tokens=20,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -64,7 +65,7 @@ async def chat(
     messages = list(conversation_history) + [{"role": "user", "content": augmented_message}]
 
     response = await _client.messages.create(
-        model=settings.claude_model,
+        model=model_for("chat"),
         max_tokens=1024,
         system=system_prompt,
         messages=messages,
@@ -89,7 +90,7 @@ async def stream_chat(
     messages = list(conversation_history) + [{"role": "user", "content": augmented_message}]
 
     async with _client.messages.stream(
-        model=settings.claude_model,
+        model=model_for("stream_chat"),
         max_tokens=1024,
         system=system_prompt,
         messages=messages,

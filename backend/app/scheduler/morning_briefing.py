@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import anthropic
 
 from app.config import get_settings
+from app.ai.model_router import model_for
 from app.ai.system_prompts import MORNING_BRIEFING_PROMPT
 
 settings = get_settings()
@@ -29,7 +30,7 @@ async def generate_morning_briefing(
     )
 
     response = await client.messages.create(
-        model=settings.claude_model,
+        model=model_for("morning_briefing"),
         max_tokens=512,
         messages=[{"role": "user", "content": prompt}],
     )

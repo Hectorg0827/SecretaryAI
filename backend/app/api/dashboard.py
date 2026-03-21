@@ -197,6 +197,7 @@ async def _ai_analyze_emails(emails: list[dict]) -> list[dict]:
     try:
         import anthropic
         from app.config import get_settings
+        from app.ai.model_router import model_for
         settings = get_settings()
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -216,7 +217,7 @@ async def _ai_analyze_emails(emails: list[dict]) -> list[dict]:
             '[{"priority":"...","summary":"...","action_needed":"..."}]'
         )
         response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=model_for("email_priority_batch"),
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )

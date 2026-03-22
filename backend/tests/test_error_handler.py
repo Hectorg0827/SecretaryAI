@@ -4,7 +4,7 @@ Tests for utils/error_handler.py — FastAPI error handlers.
 import pytest
 
 import os
-os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!x")
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")

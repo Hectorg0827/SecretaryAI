@@ -1,33 +1,105 @@
+import logging
+import logging.config
+
+import redis as redis_lib
 import sentry_sdk
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox
 from app.utils.error_handler import register_error_handlers
+from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.middleware.request_id import RequestIDMiddleware
 
 settings = get_settings()
 
-if settings.sentry_dsn:
-    sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)
+# ── Structured JSON logging ────────────────────────────────────────────────────
+_LOG_FORMAT = "json" if not settings.debug else "text"
 
+if _LOG_FORMAT == "json":
+    try:
+        from pythonjsonlogger import jsonlogger
+
+        class _RequestContextFilter(logging.Filter):
+            """Injects request_id into every log record if available."""
+            def filter(self, record):
+                if not hasattr(record, "request_id"):
+                    record.request_id = "-"
+                return True
+
+        _handler = logging.StreamHandler()
+        _handler.setFormatter(
+            jsonlogger.JsonFormatter(
+                fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
+                rename_fields={"asctime": "timestamp", "levelname": "level"},
+            )
+        )
+        _handler.addFilter(_RequestContextFilter())
+        logging.root.setLevel(logging.INFO)
+        logging.root.handlers = [_handler]
+    except ImportError:
+        logging.basicConfig(level=logging.INFO)
+else:
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+
+log = logging.getLogger(__name__)
+
+# ── Sentry ─────────────────────────────────────────────────────────────────────
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=0.2,
+        environment="development" if settings.debug else "production",
+        before_send=lambda event, hint: _scrub_sentry_event(event),
+    )
+
+
+def _scrub_sentry_event(event: dict) -> dict:
+    """Remove sensitive fields before sending to Sentry."""
+    for frame in (
+        event.get("exception", {})
+            .get("values", [{}])[0]
+            .get("stacktrace", {})
+            .get("frames", [])
+    ):
+        frame.get("vars", {}).pop("password", None)
+        frame.get("vars", {}).pop("secret_key", None)
+        frame.get("vars", {}).pop("access_token", None)
+    return event
+
+
+# ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    log.info("SecretaryAI API starting up")
     yield
-    # Shutdown
+    log.info("SecretaryAI API shut down")
 
+
+# ── Docs: served behind API key in production ──────────────────────────────────
+_docs_url = "/docs"
+_redoc_url = None
+
+if not settings.debug and not settings.docs_api_key:
+    # No key configured AND not in debug — disable entirely
+    _docs_url = None
 
 app = FastAPI(
     title="SecretaryAI API",
     version="1.0.0",
     description="AI operations manager for importers and distributors",
     lifespan=lifespan,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url=None,
+    docs_url=_docs_url,
+    redoc_url=_redoc_url,
 )
+
+# ── Middleware (order matters — outermost first) ───────────────────────────────
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIDMiddleware)
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 _allow_all = "*" in _cors_origins
@@ -37,24 +109,66 @@ app.add_middleware(
     allow_origins=["*"] if _allow_all else _cors_origins,
     allow_credentials=not _allow_all,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
 )
 
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
-app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
-app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
-app.include_router(settings_router.router, prefix="/api/settings", tags=["settings"])
-app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-app.include_router(actions.router, prefix="/api/actions", tags=["actions"])
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
-app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
-app.include_router(inbox.router, prefix="/api/inbox", tags=["inbox"])
+# ── Routers ────────────────────────────────────────────────────────────────────
+app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"])
+app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"])
+app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"])
+app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"])
+app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
+app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
+app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"])
+app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
+app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"])
+app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"])
+app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"])
 
 register_error_handlers(app)
 
 
-@app.get("/health")
+# ── Docs auth gate (production with key) ──────────────────────────────────────
+if settings.docs_api_key and not settings.debug:
+    @app.middleware("http")
+    async def _docs_auth_gate(request: Request, call_next):
+        if request.url.path.startswith("/docs") or request.url.path == "/openapi.json":
+            if request.headers.get("X-Docs-Key") != settings.docs_api_key:
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
+# ── Health check — deep ping ──────────────────────────────────────────────────
+@app.get("/health", tags=["ops"])
 async def health_check():
-    return {"status": "ok", "version": "1.0.0"}
+    """
+    Readiness probe — returns 200 only if DB and Redis are reachable.
+    Kubernetes / Docker health checks should hit this endpoint.
+    """
+    checks: dict[str, str] = {}
+    ok = True
+
+    # Redis
+    try:
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=1)
+        r.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+        ok = False
+
+    # Supabase (lightweight table count query)
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        db.table("companies").select("id", count="exact").limit(1).execute()
+        checks["db"] = "ok"
+    except Exception as exc:
+        checks["db"] = f"error: {exc}"
+        ok = False
+
+    status_code = 200 if ok else 503
+    return JSONResponse(
+        {"status": "ok" if ok else "degraded", "version": "1.0.0", "checks": checks},
+        status_code=status_code,
+    )

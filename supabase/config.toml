@@ -1,0 +1,36 @@
+# Supabase CLI project configuration
+# https://supabase.com/docs/guides/cli/config
+#
+# Usage:
+#   supabase init          (first time only, links this project)
+#   supabase db diff       (preview pending schema changes)
+#   supabase db push       (apply migrations to remote DB)
+#   supabase db reset      (reset local dev DB to latest migrations)
+#
+# Each file in supabase/migrations/ is a timestamped SQL migration.
+# Naming convention: YYYYMMDDHHMMSS_description.sql
+# Never edit a committed migration — always create a new one.
+
+[api]
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+port = 54323
+
+[inbucket]
+port = 54324
+
+[storage]
+file_size_limit = "50MiB"
+
+[auth]
+site_url = "http://localhost:5173"
+jwt_expiry = 3600

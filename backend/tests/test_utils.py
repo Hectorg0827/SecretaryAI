@@ -6,7 +6,7 @@ import time
 from unittest.mock import MagicMock
 
 import os
-os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!x")
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
@@ -82,30 +82,30 @@ class TestEncryption:
 
 # ─── Rate Limiter Tests ────────────────────────────────────────────────────────
 
-class TestSlidingWindowRateLimiter:
+class TestRedisRateLimiter:
     def test_allows_requests_within_limit(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=5, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=5, window_seconds=60)
         for _ in range(5):
             assert limiter.is_allowed("user:1") is True
 
     def test_blocks_after_limit_exceeded(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=3, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=3, window_seconds=60)
         for _ in range(3):
             limiter.is_allowed("user:2")
         assert limiter.is_allowed("user:2") is False
 
     def test_different_keys_are_independent(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=1, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=1, window_seconds=60)
         assert limiter.is_allowed("user:a") is True
         assert limiter.is_allowed("user:a") is False
         assert limiter.is_allowed("user:b") is True  # Independent key
 
     def test_remaining_decrements(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=5, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=5, window_seconds=60)
         assert limiter.remaining("user:1") == 5
         limiter.is_allowed("user:1")
         assert limiter.remaining("user:1") == 4
@@ -113,15 +113,15 @@ class TestSlidingWindowRateLimiter:
         assert limiter.remaining("user:1") == 3
 
     def test_remaining_never_negative(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=2, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=2, window_seconds=60)
         for _ in range(5):
             limiter.is_allowed("user:1")
         assert limiter.remaining("user:1") == 0
 
     def test_window_expiry_resets_allowance(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter
-        limiter = SlidingWindowRateLimiter(max_calls=1, window_seconds=1)
+        from app.utils.rate_limiter import RedisRateLimiter
+        limiter = RedisRateLimiter(max_calls=1, window_seconds=1)
         assert limiter.is_allowed("user:1") is True
         assert limiter.is_allowed("user:1") is False
         time.sleep(1.1)
@@ -164,8 +164,8 @@ class TestGetClientKey:
 
 class TestRequireRateLimit:
     def test_allows_within_limit(self):
-        from app.utils.rate_limiter import SlidingWindowRateLimiter, require_rate_limit
-        limiter = SlidingWindowRateLimiter(max_calls=10, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter, require_rate_limit
+        limiter = RedisRateLimiter(max_calls=10, window_seconds=60)
         dep_fn = require_rate_limit(limiter)
         request = MagicMock()
         request.state.user_id = "user-1"
@@ -175,8 +175,8 @@ class TestRequireRateLimit:
 
     def test_raises_429_when_limit_exceeded(self):
         from fastapi import HTTPException
-        from app.utils.rate_limiter import SlidingWindowRateLimiter, require_rate_limit
-        limiter = SlidingWindowRateLimiter(max_calls=1, window_seconds=60)
+        from app.utils.rate_limiter import RedisRateLimiter, require_rate_limit
+        limiter = RedisRateLimiter(max_calls=1, window_seconds=60)
         dep_fn = require_rate_limit(limiter)
         request = MagicMock()
         request.state.user_id = "user-limited"

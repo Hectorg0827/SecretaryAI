@@ -34,6 +34,13 @@ COPY app/       ./app/
 COPY tasks/     ./tasks/
 COPY celery_app.py .
 
+# Run as non-root user — prevents container-escape privilege escalation
+RUN addgroup --system appgroup \
+    && adduser --system --ingroup appgroup --no-create-home appuser \
+    && chown -R appuser:appgroup /app
+
+USER appuser
+
 EXPOSE 8000
 
 # Production: multiple uvicorn workers; override CMD in docker-compose for dev

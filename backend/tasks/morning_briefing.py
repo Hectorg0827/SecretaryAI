@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, build_adapter
+from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock
 from app.scheduler.morning_briefing import generate_morning_briefing
 from app.ai.data_summarizer import build_query_context
 
@@ -11,6 +11,10 @@ log = logging.getLogger(__name__)
 
 @app.task(name="tasks.morning_briefing.send_morning_briefing_all", bind=True, max_retries=2)
 def send_morning_briefing_all(self):
+    with task_lock("morning_briefing", ttl_seconds=3600) as acquired:
+        if not acquired:
+            log.info("Morning briefing already running — skipping")
+            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
 

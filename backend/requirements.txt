@@ -63,6 +63,7 @@ pydantic-settings==2.6.0
 
 # Monitoring
 sentry-sdk[fastapi]==2.18.0
+python-json-logger==2.0.7
 
 # Testing
 pytest==8.3.3

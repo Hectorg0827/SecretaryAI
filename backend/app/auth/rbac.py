@@ -30,11 +30,19 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    from app.auth.jwt import is_token_revoked
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    jti = payload.get("jti")
+    if jti and is_token_revoked(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return payload

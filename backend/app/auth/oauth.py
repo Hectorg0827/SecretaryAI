@@ -118,3 +118,41 @@ async def revoke_google_token(token: str) -> bool:
             params={"token": token},
         )
         return response.status_code == 200
+
+
+def refresh_google_token_if_needed(credentials_dict: dict) -> tuple[dict, bool]:
+    """
+    Synchronously refresh the Google access token if it is expired or close to expiry.
+    Uses google-auth's built-in refresh mechanism.
+
+    Returns:
+        (updated_credentials_dict, was_refreshed)
+        - updated_credentials_dict has the new "token" value if refreshed
+        - was_refreshed is True if a refresh was performed
+
+    This is synchronous because it is called from sync FastAPI dependencies and
+    Celery tasks. The underlying HTTP call is quick (single POST to Google).
+    """
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+
+        creds = Credentials.from_authorized_user_info(credentials_dict)
+
+        # Skip if still valid
+        if creds.valid:
+            return credentials_dict, False
+
+        # Can't refresh without a refresh token
+        if not creds.refresh_token:
+            return credentials_dict, False
+
+        creds.refresh(Request())
+
+        updated = dict(credentials_dict)
+        updated["token"] = creds.token
+        return updated, True
+
+    except Exception:
+        # If refresh fails, return original — caller handles the downstream error
+        return credentials_dict, False

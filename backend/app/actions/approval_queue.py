@@ -88,3 +88,25 @@ class ApprovalQueue:
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", draft_id).execute()
         return {"draft_id": draft_id, "status": "edited_and_approved", "content": edited_content}
+
+    def expire_old_drafts(self, company_id: str) -> int:
+        """
+        Archive pending drafts that have passed their expires_at timestamp.
+        Returns the number of drafts expired.
+        Called nightly by the overnight task.
+        """
+        if not hasattr(self._db, "table"):
+            return 0
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            result = (
+                self._db.table("drafts")
+                .update({"status": "expired"})
+                .eq("company_id", company_id)
+                .eq("status", "pending")
+                .lt("expires_at", now_iso)
+                .execute()
+            )
+            return len(result.data) if result.data else 0
+        except Exception:
+            return 0

@@ -20,8 +20,8 @@ from app.auth.oauth import (
     build_authorization_url, exchange_code_for_tokens, revoke_token,
     build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
 )
-from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password
-from app.auth.rbac import get_current_user
+from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password, revoke_token
+from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
 from app.utils.encryption import encrypt
 from app.utils.rate_limiter import login_limiter, require_rate_limit
@@ -345,6 +345,19 @@ async def refresh_token(body: RefreshRequest):
 
     new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
     return {"access_token": new_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout(
+    token: str = Depends(oauth2_scheme),
+    _user: dict = Depends(get_current_user),
+):
+    """
+    Revoke the current JWT by adding its JTI to the Redis blacklist.
+    The token becomes invalid immediately, even before its natural expiry.
+    """
+    revoke_token(token)
+    return {"status": "logged_out"}
 
 
 @router.get("/me")

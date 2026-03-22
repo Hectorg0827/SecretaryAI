@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # ─── Ensure test env vars exist before app imports ────────────────────────────
-os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!x")
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
@@ -200,7 +200,7 @@ def test_client():
     mock_settings.supabase_anon_key = "test-anon"
     mock_settings.supabase_service_role_key = "test-service-role"
     mock_settings.database_url = "postgresql://test:test@localhost/test"
-    mock_settings.secret_key = "test-secret-key-32-chars-long!!"
+    mock_settings.secret_key = "test-secret-key-32-chars-long!!x"
     mock_settings.redis_url = "redis://localhost:6379/0"
     mock_settings.sendgrid_api_key = ""
     mock_settings.from_email = "test@test.com"

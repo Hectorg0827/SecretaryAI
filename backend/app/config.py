@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from functools import lru_cache
 
 
@@ -61,20 +62,63 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
 
     # Industry Module — controls which intelligence module is loaded
-    # Set to a registered slug (see app/industry_modules/loader._REGISTRY)
-    # Companies can override this per-company in the DB companies.industry_module column
     default_industry_module: str = "wholesale_distribution"
 
     # Frontend base URL — used for OAuth redirect responses (QBO callback)
-    # Set to your public domain in production, e.g. https://app.yourcompany.com
     frontend_url: str = ""
 
     # Sentry
     sentry_dsn: str = ""
 
+    # API docs — set to a secret string to expose /docs in production behind X-Docs-Key header
+    # Leave empty to disable /docs entirely in production (docs still available in debug mode)
+    docs_api_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+    @model_validator(mode="after")
+    def _validate(self) -> "Settings":
+        errors: list[str] = []
+
+        # Secret key must be strong enough to be used as an AES-256 key seed
+        if len(self.secret_key) < 32:
+            errors.append(
+                f"SECRET_KEY must be at least 32 characters (got {len(self.secret_key)}). "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+
+        # If QBO integration is partially configured, require all three fields
+        qbo_fields = {
+            "INTUIT_CLIENT_ID": self.intuit_client_id,
+            "INTUIT_CLIENT_SECRET": self.intuit_client_secret,
+            "INTUIT_REDIRECT_URI": self.intuit_redirect_uri,
+        }
+        qbo_set = {k for k, v in qbo_fields.items() if v}
+        if qbo_set and len(qbo_set) != len(qbo_fields):
+            missing = sorted(set(qbo_fields) - qbo_set)
+            errors.append(
+                f"Partial QBO config: {missing} must also be set when using QuickBooks Online"
+            )
+
+        # Same for Google OAuth
+        google_fields = {
+            "GOOGLE_CLIENT_ID": self.google_client_id,
+            "GOOGLE_CLIENT_SECRET": self.google_client_secret,
+            "GOOGLE_REDIRECT_URI": self.google_redirect_uri,
+        }
+        google_set = {k for k, v in google_fields.items() if v}
+        if google_set and len(google_set) != len(google_fields):
+            missing = sorted(set(google_fields) - google_set)
+            errors.append(
+                f"Partial Google config: {missing} must also be set when using Gmail/Sheets"
+            )
+
+        if errors:
+            raise ValueError("Configuration errors:\n" + "\n".join(f"  • {e}" for e in errors))
+
+        return self
 
 
 @lru_cache

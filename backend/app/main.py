@@ -81,21 +81,30 @@ async def lifespan(app: FastAPI):
 
 
 # ── Docs: served behind API key in production ──────────────────────────────────
-_docs_url = "/docs"
-_redoc_url = None
-
-if not settings.debug and not settings.docs_api_key:
-    # No key configured AND not in debug — disable entirely
-    _docs_url = None
-
 app = FastAPI(
     title="SecretaryAI API",
     version="1.0.0",
     description="AI operations manager for importers and distributors",
     lifespan=lifespan,
-    docs_url=_docs_url,
-    redoc_url=_redoc_url,
+    docs_url=None,
+    redoc_url=None,
 )
+
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_docs(request: Request):
+    """API docs — accessible with X-Docs-Key header (value from DOCS_API_KEY env var)."""
+    docs_key = request.headers.get("x-docs-key", "")
+    expected = settings.docs_api_key if hasattr(settings, "docs_api_key") else ""
+    if not expected or docs_key != expected:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not authorized. Include X-Docs-Key header."}, status_code=401)
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="SecretaryAI API")
+
 
 # ── Middleware (order matters — outermost first) ───────────────────────────────
 app.add_middleware(SecurityHeadersMiddleware)
@@ -126,16 +135,6 @@ app.include_router(notifications.router,    prefix="/api/notifications", tags=["
 app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"])
 
 register_error_handlers(app)
-
-
-# ── Docs auth gate (production with key) ──────────────────────────────────────
-if settings.docs_api_key and not settings.debug:
-    @app.middleware("http")
-    async def _docs_auth_gate(request: Request, call_next):
-        if request.url.path.startswith("/docs") or request.url.path == "/openapi.json":
-            if request.headers.get("X-Docs-Key") != settings.docs_api_key:
-                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-        return await call_next(request)
 
 
 # ── Health check — deep ping ──────────────────────────────────────────────────

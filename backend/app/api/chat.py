@@ -23,6 +23,8 @@ from app.api.deps import get_adapter, get_db
 from app.auth.rbac import get_current_user, require_permission
 from app.ai.secretary import classify_intent, stream_chat, chat as ai_chat, detect_action_in_response
 from app.ai.data_summarizer import build_query_context
+from app.memory.account_memory import load_account_memory, extract_and_save_memory
+from app.memory.conversation_summary import load_recent_summaries, summarise_and_save
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -257,6 +259,16 @@ def _weeks_remaining(item: dict):
     return round(qty / sell_rate, 1) if sell_rate else None
 
 
+def _detect_account_names(message: str, history: list[dict]) -> list[str]:
+    """Heuristically extract account/customer names from message and recent history."""
+    # Simple: look for capitalized multi-word sequences that aren't common words
+    import re
+    text = message + " " + " ".join(m.get("content", "")[:100] for m in history[-4:])
+    # Match sequences like "Sunrise Distributors" or "Delta Corp"
+    candidates = re.findall(r'\b([A-Z][a-z]+ (?:[A-Z][a-z]+ )?(?:Distributors?|Corp|Inc|LLC|Co\.|Company|Group|Trading|Imports?|Exports?|Supply|Foods?|Pharma|Industries?|International|Global|National))\b', text)
+    return list(set(candidates))[:5]
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/message")
@@ -295,6 +307,20 @@ async def send_message(
         "preferred_language": user.get("preferred_language", "English"),
     }
 
+    # Load memory context
+    recent_summaries = load_recent_summaries(db, company_id, user_id)
+    # Try to detect account names in message for targeted memory lookup
+    account_names = _detect_account_names(request.message, history)
+    account_mem = load_account_memory(db, company_id, account_names)
+
+    if recent_summaries or account_mem:
+        memory_context = ""
+        if recent_summaries:
+            memory_context += f"\n\n[Recent conversation context]\n{recent_summaries}"
+        if account_mem:
+            memory_context += f"\n\n[Account memory]\n{account_mem}"
+        data_summary = data_summary + memory_context
+
     # 5. Collect the full response text while streaming
     full_response: list[str] = []
 
@@ -308,6 +334,22 @@ async def send_message(
         # 6. Persist conversation turn
         assistant_text = "".join(full_response)
         _save_turn(db, conversation_id, company_id, user_id, request.message, assistant_text)
+
+        # Async background: summarise conversation + extract account memory
+        import asyncio
+        assistant_text_captured = "".join(full_response)
+        try:
+            if len(history) >= 6:  # summarise after a few turns
+                asyncio.create_task(summarise_and_save(
+                    db, company_id, user_id, conversation_id,
+                    history + [{"role": "user", "content": request.message},
+                               {"role": "assistant", "content": assistant_text_captured}]
+                ))
+            for name in account_names:
+                if name:
+                    extract_and_save_memory(db, company_id, name, assistant_text_captured)
+        except Exception:
+            pass
 
         # 7. Detect action proposals
         action = detect_action_in_response(assistant_text)

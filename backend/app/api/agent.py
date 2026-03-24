@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db
 from app.auth.rbac import get_current_user
 from app.config import get_settings
+from app.connectors.qb_desktop import QBDesktopAdapter
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -113,14 +114,18 @@ async def trigger_sync(
         return {"status": "skipped", "message": "QuickBooks Desktop not connected"}
 
     try:
-        from app.connectors.qb_desktop import QBDesktopConnector
-        qbd = QBDesktopConnector(
-            conductor_api_key=settings.conductor_api_key,
+        from datetime import date, timedelta
+        qbd = QBDesktopAdapter(
+            api_key=settings.conductor_api_key,
             end_user_id=end_user_id,
         )
         # Fetch accounts and invoices — most frequently needed for health scoring
-        accounts = await qbd.get_customers(max_results=500)
-        invoices = await qbd.get_invoices(days=90)
+        accounts = await qbd.get_customers()
+        today = date.today()
+        invoices = await qbd.get_invoices(
+            date_from=today - timedelta(days=90),
+            date_to=today,
+        )
 
         counts = {"accounts": len(accounts), "invoices": len(invoices)}
         log.info("QB sync for %s: %s", company_id, counts)

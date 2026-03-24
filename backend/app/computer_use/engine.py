@@ -17,6 +17,7 @@ from typing import Optional
 import anthropic
 
 from app.config import get_settings
+from app.computer_use.safety import ComputerUseSafety
 
 log = logging.getLogger(__name__)
 settings = get_settings()

@@ -17,6 +17,9 @@ from app.connectors.qb_desktop import QBDesktopAdapter
 from app.connectors.qb_online import QBOnlineAdapter
 from app.connectors.gmail_connector import GmailConnector
 from app.connectors.google_sheets import GoogleSheetsConnector
+from app.connectors.outlook import OutlookConnector
+from app.connectors.shopify import ShopifyConnector
+from app.connectors.shiptrack import ShipTrackConnector
 from app.computer_use.engine import ComputerUseEngine
 
 
@@ -36,6 +39,9 @@ class UnifiedDataAdapter:
         self._qb: Optional[QuickBooksAdapter] = None
         self._gmail: Optional[GmailConnector] = None
         self._sheets: Optional[GoogleSheetsConnector] = None
+        self._outlook: Optional[OutlookConnector] = None
+        self._shopify: Optional[ShopifyConnector] = None
+        self._shiptrack: Optional[ShipTrackConnector] = None
         self._computer_use: Optional[ComputerUseEngine] = None
         self._setup_connectors()
 
@@ -66,6 +72,32 @@ class UnifiedDataAdapter:
         # Google Sheets
         if cfg.get("google_credentials"):
             self._sheets = GoogleSheetsConnector(credentials=cfg["google_credentials"])
+
+        # Outlook connector
+        if cfg.get("ms_tenant_id") and cfg.get("ms_access_token"):
+            self._outlook = OutlookConnector(
+                tenant_id=cfg["ms_tenant_id"],
+                client_id=cfg.get("ms_client_id", ""),
+                client_secret=cfg.get("ms_client_secret", ""),
+                access_token=cfg["ms_access_token"],
+                refresh_token=cfg.get("ms_refresh_token", ""),
+            )
+
+        # Shopify connector
+        if cfg.get("shopify_shop_domain") and cfg.get("shopify_access_token"):
+            self._shopify = ShopifyConnector(
+                shop_domain=cfg["shopify_shop_domain"],
+                access_token=cfg["shopify_access_token"],
+            )
+
+        # Shipment tracking connector (credentials optional)
+        self._shiptrack = ShipTrackConnector(
+            fedex_api_key=cfg.get("fedex_api_key", ""),
+            fedex_secret_key=cfg.get("fedex_secret_key", ""),
+            ups_client_id=cfg.get("ups_client_id", ""),
+            ups_client_secret=cfg.get("ups_client_secret", ""),
+            dhl_api_key=cfg.get("dhl_api_key", ""),
+        )
 
         # Computer Use Engine — kept as last-resort fallback inside AccessRouter
         self._computer_use = ComputerUseEngine(company_config=cfg)
@@ -241,22 +273,46 @@ class UnifiedDataAdapter:
     # Email
     # ------------------------------------------------------------------
 
-    async def get_emails(self, query: str, max_results: int = 20) -> list[dict]:
-        if not self._gmail:
-            return []
-        return await self._gmail.get_recent_emails(query=query, max_results=max_results)
+    async def get_emails(self, query: str = "", max_results: int = 20) -> list[dict]:
+        """Get emails — routes to Gmail or Outlook depending on what's configured."""
+        if self._gmail:
+            return await self._gmail.get_recent_emails(query=query, max_results=max_results)
+        if self._outlook:
+            return await self._outlook.get_emails(query=query, max_results=max_results)
+        return []
 
     async def send_email_reply(self, to: str, subject: str, body: str) -> dict:
-        """Send an email reply via Gmail. User must have reviewed the draft first."""
-        if not self._gmail:
-            raise RuntimeError("Gmail not configured for this company")
-        return await self._gmail.send_approved_email(to=to, subject=subject, body=body)
+        """Send an email reply — routes to Gmail or Outlook."""
+        if self._gmail:
+            return await self._gmail.send_approved_email(to=to, subject=subject, body=body)
+        if self._outlook:
+            return await self._outlook.send_email_reply(to=to, subject=subject, body=body)
+        raise ValueError("No email connector configured")
 
     async def mark_email_read(self, email_id: str) -> None:
-        """Remove UNREAD label from a Gmail message."""
-        if not self._gmail:
-            return
-        await self._gmail.mark_as_read(email_id)
+        """Mark email as read — routes to whichever connector is active."""
+        if self._gmail:
+            await self._gmail.mark_as_read(email_id)
+        elif self._outlook:
+            await self._outlook.mark_email_read(email_id)
+
+    async def get_shopify_orders(self, days: int = 30) -> list[dict]:
+        """Get Shopify orders if connected."""
+        if self._shopify:
+            return await self._shopify.get_recent_orders(days=days)
+        return []
+
+    async def track_shipment(self, tracking_number: str) -> dict:
+        """Track a shipment via the configured carrier APIs."""
+        if self._shiptrack:
+            return await self._shiptrack.track(tracking_number)
+        return {"tracking_number": tracking_number, "status": "not_configured", "description": "No tracking connector configured", "events": []}
+
+    async def track_shipments(self, tracking_numbers: list[str]) -> list[dict]:
+        """Track multiple shipments concurrently."""
+        if self._shiptrack:
+            return await self._shiptrack.track_multiple(tracking_numbers)
+        return []
 
     async def get_customs_email_updates(self) -> list[dict]:
         return await self.get_emails(
@@ -274,8 +330,14 @@ class UnifiedDataAdapter:
             results["quickbooks"] = await self._qb.test_connection()
         if self._gmail:
             results["gmail"] = True  # TODO: add ping
+        if self._outlook:
+            results["outlook"] = True
         if self._sheets:
             results["google_sheets"] = True
+        if self._shopify:
+            results["shopify"] = True
+        if self._shiptrack:
+            results["shiptrack"] = True
         return results
 
 

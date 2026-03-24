@@ -23,6 +23,7 @@ app = Celery(
         "tasks.account_health",
         "tasks.inventory_alerts",
         "tasks.file_ingestion",
+        "tasks.workflow_runner",
     ],
 )
 
@@ -78,5 +79,10 @@ app.conf.beat_schedule = {
     "file-ingestion": {
         "task": "tasks.file_ingestion.ingest_watched_files_all",
         "schedule": crontab(minute="*/30"),
+    },
+    # Workflow runner — every hour
+    "workflow-runner": {
+        "task": "tasks.workflow_runner.run_all",
+        "schedule": crontab(minute=0),  # every hour
     },
 }

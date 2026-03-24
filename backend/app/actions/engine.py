@@ -151,9 +151,45 @@ class ActionEngine:
         from app.actions.email_actions import send_alert_email
         from app.actions.report_actions import generate_internal_report
 
+        if action_type == "calculate_health_score":
+            account_id = payload.get("account_id", "")
+            account_name = payload.get("account_name", "")
+            from app.intelligence.account_health import score_account
+            from decimal import Decimal
+            result = score_account(
+                account_id=account_id,
+                account_name=account_name,
+                last_order_date=payload.get("last_order_date"),
+                avg_order_cycle_days=payload.get("avg_order_cycle_days"),
+                order_history=payload.get("order_history", []),
+                current_balance=Decimal(str(payload.get("current_balance", 0))),
+            )
+            try:
+                self._db.table("accounts").upsert({
+                    "company_id": company_id,
+                    "qb_id": account_id,
+                    "name": account_name,
+                    "health_status": result.status,
+                    "health_score": result.score,
+                    "last_health_check": datetime.now(timezone.utc).isoformat(),
+                }, on_conflict="company_id,qb_id").execute()
+            except Exception:
+                pass
+            return {"status": "ok", "health_status": result.status, "health_score": result.score}
+
+        elif action_type == "update_inventory_count":
+            item_id = payload.get("item_id", "")
+            new_qty = payload.get("quantity", 0)
+            try:
+                self._db.table("inventory").update({
+                    "warehouse_qty": int(new_qty),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("company_id", company_id).eq("qb_id", item_id).execute()
+            except Exception:
+                pass
+            return {"status": "ok", "item_id": item_id, "new_qty": new_qty}
+
         handlers = {
-            "calculate_health_score": lambda p, c: {"status": "ok"},
-            "update_inventory_count": lambda p, c: {"status": "ok"},
             "run_sync_check": lambda p, c: {"status": "ok"},
             "generate_internal_report": generate_internal_report,
             "send_morning_briefing": send_alert_email,

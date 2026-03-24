@@ -14,7 +14,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+import re
 
 from app.auth.oauth import (
     build_authorization_url, exchange_code_for_tokens, revoke_token,
@@ -260,6 +261,14 @@ async def gmail_disconnect(user: dict = Depends(get_current_user)):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+            raise ValueError("Invalid email address")
+        return v
 
 
 @router.post("/login")

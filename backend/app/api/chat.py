@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_adapter, get_db
 from app.auth.rbac import get_current_user, require_permission
@@ -38,6 +38,13 @@ MAX_CONTEXT_CHARS = 32_000
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def validate_message_length(cls, v: str) -> str:
+        if len(v) > 4000:
+            raise ValueError("Message too long (max 4000 characters)")
+        return v
 
 
 class ChatMessage(BaseModel):

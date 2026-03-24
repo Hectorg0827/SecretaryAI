@@ -31,7 +31,8 @@ def _build_alert_dict(item: dict, status) -> dict:
 
 @router.get("/")
 async def list_inventory(
-    limit: int = Query(200, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     status_filter: str = Query(None, alias="status"),
     user: dict = Depends(require_permission("view_inventory")),
     adapter=Depends(get_adapter),
@@ -73,7 +74,7 @@ async def list_inventory(
             continue
         results.append(entry)
 
-    return {"items": results[:limit], "total": len(results)}  # `items`, not `inventory`
+    return {"items": results[offset:offset+limit], "total": len(results), "offset": offset, "limit": limit}  # `items`, not `inventory`
 
 
 @router.get("/alerts")

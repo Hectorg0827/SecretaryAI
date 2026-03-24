@@ -7,6 +7,7 @@ import { FollowUpNotes } from '../components/dashboard/FollowUpNotes';
 import { AccountHealthPanel } from '../components/dashboard/AccountHealthPanel';
 import { InventoryPanel } from '../components/dashboard/InventoryPanel';
 import { PendingApprovals } from '../components/dashboard/PendingApprovals';
+import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
 import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
@@ -123,6 +124,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
               ) : (
                 <>
                   {showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                  <ProactiveFeed />
                   {showInventory     && <InventoryPanel alerts={alerts} />}
                   {showApprovals     && <PendingApprovals />}
                   {showNotes         && <FollowUpNotes />}
@@ -141,6 +143,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
             ) : (
               <>
                 {showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                <ProactiveFeed />
                 {showInventory     && <InventoryPanel alerts={alerts} />}
                 {showNotes         && <FollowUpNotes />}
               </>

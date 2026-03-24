@@ -23,6 +23,7 @@ app = Celery(
         "tasks.account_health",
         "tasks.inventory_alerts",
         "tasks.file_ingestion",
+        "tasks.proactive_insights",
     ],
 )
 
@@ -78,5 +79,10 @@ app.conf.beat_schedule = {
     "file-ingestion": {
         "task": "tasks.file_ingestion.ingest_watched_files_all",
         "schedule": crontab(minute="*/30"),
+    },
+    # Proactive insights — 8 AM UTC daily
+    "proactive-insights": {
+        "task": "tasks.proactive_insights.generate_all",
+        "schedule": crontab(hour=8, minute=0),  # 8 AM UTC daily
     },
 }

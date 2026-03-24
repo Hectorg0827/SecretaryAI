@@ -74,6 +74,20 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface FeedEvent {
+  id: string;
+  event_type: string;
+  title: string;
+  body: string;
+  priority: 'high' | 'medium' | 'low';
+  action_label: string | null;
+  action_type: string | null;
+  action_data: Record<string, unknown>;
+  entity_name: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
 export interface DashboardSummary {
   accounts: { healthy: number; slowing: number; at_risk: number; dormant: number };
   inventory_alerts: InventoryAlert[];
@@ -255,6 +269,12 @@ export const api = {
     saveQBD: (endUserId: string) =>
       api.post<{ status: string; end_user_id: string }>('/api/settings/integrations/qbd', { end_user_id: endUserId }),
     disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),
+  },
+
+  feed: {
+    list:    (unreadOnly = false) => api.get<{ events: FeedEvent[]; unread_count: number }>(`/api/feed/?unread_only=${unreadOnly}`),
+    read:    (id: string) => api.post<{ status: string }>(`/api/feed/${id}/read`, {}),
+    dismiss: (id: string) => api.post<{ status: string }>(`/api/feed/${id}/dismiss`, {}),
   },
 
   auth: {

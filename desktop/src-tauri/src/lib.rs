@@ -1,6 +1,7 @@
 mod credentials;
 mod db;
 mod heartbeat;
+mod qb_detect;
 mod screen_capture;
 mod sync;
 mod tray;
@@ -153,6 +154,7 @@ pub fn run() {
             sync::get_sync_status,
             db::query_local,
             screen_capture::capture_screen,
+            qb_detect::check_qb_installed,
         ])
         .setup(|app| {
             // Initialize local encrypted database

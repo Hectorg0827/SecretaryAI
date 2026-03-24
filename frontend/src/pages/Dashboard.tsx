@@ -7,6 +7,7 @@ import { FollowUpNotes } from '../components/dashboard/FollowUpNotes';
 import { AccountHealthPanel } from '../components/dashboard/AccountHealthPanel';
 import { InventoryPanel } from '../components/dashboard/InventoryPanel';
 import { PendingApprovals } from '../components/dashboard/PendingApprovals';
+import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel';
 import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
@@ -125,6 +126,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
                   {showAccountHealth && <AccountHealthPanel summary={accounts} />}
                   {showInventory     && <InventoryPanel alerts={alerts} />}
                   {showApprovals     && <PendingApprovals />}
+                  {showApprovals     && <WorkflowStatusPanel />}
                   {showNotes         && <FollowUpNotes />}
                 </>
               )}

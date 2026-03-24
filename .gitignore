@@ -65,3 +65,4 @@ logs/
 *.key
 *.p12
 *.pfx
+.claude/

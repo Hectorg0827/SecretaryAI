@@ -13,11 +13,13 @@ import { api, DashboardSummary } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
 export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => void }) {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading]  = useState(true);
+  const [summary, setSummary]       = useState<DashboardSummary | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const { hasPermission, canApprove, canAccessChat } = useAuth();
 
-  useEffect(() => {
+  const loadSummary = () => {
+    setLoading(true);
     api.dashboard.summary()
       .then((s) => {
         setSummary(s);
@@ -25,7 +27,20 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
       })
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadSummary(); }, []);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    api.dashboard.refresh()
+      .then(() => {
+        // Re-fetch after a short delay so the worker has time to store the snapshot
+        setTimeout(loadSummary, 3000);
+      })
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  };
 
   const accounts = summary?.accounts  ?? { healthy: 0, slowing: 0, at_risk: 0, dormant: 0 };
   const alerts   = summary?.inventory_alerts ?? [];
@@ -52,6 +67,29 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
       {/* Top bar */}
       <TopBar unreadCount={summary?.unread_emails ?? 0} />
+
+      {/* Cache freshness banner */}
+      {!loading && summary && (
+        <div className="px-6 pt-3 flex items-center gap-2 text-xs text-slate-400">
+          {summary.generated_at ? (
+            <span>
+              Data as of{' '}
+              {new Date(summary.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          ) : (
+            <span>Live data</span>
+          )}
+          {hasPermission('run_reports') && (
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="ml-1 underline hover:text-slate-600 disabled:opacity-50"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* KPI strip */}
       {loading ? (

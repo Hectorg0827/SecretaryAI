@@ -18,6 +18,11 @@ from app.api.deps import get_adapter, get_db
 from app.auth.rbac import get_current_user, require_permission, ROLE_PERMISSIONS
 from app.intelligence.account_health import score_account
 from app.intelligence.inventory_monitor import evaluate_inventory
+from app.scheduler.dashboard_snapshot import (
+    compute_dashboard_payload,
+    store_snapshot,
+    read_snapshot,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -33,85 +38,36 @@ async def get_dashboard_summary(
 ):
     """
     Single endpoint for the top-level dashboard: account health, inventory
-    alerts (with correct field names), unread email count, pending approvals,
-    and 30-day sales total.
+    alerts, unread email count, pending approvals, and 30-day sales total.
+
+    QB-derived data (accounts, inventory, sales) is served from the cached
+    dashboard_summary snapshot written by the morning briefing scheduler.
+    Only pending_actions (cheap DB query) and unread_emails (real-time) are
+    computed live. If no snapshot exists yet, a fresh computation runs as a
+    fallback and is immediately stored for subsequent callers.
     """
     company_id = user["company_id"]
 
-    # ── Account health distribution ────────────────────────────────────────
-    health_counts: Counter = Counter()
-    try:
-        customers = await adapter.get_all_customers()
-        invoices_yr = await adapter.get_orders_last_n_days(365)
+    # ── Read QB-derived data from the shared snapshot ─────────────────────
+    snap = read_snapshot(db, company_id, "dashboard_summary")
+    if snap:
+        cached_payload = snap["payload"]
+        generated_at = snap["generated_at"]
+        cached = True
+        log.debug("Dashboard summary served from cache for company %s (generated %s)", company_id, generated_at)
+    else:
+        # No snapshot yet — compute fresh and store for everyone else today
+        log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
+        cached_payload = await compute_dashboard_payload(adapter)
+        store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
+        generated_at = None
+        cached = False
 
-        by_customer: dict[str, list] = {}
-        for inv in invoices_yr:
-            cid = getattr(inv, "customer_id", None) or inv.get("customer_id", "")
-            by_customer.setdefault(cid, []).append({
-                "date": getattr(inv, "date", None) or inv.get("order_date"),
-                "total": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
-            })
+    accounts         = cached_payload.get("accounts", {})
+    inventory_alerts = cached_payload.get("inventory_alerts", [])
+    sales_30d        = cached_payload.get("sales_30d", 0.0)
 
-        for customer in customers:
-            cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
-            orders = by_customer.get(cid, [])
-            dates = [o["date"] for o in orders if o["date"]]
-            last_order = max(dates, default=None)
-            if isinstance(last_order, str):
-                try:
-                    from datetime import date as _date
-                    last_order = _date.fromisoformat(str(last_order)[:10])
-                except ValueError:
-                    last_order = None
-
-            health = score_account(
-                account_id=cid,
-                account_name=getattr(customer, "name", ""),
-                last_order_date=last_order,
-                avg_order_cycle_days=None,
-                order_history=orders,
-                current_balance=float(getattr(customer, "balance", 0)),
-            )
-            health_counts[health.status] += 1
-    except Exception as exc:
-        log.error("Dashboard summary: health scoring failed: %s", exc)
-
-    # ── Inventory alerts (fields match frontend InventoryAlert interface) ──
-    inventory_alerts: list[dict] = []
-    try:
-        inventory = await adapter.get_inventory_merged()
-        for item in inventory:
-            status = evaluate_inventory(
-                item_id=item.get("qb_id", ""),
-                product_name=item.get("product_name", ""),
-                warehouse_1_qty=int(item.get("warehouse_qty", 0)),
-                warehouse_2_qty=int(item.get("qb_qty", 0)),
-                weekly_sell_rate=Decimal(str(item.get("weekly_sell_rate", 0))),
-            )
-            if status.status in ("critical", "low", "out_of_stock"):
-                inventory_alerts.append({
-                    "item_id":        item.get("qb_id", ""),
-                    "product_name":   item["product_name"],
-                    "total_qty":      item.get("total_qty", 0),
-                    "weeks_remaining": status.weeks_remaining,
-                    "stock_status":   status.status,
-                    "needs_po":       True,
-                })
-    except Exception as exc:
-        log.error("Dashboard summary: inventory eval failed: %s", exc)
-
-    # ── 30-day sales total ─────────────────────────────────────────────────
-    sales_30d = 0.0
-    try:
-        invoices_30 = await adapter.get_orders_last_n_days(30)
-        sales_30d = sum(
-            float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
-            for inv in invoices_30
-        )
-    except Exception as exc:
-        log.error("Dashboard summary: sales total failed: %s", exc)
-
-    # ── Pending approvals count ────────────────────────────────────────────
+    # ── Pending approvals — always live (cheap DB query) ───────────────────
     pending_count = 0
     try:
         result = (
@@ -125,7 +81,7 @@ async def get_dashboard_summary(
     except Exception as exc:
         log.warning("Dashboard summary: pending count failed: %s", exc)
 
-    # ── Unread email count ─────────────────────────────────────────────────
+    # ── Unread email count — always live (real-time inbox) ─────────────────
     unread_count = 0
     try:
         emails = await adapter.get_emails(query="is:unread", max_results=50)
@@ -140,22 +96,34 @@ async def get_dashboard_summary(
 
     return {
         "company_id": company_id,
-        "accounts": {
-            "healthy": health_counts.get("healthy", 0),
-            "slowing": health_counts.get("slowing", 0),
-            "at_risk": health_counts.get("at_risk", 0),
-            "dormant": health_counts.get("dormant", 0),
-            "total":   sum(health_counts.values()),
-        },
+        "accounts":   accounts,
         # Only roles with inventory access see alerts
         "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
         # Financial figures visible to owner + manager only
-        "sales_30d":       round(sales_30d, 2) if ("view_financials" in perms or has_view_all) else None,
+        "sales_30d":        round(float(sales_30d), 2) if ("view_financials" in perms or has_view_all) else None,
         # Approval count visible to approvers only
-        "pending_actions": pending_count if ("approve_actions" in perms or has_view_all) else None,
+        "pending_actions":  pending_count if ("approve_actions" in perms or has_view_all) else None,
         # Email count visible to roles with trigger_actions only
-        "unread_emails":   unread_count if ("trigger_actions" in perms or has_view_all) else None,
+        "unread_emails":    unread_count if ("trigger_actions" in perms or has_view_all) else None,
+        # Cache metadata — frontend uses this to show "Data as of X"
+        "generated_at":     generated_at,
+        "cached":           cached,
     }
+
+
+# ── /refresh ───────────────────────────────────────────────────────────────────
+
+@router.post("/refresh")
+async def trigger_dashboard_refresh(
+    user: dict = Depends(require_permission("run_reports")),
+):
+    """
+    Enqueue an immediate dashboard snapshot refresh for this company.
+    Only roles with 'run_reports' permission (back_office, manager, owner) may call this.
+    """
+    from tasks.morning_briefing import send_morning_briefing_all
+    send_morning_briefing_all.apply_async(kwargs={"company_id": user["company_id"]})
+    return {"status": "refresh_queued", "company_id": user["company_id"]}
 
 
 # ── Email helpers ──────────────────────────────────────────────────────────────

@@ -79,6 +79,10 @@ export interface DashboardSummary {
   inventory_alerts: InventoryAlert[];
   pending_actions: number;
   unread_emails: number;
+  /** ISO timestamp of when the QB-derived data was last computed by the scheduler */
+  generated_at: string | null;
+  /** true when data came from the shared snapshot cache (not recomputed live) */
+  cached: boolean;
 }
 
 export interface InventoryAlert {
@@ -195,6 +199,7 @@ export const api = {
 
   dashboard: {
     summary:  ()          => api.get<DashboardSummary>('/api/dashboard/summary'),
+    refresh:  ()          => api.post<{ status: string }>('/api/dashboard/refresh', {}),
     sales:    (days = 30) => api.get<SalesSummary>(`/api/dashboard/sales?days=${days}`),
     emails:   ()          => api.get<{ emails: PriorityEmail[] }>('/api/dashboard/emails'),
     notes:    ()          => api.get<{ notes: FollowUpNote[] }>('/api/dashboard/notes'),

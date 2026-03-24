@@ -18,12 +18,17 @@ def run_overnight_scan_all_companies(self):
     companies = get_active_companies(db)
     log.info("Overnight scan: %d companies", len(companies))
 
+    from app.scheduler.dashboard_snapshot import store_snapshot
+
     results = []
     for company in companies:
         try:
             import asyncio
             adapter = build_adapter(company)
             result = asyncio.run(run_overnight_scan(company["id"], adapter))
+
+            # Persist overnight scan results so the dashboard can read them
+            store_snapshot(db, company["id"], "overnight_scan", result)
 
             # Expire stale pending drafts for this company
             queue = ApprovalQueue(db)

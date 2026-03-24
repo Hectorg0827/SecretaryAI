@@ -12,10 +12,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
         "view_all", "manage_users", "approve_actions", "manage_billing",
-        "view_financials", "trigger_actions",
+        "view_financials", "trigger_actions", "run_reports",
     },
     "manager": {
         "view_all", "approve_actions", "trigger_actions", "view_financials",
+        "run_reports",
     },
     "sales_rep": {
         "view_own_accounts", "view_inventory",

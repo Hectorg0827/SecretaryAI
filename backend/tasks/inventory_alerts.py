@@ -17,6 +17,8 @@ def check_all(self):
     db = get_supabase()
     companies = get_active_companies(db)
 
+    from app.scheduler.dashboard_snapshot import store_snapshot
+
     for company in companies:
         try:
             adapter = build_adapter(company)
@@ -39,5 +41,7 @@ def check_all(self):
                 len(result.get("low", [])),
                 result.get("alerts_fired", 0),
             )
+            # Persist results so all employees read the same snapshot
+            store_snapshot(db, company["id"], "inventory_alerts", result)
         except Exception as e:
             log.error("Inventory alert check failed for %s: %s", company["id"], e)

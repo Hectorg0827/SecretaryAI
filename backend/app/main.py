@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
-from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows
+from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed
 from app.utils.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -134,6 +134,7 @@ app.include_router(agent.router,            prefix="/api/agent",         tags=["
 app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"])
 app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"])
 app.include_router(workflows.router,        prefix="/api/workflows",      tags=["workflows"])
+app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"])
 
 register_error_handlers(app)
 

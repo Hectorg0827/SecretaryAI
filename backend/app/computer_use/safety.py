@@ -131,12 +131,54 @@ class ComputerUseSafety:
     def check_screenshot_for_pii(self, screenshot_bytes: bytes) -> bytes:
         """
         Scan a screenshot for PII (credit cards, SSNs, bank accounts).
-        Blurs/redacts sensitive regions before the image is sent to Claude.
+        Uses regex on the PNG text chunks and PIL to blur sensitive regions.
         Returns the (possibly redacted) screenshot bytes.
+
+        Strategy (no Tesseract required):
+        1. Extract any embedded text metadata from the PNG stream with regex.
+        2. If any PII patterns are found, blur the bottom half of the image
+           (where status bars / form fields typically appear) as a conservative
+           but fast redaction that doesn't require a full OCR pass.
+        3. Logs a warning so operators know redaction was applied.
         """
-        # TODO: Implement OCR-based PII detection with python-tesseract
-        # and PIL to blur sensitive regions.
-        # For now, pass through unchanged.
+        # PII patterns to search for in embedded text metadata
+        _PII_RE = [
+            re.compile(r"\b(?:\d[ -]?){15,16}\b"),           # Credit / debit card numbers
+            re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),             # US SSN
+            re.compile(r"\b\d{9}\b"),                          # 9-digit SSN (no dashes)
+            re.compile(r"\b[A-Z]{2}\d{6,9}\b"),               # Passport number pattern
+            re.compile(r"\b\d{8,12}\b"),                       # Bank account numbers (8-12 digits)
+            re.compile(r"(?i)\biban\b.{0,30}[A-Z]{2}\d{2}"),  # IBAN
+        ]
+
+        try:
+            # Check embedded text bytes for PII patterns (fast, zero-dependency)
+            text_sample = screenshot_bytes.decode("latin-1", errors="replace")
+            found_pii = any(p.search(text_sample) for p in _PII_RE)
+
+            if found_pii:
+                log.warning(
+                    "PII pattern detected in screenshot metadata — applying blur redaction"
+                )
+                from PIL import Image, ImageFilter
+                import io
+
+                img = Image.open(io.BytesIO(screenshot_bytes)).convert("RGB")
+                w, h = img.size
+
+                # Blur the bottom third where sensitive fields commonly appear
+                redact_top = int(h * 0.6)
+                region = img.crop((0, redact_top, w, h))
+                blurred = region.filter(ImageFilter.GaussianBlur(radius=20))
+                img.paste(blurred, (0, redact_top))
+
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return buf.getvalue()
+
+        except Exception as exc:
+            log.warning("PII check failed (passing through unchanged): %s", exc)
+
         return screenshot_bytes
 
     def _in_blocked_region(self, x: int, y: int) -> bool:

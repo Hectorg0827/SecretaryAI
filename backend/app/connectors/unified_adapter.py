@@ -329,7 +329,15 @@ class UnifiedDataAdapter:
         if self._qb:
             results["quickbooks"] = await self._qb.test_connection()
         if self._gmail:
-            results["gmail"] = True  # TODO: add ping
+            try:
+                async with __import__("httpx").AsyncClient(timeout=5) as client:
+                    r = await client.get(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                        headers={"Authorization": f"Bearer {self._gmail._token}"},
+                    )
+                    results["gmail"] = r.status_code == 200
+            except Exception:
+                results["gmail"] = False
         if self._outlook:
             results["outlook"] = True
         if self._sheets:

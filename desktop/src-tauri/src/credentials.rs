@@ -129,22 +129,111 @@ mod platform {
     }
 }
 
-// ─── Linux fallback (encrypted file) ─────────────────────────────────────────
+// ─── Linux implementation (AES-256-GCM encrypted file) ───────────────────────
+//
+// Each credential is stored as an individual file under
+//   ~/.local/share/secretaryai/credentials/<service>/<key>.enc
+//
+// The file format is: [12-byte nonce][ciphertext]
+// The encryption key is derived from the machine ID (or a fallback) using SHA-256.
+// This is not as strong as a hardware-backed store but is far better than plaintext.
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod platform {
-    use anyhow::Result;
+    use aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Nonce,
+    };
+    use anyhow::{anyhow, Result};
+    use rand::RngCore;
+    use sha2::{Digest, Sha256};
+    use std::{fs, path::PathBuf};
 
-    pub fn store(_service: &str, _key: &str, _value: &str) -> Result<()> {
-        // TODO: Use libsecret / Secret Service API on Linux
-        Err(anyhow::anyhow!("Linux credential store not yet implemented"))
+    fn cred_dir() -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("secretaryai")
+            .join("credentials")
     }
 
-    pub fn get(_service: &str, _key: &str) -> Result<Option<String>> {
-        Ok(None)
+    fn cred_path(service: &str, key: &str) -> PathBuf {
+        // Sanitize: replace any path separators
+        let safe_service = service.replace(['/', '\\', '.'], "_");
+        let safe_key     = key.replace(['/', '\\', '.'], "_");
+        cred_dir().join(safe_service).join(format!("{}.enc", safe_key))
     }
 
-    pub fn delete(_service: &str, _key: &str) -> Result<()> {
+    /// Derive a 32-byte encryption key from the machine-id (or fallback secret).
+    fn derive_key() -> [u8; 32] {
+        // Try /etc/machine-id first (stable across reboots on systemd systems)
+        let seed = fs::read_to_string("/etc/machine-id")
+            .or_else(|_| fs::read_to_string("/var/lib/dbus/machine-id"))
+            .unwrap_or_else(|_| "secretaryai-linux-fallback-key".to_string());
+
+        let mut hasher = Sha256::new();
+        hasher.update(seed.trim().as_bytes());
+        hasher.update(b"secretaryai-credential-store-v1");
+        hasher.finalize().into()
+    }
+
+    pub fn store(service: &str, key: &str, value: &str) -> Result<()> {
+        let path = cred_path(service, key);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let enc_key = derive_key();
+        let cipher  = Aes256Gcm::new_from_slice(&enc_key)
+            .map_err(|e| anyhow!("cipher init: {}", e))?;
+
+        let mut nonce_bytes = [0u8; 12];
+        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let ciphertext = cipher
+            .encrypt(nonce, value.as_bytes())
+            .map_err(|e| anyhow!("encrypt: {}", e))?;
+
+        // Write: 12-byte nonce + ciphertext
+        let mut blob = Vec::with_capacity(12 + ciphertext.len());
+        blob.extend_from_slice(&nonce_bytes);
+        blob.extend_from_slice(&ciphertext);
+        fs::write(&path, blob)?;
+        Ok(())
+    }
+
+    pub fn get(service: &str, key: &str) -> Result<Option<String>> {
+        let path = cred_path(service, key);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let blob = fs::read(&path)?;
+        if blob.len() < 12 {
+            return Err(anyhow!("credential file too short"));
+        }
+
+        let enc_key = derive_key();
+        let cipher  = Aes256Gcm::new_from_slice(&enc_key)
+            .map_err(|e| anyhow!("cipher init: {}", e))?;
+
+        let nonce      = Nonce::from_slice(&blob[..12]);
+        let ciphertext = &blob[12..];
+
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|_| anyhow!("decryption failed — key mismatch or corrupted file"))?;
+
+        Ok(Some(String::from_utf8(plaintext)?))
+    }
+
+    pub fn delete(service: &str, key: &str) -> Result<()> {
+        let path = cred_path(service, key);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
         Ok(())
     }
 }

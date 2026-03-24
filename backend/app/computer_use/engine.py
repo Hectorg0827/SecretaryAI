@@ -255,4 +255,16 @@ You have the current screenshot above. Begin."""
 
     async def _audit(self, event: str, data: dict) -> None:
         log.info("ComputerUse audit: %s %s", event, data)
-        # TODO: Write to action_log table via Supabase
+        try:
+            from app.api.deps import get_db
+            db = get_db()
+            db.table("action_log").insert({
+                "event": event,
+                "data": data,
+                "company_id": self.company_config.get("id"),
+                "created_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ).isoformat(),
+            }).execute()
+        except Exception as exc:
+            log.warning("ComputerUse audit write failed (non-fatal): %s", exc)

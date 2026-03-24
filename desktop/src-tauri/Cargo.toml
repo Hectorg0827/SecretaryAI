@@ -44,6 +44,7 @@ anyhow = "1"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 notify = "6"       # Cross-platform filesystem watching
+dirs-next = "2"    # Platform-aware user directory paths (Documents, AppData, etc.)
 # (base64 duplicate removed — declared above)
 
 # Cross-platform credential storage + process checking

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
   Settings as SettingsIcon, Database, Mail, Package, Zap,
@@ -47,69 +47,140 @@ function SettingRow({ label, description, children }: { label: string; descripti
   );
 }
 
-// ─── QB Desktop modal ─────────────────────────────────────────────────────────
+// ─── QB Desktop setup modal (agentic) ─────────────────────────────────────────
 
-function QBDModal({ onClose, onSave }: { onClose: () => void; onSave: (id: string) => Promise<void> }) {
-  const [endUserId, setEndUserId] = useState('');
-  const [saving, setSaving] = useState(false);
+type QBDStep = 'start' | 'waiting' | 'done' | 'error';
 
-  const handleSave = async () => {
-    const id = endUserId.trim();
-    if (!id) { toast.error('End User ID is required'); return; }
-    setSaving(true);
+function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnected: () => void }) {
+  const [step, setStep]           = useState<QBDStep>('start');
+  const [starting, setStarting]   = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [errorMsg, setErrorMsg]   = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up polling when modal unmounts
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const startSetup = async () => {
+    setStarting(true);
     try {
-      await onSave(id);
-      onClose();
+      const data = await api.setup.qbdStart();
+      // Open Conductor's hosted auth flow in a new tab
+      window.open(data.auth_flow_url, '_blank', 'noopener,noreferrer');
+      setStep('waiting');
+      setStatusMsg('Waiting for QuickBooks authorization…');
+      beginPolling();
+    } catch (e: any) {
+      setErrorMsg(e.message ?? 'Could not start setup. Check that Conductor is configured.');
+      setStep('error');
     } finally {
-      setSaving(false);
+      setStarting(false);
     }
+  };
+
+  const beginPolling = () => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await api.setup.qbdStatus();
+        setStatusMsg(status.message);
+        if (status.connected) {
+          clearInterval(pollRef.current!);
+          setStep('done');
+          onConnected();
+        }
+      } catch {
+        // Ignore transient errors — keep polling
+      }
+    }, 5000);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div className="bg-white rounded-xl shadow-xl border border-slate-100 w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-4">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
           <h2 className="text-base font-bold text-slate-900">Connect QuickBooks Desktop</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={16} />
-          </button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
 
-        <p className="text-sm text-slate-600 mb-1">
-          Enter the <strong>Conductor End User ID</strong> for your QuickBooks Desktop company.
-          You can find this in your Conductor dashboard under <em>End Users</em>.
-        </p>
-        <p className="text-xs text-slate-400 mb-4">
-          Your QuickBooks data and API keys are managed securely by SecretaryAI — you only need this ID.
-        </p>
+        {step === 'start' && (
+          <>
+            <p className="text-sm text-slate-600 mb-4 leading-relaxed">
+              Click <strong>Open Setup</strong> — a browser window will guide you through
+              downloading a small file and authorizing access in QuickBooks.
+              No technical knowledge needed.
+            </p>
+            <div className="bg-slate-50 rounded-lg p-3 mb-5 space-y-2">
+              {[
+                'A setup page opens in your browser',
+                'Download the .QWC file when prompted',
+                'Open it — QuickBooks will ask for permission',
+                'Click "Yes, always allow access"',
+              ].map((txt, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                  <span className="text-xs text-slate-600">{txt}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={startSetup}
+                disabled={starting}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {starting ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                {starting ? 'Opening…' : 'Open Setup'}
+              </button>
+            </div>
+          </>
+        )}
 
-        <label className="block text-xs font-medium text-slate-700 mb-1">End User ID</label>
-        <input
-          type="text"
-          value={endUserId}
-          onChange={(e) => setEndUserId(e.target.value)}
-          placeholder="eu_xxxxxxxxxxxxxxxxxxxx"
-          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 font-mono"
-          autoFocus
-          onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-        />
+        {step === 'waiting' && (
+          <>
+            <div className="flex flex-col items-center py-4 gap-3">
+              <Loader2 size={32} className="animate-spin text-blue-600" />
+              <p className="text-sm font-medium text-slate-700">Waiting for QuickBooks…</p>
+              <p className="text-xs text-slate-400 text-center leading-relaxed">{statusMsg}</p>
+            </div>
+            <p className="text-xs text-slate-400 text-center mb-4">
+              Complete the steps in the browser window, then authorize in QuickBooks when prompted.
+            </p>
+            <button onClick={startSetup} className="w-full px-4 py-2 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center gap-1.5">
+              <ExternalLink size={13} /> Re-open setup page
+            </button>
+          </>
+        )}
 
-        <div className="flex gap-3 mt-5">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg transition-colors flex items-center justify-center gap-2"
-          >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-            {saving ? 'Connecting…' : 'Connect'}
-          </button>
-        </div>
+        {step === 'done' && (
+          <div className="flex flex-col items-center py-4 gap-3 text-center">
+            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
+              <Check size={24} className="text-emerald-600" />
+            </div>
+            <p className="text-sm font-bold text-slate-800">QuickBooks is connected!</p>
+            <p className="text-xs text-slate-400">SecretaryAI will now sync your data automatically.</p>
+            <button onClick={onClose} className="mt-2 px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+              Done
+            </button>
+          </div>
+        )}
+
+        {step === 'error' && (
+          <div className="flex flex-col items-center py-4 gap-3 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center">
+              <AlertTriangle size={24} className="text-red-500" />
+            </div>
+            <p className="text-sm font-bold text-slate-800">Setup failed</p>
+            <p className="text-xs text-slate-400">{errorMsg}</p>
+            <div className="flex gap-3 mt-2 w-full">
+              <button onClick={onClose} className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Cancel</button>
+              <button onClick={() => { setStep('start'); setErrorMsg(''); }} className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">Try Again</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -175,7 +246,7 @@ export function Settings() {
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
   const [integLoading, setIntegLoading]   = useState(true);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-  const [showQBDModal, setShowQBDModal]   = useState(false);
+  const [showQBDModal, setShowQBDModal] = useState(false);
 
   // Email / inventory / agent toggles
   const [emailSummarize, setEmailSummarize]       = useState(true);
@@ -260,18 +331,9 @@ export function Settings() {
     }
   };
 
-  const saveQBD = async (endUserId: string) => {
-    setLoading('qbd', true);
-    try {
-      await api.settings.saveQBD(endUserId);
-      toast.success('QuickBooks Desktop connected');
-      await loadIntegrations();
-    } catch {
-      toast.error('Failed to connect QuickBooks Desktop');
-      throw new Error('save failed'); // keep modal open
-    } finally {
-      setLoading('qbd', false);
-    }
+  const onQBDConnected = async () => {
+    toast.success('QuickBooks Desktop connected!');
+    await loadIntegrations();
   };
 
   const disconnectQBD = async () => {
@@ -372,12 +434,12 @@ export function Settings() {
                 {/* QB Desktop */}
                 <IntegrationRow
                   label="QuickBooks Desktop"
-                  description="On-premise QuickBooks via Conductor — enter your End User ID to connect"
+                  description="On-premise QuickBooks — guided setup connects in minutes, no technical knowledge needed"
                   connected={integrations?.quickbooks_desktop.connected ?? false}
                   loading={integLoading || !!actionLoading['qbd']}
                   onConnect={() => setShowQBDModal(true)}
                   onDisconnect={disconnectQBD}
-                  connectLabel="Enter ID"
+                  connectLabel="Set up"
                 />
 
                 {/* Gmail */}
@@ -491,11 +553,11 @@ export function Settings() {
         </div>
       </div>
 
-      {/* QB Desktop modal */}
+      {/* QB Desktop setup modal */}
       {showQBDModal && (
-        <QBDModal
+        <QBDSetupModal
           onClose={() => setShowQBDModal(false)}
-          onSave={saveQBD}
+          onConnected={onQBDConnected}
         />
       )}
     </div>

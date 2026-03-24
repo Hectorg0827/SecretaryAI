@@ -271,6 +271,17 @@ export const api = {
     disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),
   },
 
+  setup: {
+    qbdStart: () =>
+      api.post<{ auth_flow_url: string; end_user_id: string; connection_id: string }>(
+        '/api/setup/qb-desktop/start', {}
+      ),
+    qbdStatus: () =>
+      api.get<{ connected: boolean; status: string; message: string }>(
+        '/api/setup/qb-desktop/status'
+      ),
+  },
+
   feed: {
     list:    (unreadOnly = false) => api.get<{ events: FeedEvent[]; unread_count: number }>(`/api/feed/?unread_only=${unreadOnly}`),
     read:    (id: string) => api.post<{ status: string }>(`/api/feed/${id}/read`, {}),

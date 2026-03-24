@@ -53,7 +53,12 @@ interface GuidanceResp {
 
 // ── Main wizard ───────────────────────────────────────────────────────────────
 
-export default function Setup() {
+interface SetupProps {
+  /** Called when QB is confirmed connected so the parent can navigate away. */
+  onComplete?: () => void;
+}
+
+export default function Setup({ onComplete }: SetupProps = {}) {
   const [step, setStep] = useState<Step>("checking");
   const [authFlowUrl, setAuthFlowUrl] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string>("");
@@ -119,6 +124,7 @@ export default function Setup() {
           if (pollRef.current) clearInterval(pollRef.current);
           if (guidanceRef.current) clearInterval(guidanceRef.current);
           setStep("done");
+          onComplete?.();
         }
       } catch {
         // Silently ignore transient errors during polling
@@ -225,7 +231,7 @@ export default function Setup() {
             heading="QuickBooks is connected!"
             body="SecretaryAI will now sync your QuickBooks data automatically in the background. You're all set."
           >
-            <button style={styles.btnPrimary} onClick={() => window.location.replace("/")}>
+            <button style={styles.btnPrimary} onClick={() => onComplete ? onComplete() : window.location.replace("/")}>
               Go to Dashboard →
             </button>
           </WizardStep>

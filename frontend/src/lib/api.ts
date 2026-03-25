@@ -203,6 +203,24 @@ export interface InboxItem {
   metadata?: Record<string, unknown>;
 }
 
+// ── Compliance types ──────────────────────────────────────────────────────────
+
+export interface ComplianceStatus { overall: 'ok'|'warning'|'critical'; critical_alerts: number; warning_alerts: number; active_states: number; total_products: number; deadlines_due_7_days: number; state_status: Record<string,string> }
+export interface ComplianceAlert { id: string; alert_type: string; priority: 'critical'|'warning'|'info'; state_code: string; item_name: string; days_until: number; expiry_date: string; message: string; action_required: string; renewal_url: string; estimated_fee: number }
+export interface ComplianceDeadline { deadline_type: string; state_code: string; due_date: string; frequency: string; action: string; notes: string }
+export interface ComplianceDigest { date: string; critical_alerts: ComplianceAlert[]; warning_alerts: ComplianceAlert[]; upcoming_deadlines: ComplianceDeadline[]; state_status: Record<string,string>; cost_estimate_q: { licenses: number; brand_registrations: number; grand_total: number } }
+export interface ShipmentCheckRequest { product_id: string; state_code: string; quantity_cases: number }
+export interface ComplianceIssue { severity: string; issue: string; action: string; fee: number; state_code: string; category: string }
+export interface ComplianceCheckResult { approved: boolean; issues: ComplianceIssue[]; fees: Record<string,number>; total_compliance_cost: number }
+export interface StateInfo { state_code: string; state_name: string; is_control_spirits: boolean; is_control_wine: boolean; brand_registration_required: boolean; priority_tier: number; regulator_url: string }
+export interface StateRules { state_code: string; state_name: string; regulator_name: string; franchise_law: { exists: boolean; termination: string; notice_days: number }; excise_tax_per_gallon: Record<string,number>; is_control_spirits: boolean; is_control_wine: boolean }
+export interface FeeEstimate { licenses: number; brand_registrations: number; grand_total: number; by_state: Record<string, Record<string,number>> }
+export interface DistributorRisk { franchise_law_exists: boolean; termination_restriction: string; risk_level: 'low'|'medium'|'high'; notice_days_required: number; notes: string }
+export interface ComplianceProduct { id: string; sku: string; name: string; product_type: string; abv_pct: number; country_of_origin: string }
+export interface StateLicense { id: string; state_code: string; license_type: string; license_number: string; expiration_date: string; status: string; annual_fee: number }
+export interface BrandRegistration { id: string; product_id: string; state_code: string; registration_number: string; expiration_date: string; status: string }
+export interface FederalPermit { id: string; permit_type: string; permit_number: string; expiration_date: string; status: string }
+
 // ─── API surface ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -293,6 +311,24 @@ export const api = {
       api.post<{ access_token: string; token_type: string; company_id: string; role: string }>(
         '/auth/login', { email, password }
       ),
+  },
+
+  // ── Compliance types ──────────────────────────────────────────────────────────
+
+  compliance: {
+    getStatus: () => api.get<ComplianceStatus>('/api/compliance/status'),
+    getAlerts: (days = 90) => api.get<ComplianceAlert[]>(`/api/compliance/alerts?days=${days}`),
+    getDeadlines: (days = 30) => api.get<ComplianceDeadline[]>(`/api/compliance/deadlines?days=${days}`),
+    getDigest: () => api.get<ComplianceDigest>('/api/compliance/digest'),
+    checkShipment: (body: ShipmentCheckRequest) => api.post<ComplianceCheckResult>('/api/compliance/check-shipment', body),
+    listStates: () => api.get<StateInfo[]>('/api/compliance/states'),
+    getStateRules: (code: string) => api.get<StateRules>(`/api/compliance/states/${code}`),
+    getFeeEstimate: (states: string[]) => api.get<FeeEstimate>(`/api/compliance/fee-estimate?states=${states.join(',')}`),
+    getDistributorRisk: (state: string) => api.get<DistributorRisk>(`/api/compliance/distributor-risk/${state}`),
+    getProducts: () => api.get<ComplianceProduct[]>('/api/compliance/products'),
+    getLicenses: () => api.get<StateLicense[]>('/api/compliance/licenses'),
+    getBrandRegistrations: () => api.get<BrandRegistration[]>('/api/compliance/brand-registrations'),
+    getFederalPermits: () => api.get<FederalPermit[]>('/api/compliance/federal-permits'),
   },
 
   logistics: {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
@@ -21,6 +21,7 @@ const ALL_NAV_ITEMS = [
   { to: '/accounts',  label: 'Accounts',  icon: Users,                        roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: Package,                      roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/chat',      label: 'Chat',      icon: MessageSquare,                roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
+  { to: '/logistics', label: 'Logistics', icon: Truck,                        roles: ['owner', 'manager'],                            badge: null        },
   { to: '/settings',  label: 'Settings',  icon: Settings,                     roles: ['owner', 'manager'],                            badge: null        },
 ] as const;
 

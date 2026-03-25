@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # Frontend base URL — used for OAuth redirect responses (QBO callback)
     frontend_url: str = ""
 
+    # Stripe
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_publishable_key: str = ""
+
     # Sentry
     sentry_dsn: str = ""
 

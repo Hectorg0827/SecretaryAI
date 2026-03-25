@@ -9,10 +9,13 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.config import get_settings
-from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed, setup, computer_use as computer_use_router
+from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed, setup, computer_use as computer_use_router, billing
+from app.api import docs as docs_router
 from app.utils.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
+from app.middleware.tenant import TenantMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 
 settings = get_settings()
 
@@ -109,6 +112,8 @@ async def custom_docs(request: Request):
 # ── Middleware (order matters — outermost first) ───────────────────────────────
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(TenantMiddleware)
+app.add_middleware(RateLimitMiddleware, redis_url=settings.redis_url)
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 _allow_all = "*" in _cors_origins
@@ -137,6 +142,10 @@ app.include_router(workflows.router,        prefix="/api/workflows",      tags=[
 app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"])
 app.include_router(setup.router,            prefix="/api/setup",         tags=["setup"])
 app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"])
+app.include_router(billing.router,             prefix="/api/billing",       tags=["billing"])
+from app.api import logistics as logistics_router
+app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"])
+app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 
 register_error_handlers(app)
 

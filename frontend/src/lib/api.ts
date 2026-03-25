@@ -295,6 +295,29 @@ export const api = {
       ),
   },
 
+  logistics: {
+    reorderQueue: (skuData: unknown[]) =>
+      api.post('/api/logistics/reorder/evaluate', { skus: skuData }),
+    generatePos: (packages: unknown[], supplierConfigs: Record<string, unknown>) =>
+      api.post('/api/logistics/po/generate', { approved_packages: packages, supplier_configs: supplierConfigs }),
+    parseVendorResponse: (data: unknown) =>
+      api.post('/api/logistics/vendor/parse-response', data),
+    parseFreightInvoice: (data: unknown) =>
+      api.post('/api/logistics/freight/parse-invoice', data),
+    logCustomsHold: (data: unknown) =>
+      api.post('/api/logistics/customs/hold', data),
+    demurrageRisk: (data: unknown) =>
+      api.post('/api/logistics/customs/demurrage-risk', data),
+    processReceipt: (data: unknown) =>
+      api.post('/api/logistics/receipt/process', data),
+    reconcileCosts: (data: unknown) =>
+      api.post('/api/logistics/cost/reconcile', data),
+    monthlyReport: () =>
+      api.get('/api/logistics/report/monthly'),
+    describeModule: () =>
+      api.get('/api/logistics/describe'),
+  },
+
   /** Streaming chat — async generator of SSE events with text and conversationId */
   async *streamChat(
     message: string,

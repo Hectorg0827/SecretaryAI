@@ -8,6 +8,7 @@ import ReportsScreen from '../screens/ReportsScreen';
 import AccountsStack from './AccountsStack';
 import InventoryScreen from '../screens/InventoryScreen';
 import ApprovalsScreen from '../screens/ApprovalsScreen';
+import LogisticsScreen from '../screens/LogisticsScreen';
 import { COLORS } from '../theme';
 
 const Tab = createBottomTabNavigator<AppTabParamList>();
@@ -20,6 +21,7 @@ const TAB_ICONS: Record<keyof AppTabParamList, [IoniconName, IoniconName]> = {
   Reports:   ['bar-chart', 'bar-chart-outline'],
   Accounts:  ['people', 'people-outline'],
   Inventory: ['cube', 'cube-outline'],
+  Logistics: ['git-network', 'git-network-outline'],
   Approvals: ['checkmark-circle', 'checkmark-circle-outline'],
 };
 
@@ -44,6 +46,7 @@ export default function AppNavigator() {
       <Tab.Screen name="Reports" component={ReportsScreen} />
       <Tab.Screen name="Accounts" component={AccountsStack} options={{ headerShown: false }} />
       <Tab.Screen name="Inventory" component={InventoryScreen} />
+      <Tab.Screen name="Logistics" component={LogisticsScreen} />
       <Tab.Screen name="Approvals" component={ApprovalsScreen} />
     </Tab.Navigator>
   );

@@ -7,7 +7,7 @@ export type RootStackParamList = {
   App: undefined;
 };
 
-// Bottom tab navigator (7 tabs)
+// Bottom tab navigator (8 tabs)
 export type AppTabParamList = {
   Dashboard: undefined;
   Chat: { conversationId?: string } | undefined;
@@ -15,6 +15,7 @@ export type AppTabParamList = {
   Accounts: undefined;
   Inventory: undefined;
   Logistics: undefined;
+  Compliance: undefined;
   Approvals: undefined;
 };
 
@@ -30,4 +31,5 @@ export type ChatScreenProps = BottomTabScreenProps<AppTabParamList, 'Chat'>;
 export type ReportsScreenProps = BottomTabScreenProps<AppTabParamList, 'Reports'>;
 export type InventoryScreenProps = BottomTabScreenProps<AppTabParamList, 'Inventory'>;
 export type LogisticsScreenProps = BottomTabScreenProps<AppTabParamList, 'Logistics'>;
+export type ComplianceScreenProps = BottomTabScreenProps<AppTabParamList, 'Compliance'>;
 export type ApprovalsScreenProps = BottomTabScreenProps<AppTabParamList, 'Approvals'>;

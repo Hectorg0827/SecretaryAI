@@ -11,6 +11,7 @@ import { Login } from './pages/Login';
 import { Inbox } from './pages/Inbox';
 import { Work } from './pages/Work';
 import { Logistics } from './pages/Logistics';
+import { Compliance } from './pages/Compliance';
 import { useAuth, Role } from './hooks/useAuth';
 
 /** Guard: redirects to /login if no JWT is stored. */
@@ -98,6 +99,14 @@ function AppShell() {
             element={
               <RoleGuard roles={['owner', 'manager']}>
                 <Logistics />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/compliance"
+            element={
+              <RoleGuard roles={['owner', 'manager']}>
+                <Compliance />
               </RoleGuard>
             }
           />

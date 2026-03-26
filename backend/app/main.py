@@ -145,6 +145,8 @@ app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=
 app.include_router(billing.router,             prefix="/api/billing",       tags=["billing"])
 from app.api import logistics as logistics_router
 app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"])
+from app.api import compliance as compliance_router
+app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"])
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 
 register_error_handlers(app)

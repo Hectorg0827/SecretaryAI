@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * API client for the SecretaryAI backend.
  * All requests are authenticated via JWT Bearer token.

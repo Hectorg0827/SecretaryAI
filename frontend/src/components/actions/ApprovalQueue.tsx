@@ -158,7 +158,7 @@ function DraftPreview({ actionType, content }: { actionType: string; content: Re
         <div><span className="text-gray-500">Vendor:</span> <span className="text-gray-800">{String(content.vendor_name ?? '')}</span></div>
         <div><span className="text-gray-500">Items:</span> <span className="text-gray-800">{items.length} line item(s)</span></div>
         <div><span className="text-gray-500">Total:</span> <span className="font-medium text-gray-800">${Number(content.subtotal ?? 0).toLocaleString()}</span></div>
-        {content.created_reason && (
+        {Boolean(content.created_reason) && (
           <div className="text-gray-500 text-xs mt-1">{String(content.created_reason)}</div>
         )}
       </div>

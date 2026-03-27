@@ -5,22 +5,8 @@ import {
   Phone, Building2, ChevronRight, ExternalLink
 } from 'lucide-react';
 import { InlineAssistant } from '../layout/InlineAssistant';
-import { api } from '../../lib/api';
+import { api, Account } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
-
-interface Account {
-  id: string;
-  name: string;
-  email?: string;
-  phone?: string;
-  state?: string;
-  health_status: 'healthy' | 'slowing' | 'at_risk' | 'dormant' | 'unknown';
-  health_score?: number;
-  last_order_date?: string;
-  current_balance?: number;
-  avg_order_value?: number;
-  assigned_rep?: string | null;
-}
 
 interface Order {
   id: string;
@@ -130,7 +116,7 @@ export function AccountDetail({ account, onClose }: Props) {
   const fmt = (n?: number) =>
     n != null ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
 
-  const fmtDate = (d?: string) =>
+  const fmtDate = (d?: string | null) =>
     d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
   return (

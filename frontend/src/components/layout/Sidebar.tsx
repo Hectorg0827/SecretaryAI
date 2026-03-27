@@ -18,12 +18,12 @@ const ALL_NAV_ITEMS = [
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
-  { to: '/accounts',  label: 'Accounts',  icon: Users,                        roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/inventory', label: 'Inventory', icon: Package,                      roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare,                roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
-  { to: '/logistics',   label: 'Logistics',   icon: Truck,                        roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/compliance',  label: 'Compliance',  icon: Scale,                        roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/settings',  label: 'Settings',  icon: Settings,                     roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/chat',      label: 'Chat',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
+  { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
 ] as const;
 
 export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {

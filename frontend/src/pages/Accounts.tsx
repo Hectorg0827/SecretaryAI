@@ -43,9 +43,7 @@ function AccountRow({ account, onClick }: { account: Account; onClick: () => voi
         </div>
       </td>
       <td className="px-5 py-3.5">
-        <Badge variant={account.health_status === 'unknown' ? 'low' : account.health_status as any}>
-          {cfg.label}
-        </Badge>
+        <Badge variant={account.health_status === 'unknown' ? 'low' : account.health_status as any} label={cfg.label} />
       </td>
       <td className="px-5 py-3.5 text-sm text-slate-600 font-medium">{fmt(account.current_balance)}</td>
       <td className="px-5 py-3.5 text-sm text-slate-600">{fmt(account.avg_order_value)}</td>

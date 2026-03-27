@@ -193,7 +193,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                 <p className="text-xs font-semibold text-blue-700 mb-1 uppercase tracking-wide">AI Summary</p>
                 <p className="text-sm text-slate-700">{String(payload.ai_summary)}</p>
-                {payload.ai_action_needed && (
+                {Boolean(payload.ai_action_needed) && (
                   <p className="mt-2 text-xs text-red-600 font-medium">⚡ Action needed</p>
                 )}
               </div>
@@ -286,7 +286,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
               ['Status',    String(payload.stock_status ?? '').replace('_', ' ')],
             ].map(([l, v]) => (
               <div key={String(l)} className="flex justify-between text-sm">
-                <span className="text-slate-500">{l}</span>
+                <span className="text-slate-500">{String(l)}</span>
                 <span className="font-medium text-slate-800">{String(v ?? '—')}</span>
               </div>
             ))}
@@ -304,7 +304,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
               ['Last Order',  payload.last_order_date ? String(payload.last_order_date).slice(0, 10) : 'None'],
             ].map(([l, v]) => (
               <div key={String(l)} className="flex justify-between text-sm">
-                <span className="text-slate-500">{l}</span>
+                <span className="text-slate-500">{String(l)}</span>
                 <span className="font-medium text-slate-800">{String(v ?? '—')}</span>
               </div>
             ))}

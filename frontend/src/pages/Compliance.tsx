@@ -301,7 +301,7 @@ export function Compliance() {
           )}
 
           {/* Check Shipment tab */}
-          {activeTab === 'check' && <ShipmentChecker />}
+          {activeTab === 'check' && <ShipmentChecker loading={false} />}
         </div>
       </div>
     </div>

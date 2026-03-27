@@ -68,7 +68,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
       {/* Top bar */}
-      <TopBar unreadCount={summary?.unread_emails ?? 0} />
+      <TopBar />
 
       {/* Cache freshness banner */}
       {!loading && summary && (

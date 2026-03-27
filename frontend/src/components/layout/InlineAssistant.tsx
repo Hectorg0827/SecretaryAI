@@ -72,7 +72,7 @@ export function InlineAssistant({ context, initialSuggestion, onClose, className
     try {
       let full = '';
       for await (const chunk of api.streamChat(fullMessage, convId ?? undefined)) {
-        if (chunk.conversation_id) setConvId(chunk.conversation_id);
+        if (chunk.conversationId) setConvId(chunk.conversationId);
         full += chunk.text ?? '';
         setMessages((prev) => {
           const updated = [...prev];

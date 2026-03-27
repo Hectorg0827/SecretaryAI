@@ -77,8 +77,8 @@ async def get_agent_status(
         try:
             last_seen_dt = datetime.fromisoformat(last_seen_str.replace("Z", "+00:00"))
             delta = datetime.now(timezone.utc) - last_seen_dt
-            # Consider connected if last heartbeat was within 12 minutes (2.4× the 5-min interval)
-            connected = delta.total_seconds() < 720
+            # Consider connected if last heartbeat was within 10 minutes (2× the 5-min interval)
+            connected = delta.total_seconds() < 600
         except ValueError:
             pass
 

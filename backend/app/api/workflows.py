@@ -10,6 +10,20 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _audit(db, company_id: str, user_id: str, action: str, detail: dict) -> None:
+    """Write a row to action_log for workflow audit trail. Best-effort — never raises."""
+    try:
+        db.table("action_log").insert({
+            "company_id":  company_id,
+            "user_id":     user_id,
+            "action_type": action,
+            "content":     detail,
+            "status":      "completed",
+        }).execute()
+    except Exception as exc:
+        log.warning("Workflow audit log write failed: %s", exc)
+
+
 @router.get("/")
 async def list_workflows(
     user: dict = Depends(get_current_user),
@@ -29,4 +43,6 @@ async def cancel_workflow(
 ):
     engine = WorkflowEngine(db, user["company_id"])
     engine.fail(run_id, "Cancelled by user")
+    _audit(db, user["company_id"], user["sub"], "workflow_cancel", {"run_id": run_id})
+    log.info("Workflow %s cancelled by user %s", run_id, user["sub"])
     return {"status": "cancelled"}

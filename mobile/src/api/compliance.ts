@@ -43,7 +43,29 @@ export interface ComplianceCheckResult {
   total_compliance_cost: number;
 }
 
-// API functions
+export interface BrandRegistration {
+  id?: string;
+  brand_name: string;
+  state_code: string;
+  status?: string;
+  registered_at?: string;
+  expiry_date?: string;
+  registration_number?: string;
+  notes?: string;
+}
+
+export interface FederalPermit {
+  id?: string;
+  permit_type: string;
+  permit_number?: string;
+  issued_at?: string;
+  expiry_date?: string;
+  issuing_authority?: string;
+  notes?: string;
+}
+
+// ── Read API ───────────────────────────────────────────────────────────────────
+
 export const getComplianceStatus = () =>
   apiFetch<ComplianceStatus>('/api/compliance/status');
 
@@ -63,3 +85,47 @@ export const getDigest = () =>
   apiFetch<{ cost_estimate_q: { grand_total: number; licenses: number; brand_registrations: number } }>(
     '/api/compliance/digest'
   );
+
+// ── Brand Registrations CRUD ───────────────────────────────────────────────────
+
+export const getBrandRegistrations = () =>
+  apiFetch<BrandRegistration[]>('/api/compliance/brand-registrations');
+
+export const createBrandRegistration = (body: BrandRegistration) =>
+  apiFetch<BrandRegistration>('/api/compliance/brand-registrations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const updateBrandRegistration = (id: string, body: Partial<BrandRegistration>) =>
+  apiFetch<BrandRegistration>(`/api/compliance/brand-registrations/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const deleteBrandRegistration = (id: string) =>
+  apiFetch<{ deleted: boolean }>(`/api/compliance/brand-registrations/${id}`, {
+    method: 'DELETE',
+  });
+
+// ── Federal Permits CRUD ───────────────────────────────────────────────────────
+
+export const getFederalPermits = () =>
+  apiFetch<FederalPermit[]>('/api/compliance/federal-permits');
+
+export const createFederalPermit = (body: FederalPermit) =>
+  apiFetch<FederalPermit>('/api/compliance/federal-permits', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const updateFederalPermit = (id: string, body: Partial<FederalPermit>) =>
+  apiFetch<FederalPermit>(`/api/compliance/federal-permits/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const deleteFederalPermit = (id: string) =>
+  apiFetch<{ deleted: boolean }>(`/api/compliance/federal-permits/${id}`, {
+    method: 'DELETE',
+  });

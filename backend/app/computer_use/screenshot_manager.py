@@ -63,11 +63,41 @@ class ScreenshotManager:
 
     def _redact_sensitive_regions(self, img):
         """
-        Blur or black-out screen regions that may contain PII.
-        Current implementation: basic OCR + pattern matching approach.
-        TODO: Use python-tesseract to detect credit card / SSN patterns.
+        Convert image to text via pytesseract (if available) and black-out any
+        bounding boxes that match SSN, credit-card, or bank-account patterns.
+        Falls back to pass-through if pytesseract or its data files are absent.
         """
-        return img  # Pass-through until OCR integration is complete
+        import re
+        PII_PATTERNS = [
+            re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),      # SSN  xxx-xx-xxxx
+            re.compile(r'\b(?:\d[ -]?){13,16}\b'),      # Credit card 13-16 digits
+            re.compile(r'\b\d{9,18}\b'),                 # Bank account / routing
+        ]
+        try:
+            import pytesseract
+            from PIL import ImageDraw
+
+            data = pytesseract.image_to_data(
+                img, output_type=pytesseract.Output.DICT, config='--psm 11'
+            )
+            draw = ImageDraw.Draw(img)
+            n = len(data['text'])
+            for i in range(n):
+                word = data['text'][i].strip()
+                if not word:
+                    continue
+                if any(pat.search(word) for pat in PII_PATTERNS):
+                    x, y, w, h = (
+                        data['left'][i], data['top'][i],
+                        data['width'][i], data['height'][i],
+                    )
+                    draw.rectangle([x, y, x + w, y + h], fill='black')
+            log.debug("Screenshot PII scan complete")
+        except Exception as exc:
+            # pytesseract not installed, data files missing, or other error —
+            # log at debug level and return unmodified image rather than crashing.
+            log.debug("PII redaction skipped (%s)", exc)
+        return img
 
 
 class MockScreenshotManager(ScreenshotManager):

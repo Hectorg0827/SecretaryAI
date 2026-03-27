@@ -13,6 +13,22 @@ import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+
+def _upsert_cycle(db, company_id: str, po_number: str, stage: int,
+                  stage_name: str, supplier_id: str = "", total_cases: int = 0) -> None:
+    """Persist the current pipeline stage to procurement_cycles. Best-effort."""
+    try:
+        db.table("procurement_cycles").upsert({
+            "company_id":    company_id,
+            "po_number":     po_number,
+            "current_stage": stage,
+            "stage_name":    stage_name,
+            **({"supplier_id":   supplier_id}   if supplier_id   else {}),
+            **({"total_cases":   total_cases}    if total_cases   else {}),
+        }, on_conflict="company_id,po_number").execute()
+    except Exception as exc:
+        log.warning("procurement_cycles upsert failed for %s: %s", po_number, exc)
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, get_db
@@ -266,6 +282,16 @@ async def generate_purchase_orders(
     approved = [_dict_to_package(p) for p in request.approved_packages]
     results = lm.generate_purchase_orders(approved, request.supplier_configs)
 
+    # Persist stage 2 for each generated PO
+    for r in results:
+        _upsert_cycle(
+            db, user["company_id"],
+            po_number=r["po"].po_number,
+            stage=2, stage_name="po_generated",
+            supplier_id=str(r["po"].supplier_id),
+            total_cases=r["po"].total_cases,
+        )
+
     return {
         "po_count": len(results),
         "purchase_orders": [
@@ -306,6 +332,13 @@ async def parse_vendor_response(
 
     result = lm.parse_vendor_response(po, request.email_subject, request.email_body)
     parsed = result["parsed"]
+
+    _upsert_cycle(
+        db, user["company_id"],
+        po_number=request.po_number,
+        stage=3, stage_name="vendor_response_received",
+        supplier_id=request.supplier_id,
+    )
 
     return {
         "po_number": request.po_number,
@@ -448,6 +481,13 @@ async def process_warehouse_receipt(
     )
 
     receipt = result["receipt"]
+    _upsert_cycle(
+        db, user["company_id"],
+        po_number=request.po_number,
+        stage=7, stage_name="warehouse_received",
+        total_cases=receipt.total_cases_received,
+    )
+
     return {
         "po_number": request.po_number,
         "total_cases_received": receipt.total_cases_received,
@@ -503,6 +543,15 @@ async def reconcile_costs(
     previous = _dict_to_lcd(request.previous)
 
     result = lm.reconcile_costs(current, previous, request.selling_price_per_case)
+
+    # Persist stage 8 using current shipment's po_number
+    _upsert_cycle(
+        db, user["company_id"],
+        po_number=request.current.get("po_number", ""),
+        stage=8, stage_name="cost_reconciled",
+        supplier_id=str(request.current.get("supplier_id", "")),
+        total_cases=int(request.current.get("cases", 0)),
+    )
 
     return {
         "variance_count": len(result["variances"]),

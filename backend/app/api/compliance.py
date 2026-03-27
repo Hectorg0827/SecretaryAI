@@ -963,3 +963,307 @@ async def add_cola(
         log.warning("Could not persist COLA to DB: %s", exc)
 
     return _serialize_dataclass(cola)
+
+
+# ─── DELETE endpoints ──────────────────────────────────────────────────────────
+
+
+@router.delete("/products/{product_id}")
+async def delete_product(
+    product_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_products").delete().eq("id", product_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": product_id}
+
+
+@router.delete("/licenses/{license_id}")
+async def delete_license(
+    license_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_licenses").delete().eq("id", license_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": license_id}
+
+
+@router.delete("/brand-registrations/{reg_id}")
+async def delete_brand_registration(
+    reg_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_brand_registrations").delete().eq("id", reg_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": reg_id}
+
+
+@router.delete("/federal-permits/{permit_id}")
+async def delete_federal_permit(
+    permit_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_federal_permits").delete().eq("id", permit_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": permit_id}
+
+
+@router.delete("/distributors/{distributor_id}")
+async def delete_distributor(
+    distributor_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_distributors").delete().eq("id", distributor_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": distributor_id}
+
+
+@router.delete("/colas/{cola_id}")
+async def delete_cola(
+    cola_id: str,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    company_id = user["company_id"]
+    db.table("compliance_colas").delete().eq("id", cola_id).eq("company_id", company_id).execute()
+    return {"deleted": True, "id": cola_id}
+
+
+# ─── PUT (update) endpoints ───────────────────────────────────────────────────
+
+
+@router.put("/products/{product_id}")
+async def update_product(
+    product_id: str,
+    request: AddProductRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = product_id
+    return await add_product(request, user, db)
+
+
+@router.put("/licenses/{license_id}")
+async def update_license(
+    license_id: str,
+    request: AddStateLicenseRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = license_id
+    return await add_license(request, user, db)
+
+
+@router.put("/brand-registrations/{reg_id}")
+async def update_brand_registration(
+    reg_id: str,
+    request: AddBrandRegistrationRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = reg_id
+    return await add_brand_registration(request, user, db)
+
+
+@router.put("/federal-permits/{permit_id}")
+async def update_federal_permit(
+    permit_id: str,
+    request: AddFederalPermitRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = permit_id
+    return await add_federal_permit(request, user, db)
+
+
+@router.put("/distributors/{distributor_id}")
+async def update_distributor(
+    distributor_id: str,
+    request: AddDistributorRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = distributor_id
+    return await add_distributor(request, user, db)
+
+
+@router.put("/colas/{cola_id}")
+async def update_cola(
+    cola_id: str,
+    request: AddCOLARequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    request.id = cola_id
+    return await add_cola(request, user, db)
+
+
+# ─── Setup status ─────────────────────────────────────────────────────────────
+
+
+@router.get("/setup-status")
+async def get_setup_status(
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """
+    Returns whether this company has completed compliance setup.
+    Used by the onboarding wizard to determine if first-time setup is needed.
+    """
+    company_id = user["company_id"]
+    missing = []
+
+    def _count(table: str) -> int:
+        try:
+            res = db.table(table).select("id", count="exact").eq("company_id", company_id).execute()
+            return res.count or len(res.data or [])
+        except Exception:
+            return 0
+
+    products_count = _count("compliance_products")
+    licenses_count = _count("compliance_licenses")
+    permits_count = _count("compliance_federal_permits")
+    distributors_count = _count("compliance_distributors")
+    brand_regs_count = _count("compliance_brand_registrations")
+
+    if permits_count == 0:
+        missing.append("federal_permits")
+    if products_count == 0:
+        missing.append("products")
+    if licenses_count == 0:
+        missing.append("licenses")
+
+    is_setup = len(missing) == 0
+
+    return {
+        "is_setup": is_setup,
+        "products_count": products_count,
+        "licenses_count": licenses_count,
+        "federal_permits_count": permits_count,
+        "distributors_count": distributors_count,
+        "brand_registrations_count": brand_regs_count,
+        "missing": missing,
+    }
+
+
+# ─── CSV import ───────────────────────────────────────────────────────────────
+
+
+class ImportRowsRequest(BaseModel):
+    entity_type: str  # "licenses" | "products" | "brand_registrations" | "federal_permits" | "distributors" | "colas"
+    rows: List[dict]
+
+
+@router.post("/import")
+async def import_rows(
+    request: ImportRowsRequest,
+    user: dict = Depends(require_permission("manage_inventory")),
+    db=Depends(get_db),
+):
+    """
+    Bulk import compliance entities from CSV rows.
+    Each row dict should use column names matching the Add*Request fields.
+    Returns count of imported rows and any per-row errors.
+    """
+    imported = 0
+    errors: list[dict] = []
+
+    for i, row in enumerate(request.rows):
+        try:
+            if request.entity_type == "licenses":
+                req = AddStateLicenseRequest(
+                    state_code=row.get("state_code", row.get("State", "")),
+                    license_type=row.get("license_type", row.get("License Type", "importer")),
+                    product_types=[pt.strip() for pt in str(row.get("product_types", row.get("Product Types", ""))).split(",") if pt.strip()],
+                    license_number=row.get("license_number", row.get("License Number", row.get("Number", ""))),
+                    issue_date=row.get("issue_date", row.get("Issue Date")),
+                    expiration_date=row.get("expiration_date", row.get("Expiration Date", row.get("Expiry", ""))),
+                    annual_fee=float(str(row.get("annual_fee", row.get("Annual Fee", 0))).replace("$", "").replace(",", "") or 0),
+                    status=row.get("status", "active"),
+                    notes=row.get("notes", row.get("Notes", "")),
+                )
+                await add_license(req, user, db)
+
+            elif request.entity_type == "products":
+                req = AddProductRequest(
+                    sku=row.get("sku", row.get("SKU", "")),
+                    name=row.get("name", row.get("Name", row.get("Product Name", ""))),
+                    product_type=row.get("product_type", row.get("Type", "wine")).lower(),
+                    abv_pct=float(row.get("abv_pct", row.get("ABV", row.get("ABV %", 0))) or 0),
+                    container_size_ml=float(row.get("container_size_ml", row.get("Size (ml)", 750)) or 750),
+                    cases_per_container=int(float(row.get("cases_per_container", row.get("Cases/Container", 56)) or 56)),
+                    unit_cost_fob=float(str(row.get("unit_cost_fob", row.get("FOB Cost", 0))).replace("$", "").replace(",", "") or 0),
+                    country_of_origin=row.get("country_of_origin", row.get("Country", "")),
+                )
+                await add_product(req, user, db)
+
+            elif request.entity_type == "federal_permits":
+                req = AddFederalPermitRequest(
+                    permit_type=row.get("permit_type", row.get("Permit Type", "importer")).lower(),
+                    permit_number=row.get("permit_number", row.get("Permit Number", row.get("Number", ""))),
+                    issue_date=row.get("issue_date", row.get("Issue Date")),
+                    expiration_date=row.get("expiration_date", row.get("Expiration Date", row.get("Expiry", ""))),
+                    status=row.get("status", "active"),
+                    notes=row.get("notes", row.get("Notes", "")),
+                )
+                await add_federal_permit(req, user, db)
+
+            elif request.entity_type == "brand_registrations":
+                req = AddBrandRegistrationRequest(
+                    product_id=row.get("product_id", row.get("Product ID", "")),
+                    state_code=row.get("state_code", row.get("State", "")),
+                    registration_number=row.get("registration_number", row.get("Reg Number", "")),
+                    registration_date=row.get("registration_date", row.get("Registration Date")),
+                    expiration_date=row.get("expiration_date", row.get("Expiration Date")),
+                    registration_fee=float(str(row.get("registration_fee", row.get("Fee", 0))).replace("$", "").replace(",", "") or 0),
+                    status=row.get("status", "active"),
+                    state_label_approval_number=row.get("state_label_approval_number", row.get("Label Approval #", "")),
+                )
+                await add_brand_registration(req, user, db)
+
+            elif request.entity_type == "distributors":
+                req = AddDistributorRequest(
+                    state_code=row.get("state_code", row.get("State", "")),
+                    distributor_name=row.get("distributor_name", row.get("Distributor", row.get("Name", ""))),
+                    territory=row.get("territory", row.get("Territory", "Statewide")),
+                    product_types=[pt.strip() for pt in str(row.get("product_types", row.get("Product Types", ""))).split(",") if pt.strip()],
+                    contract_start_date=row.get("contract_start_date", row.get("Contract Start")),
+                    contract_end_date=row.get("contract_end_date", row.get("Contract End")),
+                    franchise_law_attached=str(row.get("franchise_law_attached", row.get("Franchise Law", "false"))).lower() in ("true", "yes", "1"),
+                    termination_restriction=row.get("termination_restriction", row.get("Termination", "none")).lower(),
+                    notes=row.get("notes", row.get("Notes", "")),
+                )
+                await add_distributor(req, user, db)
+
+            elif request.entity_type == "colas":
+                req = AddCOLARequest(
+                    product_id=row.get("product_id", row.get("Product ID", "")),
+                    cola_number=row.get("cola_number", row.get("COLA Number", row.get("Number", ""))),
+                    product_type=row.get("product_type", row.get("Type", "wine")).lower(),
+                    issue_date=row.get("issue_date", row.get("Issue Date")),
+                    expiration_date=row.get("expiration_date", row.get("Expiration Date")),
+                    status=row.get("status", "active"),
+                    formula_approved=str(row.get("formula_approved", row.get("Formula Approved", "false"))).lower() in ("true", "yes", "1"),
+                    lab_analysis_on_file=str(row.get("lab_analysis_on_file", row.get("Lab Analysis", "false"))).lower() in ("true", "yes", "1"),
+                )
+                await add_cola(req, user, db)
+
+            else:
+                raise ValueError(f"Unknown entity_type: {request.entity_type!r}")
+
+            imported += 1
+
+        except Exception as exc:
+            errors.append({"row": i + 1, "data": row, "error": str(exc)})
+
+    return {
+        "entity_type": request.entity_type,
+        "imported": imported,
+        "errors": errors,
+        "total_rows": len(request.rows),
+    }

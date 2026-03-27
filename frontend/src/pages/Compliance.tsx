@@ -12,11 +12,12 @@ import {
   BrandRegistration,
   FederalPermit,
 } from '../lib/api';
-import { AlertsPanel }            from '../components/compliance/AlertsPanel';
-import { DeadlinesPanel }         from '../components/compliance/DeadlinesPanel';
-import { ShipmentChecker }        from '../components/compliance/ShipmentChecker';
-import { LicenseRegistry }        from '../components/compliance/LicenseRegistry';
-import { ComplianceStatusBadge }  from '../components/compliance/ComplianceStatusBadge';
+import { AlertsPanel }             from '../components/compliance/AlertsPanel';
+import { DeadlinesPanel }          from '../components/compliance/DeadlinesPanel';
+import { ShipmentChecker }         from '../components/compliance/ShipmentChecker';
+import { LicenseRegistry }         from '../components/compliance/LicenseRegistry';
+import { ComplianceStatusBadge }   from '../components/compliance/ComplianceStatusBadge';
+import { ComplianceSetupWizard }   from '../components/compliance/ComplianceSetupWizard';
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
@@ -92,8 +93,26 @@ export function Compliance() {
   const [loadingDeadlines, setLoadingDeadlines] = useState(false);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
 
-  // Load on mount
-  useEffect(() => {
+  // Setup wizard state
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+
+  function fetchLicenses() {
+    setLoadingLicenses(true);
+    Promise.all([
+      api.compliance.getLicenses(),
+      api.compliance.getBrandRegistrations(),
+      api.compliance.getFederalPermits(),
+    ])
+      .then(([lics, brands, fed]) => {
+        setLicenses(lics as StateLicense[]);
+        setBrandRegs(brands as BrandRegistration[]);
+        setFederalPermits(fed as FederalPermit[]);
+      })
+      .catch(() => null)
+      .finally(() => setLoadingLicenses(false));
+  }
+
+  function fetchAll() {
     setLoadingStatus(true);
     api.compliance.getStatus()
       .then(setStatus)
@@ -112,19 +131,21 @@ export function Compliance() {
       .catch(() => [])
       .finally(() => setLoadingDeadlines(false));
 
-    setLoadingLicenses(true);
-    Promise.all([
-      api.compliance.getLicenses(),
-      api.compliance.getBrandRegistrations(),
-      api.compliance.getFederalPermits(),
-    ])
-      .then(([lics, brands, fed]) => {
-        setLicenses(lics as StateLicense[]);
-        setBrandRegs(brands as BrandRegistration[]);
-        setFederalPermits(fed as FederalPermit[]);
+    fetchLicenses();
+  }
+
+  // Load on mount — check setup status first
+  useEffect(() => {
+    api.compliance.getSetupStatus()
+      .then((s) => {
+        if (!s.is_setup) {
+          setShowSetupWizard(true);
+        }
       })
-      .catch(() => null)
-      .finally(() => setLoadingLicenses(false));
+      .catch(() => null);
+
+    fetchAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const criticalCount = status?.critical_alerts ?? 0;
@@ -139,6 +160,15 @@ export function Compliance() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50">
+      {/* Setup wizard */}
+      {showSetupWizard && (
+        <ComplianceSetupWizard
+          onComplete={() => {
+            setShowSetupWizard(false);
+            fetchAll();
+          }}
+        />
+      )}
       {/* Page header */}
       <div className="bg-white border-b border-slate-100 px-6 py-4 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -266,6 +296,7 @@ export function Compliance() {
               brandRegistrations={brandRegs}
               federalPermits={federalPermits}
               loading={loadingLicenses}
+              onRefresh={fetchLicenses}
             />
           )}
 

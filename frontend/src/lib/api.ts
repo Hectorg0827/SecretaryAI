@@ -227,6 +227,7 @@ export const api = {
   get:    <T>(path: string)               => request<T>('GET',    path),
   post:   <T>(path: string, body: unknown) => request<T>('POST',   path, body),
   patch:  <T>(path: string, body: unknown) => request<T>('PATCH',  path, body),
+  put:    <T>(path: string, body: unknown) => request<T>('PUT',    path, body),
   delete: <T>(path: string)               => request<T>('DELETE', path),
 
   dashboard: {
@@ -329,6 +330,38 @@ export const api = {
     getLicenses: () => api.get<StateLicense[]>('/api/compliance/licenses'),
     getBrandRegistrations: () => api.get<BrandRegistration[]>('/api/compliance/brand-registrations'),
     getFederalPermits: () => api.get<FederalPermit[]>('/api/compliance/federal-permits'),
+
+    // Setup
+    getSetupStatus: () => api.get<{is_setup: boolean; missing: string[]; products_count: number; licenses_count: number; federal_permits_count: number; distributors_count: number; brand_registrations_count: number}>('/api/compliance/setup-status'),
+
+    // CRUD — products
+    createProduct: (body: object) => api.post<object>('/api/compliance/products', body),
+    updateProduct: (id: string, body: object) => api.put<object>(`/api/compliance/products/${id}`, body),
+    deleteProduct: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/products/${id}`),
+
+    // CRUD — licenses
+    createLicense: (body: object) => api.post<object>('/api/compliance/licenses', body),
+    updateLicense: (id: string, body: object) => api.put<object>(`/api/compliance/licenses/${id}`, body),
+    deleteLicense: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/licenses/${id}`),
+
+    // CRUD — brand registrations
+    createBrandRegistration: (body: object) => api.post<object>('/api/compliance/brand-registrations', body),
+    updateBrandRegistration: (id: string, body: object) => api.put<object>(`/api/compliance/brand-registrations/${id}`, body),
+    deleteBrandRegistration: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/brand-registrations/${id}`),
+
+    // CRUD — federal permits
+    createFederalPermit: (body: object) => api.post<object>('/api/compliance/federal-permits', body),
+    updateFederalPermit: (id: string, body: object) => api.put<object>(`/api/compliance/federal-permits/${id}`, body),
+    deleteFederalPermit: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/federal-permits/${id}`),
+
+    // CRUD — distributors
+    getDistributors: () => api.get<{count: number; distributors: object[]}>('/api/compliance/distributors'),
+    createDistributor: (body: object) => api.post<object>('/api/compliance/distributors', body),
+    updateDistributor: (id: string, body: object) => api.put<object>(`/api/compliance/distributors/${id}`, body),
+    deleteDistributor: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/distributors/${id}`),
+
+    // Import
+    importRows: (body: {entity_type: string; rows: object[]}) => api.post<{imported: number; errors: object[]; total_rows: number}>('/api/compliance/import', body),
   },
 
   logistics: {

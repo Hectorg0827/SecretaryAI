@@ -12,7 +12,7 @@ Decision logic:
 from datetime import date, timedelta
 from typing import Optional
 
-from app.connectors.base import Customer, Invoice, InventoryItem, PurchaseOrder, QuickBooksAdapter
+from app.connectors.base import Customer, Invoice, InventoryItem, Payment, PurchaseOrder, QuickBooksAdapter
 from app.connectors.qb_desktop import QBDesktopAdapter
 from app.connectors.qb_online import QBOnlineAdapter
 from app.connectors.gmail_connector import GmailConnector
@@ -177,6 +177,53 @@ class UnifiedDataAdapter:
         if not self._qb:
             raise RuntimeError("No QB connector configured")
         return await self._qb.get_purchase_orders()
+
+    async def create_purchase_order(
+        self,
+        vendor_id: str,
+        line_items: list[dict],
+        ship_date: Optional[date] = None,
+        memo: Optional[str] = None,
+    ) -> PurchaseOrder:
+        """Create a PO in QuickBooks (Desktop or Online)."""
+        if not self._qb:
+            raise RuntimeError("No QB connector configured")
+        return await self._qb.create_purchase_order(
+            vendor_id=vendor_id,
+            line_items=line_items,
+            ship_date=ship_date,
+            memo=memo,
+        )
+
+    async def update_invoice_status(
+        self,
+        invoice_id: str,
+        status: str,
+    ) -> Invoice:
+        """Update invoice status in QuickBooks (currently supports 'void')."""
+        if not self._qb:
+            raise RuntimeError("No QB connector configured")
+        return await self._qb.update_invoice_status(invoice_id=invoice_id, status=status)
+
+    async def create_payment(
+        self,
+        customer_id: str,
+        amount,
+        invoice_id: Optional[str] = None,
+        payment_method: str = "check",
+        memo: Optional[str] = None,
+    ) -> Payment:
+        """Record a customer payment in QuickBooks."""
+        if not self._qb:
+            raise RuntimeError("No QB connector configured")
+        from decimal import Decimal
+        return await self._qb.create_payment(
+            customer_id=customer_id,
+            amount=Decimal(str(amount)),
+            invoice_id=invoice_id,
+            payment_method=payment_method,
+            memo=memo,
+        )
 
     # ------------------------------------------------------------------
     # Merged inventory (QB + any warehouse system via Computer Use)

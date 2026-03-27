@@ -12,6 +12,7 @@ from app.connectors.base import (
     Customer,
     Invoice,
     InventoryItem,
+    Payment,
     PurchaseOrder,
     QuickBooksAdapter,
 )
@@ -70,6 +71,46 @@ class QBOnlineAdapter(QuickBooksAdapter):
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+
+    async def _post(self, entity: str, payload: dict) -> dict:
+        """POST (create) a QBO entity."""
+        url = f"{QBO_BASE}/{self._realm_id}/{entity}"
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                params={"minorversion": "70"},
+                headers=self._headers(),
+            )
+            if response.status_code == 401:
+                await self._refresh_access_token()
+                response = await client.post(
+                    url,
+                    json=payload,
+                    params={"minorversion": "70"},
+                    headers=self._headers(),
+                )
+            response.raise_for_status()
+            return response.json()
+
+    async def _get_entity(self, entity: str, entity_id: str) -> dict:
+        """GET a single QBO entity by ID (needed to obtain SyncToken for updates)."""
+        url = f"{QBO_BASE}/{self._realm_id}/{entity}/{entity_id}"
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(
+                url,
+                params={"minorversion": "70"},
+                headers=self._headers(),
+            )
+            if response.status_code == 401:
+                await self._refresh_access_token()
+                response = await client.get(
+                    url,
+                    params={"minorversion": "70"},
+                    headers=self._headers(),
+                )
+            response.raise_for_status()
+            return response.json()
 
     async def _query(self, sql: str) -> dict:
         """Execute a QBO query using Intuit's SQL-like query language."""
@@ -206,3 +247,143 @@ class QBOnlineAdapter(QuickBooksAdapter):
             return True
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Write-back methods
+    # ------------------------------------------------------------------
+
+    async def create_purchase_order(
+        self,
+        vendor_id: str,
+        line_items: list[dict],
+        ship_date: Optional[date] = None,
+        memo: Optional[str] = None,
+    ) -> PurchaseOrder:
+        """Create a PurchaseOrder in QBO."""
+        qbo_lines = []
+        for i, item in enumerate(line_items):
+            line: dict = {
+                "Id": str(i + 1),
+                "DetailType": "ItemBasedExpenseLineDetail",
+                "Amount": float(item.get("unit_cost", 0)) * float(item.get("quantity", 1)),
+                "ItemBasedExpenseLineDetail": {
+                    "ItemRef": {"value": item["item_id"]},
+                    "Qty": float(item.get("quantity", 1)),
+                    "UnitPrice": float(item.get("unit_cost", 0)),
+                },
+            }
+            if item.get("description"):
+                line["Description"] = item["description"]
+            qbo_lines.append(line)
+
+        payload: dict = {
+            "VendorRef": {"value": vendor_id},
+            "Line": qbo_lines,
+            "TxnDate": date.today().isoformat(),
+        }
+        if ship_date:
+            payload["ShipDate"] = ship_date.isoformat()
+        if memo:
+            payload["Memo"] = memo
+
+        data = await self._post("purchaseorder", payload)
+        raw = data.get("PurchaseOrder", data)
+        return self._normalize_purchase_order(raw)
+
+    async def update_invoice_status(
+        self,
+        invoice_id: str,
+        status: str,
+    ) -> Invoice:
+        """
+        Update invoice status in QBO.
+        - "void": voids the invoice using QBO's void operation.
+        Any other status raises ValueError (use create_payment() to mark as paid).
+        """
+        if status != "void":
+            raise ValueError(
+                f"QBO only supports status='void' via update_invoice_status. "
+                f"To mark as paid use create_payment(). Got: {status!r}"
+            )
+
+        # QBO requires the current SyncToken to void
+        data = await self._get_entity("invoice", invoice_id)
+        inv = data.get("Invoice", data)
+        sync_token = inv.get("SyncToken", "0")
+
+        payload = {
+            "Id": invoice_id,
+            "SyncToken": sync_token,
+            "sparse": True,
+        }
+        url = f"{QBO_BASE}/{self._realm_id}/invoice"
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                params={"minorversion": "70", "operation": "void"},
+                headers=self._headers(),
+            )
+            if response.status_code == 401:
+                await self._refresh_access_token()
+                response = await client.post(
+                    url,
+                    json=payload,
+                    params={"minorversion": "70", "operation": "void"},
+                    headers=self._headers(),
+                )
+            response.raise_for_status()
+            raw = response.json().get("Invoice", response.json())
+        return self._normalize_invoice(raw)
+
+    async def create_payment(
+        self,
+        customer_id: str,
+        amount: Decimal,
+        invoice_id: Optional[str] = None,
+        payment_method: str = "check",
+        memo: Optional[str] = None,
+    ) -> Payment:
+        """Record a customer payment in QBO, optionally linked to an invoice."""
+        payload: dict = {
+            "CustomerRef": {"value": customer_id},
+            "TotalAmt": float(amount),
+            "TxnDate": date.today().isoformat(),
+        }
+
+        if invoice_id:
+            payload["Line"] = [
+                {
+                    "Amount": float(amount),
+                    "LinkedTxn": [{"TxnId": invoice_id, "TxnType": "Invoice"}],
+                }
+            ]
+
+        # Map payment method string to QBO PaymentMethodRef (best-effort lookup)
+        _PM_MAP = {
+            "check": "1",
+            "cash": "2",
+            "credit_card": "3",
+            "ach": "4",
+            "wire": "4",
+        }
+        pm_ref = _PM_MAP.get(payment_method.lower())
+        if pm_ref:
+            payload["PaymentMethodRef"] = {"value": pm_ref}
+
+        if memo:
+            payload["PrivateNote"] = memo
+
+        data = await self._post("payment", payload)
+        raw = data.get("Payment", data)
+        return Payment(
+            id=raw["Id"],
+            qb_id=raw["Id"],
+            customer_id=raw.get("CustomerRef", {}).get("value", customer_id),
+            customer_name=raw.get("CustomerRef", {}).get("name", ""),
+            date=date.fromisoformat(raw["TxnDate"]) if raw.get("TxnDate") else date.today(),
+            amount=Decimal(str(raw.get("TotalAmt", amount))),
+            invoice_id=invoice_id,
+            payment_method=payment_method,
+            memo=raw.get("PrivateNote"),
+        )

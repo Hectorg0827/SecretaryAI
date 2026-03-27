@@ -23,8 +23,9 @@ app = Celery(
         "tasks.account_health",
         "tasks.inventory_alerts",
         "tasks.file_ingestion",
-"tasks.workflow_runner",
+        "tasks.workflow_runner",
         "tasks.proactive_insights",
+        "tasks.compliance_alerts",
     ],
 )
 
@@ -90,5 +91,10 @@ app.conf.beat_schedule = {
     "proactive-insights": {
         "task": "tasks.proactive_insights.generate_all",
         "schedule": crontab(hour=8, minute=0),
+    },
+    # Compliance alert check — 8:15 AM UTC daily (after morning briefing)
+    "compliance-alerts": {
+        "task": "tasks.compliance_alerts.check_all",
+        "schedule": crontab(hour=8, minute=15),
     },
 }

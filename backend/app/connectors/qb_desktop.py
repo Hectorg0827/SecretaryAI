@@ -13,6 +13,7 @@ from app.connectors.base import (
     Customer,
     Invoice,
     InventoryItem,
+    Payment,
     PurchaseOrder,
     QuickBooksAdapter,
 )
@@ -39,6 +40,26 @@ class QBDesktopAdapter(QuickBooksAdapter):
                 f"{self.BASE_URL}{path}",
                 headers=self._headers,
                 params=params or {},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def _post(self, path: str, payload: dict) -> dict:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.BASE_URL}{path}",
+                headers={**self._headers, "Content-Type": "application/json"},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def _patch(self, path: str, payload: dict) -> dict:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.patch(
+                f"{self.BASE_URL}{path}",
+                headers={**self._headers, "Content-Type": "application/json"},
+                json=payload,
             )
             response.raise_for_status()
             return response.json()
@@ -146,3 +167,93 @@ class QBDesktopAdapter(QuickBooksAdapter):
             return True
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Write-back methods
+    # ------------------------------------------------------------------
+
+    async def create_purchase_order(
+        self,
+        vendor_id: str,
+        line_items: list[dict],
+        ship_date: Optional[date] = None,
+        memo: Optional[str] = None,
+    ) -> PurchaseOrder:
+        """Create a PurchaseOrder via Conductor."""
+        conductor_lines = [
+            {
+                "itemId": item["item_id"],
+                "description": item.get("description", ""),
+                "quantity": str(item.get("quantity", 1)),
+                "unitCost": str(item.get("unit_cost", 0)),
+            }
+            for item in line_items
+        ]
+
+        payload: dict = {
+            "vendorId": vendor_id,
+            "lineItems": conductor_lines,
+            "transactionDate": date.today().isoformat(),
+        }
+        if ship_date:
+            payload["expectedDate"] = ship_date.isoformat()
+        if memo:
+            payload["memo"] = memo
+
+        raw = await self._post("/quickbooks-desktop/purchase-orders", payload)
+        return self._normalize_purchase_order(raw)
+
+    async def update_invoice_status(
+        self,
+        invoice_id: str,
+        status: str,
+    ) -> Invoice:
+        """
+        Update invoice status via Conductor.
+        Supported: "void" (sets isPaid=false, balance=total via void flag).
+        """
+        if status == "void":
+            payload = {"isVoided": True}
+        else:
+            raise ValueError(
+                f"QBD only supports status='void' via update_invoice_status. "
+                f"To mark as paid use create_payment(). Got: {status!r}"
+            )
+
+        raw = await self._patch(f"/quickbooks-desktop/invoices/{invoice_id}", payload)
+        return self._normalize_invoice(raw)
+
+    async def create_payment(
+        self,
+        customer_id: str,
+        amount: Decimal,
+        invoice_id: Optional[str] = None,
+        payment_method: str = "check",
+        memo: Optional[str] = None,
+    ) -> Payment:
+        """Record a customer payment via Conductor."""
+        payload: dict = {
+            "customerId": customer_id,
+            "totalAmount": str(amount),
+            "paymentMethod": payment_method,
+            "transactionDate": date.today().isoformat(),
+        }
+        if invoice_id:
+            payload["appliedToTransactions"] = [
+                {"transactionId": invoice_id, "appliedAmount": str(amount)}
+            ]
+        if memo:
+            payload["memo"] = memo
+
+        raw = await self._post("/quickbooks-desktop/payments", payload)
+        return Payment(
+            id=raw["id"],
+            qb_id=raw["id"],
+            customer_id=raw.get("customer", {}).get("id", customer_id),
+            customer_name=raw.get("customer", {}).get("name", ""),
+            date=date.fromisoformat(raw["transactionDate"]) if raw.get("transactionDate") else date.today(),
+            amount=Decimal(str(raw.get("totalAmount", amount))),
+            invoice_id=invoice_id,
+            payment_method=payment_method,
+            memo=raw.get("memo"),
+        )

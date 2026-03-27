@@ -26,6 +26,7 @@ app = Celery(
         "tasks.workflow_runner",
         "tasks.proactive_insights",
         "tasks.compliance_alerts",
+        "tasks.qbo_token_refresh",
     ],
 )
 
@@ -96,5 +97,10 @@ app.conf.beat_schedule = {
     "compliance-alerts": {
         "task": "tasks.compliance_alerts.check_all",
         "schedule": crontab(hour=8, minute=15),
+    },
+    # QBO token refresh — every 50 minutes to keep access tokens fresh
+    "qbo-token-refresh": {
+        "task": "tasks.qbo_token_refresh.refresh_expiring_tokens",
+        "schedule": crontab(minute="*/50"),
     },
 }

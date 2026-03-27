@@ -126,6 +126,11 @@ async def qbo_callback(
     encrypted_access = encrypt(tokens["access_token"], settings.secret_key)
     encrypted_refresh = encrypt(tokens["refresh_token"], settings.secret_key)
 
+    from datetime import timedelta
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+    ).isoformat()
+
     # Persist to Supabase (service-role key bypasses RLS)
     try:
         from supabase import create_client
@@ -137,6 +142,7 @@ async def qbo_callback(
             "qbo_access_token": encrypted_access,
             "qbo_refresh_token": encrypted_refresh,
             "qbo_connected_at": datetime.now(timezone.utc).isoformat(),
+            "qbo_token_expires_at": expires_at,
         }).eq("id", company_id).execute()
         log.info("QBO tokens stored for company %s (realm %s)", company_id, realm_id)
     except Exception as exc:
@@ -263,13 +269,16 @@ async def gmail_disconnect(user: dict = Depends(get_current_user)):
 # ─── Local auth ───────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str | None = None
+    password: str | None = None
     totp_code: str | None = None
+    pre_auth_token: str | None = None  # mobile 2FA second step
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, v: str) -> str:
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         v = v.strip().lower()
         if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
             raise ValueError("Invalid email address")
@@ -279,12 +288,72 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))):
     """
-    Authenticate with email + password.
-    Returns a short-lived JWT (access token) and company_id.
+    Authenticate with email + password, optionally with a TOTP code.
+
+    Two-step mobile flow: first call returns requires_2fa + pre_auth_token;
+    second call sends pre_auth_token + totp_code to complete authentication.
     """
+    from supabase import create_client
+    db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+    # ── Second-step: pre_auth_token + totp_code (mobile 2FA) ─────────────────
+    if body.pre_auth_token and body.totp_code:
+        from jose import jwt as jose_jwt, JWTError
+        try:
+            payload = jose_jwt.decode(
+                body.pre_auth_token,
+                settings.secret_key,
+                algorithms=["HS256"],
+            )
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid or expired 2FA session")
+
+        if payload.get("scope") != "2fa_pending":
+            raise HTTPException(status_code=401, detail="Invalid token scope")
+
+        user_id = payload.get("sub")
+        try:
+            result = (
+                db.table("users")
+                .select("id, company_id, role, is_active, totp_enabled, totp_secret")
+                .eq("id", user_id)
+                .execute()
+            )
+        except Exception as exc:
+            log.error("2FA step-2 DB query failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+        if not result.data:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        user = result.data[0]
+        if not user.get("is_active", True):
+            raise HTTPException(status_code=403, detail="Account disabled")
+        if not user.get("totp_enabled") or not user.get("totp_secret"):
+            raise HTTPException(status_code=400, detail="2FA not configured")
+
+        try:
+            secret = decrypt(user["totp_secret"], settings.secret_key)
+        except Exception:
+            raise HTTPException(status_code=500, detail="2FA configuration error")
+
+        import pyotp
+        if not pyotp.TOTP(secret).verify(body.totp_code, valid_window=1):
+            raise HTTPException(status_code=401, detail="Invalid 2FA code")
+
+        token = create_access_token({
+            "sub": user["id"],
+            "company_id": user["company_id"],
+            "role": user["role"],
+        })
+        return {"access_token": token, "token_type": "bearer",
+                "company_id": user["company_id"], "role": user["role"]}
+
+    # ── First-step: email + password ──────────────────────────────────────────
+    if not body.email or not body.password:
+        raise HTTPException(status_code=422, detail="email and password are required")
+
     try:
-        from supabase import create_client
-        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
             .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret")
@@ -317,7 +386,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
                 "requires_2fa": True,
                 "pre_auth_token": pre_auth,
             }
-        # TOTP code supplied — verify it
+        # TOTP code supplied inline (web flow) — verify it
         try:
             secret = decrypt(user["totp_secret"], settings.secret_key)
         except Exception:
@@ -405,7 +474,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
-            .select("id, name, email, role")
+            .select("id, name, email, role, totp_enabled")
             .eq("id", user["sub"])
             .execute()
         )

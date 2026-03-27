@@ -60,6 +60,33 @@ async def exchange_code_for_tokens(code: str, realm_id: str) -> dict:
         }
 
 
+async def refresh_qbo_token(refresh_token: str) -> dict:
+    """
+    Use a QBO refresh token to obtain a new access token.
+
+    Returns a dict with keys: access_token, refresh_token, expires_in.
+    QBO access tokens expire after 3600 s; refresh tokens last 100 days
+    (Intuit rotates them on each use).
+    """
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            QBO_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            auth=(settings.intuit_client_id, settings.intuit_client_secret),
+            headers={"Accept": "application/json"},
+        )
+        response.raise_for_status()
+        tokens = response.json()
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token", refresh_token),  # rotated or same
+            "expires_in": tokens.get("expires_in", 3600),
+        }
+
+
 async def revoke_token(token: str) -> bool:
     """Revoke a QBO token (for disconnect flow)."""
     async with httpx.AsyncClient() as client:

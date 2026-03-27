@@ -69,6 +69,55 @@ def get_active_companies(db: Client) -> list[dict]:
     return result.data or []
 
 
+def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
+    """
+    Proactively refresh the QBO access token if it expires within 10 minutes.
+    Updates cfg in-place and persists new tokens + expiry to the DB.
+    """
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from app.utils.encryption import encrypt
+
+    expires_at_str = company.get("qbo_token_expires_at")
+    if not expires_at_str:
+        return  # No expiry tracked — skip (will refresh on next QBO API 401)
+
+    try:
+        expires_at = datetime.fromisoformat(expires_at_str)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return
+
+    if datetime.now(timezone.utc) < expires_at - timedelta(minutes=10):
+        return  # Still valid for >10 minutes — no refresh needed
+
+    refresh_token = cfg.get("qbo_refresh_token")
+    if not refresh_token:
+        return
+
+    try:
+        from app.auth.oauth import refresh_qbo_token
+        new_tokens = asyncio.run(refresh_qbo_token(refresh_token))
+
+        new_expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=new_tokens.get("expires_in", 3600))
+        ).isoformat()
+
+        cfg["qbo_access_token"] = new_tokens["access_token"]
+        cfg["qbo_refresh_token"] = new_tokens["refresh_token"]
+
+        db.table("companies").update({
+            "qbo_access_token":    encrypt(new_tokens["access_token"], settings.secret_key),
+            "qbo_refresh_token":   encrypt(new_tokens["refresh_token"], settings.secret_key),
+            "qbo_token_expires_at": new_expires_at,
+        }).eq("id", company["id"]).execute()
+
+        log.info("QBO access token refreshed for company %s", company["id"])
+    except Exception as exc:
+        log.warning("QBO token refresh failed for company %s: %s", company["id"], exc)
+
+
 def build_adapter(company: dict) -> UnifiedDataAdapter:
     """Build a UnifiedDataAdapter from a company row."""
     from app.utils.encryption import decrypt
@@ -83,6 +132,10 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
     if cfg.get("google_refresh_token"):
         cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+
+    # Proactively refresh QBO access token if close to expiry
+    if cfg.get("qbo_access_token") and cfg.get("qbo_refresh_token"):
+        _refresh_qbo_if_needed(company, cfg, get_supabase())
 
     # Build gmail_credentials dict that GmailConnector expects (refresh token if expired)
     if cfg.get("google_access_token") and cfg.get("google_refresh_token"):

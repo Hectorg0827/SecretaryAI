@@ -8,11 +8,14 @@ import {
   Alert,
   ScrollView,
   Switch,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../stores/authStore';
 import { setApiBase, API_BASE } from '../api/client';
+import { setup2fa, verify2fa, disable2fa } from '../api/auth';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -54,6 +57,201 @@ function SettingRow({
       </View>
       {right ?? (onPress ? <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} /> : null)}
     </TouchableOpacity>
+  );
+}
+
+type TwoFAStep = 'idle' | 'setup' | 'verify' | 'disabling';
+
+function TwoFASection({ totpEnabled }: { totpEnabled: boolean }) {
+  const [step, setStep] = useState<TwoFAStep>('idle');
+  const [secret, setSecret] = useState('');
+  const [otpauthUrl, setOtpauthUrl] = useState('');
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [enabled, setEnabled] = useState(totpEnabled);
+
+  const handleSetup = async () => {
+    setLoading(true);
+    try {
+      const res = await setup2fa();
+      setSecret(res.secret);
+      setOtpauthUrl(res.otpauth_url);
+      setStep('setup');
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to start 2FA setup');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenAuthApp = () => {
+    Linking.openURL(otpauthUrl).catch(() => {
+      Alert.alert('Cannot open URL', 'Copy the secret and enter it manually in your authenticator app.');
+    });
+  };
+
+  const handleVerify = async () => {
+    if (code.trim().length !== 6) {
+      Alert.alert('Invalid code', 'Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await verify2fa(code.trim());
+      setEnabled(true);
+      setStep('idle');
+      setCode('');
+      Alert.alert('2FA enabled', 'Two-factor authentication is now active on your account.');
+    } catch (err) {
+      Alert.alert('Invalid code', err instanceof Error ? err.message : 'Please try again.');
+      setCode('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    if (code.trim().length !== 6) {
+      Alert.alert('Invalid code', 'Enter the 6-digit code from your authenticator app.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await disable2fa(code.trim());
+      setEnabled(false);
+      setStep('idle');
+      setCode('');
+      Alert.alert('2FA disabled', 'Two-factor authentication has been removed from your account.');
+    } catch (err) {
+      Alert.alert('Invalid code', err instanceof Error ? err.message : 'Please try again.');
+      setCode('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (step === 'setup') {
+    return (
+      <View style={twoFAStyles.container}>
+        <Text style={twoFAStyles.title}>Set up 2FA</Text>
+        <Text style={twoFAStyles.body}>
+          Tap the button below to open your authenticator app, or copy the secret and enter it
+          manually. Then enter the 6-digit code to verify.
+        </Text>
+        <TouchableOpacity style={twoFAStyles.qrBtn} onPress={handleOpenAuthApp}>
+          <Ionicons name="qr-code" size={18} color={COLORS.primary} />
+          <Text style={twoFAStyles.qrBtnText}>Open in authenticator app</Text>
+        </TouchableOpacity>
+        <Text style={twoFAStyles.secretLabel}>Manual secret</Text>
+        <Text style={twoFAStyles.secret} selectable>{secret}</Text>
+        <Text style={twoFAStyles.label}>Verification code</Text>
+        <TextInput
+          style={[twoFAStyles.input, twoFAStyles.codeInput]}
+          value={code}
+          onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
+          placeholder="000000"
+          placeholderTextColor={COLORS.textMuted}
+          keyboardType="number-pad"
+          editable={!loading}
+        />
+        <View style={twoFAStyles.row}>
+          <TouchableOpacity
+            style={[twoFAStyles.btn, twoFAStyles.cancelBtn]}
+            onPress={() => { setStep('idle'); setCode(''); }}
+          >
+            <Text style={twoFAStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[twoFAStyles.btn, twoFAStyles.primaryBtn, loading && twoFAStyles.disabledBtn]}
+            onPress={handleVerify}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={twoFAStyles.primaryText}>Verify & Enable</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (step === 'disabling') {
+    return (
+      <View style={twoFAStyles.container}>
+        <Text style={twoFAStyles.title}>Disable 2FA</Text>
+        <Text style={twoFAStyles.body}>
+          Enter the 6-digit code from your authenticator app to confirm you want to disable 2FA.
+        </Text>
+        <Text style={twoFAStyles.label}>Verification code</Text>
+        <TextInput
+          style={[twoFAStyles.input, twoFAStyles.codeInput]}
+          value={code}
+          onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 6))}
+          placeholder="000000"
+          placeholderTextColor={COLORS.textMuted}
+          keyboardType="number-pad"
+          editable={!loading}
+          autoFocus
+        />
+        <View style={twoFAStyles.row}>
+          <TouchableOpacity
+            style={[twoFAStyles.btn, twoFAStyles.cancelBtn]}
+            onPress={() => { setStep('idle'); setCode(''); }}
+          >
+            <Text style={twoFAStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[twoFAStyles.btn, twoFAStyles.dangerBtn, loading && twoFAStyles.disabledBtn]}
+            onPress={handleDisable}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={twoFAStyles.primaryText}>Disable 2FA</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // idle — show enable/disable button
+  return (
+    <View style={twoFAStyles.container}>
+      <View style={twoFAStyles.statusRow}>
+        <Ionicons
+          name={enabled ? 'shield-checkmark' : 'shield-outline'}
+          size={20}
+          color={enabled ? COLORS.success : COLORS.textMuted}
+        />
+        <Text style={[twoFAStyles.statusText, { color: enabled ? COLORS.success : COLORS.textMuted }]}>
+          {enabled ? '2FA is enabled' : '2FA is not enabled'}
+        </Text>
+      </View>
+      {enabled ? (
+        <TouchableOpacity
+          style={[twoFAStyles.btn, twoFAStyles.dangerOutlineBtn]}
+          onPress={() => setStep('disabling')}
+        >
+          <Text style={twoFAStyles.dangerOutlineText}>Disable two-factor authentication</Text>
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          style={[twoFAStyles.btn, twoFAStyles.primaryBtn, loading && twoFAStyles.disabledBtn]}
+          onPress={handleSetup}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={twoFAStyles.primaryText}>Enable two-factor authentication</Text>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
   );
 }
 
@@ -166,6 +364,12 @@ export default function SettingsScreen() {
           <SettingRow icon="business" label="Company" value={user?.company_name ?? '—'} />
         </View>
 
+        {/* Security */}
+        <Text style={styles.sectionLabel}>Security</Text>
+        <View style={styles.card}>
+          <TwoFASection totpEnabled={user?.totp_enabled ?? false} />
+        </View>
+
         {/* Sign out */}
         <Text style={styles.sectionLabel}>Account</Text>
         <View style={styles.card}>
@@ -207,4 +411,59 @@ const styles = StyleSheet.create({
   urlSaveBtn: { backgroundColor: COLORS.primary },
   urlSaveText: { color: '#fff', fontWeight: '700' },
   footer: { marginTop: 24, textAlign: 'center', fontSize: 12, color: COLORS.textMuted },
+});
+
+const twoFAStyles = StyleSheet.create({
+  container: { padding: 16 },
+  title: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
+  body: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 16 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  statusText: { fontSize: 14, fontWeight: '600' },
+  secretLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted, marginBottom: 4 },
+  secret: {
+    fontFamily: 'monospace',
+    fontSize: 13,
+    color: COLORS.text,
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.sm,
+    padding: 10,
+    marginBottom: 16,
+    letterSpacing: 1,
+  },
+  label: { fontSize: 13, fontWeight: '600', color: COLORS.text, marginBottom: 6 },
+  input: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: COLORS.text,
+    backgroundColor: COLORS.background,
+    marginBottom: 16,
+  },
+  codeInput: { fontSize: 22, letterSpacing: 8, textAlign: 'center' },
+  qrBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    borderRadius: RADIUS.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
+  },
+  qrBtnText: { color: COLORS.primary, fontWeight: '600', fontSize: 14 },
+  row: { flexDirection: 'row', gap: 10 },
+  btn: { flex: 1, borderRadius: RADIUS.md, paddingVertical: 11, alignItems: 'center' },
+  cancelBtn: { borderWidth: 1, borderColor: COLORS.border },
+  cancelText: { color: COLORS.textSecondary, fontWeight: '600' },
+  primaryBtn: { backgroundColor: COLORS.primary },
+  primaryText: { color: '#fff', fontWeight: '700' },
+  dangerBtn: { backgroundColor: COLORS.danger },
+  dangerOutlineBtn: { borderWidth: 1, borderColor: COLORS.danger },
+  dangerOutlineText: { color: COLORS.danger, fontWeight: '600' },
+  disabledBtn: { opacity: 0.6 },
 });

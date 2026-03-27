@@ -309,10 +309,11 @@ export const api = {
   },
 
   auth: {
-    login: (email: string, password: string) =>
-      api.post<{ access_token: string; token_type: string; company_id: string; role: string }>(
-        '/auth/login', { email, password }
-      ),
+    login: (email: string, password: string, totp_code?: string) =>
+      api.post<
+        | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
+        | { requires_2fa: true; pre_auth_token: string }
+      >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
   },
 
   // ── Compliance types ──────────────────────────────────────────────────────────
@@ -360,6 +361,12 @@ export const api = {
     createDistributor: (body: object) => api.post<object>('/api/compliance/distributors', body),
     updateDistributor: (id: string, body: object) => api.put<object>(`/api/compliance/distributors/${id}`, body),
     deleteDistributor: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/distributors/${id}`),
+
+    // CRUD — COLAs (Certificate of Label Approval)
+    getColas: () => api.get<object[]>('/api/compliance/colas'),
+    createCola: (body: object) => api.post<object>('/api/compliance/colas', body),
+    updateCola: (id: string, body: object) => api.put<object>(`/api/compliance/colas/${id}`, body),
+    deleteCola: (id: string) => api.delete<{deleted: boolean}>(`/api/compliance/colas/${id}`),
 
     // Import
     importRows: (body: {entity_type: string; rows: object[]}) => api.post<{imported: number; errors: object[]; total_rows: number}>('/api/compliance/import', body),

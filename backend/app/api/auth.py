@@ -265,6 +265,7 @@ async def gmail_disconnect(user: dict = Depends(get_current_user)):
 class LoginRequest(BaseModel):
     email: str
     password: str
+    totp_code: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -286,7 +287,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
-            .select("id, company_id, role, password_hash, is_active")
+            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret")
             .eq("email", body.email.lower().strip())
             .execute()
         )
@@ -301,6 +302,29 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
     user = users[0]
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Account disabled")
+
+    # ── 2FA enforcement ──────────────────────────────────────────────────────
+    if user.get("totp_enabled") and user.get("totp_secret"):
+        if not body.totp_code:
+            # Password correct but 2FA required — return a short-lived pre-auth
+            # token so the frontend can prompt for TOTP without re-sending password.
+            from datetime import timedelta
+            pre_auth = create_access_token(
+                {"sub": user["id"], "scope": "2fa_pending"},
+                expires_delta=timedelta(minutes=5),
+            )
+            return {
+                "requires_2fa": True,
+                "pre_auth_token": pre_auth,
+            }
+        # TOTP code supplied — verify it
+        try:
+            secret = decrypt(user["totp_secret"], settings.secret_key)
+        except Exception:
+            raise HTTPException(status_code=500, detail="2FA configuration error")
+        import pyotp
+        if not pyotp.TOTP(secret).verify(body.totp_code, valid_window=1):
+            raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
     token = create_access_token({
         "sub": user["id"],

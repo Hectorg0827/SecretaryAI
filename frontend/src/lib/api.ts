@@ -229,7 +229,8 @@ export const api = {
   post:   <T>(path: string, body: unknown) => request<T>('POST',   path, body),
   patch:  <T>(path: string, body: unknown) => request<T>('PATCH',  path, body),
   put:    <T>(path: string, body: unknown) => request<T>('PUT',    path, body),
-  delete: <T>(path: string)               => request<T>('DELETE', path),
+  delete:         <T>(path: string)               => request<T>('DELETE', path),
+  deleteWithBody: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
 
   dashboard: {
     summary:  ()          => api.get<DashboardSummary>('/api/dashboard/summary'),

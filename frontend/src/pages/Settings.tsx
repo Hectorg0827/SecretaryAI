@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
-  Settings as SettingsIcon, Database, Mail, Package, Zap,
-  Check, AlertTriangle, Loader2, X, ExternalLink,
+  Settings as SettingsIcon, Database, Mail, Package, Zap, ShieldCheck,
+  Check, AlertTriangle, Loader2, X, ExternalLink, Copy,
 } from 'lucide-react';
 import { api, IntegrationsResponse } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -10,11 +10,194 @@ import toast from 'react-hot-toast';
 interface Section { id: string; label: string; icon: React.ElementType; }
 
 const SECTIONS: Section[] = [
-  { id: 'integrations', label: 'Integrations',    icon: Database },
-  { id: 'email',        label: 'Email Settings',   icon: Mail     },
-  { id: 'inventory',    label: 'Inventory Alerts', icon: Package  },
-  { id: 'agent',        label: 'Desktop Agent',    icon: Zap      },
+  { id: 'integrations', label: 'Integrations',    icon: Database     },
+  { id: 'email',        label: 'Email Settings',   icon: Mail         },
+  { id: 'inventory',    label: 'Inventory Alerts', icon: Package      },
+  { id: 'agent',        label: 'Desktop Agent',    icon: Zap          },
+  { id: 'security',     label: 'Security',         icon: ShieldCheck  },
 ];
+
+// ─── Two-Factor Authentication section ────────────────────────────────────────
+
+function TwoFASection() {
+  type Step = 'idle' | 'setup' | 'verify' | 'enabled';
+
+  const [step,     setStep]     = useState<Step>('idle');
+  const [secret,   setSecret]   = useState('');
+  const [qrUrl,    setQrUrl]    = useState('');
+  const [code,     setCode]     = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [enabled,  setEnabled]  = useState(false);
+  const [disCode,  setDisCode]  = useState('');
+  const [disOpen,  setDisOpen]  = useState(false);
+
+  // Start 2FA setup — request a new TOTP secret from the backend
+  const startSetup = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post<{ secret: string; otpauth_url: string }>('/auth/2fa/setup', {});
+      setSecret(res.secret);
+      setQrUrl(res.otpauth_url);
+      setStep('setup');
+    } catch {
+      toast.error('Could not start 2FA setup. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verify the TOTP code and activate 2FA
+  const verifyCode = async () => {
+    if (code.length !== 6) return;
+    setLoading(true);
+    try {
+      await api.post('/auth/2fa/verify', { totp_code: code });
+      setEnabled(true);
+      setStep('enabled');
+      setCode('');
+      toast.success('Two-factor authentication enabled.');
+    } catch {
+      toast.error('Invalid code. Try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Disable 2FA after verifying identity
+  const disable2FA = async () => {
+    if (disCode.length !== 6) return;
+    setLoading(true);
+    try {
+      await api.deleteWithBody('/auth/2fa/disable', { totp_code: disCode });
+      setEnabled(false);
+      setStep('idle');
+      setDisCode('');
+      setDisOpen(false);
+      toast.success('Two-factor authentication disabled.');
+    } catch {
+      toast.error('Invalid code. Could not disable 2FA.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copySecret = () => {
+    navigator.clipboard.writeText(secret);
+    toast.success('Secret copied to clipboard');
+  };
+
+  return (
+    <div className="space-y-0">
+      <SettingRow label="Two-Factor Authentication" description="Require a time-based one-time code in addition to your password.">
+        {step === 'idle' && !enabled && (
+          <button
+            onClick={startSetup}
+            disabled={loading}
+            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {loading && <Loader2 size={11} className="animate-spin" />}
+            Enable
+          </button>
+        )}
+        {enabled && (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
+              <Check size={12} /> Active
+            </span>
+            <button
+              onClick={() => setDisOpen(true)}
+              className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors"
+            >
+              Disable
+            </button>
+          </div>
+        )}
+      </SettingRow>
+
+      {/* Step: show QR + secret */}
+      {step === 'setup' && (
+        <div className="py-5 space-y-4 border-b border-slate-100">
+          <p className="text-sm text-slate-600">
+            Scan this QR code with your authenticator app (e.g. Google Authenticator or Authy), then enter the 6-digit code below to confirm.
+          </p>
+
+          {/* QR code rendered as a link to an online renderer to keep bundle size down */}
+          <div className="flex items-center gap-4">
+            <div className="w-32 h-32 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 flex-shrink-0">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrUrl)}`}
+                alt="2FA QR code"
+                className="w-28 h-28 rounded"
+              />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-500 mb-1">Or enter this secret manually:</p>
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <code className="text-xs font-mono text-slate-700 break-all">{secret}</code>
+                <button onClick={copySecret} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
+                  <Copy size={13} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="000000"
+              className="w-32 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 font-mono text-center tracking-widest"
+            />
+            <button
+              onClick={verifyCode}
+              disabled={loading || code.length !== 6}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            >
+              {loading && <Loader2 size={13} className="animate-spin" />}
+              Verify & activate
+            </button>
+            <button onClick={() => setStep('idle')} className="text-xs text-slate-400 hover:text-slate-600 px-2">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Disable confirmation */}
+      {disOpen && (
+        <div className="py-5 border-b border-slate-100 space-y-3">
+          <p className="text-sm text-slate-600">Enter the 6-digit code from your authenticator app to confirm.</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={disCode}
+              onChange={(e) => setDisCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="000000"
+              className="w-32 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 font-mono text-center tracking-widest"
+              autoFocus
+            />
+            <button
+              onClick={disable2FA}
+              disabled={loading || disCode.length !== 6}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            >
+              {loading && <Loader2 size={13} className="animate-spin" />}
+              Disable 2FA
+            </button>
+            <button onClick={() => { setDisOpen(false); setDisCode(''); }} className="text-xs text-slate-400 hover:text-slate-600 px-2">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -540,7 +723,11 @@ export function Settings() {
             )}
           </div>
 
-          {active !== 'integrations' && (
+          {active === 'security' && (
+            <TwoFASection />
+          )}
+
+          {active !== 'integrations' && active !== 'security' && (
             <div className="mt-5 flex justify-end">
               <button
                 onClick={() => toast.success('Settings saved')}

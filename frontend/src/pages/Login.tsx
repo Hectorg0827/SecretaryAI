@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Zap, Loader2, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
 
@@ -154,6 +154,14 @@ export function Login() {
           {!needs2fa && (
             <p className="text-xs text-slate-400 text-center mt-6">
               Forgot your password? Contact your account owner.
+            </p>
+          )}
+          {!needs2fa && (
+            <p className="text-xs text-slate-400 text-center mt-3">
+              New to SecretaryAI?{' '}
+              <Link to="/register" className="text-blue-600 hover:underline font-medium">
+                Create an account
+              </Link>
             </p>
           )}
         </div>

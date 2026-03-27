@@ -6,6 +6,10 @@ GET  /auth/qbo/callback      → exchange code, store encrypted tokens, redirect
 DELETE /auth/qbo/disconnect  → revoke token, clear DB fields
 POST /auth/login             → local email/password login, returns JWT
 POST /auth/refresh           → refresh JWT
+POST /auth/register          → create company + owner user, returns JWT
+POST /auth/2fa/setup         → generate TOTP secret, store pending in Redis
+POST /auth/2fa/verify        → verify TOTP code, enable 2FA in DB
+DELETE /auth/2fa/disable     → verify code, disable 2FA in DB
 """
 import secrets
 import logging
@@ -24,7 +28,7 @@ from app.auth.oauth import (
 from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password, revoke_token
 from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
-from app.utils.encryption import encrypt
+from app.utils.encryption import encrypt, decrypt
 from app.utils.rate_limiter import login_limiter, require_rate_limit
 
 log = logging.getLogger(__name__)
@@ -389,6 +393,260 @@ async def get_me(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
 
     return result.data[0]
+
+
+# ─── Registration ─────────────────────────────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    company_name: str
+    email: str
+    password: str
+    full_name: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+            raise ValueError("Invalid email address")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not re.search(r'[A-Za-z]', v):
+            raise ValueError("Password must contain at least one letter")
+        if not re.search(r'[0-9]', v):
+            raise ValueError("Password must contain at least one number")
+        return v
+
+
+@router.post("/register", status_code=201)
+async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_limiter))):
+    """
+    Create a new company and owner user, then return a JWT so the user is
+    immediately logged in.
+    """
+    from supabase import create_client
+    db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+    # Check email uniqueness
+    try:
+        existing = (
+            db.table("users")
+            .select("id")
+            .eq("email", body.email)
+            .execute()
+        )
+    except Exception as exc:
+        log.error("Register email-check DB query failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if existing.data:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    # Create company
+    try:
+        company_result = (
+            db.table("companies")
+            .insert({"name": body.company_name})
+            .execute()
+        )
+    except Exception as exc:
+        log.error("Register company insert failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not company_result.data:
+        log.error("Register company insert returned no data")
+        raise HTTPException(status_code=500, detail="Failed to create company")
+
+    company_id = company_result.data[0]["id"]
+
+    # Create user
+    user_payload: dict = {
+        "email": body.email,
+        "password_hash": hash_password(body.password),
+        "role": "owner",
+        "company_id": company_id,
+        "is_active": True,
+    }
+    if body.full_name:
+        user_payload["name"] = body.full_name
+
+    try:
+        user_result = (
+            db.table("users")
+            .insert(user_payload)
+            .execute()
+        )
+    except Exception as exc:
+        log.error("Register user insert failed: %s", exc)
+        # Attempt to clean up orphaned company row
+        try:
+            db.table("companies").delete().eq("id", company_id).execute()
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not user_result.data:
+        log.error("Register user insert returned no data")
+        raise HTTPException(status_code=500, detail="Failed to create user")
+
+    user = user_result.data[0]
+    token = create_access_token({
+        "sub": user["id"],
+        "company_id": company_id,
+        "role": "owner",
+    })
+    log.info("New owner registered: user=%s company=%s", user["id"], company_id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "company_id": company_id,
+        "role": "owner",
+    }
+
+
+# ─── Two-factor authentication ────────────────────────────────────────────────
+
+class TwoFACodeRequest(BaseModel):
+    code: str
+
+
+@router.post("/2fa/setup")
+async def twofa_setup(user: dict = Depends(get_current_user)):
+    """
+    Generate a TOTP secret for the authenticated user and store it in Redis
+    pending verification.  Returns the secret and an otpauth:// URL for QR
+    code generation.  Does NOT persist to DB until /2fa/verify is called.
+    """
+    import pyotp
+
+    secret = pyotp.random_base32()
+    user_id = user["sub"]
+
+    # Fetch user email for the otpauth URL label
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        result = db.table("users").select("email").eq("id", user_id).execute()
+    except Exception as exc:
+        log.error("2FA setup DB query failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    email = result.data[0]["email"]
+
+    # Store pending secret in Redis with 10-minute TTL
+    try:
+        r = _redis()
+        r.setex(f"2fa_pending:{user_id}", 600, secret)
+    except Exception as exc:
+        log.error("2FA setup Redis write failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    otpauth_url = f"otpauth://totp/SecretaryAI:{email}?secret={secret}&issuer=SecretaryAI"
+    return {"secret": secret, "otpauth_url": otpauth_url}
+
+
+@router.post("/2fa/verify")
+async def twofa_verify(body: TwoFACodeRequest, user: dict = Depends(get_current_user)):
+    """
+    Verify a TOTP code against the pending secret stored in Redis.
+    On success, saves the encrypted secret to the DB and enables 2FA.
+    """
+    import pyotp
+
+    user_id = user["sub"]
+
+    # Retrieve pending secret from Redis
+    try:
+        r = _redis()
+        secret = r.get(f"2fa_pending:{user_id}")
+    except Exception as exc:
+        log.error("2FA verify Redis read failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not secret:
+        raise HTTPException(status_code=400, detail="No pending 2FA setup found; call /2fa/setup first")
+
+    if not pyotp.TOTP(secret).verify(body.code):
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    # Persist encrypted secret and enable 2FA
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        db.table("users").update({
+            "totp_secret": encrypt(secret, settings.secret_key),
+            "totp_enabled": True,
+        }).eq("id", user_id).execute()
+    except Exception as exc:
+        log.error("2FA verify DB update failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    # Clean up pending Redis key
+    try:
+        r = _redis()
+        r.delete(f"2fa_pending:{user_id}")
+    except Exception as exc:
+        log.warning("2FA verify Redis cleanup failed for user %s: %s", user_id, exc)
+
+    log.info("2FA enabled for user %s", user_id)
+    return {"enabled": True}
+
+
+@router.delete("/2fa/disable")
+async def twofa_disable(body: TwoFACodeRequest, user: dict = Depends(get_current_user)):
+    """
+    Disable 2FA for the authenticated user after verifying the current TOTP code.
+    """
+    import pyotp
+
+    user_id = user["sub"]
+
+    # Fetch current encrypted TOTP secret from DB
+    try:
+        from supabase import create_client
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+        result = (
+            db.table("users")
+            .select("totp_secret, totp_enabled")
+            .eq("id", user_id)
+            .execute()
+        )
+    except Exception as exc:
+        log.error("2FA disable DB query failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    row = result.data[0]
+    if not row.get("totp_enabled") or not row.get("totp_secret"):
+        raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
+
+    secret = decrypt(row["totp_secret"], settings.secret_key)
+
+    if not pyotp.TOTP(secret).verify(body.code):
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    # Disable 2FA in DB
+    try:
+        db.table("users").update({
+            "totp_enabled": False,
+            "totp_secret": None,
+        }).eq("id", user_id).execute()
+    except Exception as exc:
+        log.error("2FA disable DB update failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    log.info("2FA disabled for user %s", user_id)
+    return {"enabled": False}
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -22,6 +22,15 @@ from app.computer_use.safety import ComputerUseSafety
 log = logging.getLogger(__name__)
 settings = get_settings()
 
+# Sentinel returned when a COMMIT action is blocked pending approval
+class PolicyBlockedError(Exception):
+    """Raised when PolicyEngine denies or requires approval for a CU action."""
+    def __init__(self, effect: str, rule_name: str, proposal_id: str | None = None):
+        self.effect = effect
+        self.rule_name = rule_name
+        self.proposal_id = proposal_id
+        super().__init__(f"PolicyEngine blocked action: effect={effect} rule={rule_name}")
+
 # Maximum steps per task (prevents infinite loops)
 MAX_STEPS = 50
 # Seconds to wait between actions (give the UI time to react)
@@ -44,10 +53,11 @@ class ComputerUseEngine:
     - ComputerUseSafety checks every action before it runs
     """
 
-    def __init__(self, company_config: dict):
+    def __init__(self, company_config: dict, db=None):
         self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.company_config = company_config
         self.safety = ComputerUseSafety(company_config)
+        self._db = db
 
     # ------------------------------------------------------------------
     # Public API
@@ -192,22 +202,53 @@ class ComputerUseEngine:
         self,
         app_name: str,
         action_description: str,
-        requires_approval: bool = True,
+        requested_by: str = "system",
+        amount=None,
     ) -> dict:
         """
         Perform an action (not just read) in an application.
-        ALWAYS requires autonomy-engine approval before calling this.
+        PolicyEngine is consulted before any COMMIT proceeds.
+        Raises PolicyBlockedError if the policy denies or requires approval.
         """
-        # This is identical flow but the prompt emphasizes DOING, not just reading
+        company_id = self.company_config.get("id", "unknown")
+
+        # Evaluate policy before touching the screen
+        if self._db:
+            from app.domain.policy import PolicyEngine
+            from app.domain.contracts import ActionProposal, ActionClass
+
+            proposal = ActionProposal(
+                action_type="computer_use_action",
+                action_class=ActionClass.COMMIT,
+                description=f"Computer-use action in {app_name}: {action_description}",
+                company_id=company_id,
+                requested_by=requested_by,
+                amount=amount,
+            )
+            engine = PolicyEngine(company_id=company_id, db=self._db)
+            decision = await engine.evaluate(proposal)
+
+            await self._audit("computer_use_policy_check", {
+                "app": app_name,
+                "action": action_description,
+                "effect": decision.effect,
+                "rule": decision.rule_name,
+            })
+
+            if decision.effect in ("deny", "require_approval"):
+                raise PolicyBlockedError(
+                    effect=decision.effect,
+                    rule_name=decision.rule_name,
+                )
+
         await self._audit("computer_use_action_start", {
             "app": app_name,
             "action": action_description,
-            "pre_approved": not requires_approval,
         })
 
         return await self.extract_data(
             app_name=app_name,
-            task=f"[ACTION TASK — user has approved this]\n{action_description}",
+            task=f"[ACTION TASK — policy approved]\n{action_description}",
         )
 
     # ------------------------------------------------------------------

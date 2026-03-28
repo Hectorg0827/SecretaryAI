@@ -8,13 +8,15 @@ Priority order (configured per capability):
   COMPUTER_USE  → vision-based last resort
 
 For COMMIT operations: never auto-escalate past API without human approval.
-Every attempt is logged to access_router_log.
+Every attempt is logged to access_router_log with confidence score.
 """
 import logging
 import time
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+from app.domain.data_result import DataResult, Confidence
+from app.domain.contracts import DataPath
 
 log = logging.getLogger(__name__)
 
@@ -27,13 +29,23 @@ class AccessPath(Enum):
     COMPUTER_USE = "computer_use"
 
 
-@dataclass
-class RouteResult:
-    path_used: AccessPath
-    data: dict
-    fallback_used: bool = False
-    error_path: Optional[AccessPath] = None
+# Confidence score per access path
+_PATH_CONFIDENCE: dict[AccessPath, int] = {
+    AccessPath.API: Confidence.API,
+    AccessPath.PLAYWRIGHT: Confidence.BROWSER,
+    AccessPath.FILE_INGESTION: Confidence.FILE_FRESH,
+    AccessPath.WINDOWS_UI: Confidence.COMPUTER_USE,
+    AccessPath.COMPUTER_USE: Confidence.COMPUTER_USE,
+}
 
+# Map AccessPath → DataPath (domain contract)
+_PATH_TO_DATAPATH: dict[AccessPath, DataPath] = {
+    AccessPath.API: DataPath.API,
+    AccessPath.PLAYWRIGHT: DataPath.BROWSER,
+    AccessPath.FILE_INGESTION: DataPath.FILE,
+    AccessPath.WINDOWS_UI: DataPath.COMPUTER_USE,
+    AccessPath.COMPUTER_USE: DataPath.COMPUTER_USE,
+}
 
 # Ordered fallback chains per capability
 _PATH_CHAINS: dict[str, list[AccessPath]] = {
@@ -61,16 +73,17 @@ class AccessRouter:
         capability: str,
         params: dict,
         operation_type: str = "read",
-    ) -> RouteResult:
+        correlation_id: Optional[str] = None,
+    ) -> DataResult:
         """
-        Try each path in priority order and return the first successful result.
+        Try each path in priority order and return a DataResult from the first success.
         For COMMIT operations escalated past API, stop and raise requiring approval.
         """
         chain = _PATH_CHAINS.get(capability, [AccessPath.API, AccessPath.COMPUTER_USE])
         first_error: Optional[AccessPath] = None
 
         for i, path in enumerate(chain):
-            # COMMIT escalation guard
+            # COMMIT escalation guard — never auto-promote to a less reliable path
             if operation_type == "commit" and i > 0 and path != AccessPath.API:
                 log.warning(
                     "AccessRouter: COMMIT for %s would require escalation to %s — requiring approval",
@@ -78,16 +91,21 @@ class AccessRouter:
                 )
                 raise CommitRequiresApprovalError(capability, path)
 
+            data_path = _PATH_TO_DATAPATH[path]
+            confidence = _PATH_CONFIDENCE[path]
+
             start = time.monotonic()
             try:
                 data = await self._try_path(path, capability, params)
                 duration_ms = int((time.monotonic() - start) * 1000)
-                self._log(capability, operation_type, path, True, None, duration_ms, i > 0)
-                return RouteResult(
-                    path_used=path,
+                self._log(capability, operation_type, path, True, None, duration_ms, i > 0, confidence, correlation_id)
+                return DataResult.ok(
                     data=data,
-                    fallback_used=(i > 0),
-                    error_path=first_error,
+                    source=data_path,
+                    confidence=confidence,
+                    capability=capability,
+                    correlation_id=correlation_id,
+                    metadata={"fallback_used": i > 0, "duration_ms": duration_ms},
                 )
             except Exception as exc:
                 duration_ms = int((time.monotonic() - start) * 1000)
@@ -97,9 +115,14 @@ class AccessRouter:
                     "AccessRouter: %s via %s failed (%s), trying next path",
                     capability, path.value, exc,
                 )
-                self._log(capability, operation_type, path, False, str(exc), duration_ms, False)
+                self._log(capability, operation_type, path, False, str(exc), duration_ms, False, 0, correlation_id)
 
-        raise AllPathsFailedError(capability, chain)
+        return DataResult.from_error(
+            error=f"All paths failed for '{capability}': {[p.value for p in chain]}",
+            source=DataPath.UNKNOWN,
+            capability=capability,
+            correlation_id=correlation_id,
+        )
 
     # ------------------------------------------------------------------
     # Path handlers
@@ -212,7 +235,7 @@ class AccessRouter:
 
     async def _try_computer_use(self, capability: str, params: dict) -> dict:
         from app.computer_use.engine import ComputerUseEngine
-        engine = ComputerUseEngine(company_config=self._config)
+        engine = ComputerUseEngine(company_config=self._config, db=self._db)
 
         task_map = {
             "inventory": "Get current inventory quantities for all products",
@@ -239,6 +262,8 @@ class AccessRouter:
         error_msg: Optional[str],
         duration_ms: int,
         fallback_used: bool,
+        confidence: int,
+        correlation_id: Optional[str],
     ) -> None:
         try:
             self._db.table("access_router_log").insert(
@@ -251,6 +276,8 @@ class AccessRouter:
                     "fallback_used": fallback_used,
                     "error_msg": error_msg,
                     "duration_ms": duration_ms,
+                    "confidence": confidence,
+                    "correlation_id": correlation_id,
                 }
             ).execute()
         except Exception as exc:

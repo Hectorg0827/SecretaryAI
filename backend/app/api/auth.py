@@ -588,6 +588,13 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         raise HTTPException(status_code=500, detail="Failed to create user")
 
     user = user_result.data[0]
+
+    # Seed per-company defaults (non-fatal — log and continue if fails)
+    try:
+        await _seed_company_defaults(company_id, db)
+    except Exception as exc:
+        log.warning("Failed to seed company defaults for %s (non-fatal): %s", company_id, exc)
+
     token = create_access_token({
         "sub": user["id"],
         "company_id": company_id,
@@ -600,6 +607,30 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         "company_id": company_id,
         "role": "owner",
     }
+
+
+async def _seed_company_defaults(company_id: str, db) -> None:
+    """
+    Idempotent — seeds company_features flags and default policy_rules for a
+    newly registered company. Safe to call multiple times.
+    """
+    # 1. company_features — per-tenant feature flags
+    db.table("company_features").upsert(
+        {
+            "company_id": company_id,
+            "computer_use_enabled": False,
+            "browser_auto_enabled": True,
+            "require_approval_above": "500.00",
+            "api_auto_sync": True,
+            "file_ingestion_enabled": True,
+        },
+        on_conflict="company_id",
+    ).execute()
+
+    # 2. policy_rules — default allow/deny rules
+    from app.domain.policy import PolicyEngine
+    engine = PolicyEngine(company_id=company_id, db=db)
+    await engine.seed_defaults()
 
 
 # ─── Two-factor authentication ────────────────────────────────────────────────

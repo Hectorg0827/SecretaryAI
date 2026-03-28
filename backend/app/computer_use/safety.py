@@ -77,8 +77,9 @@ class ComputerUseSafety:
     MAX_ACTIONS_PER_TASK = 50
     MAX_TASK_SECONDS = 300
 
-    def __init__(self, company_config: dict):
+    def __init__(self, company_config: dict, db=None):
         self.company_config = company_config
+        self._db = db
         # Customer-specific additional blocked apps
         extra_blocked = company_config.get("blocked_apps", [])
         self._blocked = self.BLOCKED_APPS | frozenset(a.lower() for a in extra_blocked)

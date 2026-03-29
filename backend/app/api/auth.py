@@ -400,6 +400,20 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         "company_id": user["company_id"],
         "role": user["role"],
     })
+
+    # Audit successful login (non-fatal)
+    try:
+        from app.utils.audit import write_audit_event
+        write_audit_event(
+            db,
+            company_id=user["company_id"],
+            event_type="user_login",
+            actor_id=user["id"],
+            metadata={"role": user["role"]},
+        )
+    except Exception:
+        pass
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -601,6 +615,20 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         "role": "owner",
     })
     log.info("New owner registered: user=%s company=%s", user["id"], company_id)
+
+    # Audit registration (non-fatal)
+    try:
+        from app.utils.audit import write_audit_event
+        write_audit_event(
+            db,
+            company_id=company_id,
+            event_type="company_registered",
+            actor_id=user["id"],
+            metadata={"role": "owner"},
+        )
+    except Exception:
+        pass
+
     return {
         "access_token": token,
         "token_type": "bearer",

@@ -27,6 +27,8 @@ app = Celery(
         "tasks.proactive_insights",
         "tasks.compliance_alerts",
         "tasks.qbo_token_refresh",
+        "tasks.workflow_reaper",
+        "tasks.connector_health",
     ],
 )
 
@@ -102,5 +104,15 @@ app.conf.beat_schedule = {
     "qbo-token-refresh": {
         "task": "tasks.qbo_token_refresh.refresh_expiring_tokens",
         "schedule": crontab(minute="*/50"),
+    },
+    # Workflow reaper — every 30 minutes, fails stuck runs
+    "workflow-reaper": {
+        "task": "tasks.workflow_reaper.reap_stuck_runs",
+        "schedule": crontab(minute="*/30"),
+    },
+    # Connector health — every 5 minutes, marks stale connectors
+    "connector-health": {
+        "task": "tasks.connector_health.check_all",
+        "schedule": crontab(minute="*/5"),
     },
 }

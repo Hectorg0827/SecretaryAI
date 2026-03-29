@@ -275,6 +275,11 @@ async def connector_heartbeat(
 
 # ─── Task polling ─────────────────────────────────────────────────────────────
 
+# Re-delivery window: if a task was dispatched but no result received within
+# this many seconds, it becomes eligible for re-dispatch to another connector.
+_TASK_REDELIVERY_SECONDS = 300  # 5 minutes
+
+
 @router.get("/tasks", response_model=FetchTaskResponse)
 async def fetch_connector_tasks(
     max_tasks: Annotated[int, Query(ge=1, le=10)] = 1,
@@ -283,30 +288,55 @@ async def fetch_connector_tasks(
 ):
     """
     Connector polls for pending tasks.
+
     Returns up to max_tasks tasks and marks them as 'dispatched'.
+
+    Idempotency: a task dispatched more than _TASK_REDELIVERY_SECONDS ago without
+    a result is treated as 'pending' again, preventing permanent loss on connector
+    crash.  A task is never returned twice within the redelivery window.
     """
     now = datetime.now(timezone.utc)
+    redelivery_cutoff = (now - timedelta(seconds=_TASK_REDELIVERY_SECONDS)).isoformat()
+
     tasks_out = []
     try:
+        # Fetch tasks that are either:
+        #   a) status='pending'  (never dispatched), OR
+        #   b) status='dispatched' AND dispatched_at < redelivery_cutoff
+        #      (dispatched but no result within the window — eligible for re-dispatch)
         result = (
             db.table("connector_tasks")
             .select("*")
             .eq("company_id", connector["company_id"])
             .eq("connector_type", connector["connector_type"])
-            .eq("status", "pending")
+            .in_("status", ["pending", "dispatched"])
             .order("priority", desc=False)
             .order("issued_at", desc=False)
-            .limit(max_tasks)
+            .limit(max_tasks * 5)  # over-fetch to filter in Python
             .execute()
         )
         rows = result.data or []
+
         for row in rows:
-            # Mark dispatched
+            if len(tasks_out) >= max_tasks:
+                break
+            # Skip recently-dispatched tasks (still within redelivery window)
+            if (
+                row["status"] == "dispatched"
+                and row.get("dispatched_at")
+                and row["dispatched_at"] >= redelivery_cutoff
+            ):
+                continue
+
+            # Atomically mark dispatched — only this connector gets this task
             db.table("connector_tasks").update({
                 "status": "dispatched",
                 "dispatched_at": now.isoformat(),
-            }).eq("id", row["id"]).execute()
+                "dispatcher_id": connector["id"],
+            }).eq("id", row["id"]).in_("status", ["pending", "dispatched"]).execute()
+
             tasks_out.append(row)
+
     except Exception as exc:
         log.warning("Task fetch failed for connector %s: %s", connector["id"], exc)
 

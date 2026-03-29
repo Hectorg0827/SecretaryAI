@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db, get_adapter
 from app.auth.rbac import get_current_user, require_permission
 from app.actions.approval_queue import ApprovalQueue
+from app.utils.audit import write_audit_event
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -99,6 +100,30 @@ async def approve_draft(
     if draft:
         await _execute_approved_draft(draft, adapter)
 
+    # Write audit event
+    write_audit_event(
+        db,
+        company_id=user["company_id"],
+        event_type="draft_approved",
+        actor_id=user["sub"],
+        approved_by=user["sub"],
+        action_class=draft.get("action_type"),
+        metadata={"draft_id": draft_id, "action_type": draft.get("action_type")},
+    )
+
+    # Resume linked workflow run if present
+    workflow_run_id = draft.get("workflow_run_id")
+    if workflow_run_id:
+        try:
+            from app.workflows.engine import WorkflowEngine
+            wf_engine = WorkflowEngine(db, user["company_id"])
+            wf_engine.resume_after_approval(
+                workflow_run_id, approved=True, approved_by=user["sub"]
+            )
+            log.info("Resumed workflow run %s after draft %s approved", workflow_run_id, draft_id)
+        except Exception as exc:
+            log.warning("Failed to resume workflow %s after approval: %s", workflow_run_id, exc)
+
     return result
 
 
@@ -111,11 +136,41 @@ async def reject_draft(
 ):
     """Reject a pending draft action."""
     queue = ApprovalQueue(db)
-    return await queue.reject(
+
+    # Fetch draft before rejecting to get workflow_run_id
+    try:
+        draft_result = db.table("drafts").select("*").eq("id", draft_id).execute()
+        draft = draft_result.data[0] if draft_result.data else {}
+    except Exception:
+        draft = {}
+
+    result = await queue.reject(
         draft_id=draft_id,
         reviewed_by=user["sub"],
         reason=body.reason,
     )
+
+    write_audit_event(
+        db,
+        company_id=user["company_id"],
+        event_type="draft_rejected",
+        actor_id=user["sub"],
+        action_class=draft.get("action_type"),
+        metadata={"draft_id": draft_id, "reason": body.reason},
+    )
+
+    # Cancel linked workflow run if present
+    workflow_run_id = draft.get("workflow_run_id")
+    if workflow_run_id:
+        try:
+            from app.workflows.engine import WorkflowEngine
+            wf_engine = WorkflowEngine(db, user["company_id"])
+            wf_engine.resume_after_approval(workflow_run_id, approved=False)
+            log.info("Cancelled workflow run %s after draft %s rejected", workflow_run_id, draft_id)
+        except Exception as exc:
+            log.warning("Failed to cancel workflow %s after rejection: %s", workflow_run_id, exc)
+
+    return result
 
 
 class DraftPORequest(BaseModel):

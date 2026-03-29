@@ -22,9 +22,13 @@ class ApprovalQueue:
         action_type: str,
         content: dict,
         created_by: str = "ai",
+        workflow_run_id: Optional[str] = None,
+        expires_hours: int = 48,
     ) -> str:
         """Add a draft to the approval queue. Returns the draft ID."""
+        from datetime import timedelta
         draft_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
         record = {
             "id": draft_id,
             "company_id": company_id,
@@ -32,8 +36,11 @@ class ApprovalQueue:
             "action_type": action_type,
             "content": content,
             "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=expires_hours)).isoformat(),
         }
+        if workflow_run_id:
+            record["workflow_run_id"] = workflow_run_id
 
         if hasattr(self._db, "table"):
             self._db.table("drafts").insert(record).execute()

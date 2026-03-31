@@ -173,5 +173,7 @@ class Confidence:
     BROWSER      = 75    # Playwright browser scrape
     FILE_FRESH   = 65    # File uploaded today
     FILE_STALE   = 45    # File older than 24 h
-    COMPUTER_USE = 35    # Computer-use OCR — lower accuracy
+    COMPUTER_USE = 35    # Computer-use OCR — lower accuracy (legacy alias)
+    CU_FRESH     = 55    # CU cached result < 15 min old
+    CU_STALE     = 25    # CU cached result 15 min–1 hour old
     UNKNOWN      = 0

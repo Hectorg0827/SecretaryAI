@@ -116,13 +116,17 @@ class TestAccessRouterDataResult:
 
         router = self._make_router(api_error="down")
         router._try_file_ingestion = AsyncMock(side_effect=RuntimeError("no file"))
-        router._try_computer_use = AsyncMock(return_value={"records": []})
+        # Phase 7: CU path now goes through _try_computer_use_isolated which
+        # returns (data, confidence) — mock accordingly.
+        router._try_computer_use_isolated = AsyncMock(
+            return_value=({"records": []}, Confidence.CU_FRESH)
+        )
 
         result = await router.route("inventory", {})
 
         assert result.is_ok is True
         assert result.source == DataPath.COMPUTER_USE
-        assert result.confidence == Confidence.COMPUTER_USE
+        assert result.confidence == Confidence.CU_FRESH
 
 
 # ─── WorkflowEngine policy hooks ──────────────────────────────────────────────

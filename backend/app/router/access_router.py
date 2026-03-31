@@ -220,8 +220,7 @@ class AccessRouter:
             data = await self._try_api(capability, params)
             return data, _PATH_CONFIDENCE[path]
         if path == AccessPath.COMPUTER_USE:
-            data = await self._try_computer_use(capability, params)
-            return data, _PATH_CONFIDENCE[path]
+            return await self._try_computer_use_isolated(capability, params, correlation_id)
         raise ValueError(f"Unhandled path: {path}")
 
     async def _try_api(self, capability: str, params: dict) -> dict:
@@ -338,6 +337,37 @@ class AccessRouter:
 
         except Exception as exc:
             raise RuntimeError(f"File ingestion lookup failed: {exc}") from exc
+
+    async def _try_computer_use_isolated(
+        self,
+        capability: str,
+        params: dict,
+        correlation_id: Optional[str],
+    ) -> tuple[dict, int]:
+        """
+        Non-blocking CU path — checks the cache, enqueues on miss.
+
+        Returns (data, confidence) if a fresh cached result is available.
+        Raises RuntimeError (treated as a path miss by the router) if:
+          - no cached result exists (a job has been enqueued for next time), or
+          - the DB is unavailable.
+
+        This prevents the request path from ever blocking on a live CU session.
+        """
+        from app.services.computer_use_service import ComputerUseService
+        cu = ComputerUseService(self._db, self._company_id)
+        cached = cu.get_or_enqueue(capability, params, correlation_id=correlation_id)
+        if cached is None:
+            raise RuntimeError(
+                f"CU: no cached result for capability={capability}; "
+                "job enqueued for background execution"
+            )
+        data, confidence = cached
+        log.debug(
+            "CU: returning cached result for capability=%s confidence=%d",
+            capability, confidence,
+        )
+        return data, confidence
 
     async def _try_computer_use(self, capability: str, params: dict) -> dict:
         from app.computer_use.engine import ComputerUseEngine

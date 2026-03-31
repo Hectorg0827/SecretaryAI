@@ -30,6 +30,7 @@ app = Celery(
         "tasks.workflow_reaper",
         "tasks.connector_health",
         "tasks.ingestion_scheduler",
+        "tasks.cu_worker",
     ],
 )
 
@@ -120,5 +121,10 @@ app.conf.beat_schedule = {
     "ingestion-scheduler": {
         "task": "tasks.ingestion_scheduler.run",
         "schedule": crontab(minute="*/15"),
+    },
+    # CU worker — every 2 minutes, processes one pending CU job per company
+    "cu-worker": {
+        "task": "tasks.cu_worker.process_pending_jobs",
+        "schedule": crontab(minute="*/2"),
     },
 }

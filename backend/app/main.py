@@ -150,6 +150,8 @@ app.include_router(compliance_router.router,   prefix="/api/compliance",     tag
 from app.api import connectors as connectors_router
 app.include_router(connectors_router.router,   prefix="/api/connectors",     tags=["connectors"])
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
+from app.api import admin as admin_router
+app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
 
 register_error_handlers(app)
 

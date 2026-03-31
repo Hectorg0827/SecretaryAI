@@ -14,6 +14,8 @@ import Work from './pages/Work';
 import { Logistics } from './pages/Logistics';
 import { Compliance } from './pages/Compliance';
 import { Connectors } from './pages/Connectors';
+import { AuditLog } from './pages/AuditLog';
+import { AdminDiag } from './pages/AdminDiag';
 import { useAuth, Role } from './hooks/useAuth';
 
 /** Guard: redirects to /login if no JWT is stored. */
@@ -117,6 +119,22 @@ function AppShell() {
             element={
               <RoleGuard roles={['owner', 'manager']}>
                 <Connectors />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/audit-log"
+            element={
+              <RoleGuard roles={['owner', 'manager']}>
+                <AuditLog />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RoleGuard roles={['owner', 'manager']}>
+                <AdminDiag />
               </RoleGuard>
             }
           />

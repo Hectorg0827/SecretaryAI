@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
@@ -24,6 +24,8 @@ const ALL_NAV_ITEMS = [
   { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/connectors', label: 'Connectors', icon: Server,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/audit-log',  label: 'Audit Log',  icon: Shield,    exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/admin',      label: 'Diagnostics', icon: Activity,  exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
 ] as const;
 

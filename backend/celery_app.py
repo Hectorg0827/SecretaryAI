@@ -29,6 +29,7 @@ app = Celery(
         "tasks.qbo_token_refresh",
         "tasks.workflow_reaper",
         "tasks.connector_health",
+        "tasks.ingestion_scheduler",
     ],
 )
 
@@ -114,5 +115,10 @@ app.conf.beat_schedule = {
     "connector-health": {
         "task": "tasks.connector_health.check_all",
         "schedule": crontab(minute="*/5"),
+    },
+    # Hardened ingestion scheduler — every 15 minutes, dedup-safe
+    "ingestion-scheduler": {
+        "task": "tasks.ingestion_scheduler.run",
+        "schedule": crontab(minute="*/15"),
     },
 }

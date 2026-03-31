@@ -133,3 +133,46 @@ def normalize_inventory_report(rows: list[dict]) -> list[dict]:
 
 def normalize_order_report(rows: list[dict]) -> list[dict]:
     return _normalize_rows(rows, _ORDER_COLUMN_MAP)
+
+
+def parse_file(path: str) -> dict | None:
+    """
+    Parse a supported file and return a result dict ready for ingestion.
+
+    Returns a dict with keys: filename, report_type, rows, raw_text, row_count.
+    Returns None if the file cannot be parsed (unsupported format, read error).
+    """
+    from app.file_ingestion.watcher import SUPPORTED_EXTENSIONS
+    p = Path(path)
+    suffix = p.suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        return None
+
+    try:
+        rows: list[dict] = []
+        raw_text: str = ""
+        if suffix == ".csv":
+            rows = parse_csv(path)
+        elif suffix in {".xlsx", ".xls"}:
+            rows = parse_excel(path)
+        elif suffix == ".pdf":
+            raw_text = parse_pdf_text(path)
+
+        headers = list(rows[0].keys()) if rows else []
+        report_type = detect_report_type(p.name, headers)
+
+        if report_type == "inventory":
+            rows = normalize_inventory_report(rows)
+        elif report_type == "orders":
+            rows = normalize_order_report(rows)
+
+        return {
+            "filename": p.name,
+            "report_type": report_type,
+            "rows": rows,
+            "raw_text": raw_text,
+            "row_count": len(rows),
+        }
+    except Exception as exc:
+        log.warning("parse_file: failed for %s: %s", path, exc)
+        return None

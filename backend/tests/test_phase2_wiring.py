@@ -63,7 +63,10 @@ class TestAccessRouterDataResult:
         router = self._make_router()
         # Make API fail, file_ingestion succeed
         router._try_api = AsyncMock(side_effect=RuntimeError("api down"))
-        router._try_file_ingestion = AsyncMock(return_value={"rows": [], "source": "file_ingestion"})
+        # Phase 4: _try_file_ingestion returns (data, confidence) tuple
+        router._try_file_ingestion = AsyncMock(
+            return_value=({"rows": [], "source": "file_ingestion"}, Confidence.FILE_FRESH)
+        )
 
         result = await router.route("inventory", {})
 

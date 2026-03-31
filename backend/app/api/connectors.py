@@ -619,3 +619,86 @@ async def generate_install_secret(
         "warning": "Copy this secret now — it will not be shown again. "
                    "Use it during connector installation.",
     }
+
+
+# ─── Task dispatch (cloud → connector queue) ─────────────────────────────────
+
+class DispatchTaskRequest(BaseModel):
+    task_type: str
+    parameters: dict = {}
+    priority: int = 5
+    timeout_seconds: int = 300
+    correlation_id: str | None = None
+
+
+@router.post("/dispatch-task")
+async def dispatch_task(
+    body: DispatchTaskRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Enqueue a task for the company's connector to execute.
+    The connector will pick it up on its next task poll (within 30s).
+
+    Returns the task_id that can be used to query the result via
+    GET /api/connectors/task-result/{task_id}.
+    """
+    import uuid
+    from app.domain.connector_protocol import QB_DESKTOP_CAPABILITIES
+
+    company_id = user["company_id"]
+
+    # Verify connector exists and is connected (or stale — still try)
+    try:
+        reg_result = (
+            db.table("connector_registrations")
+            .select("id, connector_type, status")
+            .eq("company_id", company_id)
+            .in_("status", ["connected", "stale"])
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        log.error("dispatch_task: connector lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    if not reg_result.data:
+        raise HTTPException(
+            status_code=404,
+            detail="No connected connector found for this company. "
+                   "Please install and start the QB Desktop connector.",
+        )
+
+    connector = reg_result.data[0]
+    task_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        db.table("connector_tasks").insert({
+            "id": task_id,
+            "task_id": task_id,
+            "company_id": company_id,
+            "connector_type": connector["connector_type"],
+            "task_type": body.task_type,
+            "parameters": body.parameters,
+            "status": "pending",
+            "priority": body.priority,
+            "timeout_seconds": body.timeout_seconds,
+            "correlation_id": body.correlation_id,
+            "issued_at": now,
+        }).execute()
+    except Exception as exc:
+        log.error("dispatch_task: insert failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    log.info(
+        "Task dispatched: type=%s task_id=%s company=%s",
+        body.task_type, task_id, company_id,
+    )
+    return {
+        "task_id": task_id,
+        "status": "pending",
+        "connector_status": connector["status"],
+        "issued_at": now,
+    }

@@ -224,6 +224,29 @@ export interface FederalPermit { id: string; permit_type: string; permit_number:
 
 // ─── API surface ──────────────────────────────────────────────────────────────
 
+export interface ConnectorRegistration {
+  id: string;
+  company_id: string;
+  connector_type: string;
+  connector_id: string;
+  version: string;
+  status: 'connected' | 'stale' | 'error' | 'disconnected';
+  last_heartbeat: string | null;
+  capabilities: string[];
+  registered_at: string;
+}
+
+export interface ConnectorSyncLog {
+  id: string;
+  sync_type: string;
+  entity_type: string;
+  status: string;
+  rows_fetched: number;
+  rows_upserted: number;
+  started_at: string;
+  completed_at: string | null;
+}
+
 export const api = {
   get:    <T>(path: string)               => request<T>('GET',    path),
   post:   <T>(path: string, body: unknown) => request<T>('POST',   path, body),
@@ -231,6 +254,14 @@ export const api = {
   put:    <T>(path: string, body: unknown) => request<T>('PUT',    path, body),
   delete:         <T>(path: string)               => request<T>('DELETE', path),
   deleteWithBody: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
+
+  connectors: {
+    status:              () => api.get<{ connectors: ConnectorRegistration[] }>('/api/connectors/status'),
+    detail:              (id: string) => api.get<{ connector: ConnectorRegistration; sync_logs: ConnectorSyncLog[] }>(`/api/connectors/status/${id}`),
+    generateSecret:      () => api.post<{ install_secret: string; warning: string }>('/api/connectors/generate-install-secret', {}),
+    dispatchTask:        (task_type: string, parameters?: Record<string, unknown>) =>
+                           api.post<{ task_id: string; status: string; issued_at: string }>('/api/connectors/dispatch-task', { task_type, parameters: parameters ?? {} }),
+  },
 
   dashboard: {
     summary:  ()          => api.get<DashboardSummary>('/api/dashboard/summary'),

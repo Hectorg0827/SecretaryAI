@@ -15,9 +15,13 @@ static COMPUTER_USE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Activate Computer Use mode (called when a CU task starts).
 /// Returns false if the user has not granted screen capture permission.
 pub fn activate_computer_use() -> bool {
-    // TODO: Check permission store — user must have granted screen access
-    COMPUTER_USE_ACTIVE.store(true, Ordering::SeqCst);
-    true
+    // Check permission by attempting a silent test capture
+    if _capture_and_encode().is_ok() {
+        COMPUTER_USE_ACTIVE.store(true, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
 }
 
 /// Deactivate Computer Use mode (called when a CU task ends).

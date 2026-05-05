@@ -1,0 +1,1138 @@
+{
+  "company": {
+    "name": "Test Distributor Inc.",
+    "description": "Realistic test distributor for SecretaryAI testing",
+    "industry": "Food Distribution",
+    "generated_date": "2026-05-03"
+  },
+  "customers": [
+    {
+      "qb_id": "CUST-001",
+      "name": "Whole Foods Market",
+      "type": "customer",
+      "email": "purchasing@wholefoods.com",
+      "phone": "(512) 477-4455",
+      "billing_address": {
+        "street": "550 Bowie Street",
+        "city": "Austin",
+        "state": "TX",
+        "postal_code": "78703",
+        "country": "USA"
+      },
+      "shipping_address": {
+        "street": "550 Bowie Street",
+        "city": "Austin",
+        "state": "TX",
+        "postal_code": "78703"
+      },
+      "credit_limit": "50000",
+      "payment_terms": "Net 30",
+      "notes": "Tier-1 retail customer, weekly orders"
+    },
+    {
+      "qb_id": "CUST-002",
+      "name": "Trader Joe's Distribution Center",
+      "type": "customer",
+      "email": "logistics@traderjoes.com",
+      "phone": "(626) 599-3700",
+      "billing_address": {
+        "street": "800 S. Raymond Ave",
+        "city": "Pasadena",
+        "state": "CA",
+        "postal_code": "91105",
+        "country": "USA"
+      },
+      "shipping_address": {
+        "street": "800 S. Raymond Ave",
+        "city": "Pasadena",
+        "state": "CA",
+        "postal_code": "91105"
+      },
+      "credit_limit": "75000",
+      "payment_terms": "Net 30",
+      "notes": "Large-scale regional distributor"
+    },
+    {
+      "qb_id": "CUST-003",
+      "name": "Local Organic Market - Boston",
+      "type": "customer",
+      "email": "orders@localorganic.com",
+      "phone": "(617) 555-0147",
+      "billing_address": {
+        "street": "123 Newbury Street",
+        "city": "Boston",
+        "state": "MA",
+        "postal_code": "02115",
+        "country": "USA"
+      },
+      "shipping_address": {
+        "street": "123 Newbury Street",
+        "city": "Boston",
+        "state": "MA",
+        "postal_code": "02115"
+      },
+      "credit_limit": "25000",
+      "payment_terms": "Net 15",
+      "notes": "Independent grocery chain, 12 locations"
+    },
+    {
+      "qb_id": "CUST-004",
+      "name": "Fresh Express Foods - Miami",
+      "type": "customer",
+      "email": "procurement@freshexpress.com",
+      "phone": "(305) 555-0123",
+      "billing_address": {
+        "street": "456 Biscayne Blvd",
+        "city": "Miami",
+        "state": "FL",
+        "postal_code": "33132",
+        "country": "USA"
+      },
+      "shipping_address": {
+        "street": "456 Biscayne Blvd",
+        "city": "Miami",
+        "state": "FL",
+        "postal_code": "33132"
+      },
+      "credit_limit": "30000",
+      "payment_terms": "Net 30",
+      "notes": "Regional wholesaler, 15 retail partners"
+    },
+    {
+      "qb_id": "CUST-005",
+      "name": "Corner Store Collective",
+      "type": "customer",
+      "email": "admin@cornerstores.com",
+      "phone": "(206) 555-0178",
+      "billing_address": {
+        "street": "789 Pike Place",
+        "city": "Seattle",
+        "state": "WA",
+        "postal_code": "98101",
+        "country": "USA"
+      },
+      "shipping_address": {
+        "street": "789 Pike Place",
+        "city": "Seattle",
+        "state": "WA",
+        "postal_code": "98101"
+      },
+      "credit_limit": "15000",
+      "payment_terms": "Net 7",
+      "notes": "Small independent cooperative"
+    }
+  ],
+  "vendors": [
+    {
+      "qb_id": "VEND-001",
+      "name": "Dole Food Company",
+      "type": "vendor",
+      "email": "orders@dole.com",
+      "phone": "(831) 728-4900",
+      "billing_address": {
+        "street": "1 Dole Drive",
+        "city": "Westlake Village",
+        "state": "CA",
+        "postal_code": "91362",
+        "country": "USA"
+      },
+      "payment_terms": "Net 45",
+      "account_number": "DOLE-5001",
+      "notes": "Primary fruit & vegetable supplier"
+    },
+    {
+      "qb_id": "VEND-002",
+      "name": "ConAgra Foods",
+      "type": "vendor",
+      "email": "b2b@conagrafoods.com",
+      "phone": "(402) 240-4000",
+      "billing_address": {
+        "street": "222 Merchandise Mart",
+        "city": "Chicago",
+        "state": "IL",
+        "postal_code": "60654",
+        "country": "USA"
+      },
+      "payment_terms": "Net 60",
+      "account_number": "CAG-2234",
+      "notes": "Packaged goods distributor"
+    },
+    {
+      "qb_id": "VEND-003",
+      "name": "Fresh Del Monte Produce",
+      "type": "vendor",
+      "email": "sales@freshdelmonte.com",
+      "phone": "(212) 384-8500",
+      "billing_address": {
+        "street": "570 Lexington Avenue",
+        "city": "New York",
+        "state": "NY",
+        "postal_code": "10022",
+        "country": "USA"
+      },
+      "payment_terms": "Net 30",
+      "account_number": "FDM-4456",
+      "notes": "Fresh produce, bananas & melons"
+    },
+    {
+      "qb_id": "VEND-004",
+      "name": "Smucker Company",
+      "type": "vendor",
+      "email": "vendor@smuckers.com",
+      "phone": "(330) 682-3000",
+      "billing_address": {
+        "street": "1 Strawberry Lane",
+        "city": "Orrville",
+        "state": "OH",
+        "postal_code": "44667",
+        "country": "USA"
+      },
+      "payment_terms": "Net 45",
+      "account_number": "SJM-7788",
+      "notes": "Jams, preserves, specialty foods"
+    }
+  ],
+  "inventory": [
+    {
+      "qb_id": "INV-001",
+      "name": "Organic Bananas - Per Pound",
+      "sku": "PROD-001",
+      "description": "Fair-trade organic bananas, premium grade",
+      "unit_of_measure": "lb",
+      "quantity_on_hand": "1240",
+      "reorder_point": "500",
+      "purchase_cost": "0.45",
+      "sales_price": "0.89",
+      "taxable": true,
+      "vendor_id": "VEND-001",
+      "preferred_vendor": "Dole Food Company"
+    },
+    {
+      "qb_id": "INV-002",
+      "name": "Romaine Lettuce - Case",
+      "sku": "PROD-002",
+      "description": "Fresh romaine lettuce, 24 heads per case",
+      "unit_of_measure": "case",
+      "quantity_on_hand": "145",
+      "reorder_point": "50",
+      "purchase_cost": "12.50",
+      "sales_price": "24.99",
+      "taxable": true,
+      "vendor_id": "VEND-001",
+      "preferred_vendor": "Dole Food Company"
+    },
+    {
+      "qb_id": "INV-003",
+      "name": "Broccoli Crowns - Case",
+      "sku": "PROD-003",
+      "description": "Fresh organic broccoli crowns, 12 per case",
+      "unit_of_measure": "case",
+      "quantity_on_hand": "89",
+      "reorder_point": "40",
+      "purchase_cost": "18.00",
+      "sales_price": "34.99",
+      "taxable": true,
+      "vendor_id": "VEND-003",
+      "preferred_vendor": "Fresh Del Monte Produce"
+    },
+    {
+      "qb_id": "INV-004",
+      "name": "Orange Juice - Gallon",
+      "sku": "PROD-004",
+      "description": "100% pure orange juice, 1 gallon jug",
+      "unit_of_measure": "each",
+      "quantity_on_hand": "456",
+      "reorder_point": "200",
+      "purchase_cost": "4.25",
+      "sales_price": "8.99",
+      "taxable": true,
+      "vendor_id": "VEND-003",
+      "preferred_vendor": "Fresh Del Monte Produce"
+    },
+    {
+      "qb_id": "INV-005",
+      "name": "Grape Jelly - 18 oz Jar",
+      "sku": "PROD-005",
+      "description": "Smuckers premium grape jelly",
+      "unit_of_measure": "each",
+      "quantity_on_hand": "678",
+      "reorder_point": "200",
+      "purchase_cost": "1.85",
+      "sales_price": "3.99",
+      "taxable": false,
+      "vendor_id": "VEND-004",
+      "preferred_vendor": "Smucker Company"
+    },
+    {
+      "qb_id": "INV-006",
+      "name": "Peanut Butter - 18 oz Jar",
+      "sku": "PROD-006",
+      "description": "Smuckers creamy peanut butter",
+      "unit_of_measure": "each",
+      "quantity_on_hand": "521",
+      "reorder_point": "150",
+      "purchase_cost": "2.15",
+      "sales_price": "4.49",
+      "taxable": false,
+      "vendor_id": "VEND-004",
+      "preferred_vendor": "Smucker Company"
+    },
+    {
+      "qb_id": "INV-007",
+      "name": "Canned Corn - Case",
+      "sku": "PROD-007",
+      "description": "Whole kernel corn, 24 cans per case",
+      "unit_of_measure": "case",
+      "quantity_on_hand": "234",
+      "reorder_point": "100",
+      "purchase_cost": "8.50",
+      "sales_price": "15.99",
+      "taxable": false,
+      "vendor_id": "VEND-002",
+      "preferred_vendor": "ConAgra Foods"
+    },
+    {
+      "qb_id": "INV-008",
+      "name": "Pasta - 1 lb Box",
+      "sku": "PROD-008",
+      "description": "Premium semolina pasta assorted shapes",
+      "unit_of_measure": "case",
+      "quantity_on_hand": "867",
+      "reorder_point": "300",
+      "purchase_cost": "0.75",
+      "sales_price": "1.49",
+      "taxable": false,
+      "vendor_id": "VEND-002",
+      "preferred_vendor": "ConAgra Foods"
+    }
+  ],
+  "invoices": [
+    {
+      "qb_id": "INV-00001",
+      "customer_id": "CUST-001",
+      "customer_name": "Whole Foods Market",
+      "invoice_date": "2026-04-28",
+      "due_date": "2026-05-28",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "2",
+          "unit_price": "0.89",
+          "amount": "1.78"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "2",
+          "unit_price": "24.99",
+          "amount": "49.98"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "2",
+          "unit_price": "34.99",
+          "amount": "69.98"
+        }
+      ],
+      "total_amount": "121.74",
+      "balance_remaining": "121.74",
+      "status": "open",
+      "memo": "Standard order - Whole Foods Market"
+    },
+    {
+      "qb_id": "INV-00002",
+      "customer_id": "CUST-002",
+      "customer_name": "Trader Joe's Distribution Center",
+      "invoice_date": "2026-04-21",
+      "due_date": "2026-05-21",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "3",
+          "unit_price": "0.89",
+          "amount": "2.67"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "3",
+          "unit_price": "24.99",
+          "amount": "74.97"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "3",
+          "unit_price": "34.99",
+          "amount": "104.97"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "3",
+          "unit_price": "8.99",
+          "amount": "26.97"
+        }
+      ],
+      "total_amount": "209.58",
+      "balance_remaining": "209.58",
+      "status": "open",
+      "memo": "Standard order - Trader Joe's Distribution Center"
+    },
+    {
+      "qb_id": "INV-00003",
+      "customer_id": "CUST-003",
+      "customer_name": "Local Organic Market - Boston",
+      "invoice_date": "2026-04-14",
+      "due_date": "2026-05-14",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "4",
+          "unit_price": "0.89",
+          "amount": "3.56"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "4",
+          "unit_price": "24.99",
+          "amount": "99.96"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "4",
+          "unit_price": "34.99",
+          "amount": "139.96"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "4",
+          "unit_price": "8.99",
+          "amount": "35.96"
+        },
+        {
+          "item_id": "INV-005",
+          "item_name": "Grape Jelly - 18 oz Jar",
+          "quantity": "4",
+          "unit_price": "3.99",
+          "amount": "15.96"
+        }
+      ],
+      "total_amount": "295.40",
+      "balance_remaining": "0",
+      "status": "paid",
+      "memo": "Standard order - Local Organic Market - Boston"
+    },
+    {
+      "qb_id": "INV-00004",
+      "customer_id": "CUST-004",
+      "customer_name": "Fresh Express Foods - Miami",
+      "invoice_date": "2026-04-07",
+      "due_date": "2026-05-07",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "5",
+          "unit_price": "0.89",
+          "amount": "4.45"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "5",
+          "unit_price": "24.99",
+          "amount": "124.95"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "5",
+          "unit_price": "34.99",
+          "amount": "174.95"
+        }
+      ],
+      "total_amount": "304.35",
+      "balance_remaining": "304.35",
+      "status": "open",
+      "memo": "Standard order - Fresh Express Foods - Miami"
+    },
+    {
+      "qb_id": "INV-00005",
+      "customer_id": "CUST-005",
+      "customer_name": "Corner Store Collective",
+      "invoice_date": "2026-03-31",
+      "due_date": "2026-04-30",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "6",
+          "unit_price": "0.89",
+          "amount": "5.34"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "6",
+          "unit_price": "24.99",
+          "amount": "149.94"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "6",
+          "unit_price": "34.99",
+          "amount": "209.94"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "6",
+          "unit_price": "8.99",
+          "amount": "53.94"
+        }
+      ],
+      "total_amount": "419.16",
+      "balance_remaining": "419.16",
+      "status": "open",
+      "memo": "Standard order - Corner Store Collective"
+    },
+    {
+      "qb_id": "INV-00006",
+      "customer_id": "CUST-001",
+      "customer_name": "Whole Foods Market",
+      "invoice_date": "2026-03-24",
+      "due_date": "2026-04-23",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "2",
+          "unit_price": "0.89",
+          "amount": "1.78"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "2",
+          "unit_price": "24.99",
+          "amount": "49.98"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "2",
+          "unit_price": "34.99",
+          "amount": "69.98"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "2",
+          "unit_price": "8.99",
+          "amount": "17.98"
+        },
+        {
+          "item_id": "INV-005",
+          "item_name": "Grape Jelly - 18 oz Jar",
+          "quantity": "2",
+          "unit_price": "3.99",
+          "amount": "7.98"
+        }
+      ],
+      "total_amount": "147.70",
+      "balance_remaining": "0",
+      "status": "paid",
+      "memo": "Standard order - Whole Foods Market"
+    },
+    {
+      "qb_id": "INV-00007",
+      "customer_id": "CUST-002",
+      "customer_name": "Trader Joe's Distribution Center",
+      "invoice_date": "2026-03-17",
+      "due_date": "2026-04-16",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "3",
+          "unit_price": "0.89",
+          "amount": "2.67"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "3",
+          "unit_price": "24.99",
+          "amount": "74.97"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "3",
+          "unit_price": "34.99",
+          "amount": "104.97"
+        }
+      ],
+      "total_amount": "182.61",
+      "balance_remaining": "182.61",
+      "status": "open",
+      "memo": "Standard order - Trader Joe's Distribution Center"
+    },
+    {
+      "qb_id": "INV-00008",
+      "customer_id": "CUST-003",
+      "customer_name": "Local Organic Market - Boston",
+      "invoice_date": "2026-03-10",
+      "due_date": "2026-04-09",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "4",
+          "unit_price": "0.89",
+          "amount": "3.56"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "4",
+          "unit_price": "24.99",
+          "amount": "99.96"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "4",
+          "unit_price": "34.99",
+          "amount": "139.96"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "4",
+          "unit_price": "8.99",
+          "amount": "35.96"
+        }
+      ],
+      "total_amount": "279.44",
+      "balance_remaining": "279.44",
+      "status": "open",
+      "memo": "Standard order - Local Organic Market - Boston"
+    },
+    {
+      "qb_id": "INV-00009",
+      "customer_id": "CUST-004",
+      "customer_name": "Fresh Express Foods - Miami",
+      "invoice_date": "2026-03-03",
+      "due_date": "2026-04-02",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "5",
+          "unit_price": "0.89",
+          "amount": "4.45"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "5",
+          "unit_price": "24.99",
+          "amount": "124.95"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "5",
+          "unit_price": "34.99",
+          "amount": "174.95"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "5",
+          "unit_price": "8.99",
+          "amount": "44.95"
+        },
+        {
+          "item_id": "INV-005",
+          "item_name": "Grape Jelly - 18 oz Jar",
+          "quantity": "5",
+          "unit_price": "3.99",
+          "amount": "19.95"
+        }
+      ],
+      "total_amount": "369.25",
+      "balance_remaining": "0",
+      "status": "paid",
+      "memo": "Standard order - Fresh Express Foods - Miami"
+    },
+    {
+      "qb_id": "INV-00010",
+      "customer_id": "CUST-005",
+      "customer_name": "Corner Store Collective",
+      "invoice_date": "2026-02-24",
+      "due_date": "2026-03-26",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "6",
+          "unit_price": "0.89",
+          "amount": "5.34"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "6",
+          "unit_price": "24.99",
+          "amount": "149.94"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "6",
+          "unit_price": "34.99",
+          "amount": "209.94"
+        }
+      ],
+      "total_amount": "365.22",
+      "balance_remaining": "365.22",
+      "status": "open",
+      "memo": "Standard order - Corner Store Collective"
+    },
+    {
+      "qb_id": "INV-00011",
+      "customer_id": "CUST-001",
+      "customer_name": "Whole Foods Market",
+      "invoice_date": "2026-02-17",
+      "due_date": "2026-03-19",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "2",
+          "unit_price": "0.89",
+          "amount": "1.78"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "2",
+          "unit_price": "24.99",
+          "amount": "49.98"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "2",
+          "unit_price": "34.99",
+          "amount": "69.98"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "2",
+          "unit_price": "8.99",
+          "amount": "17.98"
+        }
+      ],
+      "total_amount": "139.72",
+      "balance_remaining": "139.72",
+      "status": "open",
+      "memo": "Standard order - Whole Foods Market"
+    },
+    {
+      "qb_id": "INV-00012",
+      "customer_id": "CUST-002",
+      "customer_name": "Trader Joe's Distribution Center",
+      "invoice_date": "2026-02-10",
+      "due_date": "2026-03-12",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "3",
+          "unit_price": "0.89",
+          "amount": "2.67"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "3",
+          "unit_price": "24.99",
+          "amount": "74.97"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "3",
+          "unit_price": "34.99",
+          "amount": "104.97"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "3",
+          "unit_price": "8.99",
+          "amount": "26.97"
+        },
+        {
+          "item_id": "INV-005",
+          "item_name": "Grape Jelly - 18 oz Jar",
+          "quantity": "3",
+          "unit_price": "3.99",
+          "amount": "11.97"
+        }
+      ],
+      "total_amount": "221.55",
+      "balance_remaining": "0",
+      "status": "paid",
+      "memo": "Standard order - Trader Joe's Distribution Center"
+    },
+    {
+      "qb_id": "INV-00013",
+      "customer_id": "CUST-003",
+      "customer_name": "Local Organic Market - Boston",
+      "invoice_date": "2026-02-03",
+      "due_date": "2026-03-05",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "4",
+          "unit_price": "0.89",
+          "amount": "3.56"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "4",
+          "unit_price": "24.99",
+          "amount": "99.96"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "4",
+          "unit_price": "34.99",
+          "amount": "139.96"
+        }
+      ],
+      "total_amount": "243.48",
+      "balance_remaining": "243.48",
+      "status": "open",
+      "memo": "Standard order - Local Organic Market - Boston"
+    }
+  ],
+  "purchase_orders": [
+    {
+      "qb_id": "PO-00001",
+      "vendor_id": "VEND-001",
+      "vendor_name": "Dole Food Company",
+      "po_date": "2026-04-23",
+      "expected_date": "2026-04-30",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "50",
+          "unit_cost": "0.45",
+          "amount": "22.50"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "50",
+          "unit_cost": "12.50",
+          "amount": "625.00"
+        }
+      ],
+      "total_amount": "647.50",
+      "status": "open",
+      "memo": "Bulk order from Dole Food Company"
+    },
+    {
+      "qb_id": "PO-00002",
+      "vendor_id": "VEND-002",
+      "vendor_name": "ConAgra Foods",
+      "po_date": "2026-04-09",
+      "expected_date": "2026-04-16",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "51",
+          "unit_cost": "0.45",
+          "amount": "22.95"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "51",
+          "unit_cost": "12.50",
+          "amount": "637.50"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "51",
+          "unit_cost": "18.00",
+          "amount": "918.00"
+        }
+      ],
+      "total_amount": "1578.45",
+      "status": "received",
+      "memo": "Bulk order from ConAgra Foods"
+    },
+    {
+      "qb_id": "PO-00003",
+      "vendor_id": "VEND-003",
+      "vendor_name": "Fresh Del Monte Produce",
+      "po_date": "2026-03-26",
+      "expected_date": "2026-04-02",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "52",
+          "unit_cost": "0.45",
+          "amount": "23.40"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "52",
+          "unit_cost": "12.50",
+          "amount": "650.00"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "52",
+          "unit_cost": "18.00",
+          "amount": "936.00"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "52",
+          "unit_cost": "4.25",
+          "amount": "221.00"
+        }
+      ],
+      "total_amount": "1830.40",
+      "status": "open",
+      "memo": "Bulk order from Fresh Del Monte Produce"
+    },
+    {
+      "qb_id": "PO-00004",
+      "vendor_id": "VEND-004",
+      "vendor_name": "Smucker Company",
+      "po_date": "2026-03-12",
+      "expected_date": "2026-03-19",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "53",
+          "unit_cost": "0.45",
+          "amount": "23.85"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "53",
+          "unit_cost": "12.50",
+          "amount": "662.50"
+        }
+      ],
+      "total_amount": "686.35",
+      "status": "received",
+      "memo": "Bulk order from Smucker Company"
+    },
+    {
+      "qb_id": "PO-00005",
+      "vendor_id": "VEND-001",
+      "vendor_name": "Dole Food Company",
+      "po_date": "2026-02-26",
+      "expected_date": "2026-03-05",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "54",
+          "unit_cost": "0.45",
+          "amount": "24.30"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "54",
+          "unit_cost": "12.50",
+          "amount": "675.00"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "54",
+          "unit_cost": "18.00",
+          "amount": "972.00"
+        }
+      ],
+      "total_amount": "1671.30",
+      "status": "open",
+      "memo": "Bulk order from Dole Food Company"
+    },
+    {
+      "qb_id": "PO-00006",
+      "vendor_id": "VEND-002",
+      "vendor_name": "ConAgra Foods",
+      "po_date": "2026-02-12",
+      "expected_date": "2026-02-19",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "55",
+          "unit_cost": "0.45",
+          "amount": "24.75"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "55",
+          "unit_cost": "12.50",
+          "amount": "687.50"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "55",
+          "unit_cost": "18.00",
+          "amount": "990.00"
+        },
+        {
+          "item_id": "INV-004",
+          "item_name": "Orange Juice - Gallon",
+          "quantity": "55",
+          "unit_cost": "4.25",
+          "amount": "233.75"
+        }
+      ],
+      "total_amount": "1936.00",
+      "status": "received",
+      "memo": "Bulk order from ConAgra Foods"
+    },
+    {
+      "qb_id": "PO-00007",
+      "vendor_id": "VEND-003",
+      "vendor_name": "Fresh Del Monte Produce",
+      "po_date": "2026-01-29",
+      "expected_date": "2026-02-05",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "56",
+          "unit_cost": "0.45",
+          "amount": "25.20"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "56",
+          "unit_cost": "12.50",
+          "amount": "700.00"
+        }
+      ],
+      "total_amount": "725.20",
+      "status": "open",
+      "memo": "Bulk order from Fresh Del Monte Produce"
+    },
+    {
+      "qb_id": "PO-00008",
+      "vendor_id": "VEND-004",
+      "vendor_name": "Smucker Company",
+      "po_date": "2026-01-15",
+      "expected_date": "2026-01-22",
+      "line_items": [
+        {
+          "item_id": "INV-001",
+          "item_name": "Organic Bananas - Per Pound",
+          "quantity": "57",
+          "unit_cost": "0.45",
+          "amount": "25.65"
+        },
+        {
+          "item_id": "INV-002",
+          "item_name": "Romaine Lettuce - Case",
+          "quantity": "57",
+          "unit_cost": "12.50",
+          "amount": "712.50"
+        },
+        {
+          "item_id": "INV-003",
+          "item_name": "Broccoli Crowns - Case",
+          "quantity": "57",
+          "unit_cost": "18.00",
+          "amount": "1026.00"
+        }
+      ],
+      "total_amount": "1764.15",
+      "status": "received",
+      "memo": "Bulk order from Smucker Company"
+    }
+  ],
+  "payments": [
+    {
+      "qb_id": "PAY-INV-00003",
+      "customer_id": "CUST-003",
+      "customer_name": "Local Organic Market - Boston",
+      "invoice_id": "INV-00003",
+      "payment_date": "2026-05-04",
+      "payment_method": "check",
+      "amount": "295.40",
+      "memo": "Payment for INV-00003"
+    },
+    {
+      "qb_id": "PAY-INV-00006",
+      "customer_id": "CUST-001",
+      "customer_name": "Whole Foods Market",
+      "invoice_id": "INV-00006",
+      "payment_date": "2026-04-13",
+      "payment_method": "check",
+      "amount": "147.70",
+      "memo": "Payment for INV-00006"
+    },
+    {
+      "qb_id": "PAY-INV-00009",
+      "customer_id": "CUST-004",
+      "customer_name": "Fresh Express Foods - Miami",
+      "invoice_id": "INV-00009",
+      "payment_date": "2026-03-23",
+      "payment_method": "check",
+      "amount": "369.25",
+      "memo": "Payment for INV-00009"
+    },
+    {
+      "qb_id": "PAY-INV-00012",
+      "customer_id": "CUST-002",
+      "customer_name": "Trader Joe's Distribution Center",
+      "invoice_id": "INV-00012",
+      "payment_date": "2026-03-02",
+      "payment_method": "check",
+      "amount": "221.55",
+      "memo": "Payment for INV-00012"
+    }
+  ]
+}

@@ -544,7 +544,7 @@ class SCORToCEngine:
         plan_score = rating_to_score.get(benchmarks.get("order_fill_rate", "fair"), 55)
         source_score = rating_to_score.get(benchmarks.get("order_cycle_time", "fair"), 55)
         deliver_score = rating_to_score.get(benchmarks.get("perfect_order_fulfillment", "fair"), 55)
-        return_score = 70.0  # placeholder (returns data would refine this)
+        return_score = rating_to_score.get(benchmarks.get("return_rate", "fair"), 70.0)
         enable_score = rating_to_score.get(benchmarks.get("cash_to_cash", "fair"), 55)
         cost_score = rating_to_score.get(benchmarks.get("supply_chain_cost", "fair"), 55)
 

@@ -330,7 +330,7 @@ export default function SettingsScreen() {
                 onChangeText={setApiUrl}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="https://api.yourserver.com"
+                placeholder="https://api.secretaryai.com"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="url"
               />

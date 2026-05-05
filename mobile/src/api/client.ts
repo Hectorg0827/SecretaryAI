@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'secretary_access_token';
 
-export let API_BASE = 'http://localhost:8000';
+export let API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 export function setApiBase(url: string) {
   API_BASE = url.replace(/\/$/, '');

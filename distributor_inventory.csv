@@ -1,0 +1,9 @@
+name,sku,description,unit_of_measure,quantity_on_hand,reorder_point,purchase_cost,sales_price,preferred_vendor
+Organic Bananas - Per Pound,PROD-001,"Fair-trade organic bananas, premium grade",lb,1240,500,0.45,0.89,Dole Food Company
+Romaine Lettuce - Case,PROD-002,"Fresh romaine lettuce, 24 heads per case",case,145,50,12.50,24.99,Dole Food Company
+Broccoli Crowns - Case,PROD-003,"Fresh organic broccoli crowns, 12 per case",case,89,40,18.00,34.99,Fresh Del Monte Produce
+Orange Juice - Gallon,PROD-004,"100% pure orange juice, 1 gallon jug",each,456,200,4.25,8.99,Fresh Del Monte Produce
+Grape Jelly - 18 oz Jar,PROD-005,Smuckers premium grape jelly,each,678,200,1.85,3.99,Smucker Company
+Peanut Butter - 18 oz Jar,PROD-006,Smuckers creamy peanut butter,each,521,150,2.15,4.49,Smucker Company
+Canned Corn - Case,PROD-007,"Whole kernel corn, 24 cans per case",case,234,100,8.50,15.99,ConAgra Foods
+Pasta - 1 lb Box,PROD-008,Premium semolina pasta assorted shapes,case,867,300,0.75,1.49,ConAgra Foods

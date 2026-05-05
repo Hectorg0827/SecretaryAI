@@ -1,0 +1,6 @@
+name,email,phone,billing_address_street,billing_address_city,billing_address_state,billing_address_postal_code,credit_limit,payment_terms,notes
+Whole Foods Market,purchasing@wholefoods.com,(512) 477-4455,550 Bowie Street,Austin,TX,78703,50000,Net 30,"Tier-1 retail customer, weekly orders"
+Trader Joe's Distribution Center,logistics@traderjoes.com,(626) 599-3700,800 S. Raymond Ave,Pasadena,CA,91105,75000,Net 30,Large-scale regional distributor
+Local Organic Market - Boston,orders@localorganic.com,(617) 555-0147,123 Newbury Street,Boston,MA,02115,25000,Net 15,"Independent grocery chain, 12 locations"
+Fresh Express Foods - Miami,procurement@freshexpress.com,(305) 555-0123,456 Biscayne Blvd,Miami,FL,33132,30000,Net 30,"Regional wholesaler, 15 retail partners"
+Corner Store Collective,admin@cornerstores.com,(206) 555-0178,789 Pike Place,Seattle,WA,98101,15000,Net 7,Small independent cooperative

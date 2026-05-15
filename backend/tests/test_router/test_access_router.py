@@ -9,8 +9,8 @@ from app.router.policy import check_permission, requires_approval, PermissionCla
 
 class TestPathChains:
     def _chains(self):
-        from app.router.access_router import _PATH_CHAINS
-        return _PATH_CHAINS
+        from app.router.access_router import _DEFAULT_PATH_CHAINS
+        return _DEFAULT_PATH_CHAINS
 
     def test_inventory_starts_with_api(self):
         chains = self._chains()

@@ -187,6 +187,9 @@ class VendorResponseParser:
         """Extract ISO date strings from text. Returns up to 3 dates."""
         found: list[str] = []
         today = date.today()
+        # Accept dates up to 90 days in the past — vendor emails may be
+        # processed after a confirmed ship date has already passed.
+        earliest = today - timedelta(days=90)
 
         # Pattern: DD/MM/YYYY or MM/DD/YYYY
         for m in re.finditer(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})\b", text):
@@ -197,12 +200,12 @@ class VendorResponseParser:
             try:
                 if 1 <= mo <= 12 and 1 <= d <= 31:
                     dt = date(y, mo, d)
-                    if dt > today:
+                    if dt >= earliest:
                         found.append(dt.isoformat())
             except ValueError:
                 try:
                     dt = date(y, d, mo)
-                    if dt > today:
+                    if dt >= earliest:
                         found.append(dt.isoformat())
                 except ValueError:
                     pass
@@ -225,7 +228,7 @@ class VendorResponseParser:
                 month = self._MONTH_MAP.get(month_name, 0)
                 if month:
                     dt = date(year, month, day)
-                    if dt > today:
+                    if dt >= earliest:
                         found.append(dt.isoformat())
             except (ValueError, TypeError):
                 pass

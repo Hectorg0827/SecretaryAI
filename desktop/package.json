@@ -17,18 +17,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-notification": "^2.0.0",
-    "@tauri-apps/plugin-store": "^2.0.0",
-    "@tauri-apps/plugin-http": "^2.0.0",
-    "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-http": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-store": "^2.0.0",
+    "lucide-react": "^0.462.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
-    "zustand": "^5.0.0",
-    "@supabase/supabase-js": "^2.45.0",
-    "lucide-react": "^0.462.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

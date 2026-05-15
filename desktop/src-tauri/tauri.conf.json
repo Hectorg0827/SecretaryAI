@@ -80,7 +80,7 @@
     "updater": {
       "pubkey": "PLACEHOLDER_REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
       "endpoints": [
-        "https://api.secretaryai.com/updates/{{target}}/{{arch}}/{{current_version}}"
+        "https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "windows": {

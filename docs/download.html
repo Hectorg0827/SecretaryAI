@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Download SecretaryAI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .logo {
+      font-size: 2.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+
+    .tagline {
+      color: #94a3b8;
+      font-size: 1.1rem;
+      margin-bottom: 3rem;
+      text-align: center;
+    }
+
+    .cards {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 3rem;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1rem;
+      padding: 2rem;
+      width: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .card:hover { border-color: #6366f1; transform: translateY(-2px); }
+
+    .card-icon { font-size: 3rem; }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+
+    .card-sub {
+      font-size: 0.85rem;
+      color: #64748b;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      font-weight: 600;
+      font-size: 1rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.5rem;
+      text-decoration: none;
+      width: 100%;
+      justify-content: center;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid #475569;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      padding: 0.5rem 1rem;
+    }
+    .btn-secondary:hover { border-color: #6366f1; color: #e2e8f0; opacity: 1; }
+
+    .version-badge {
+      font-size: 0.75rem;
+      color: #64748b;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 1rem;
+      padding: 0.2rem 0.7rem;
+    }
+
+    .steps {
+      max-width: 640px;
+      width: 100%;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1rem;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+    }
+    .steps h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1rem;
+    }
+    .step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+    .step:last-child { margin-bottom: 0; }
+    .step-num {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 50%;
+      background: #6366f1;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-body { line-height: 1.6; color: #cbd5e1; font-size: 0.95rem; }
+    .step-body strong { color: #f1f5f9; }
+
+    .footnote {
+      color: #475569;
+      font-size: 0.8rem;
+      text-align: center;
+      max-width: 500px;
+    }
+    .footnote a { color: #6366f1; text-decoration: none; }
+    .footnote a:hover { text-decoration: underline; }
+
+    /* Auto-detect OS and highlight the right card */
+    .card.highlighted {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px #6366f120;
+    }
+    .recommended-badge {
+      background: #6366f1;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.2rem 0.6rem;
+      border-radius: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="logo">SecretaryAI</div>
+  <p class="tagline">AI operations manager for importers &amp; distributors</p>
+
+  <div class="cards">
+    <!-- macOS -->
+    <div class="card" id="card-mac">
+      <div class="card-icon">🍎</div>
+      <div class="card-title">macOS</div>
+      <span class="version-badge" id="version-mac">Loading…</span>
+      <div class="card-sub">macOS 12 Monterey or later<br>Intel &amp; Apple Silicon (M1/M2/M3)</div>
+      <a class="btn" id="btn-mac" href="#">⬇ Download for Mac</a>
+      <a class="btn btn-secondary" id="btn-mac-intel" href="#">Intel Mac (older)</a>
+    </div>
+
+    <!-- Windows -->
+    <div class="card" id="card-win">
+      <div class="card-icon">🪟</div>
+      <div class="card-title">Windows</div>
+      <span class="version-badge" id="version-win">Loading…</span>
+      <div class="card-sub">Windows 10 or later (64-bit)<br>No admin rights required</div>
+      <a class="btn" id="btn-win" href="#">⬇ Download for Windows</a>
+      <a class="btn btn-secondary" id="btn-win-msi" href="#">MSI (enterprise)</a>
+    </div>
+  </div>
+
+  <!-- How to install -->
+  <div class="steps">
+    <h3>How to install</h3>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body"><strong>Download</strong> the file for your computer above.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body" id="step2-text">
+        <strong>macOS:</strong> Open the .dmg file, drag SecretaryAI to your Applications folder, then double-click it.<br>
+        <strong>Windows:</strong> Run the .exe installer and click Next → Install → Finish.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body"><strong>Sign in</strong> with your SecretaryAI account when the app opens. That's it!</div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body"><strong>Updates are automatic.</strong> The app notifies you when a new version is available and installs it in the background.</div>
+    </div>
+  </div>
+
+  <p class="footnote">
+    Having trouble? <a href="https://github.com/Hectorg0827/SecretaryAI/releases" target="_blank">Browse all releases on GitHub</a>
+    &nbsp;·&nbsp;
+    <a href="mailto:support@secretaryai.com">Contact support</a>
+  </p>
+
+  <script>
+    const RELEASES_API = "https://api.github.com/repos/Hectorg0827/SecretaryAI/releases/latest";
+    const RELEASES_PAGE = "https://github.com/Hectorg0827/SecretaryAI/releases/latest";
+
+    async function loadRelease() {
+      let data;
+      try {
+        const res = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
+        data = await res.json();
+      } catch {
+        // GitHub API unavailable — fall back to releases page
+        setFallback();
+        return;
+      }
+
+      const version = data.tag_name || "latest";
+      const assets  = data.assets || [];
+
+      const find = (pattern) => {
+        const a = assets.find(a => pattern.test(a.name));
+        return a ? a.browser_download_url : RELEASES_PAGE;
+      };
+
+      const macArm   = find(/aarch64\.dmg$/i);
+      const macIntel = find(/_x64\.dmg$/i);
+      const winExe   = find(/x64-setup\.exe$/i);
+      const winMsi   = find(/x64_en-US\.msi$/i);
+
+      document.getElementById("version-mac").textContent = version;
+      document.getElementById("version-win").textContent = version;
+
+      document.getElementById("btn-mac").href       = macArm;
+      document.getElementById("btn-mac-intel").href = macIntel;
+      document.getElementById("btn-win").href       = winExe;
+      document.getElementById("btn-win-msi").href   = winMsi;
+    }
+
+    function setFallback() {
+      ["version-mac","version-win"].forEach(id =>
+        document.getElementById(id).textContent = "latest");
+      ["btn-mac","btn-mac-intel","btn-win","btn-win-msi"].forEach(id =>
+        document.getElementById(id).href = RELEASES_PAGE);
+    }
+
+    // Auto-highlight the right platform card
+    function highlightPlatform() {
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes("mac")) {
+        document.getElementById("card-mac").classList.add("highlighted");
+        document.getElementById("card-mac").querySelector(".card-title").insertAdjacentHTML(
+          "afterend", '<span class="recommended-badge">Your Mac</span>');
+      } else if (ua.includes("win")) {
+        document.getElementById("card-win").classList.add("highlighted");
+        document.getElementById("card-win").querySelector(".card-title").insertAdjacentHTML(
+          "afterend", '<span class="recommended-badge">Your PC</span>');
+      }
+    }
+
+    highlightPlatform();
+    loadRelease();
+  </script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SecretaryAI Desktop — Cross-Platform Release Builder
+#
+# Triggers:
+#   push tag   v*      → full build + GitHub Release (with installers attached)
+#   workflow_dispatch   → manual build for testing
+#
+# Outputs (attached to the GitHub Release):
+#   macOS Intel    SecretaryAI_x.y.z_x64.dmg
+#   macOS ARM      SecretaryAI_x.y.z_aarch64.dmg
+#   Windows NSIS   SecretaryAI_x.y.z_x64-setup.exe   ← double-click installer
+#   Windows MSI    SecretaryAI_x.y.z_x64_en-US.msi
+#   update.json    Tauri updater manifest (consumed by the auto-updater)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as draft release?"
+        required: false
+        default: "true"
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build for each platform ────────────────────────────────────────────────
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Intel
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            label: macos-intel
+
+          # macOS Apple Silicon
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-arm
+
+          # Windows x64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows
+
+    runs-on: ${{ matrix.platform }}
+    name: Build (${{ matrix.label }})
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node.js ─────────────────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop/package-lock.json
+
+      # ── Rust ────────────────────────────────────────────────────────────────
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust / Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      # ── macOS-only: Xcode CLI tools + pkg-config ─────────────────────────
+      - name: Install macOS dependencies
+        if: startsWith(matrix.platform, 'macos')
+        run: |
+          brew install pkg-config
+
+      # ── Windows-only: WebView2 (pre-installed on GitHub Actions, verify) ──
+      - name: Verify WebView2 (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (Test-Path $key) {
+            Write-Host "WebView2 found: $((Get-ItemProperty $key).pv)"
+          } else {
+            Write-Warning "WebView2 not found in registry — installer will bundle the bootstrapper"
+          }
+
+      # ── Install JS deps ─────────────────────────────────────────────────────
+      - name: Install Node dependencies
+        working-directory: desktop
+        run: npm ci
+
+      # ── Inject build-time env vars ──────────────────────────────────────────
+      # These are read by the Vite build and baked into the app bundle.
+      - name: Set build-time environment
+        shell: bash
+        run: |
+          echo "VITE_API_BASE_URL=${{ vars.API_BASE_URL || 'https://api.secretaryai.com' }}" >> $GITHUB_ENV
+          echo "VITE_SUPABASE_URL=${{ vars.SUPABASE_URL || '' }}" >> $GITHUB_ENV
+          echo "VITE_SUPABASE_ANON_KEY=${{ vars.SUPABASE_ANON_KEY || '' }}" >> $GITHUB_ENV
+
+      # ── Build + bundle with the official Tauri action ───────────────────────
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS code-signing (optional; leave blank to build unsigned)
+          APPLE_CERTIFICATE:            ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD:   ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY:       ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                     ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:               ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:                ${{ secrets.APPLE_TEAM_ID }}
+          # Windows code-signing (optional; leave blank to build unsigned)
+          TAURI_SIGNING_PRIVATE_KEY:    ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName:     ${{ github.ref_name }}
+          releaseName: "SecretaryAI ${{ github.ref_name }}"
+          releaseBody: |
+            ## What's new in ${{ github.ref_name }}
+
+            See the [changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+
+            ## Installation
+
+            | Platform | File | Notes |
+            |---|---|---|
+            | macOS (Apple Silicon M1/M2/M3) | `*_aarch64.dmg` | Drag to Applications |
+            | macOS (Intel) | `*_x64.dmg` | Drag to Applications |
+            | Windows | `*_x64-setup.exe` | Double-click to install |
+            | Windows (MSI) | `*_x64_en-US.msi` | Enterprise / silent install |
+
+            **First install:** QuickBooks Desktop users need to also run the QB Desktop connector (included in the installer).
+          releaseDraft: ${{ github.event.inputs.draft == 'true' || github.event_name == 'workflow_dispatch' }}
+          prerelease:   false
+          args:         --target ${{ matrix.target }}
+
+  # ── Post-release: update the updater manifest ──────────────────────────────
+  publish-update-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish update manifest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Generate latest.json for the Tauri updater plugin.
+      # The tauri-action already attaches individual platform signatures;
+      # this step consolidates them into a single manifest file and uploads
+      # it as a release asset so the in-app updater can find it.
+      - name: Download release assets
+        uses: robinraju/release-downloader@v1.9
+        with:
+          tag: ${{ github.ref_name }}
+          fileName: "*.sig"
+          out-file-path: sigs
+
+      - name: Build update manifest (latest.json)
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"   # strip leading 'v'
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read .sig files if they exist (optional — updater works without them
+          # when TAURI_SIGNING keys are not configured)
+          sig_darwin_x64=""
+          sig_darwin_aarch64=""
+          sig_windows_x64=""
+
+          for f in sigs/*.sig; do
+            [ -f "$f" ] || continue
+            sig=$(cat "$f")
+            case "$f" in
+              *x64.dmg.sig | *x86_64.dmg.sig) sig_darwin_x64="$sig" ;;
+              *aarch64.dmg.sig)                sig_darwin_aarch64="$sig" ;;
+              *x64-setup.exe.sig | *x64_en-US.msi.sig) sig_windows_x64="$sig" ;;
+            esac
+          done
+
+          BASE="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+          cat > latest.json <<EOF
+          {
+            "version": "v${VERSION}",
+            "notes": "See https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+            "pub_date": "${PUB_DATE}",
+            "platforms": {
+              "darwin-x86_64": {
+                "url": "${BASE}/SecretaryAI_${VERSION}_x64.dmg",
+                "signature": "${sig_darwin_x64}"
+              },
+              "darwin-aarch64": {
+                "url": "${BASE}/SecretaryAI_${VERSION}_aarch64.dmg",
+                "signature": "${sig_darwin_aarch64}"
+              },
+              "windows-x86_64": {
+                "url": "${BASE}/SecretaryAI_${VERSION}_x64-setup.exe",
+                "signature": "${sig_windows_x64}"
+              }
+            }
+          }
+          EOF
+
+          echo "Generated latest.json:"
+          cat latest.json
+
+      - name: Upload update manifest to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: latest.json
+          asset_name: latest.json
+          tag: ${{ github.ref }}
+          overwrite: true

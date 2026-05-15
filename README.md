@@ -2,6 +2,17 @@
 
 AI operations manager for small importers and distributors. Conversational AI connected to QuickBooks (Desktop + Online), inventory, and email.
 
+## ⬇ Download the desktop app
+
+**[docs/download.html](docs/download.html)** — one-click installers for Mac and Windows.
+
+Or go directly to the [GitHub Releases page](https://github.com/Hectorg0827/SecretaryAI/releases/latest) and download:
+- **macOS** → `SecretaryAI_x.y.z_aarch64.dmg` (Apple Silicon) or `*_x64.dmg` (Intel)
+- **Windows** → `SecretaryAI_x.y.z_x64-setup.exe` — double-click, Next → Install → Finish
+
+No command line. No developer tools. No Docker required on your desktop.
+> The backend runs in the cloud. The desktop app connects to it automatically after sign-in.
+
 ## Architecture
 
 ```

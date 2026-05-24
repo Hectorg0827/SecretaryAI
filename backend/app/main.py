@@ -153,6 +153,12 @@ app.include_router(docs_router.router,         prefix="/api/docs",           tag
 from app.api import admin as admin_router
 app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
 
+# Feature Factory — self-extending features (router defines its own /api/feature-factory prefix)
+from app.feature_factory.router import router as feature_factory_router
+from app.feature_factory.wiring import install_overrides as install_feature_factory_overrides
+app.include_router(feature_factory_router)
+install_feature_factory_overrides(app)
+
 register_error_handlers(app)
 
 

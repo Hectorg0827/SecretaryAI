@@ -31,6 +31,7 @@ app = Celery(
         "tasks.connector_health",
         "tasks.ingestion_scheduler",
         "tasks.cu_worker",
+        "tasks.feature_runs",
     ],
 )
 
@@ -126,5 +127,10 @@ app.conf.beat_schedule = {
     "cu-worker": {
         "task": "tasks.cu_worker.process_pending_jobs",
         "schedule": crontab(minute="*/2"),
+    },
+    # Feature Factory tick — every minute; the task itself decides what's due
+    "feature-factory-tick": {
+        "task": "tasks.feature_runs.tick_scheduled_features",
+        "schedule": 60.0,
     },
 }

@@ -4,10 +4,10 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    Manager,
 };
 
-pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
+pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open SecretaryAI", true, None::<&str>)?;
     let sync = MenuItem::with_id(app, "sync", "Sync Now", true, None::<&str>)?;
     let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
@@ -15,7 +15,12 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&open, &sync, &separator, &quit])?;
 
-    TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new();
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    builder
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

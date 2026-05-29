@@ -55,6 +55,8 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     name: Build (${{ matrix.label }})
+    permissions:
+      contents: write   # required for tauri-action to create the release & upload installers
 
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
@@ -156,6 +158,8 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     name: Publish update manifest
+    permissions:
+      contents: write   # required to upload latest.json to the release
 
     steps:
       - name: Checkout

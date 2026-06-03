@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Activity, RefreshCw, Server, GitBranch, Cpu, HardDrive,
   CheckCircle2, XCircle, Clock, AlertTriangle, ChevronLeft, ChevronRight,
+  type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
 
@@ -81,7 +82,7 @@ function StatCard({
 
 // ── Section header ────────────────────────────────────────────────────────────
 
-function SectionHeader({ icon: Icon, title, sub }: { icon: React.ComponentType<{size:number; className?:string}>; title: string; sub?: string }) {
+function SectionHeader({ icon: Icon, title, sub }: { icon: LucideIcon; title: string; sub?: string }) {
   return (
     <div className="flex items-center gap-2 mb-3">
       <Icon size={16} className="text-slate-500" />

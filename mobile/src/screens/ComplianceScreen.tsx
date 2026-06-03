@@ -329,7 +329,7 @@ function CostsTab({
 type TabKey = 'Alerts' | 'Deadlines' | 'Costs';
 const TABS: TabKey[] = ['Alerts', 'Deadlines', 'Costs'];
 
-export function ComplianceScreen() {
+export default function ComplianceScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>('Alerts');
 
   // Status state

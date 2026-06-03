@@ -66,7 +66,7 @@ mod platform {
 
         unsafe {
             match CredReadW(
-                windows::core::PWSTR(target.as_ptr() as *mut _),
+                windows::core::PCWSTR(target.as_ptr()),
                 CRED_TYPE_GENERIC,
                 0,
                 &mut cred_ptr,
@@ -93,7 +93,7 @@ mod platform {
         let target = to_wide(&format!("SecretaryAI/{}/{}", service, key));
         unsafe {
             let _ = CredDeleteW(
-                windows::core::PWSTR(target.as_ptr() as *mut _),
+                windows::core::PCWSTR(target.as_ptr()),
                 CRED_TYPE_GENERIC,
                 0,
             );

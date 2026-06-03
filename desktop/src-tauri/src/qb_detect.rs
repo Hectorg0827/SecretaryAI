@@ -12,7 +12,7 @@ pub fn check_qb_installed() -> bool {
 #[cfg(target_os = "windows")]
 fn detect_qb() -> bool {
     use windows::Win32::System::Registry::{
-        RegOpenKeyExW, RegCloseKey, HKEY_LOCAL_MACHINE, KEY_READ,
+        RegOpenKeyExW, RegCloseKey, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
     };
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -23,11 +23,11 @@ fn detect_qb() -> bool {
         .chain(std::iter::once(0))
         .collect();
 
-    let mut hkey = std::ptr::null_mut();
+    let mut hkey = HKEY::default();
     let result = unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
-            windows::core::PWSTR(key_path.as_ptr() as *mut _),
+            windows::core::PCWSTR(key_path.as_ptr()),
             0,
             KEY_READ,
             &mut hkey,
@@ -48,7 +48,7 @@ fn detect_qb() -> bool {
     let result2 = unsafe {
         RegOpenKeyExW(
             HKEY_LOCAL_MACHINE,
-            windows::core::PWSTR(key_path_32.as_ptr() as *mut _),
+            windows::core::PCWSTR(key_path_32.as_ptr()),
             0,
             KEY_READ,
             &mut hkey,

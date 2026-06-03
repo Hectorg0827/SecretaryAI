@@ -21,10 +21,15 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      version:
+        description: "Release version tag (must start with 'v', e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+        type: string
       draft:
         description: "Create as draft release?"
         required: false
-        default: "true"
+        default: false
         type: boolean
 
 concurrency:
@@ -119,20 +124,22 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS code-signing (optional; leave blank to build unsigned)
-          APPLE_CERTIFICATE:            ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD:   ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY:       ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID:                     ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD:               ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID:                ${{ secrets.APPLE_TEAM_ID }}
-          # Windows code-signing (optional; leave blank to build unsigned)
-          TAURI_SIGNING_PRIVATE_KEY:    ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # NOTE: code-signing is intentionally NOT configured here.
+          # Tauri's bundler treats a *present but empty* APPLE_CERTIFICATE /
+          # APPLE_SIGNING_IDENTITY env var as "sign this app" and then fails when
+          # it tries to import an empty certificate ("security import: ... not
+          # valid"). So these vars must be omitted entirely (not set to "") to
+          # produce a working UNSIGNED build.
+          #
+          # To enable signing later, add the env vars back — but only once the
+          # corresponding repository secrets actually contain real values, e.g.:
+          #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
+          #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID            (macOS notarization)
+          #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
         with:
           projectPath: desktop
-          tagName:     ${{ github.ref_name }}
-          releaseName: "SecretaryAI ${{ github.ref_name }}"
+          tagName:     ${{ github.event.inputs.version || github.ref_name }}
+          releaseName: "SecretaryAI ${{ github.event.inputs.version || github.ref_name }}"
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
@@ -148,7 +155,7 @@ jobs:
             | Windows (MSI) | `*_x64_en-US.msi` | Enterprise / silent install |
 
             **First install:** QuickBooks Desktop users need to also run the QB Desktop connector (included in the installer).
-          releaseDraft: ${{ github.event.inputs.draft == 'true' || github.event_name == 'workflow_dispatch' }}
+          releaseDraft: ${{ github.event.inputs.draft || false }}
           prerelease:   false
           args:         --target ${{ matrix.target }}
 

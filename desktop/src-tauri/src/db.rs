@@ -39,6 +39,11 @@ fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
 
 pub fn open_db(app: &AppHandle) -> Result<Connection> {
     let path = db_path(app);
+    // Connection::open does NOT create missing parent directories — on a fresh
+    // install the app-data dir doesn't exist yet, so create it first.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let conn = Connection::open(&path)?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
     Ok(conn)
@@ -46,7 +51,20 @@ pub fn open_db(app: &AppHandle) -> Result<Connection> {
 
 pub fn init_local_db(app: &AppHandle) -> Result<()> {
     let path = db_path(app);
-    let _key = get_or_create_db_key(app)?;
+
+    // Ensure the app-data directory exists before opening the DB file.
+    // Without this, Connection::open fails on first launch and the whole app
+    // aborts during setup() (the window never appears).
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Best-effort: provision a key for future at-rest encryption. This talks to
+    // the OS credential store, which must NOT be allowed to block app startup,
+    // so failures are logged and ignored (the key is not used yet).
+    if let Err(e) = get_or_create_db_key(app) {
+        log::warn!("Could not provision DB key (continuing without it): {e}");
+    }
 
     // Note: For SQLite encryption use SQLCipher in production.
     // The key above would be passed as PRAGMA key = 'key_value';

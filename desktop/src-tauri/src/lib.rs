@@ -157,11 +157,16 @@ pub fn run() {
             qb_detect::check_qb_installed,
         ])
         .setup(|app| {
-            // Initialize local encrypted database
-            db::init_local_db(app.handle())?;
+            // Initialize local encrypted database.
+            // Non-fatal: a DB failure must never prevent the window from opening.
+            if let Err(e) = db::init_local_db(app.handle()) {
+                error!("Local DB init failed (continuing): {e}");
+            }
 
-            // Set up system tray
-            tray::setup_tray(app)?;
+            // Set up system tray. Non-fatal as well.
+            if let Err(e) = tray::setup_tray(app) {
+                error!("Tray setup failed (continuing): {e}");
+            }
 
             // Start background sync loop
             let handle = app.handle().clone();

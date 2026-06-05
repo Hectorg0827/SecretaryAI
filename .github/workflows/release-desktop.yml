@@ -22,15 +22,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version tag (must start with 'v', e.g. v1.0.0)"
+        description: "Release version tag (must start with 'v', e.g. v1.0.1)"
         required: true
-        default: "v1.0.0"
+        default: "v1.0.1"
         type: string
-      draft:
-        description: "Create as draft release?"
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: release-${{ github.ref }}
@@ -43,8 +38,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS Intel
-          - platform: macos-13
+          # macOS Intel — build on Apple-Silicon runners (cross-compile to x86_64).
+          # The dedicated macos-13 Intel runners are scarce/deprecated and were
+          # leaving this job queued until the 24h timeout; macos-latest is plentiful.
+          - platform: macos-latest
             target: x86_64-apple-darwin
             label: macos-intel
 
@@ -155,9 +152,31 @@ jobs:
             | Windows (MSI) | `*_x64_en-US.msi` | Enterprise / silent install |
 
             **First install:** QuickBooks Desktop users need to also run the QB Desktop connector (included in the installer).
-          releaseDraft: ${{ github.event.inputs.draft || false }}
+          # IMPORTANT: build to a DRAFT release. This repo has GitHub
+          # "immutable releases" enabled — once a release is *published* its
+          # assets are frozen and uploads fail with "Cannot upload assets to an
+          # immutable release". Draft releases stay mutable, so every matrix job
+          # can attach its installer; you then publish the draft (which freezes
+          # it WITH the installers already attached).
+          releaseDraft: true
           prerelease:   false
           args:         --target ${{ matrix.target }}
+
+      # ── Bulletproof delivery: upload the installers as run artifacts ─────────
+      # Runs even if the release-upload step above fails (e.g. immutable-release
+      # rules). The built installers are on disk regardless, so they're always
+      # downloadable from this run's "Artifacts" section — no release needed.
+      - name: Upload installers as run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecretaryAI-installer-${{ matrix.label }}
+          path: |
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: ignore
+          retention-days: 30
 
   # ── Post-release: update the updater manifest ──────────────────────────────
   publish-update-manifest:

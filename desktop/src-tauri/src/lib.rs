@@ -7,7 +7,7 @@ mod sync;
 mod tray;
 mod watcher;
 
-use log::{info, warn, error};
+use log::{error, info, warn};
 use std::{
     fs,
     io::{Read, Write},
@@ -96,10 +96,16 @@ fn acquire_lock() -> bool {
         }
         if let Ok(existing_pid) = contents.trim().parse::<u32>() {
             if is_pid_alive(existing_pid) {
-                warn!("Lock file held by live PID {}; another instance running", existing_pid);
+                warn!(
+                    "Lock file held by live PID {}; another instance running",
+                    existing_pid
+                );
                 return false;
             }
-            info!("Stale lock file from PID {} (crashed); taking over", existing_pid);
+            info!(
+                "Stale lock file from PID {} (crashed); taking over",
+                existing_pid
+            );
         }
         let _ = fs::remove_file(&lock_path);
     }
@@ -190,9 +196,12 @@ pub fn run() {
                             Ok(Some(update)) => {
                                 info!("Update available: {}", update.version);
                                 if let Err(e) = update
-                                    .download_and_install(|_, _| {}, || {
-                                        info!("Update downloaded — will apply on next launch");
-                                    })
+                                    .download_and_install(
+                                        |_, _| {},
+                                        || {
+                                            info!("Update downloaded — will apply on next launch");
+                                        },
+                                    )
                                     .await
                                 {
                                     error!("Update install failed: {e}");

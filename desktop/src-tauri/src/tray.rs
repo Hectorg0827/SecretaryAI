@@ -1,6 +1,5 @@
 /// System tray setup — runs in background, accessible from menu bar / taskbar.
 /// Works on both Windows (system tray) and macOS (menu bar).
-
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},

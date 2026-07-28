@@ -72,8 +72,8 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 13 | P1 | Overlapping release workflows disagree (signing/draft/updater/names) | `.github/workflows/*` | ⬜ open (consolidate) |
 | 14 | P2 | `install.sh`/`install.ps1` point to wrong repo; install Docker stack | install scripts | ⬜ open |
 | 15 | P2 | `install.ps1` uses `Invoke-Expression`; docs pipe remote script to shell | `install.ps1` | ⬜ open |
-| 16 | P1 | `.gitignore` ignores `Cargo.lock`/`*.lock` | `.gitignore` | ⬜ open |
-| 17 | P1 | No PR CI, CodeQL, or Dependabot | `.github/` | ⬜ open |
+| 16 | P1 | `.gitignore` ignores `Cargo.lock`/`*.lock` | `.gitignore` | ✅ fixed — `Cargo.lock` un-ignored and committed (6685 deps pinned). |
+| 17 | P1 | No PR CI, CodeQL, or Dependabot | `.github/` | ✅ fixed — added `ci.yml` (backend pytest, web/desktop lint+typecheck+build, rust fmt/clippy/test, dep-audit), `codeql.yml` (python + js/ts), `dependabot.yml` (6 ecosystems). Clippy `-D warnings` + audit enforcement tracked. |
 | 18 | P2 | No `test` script in frontend/desktop package.json | package.json | ⬜ open |
 | 23 | P2 | GitHub Actions use floating versions incl. `@master` | workflows | ⬜ open (pin SHAs) |
 | 25 | P2 | Desktop heartbeat runs with empty company ID + no auth token | `heartbeat.rs`/`lib.rs` | ⬜ open |

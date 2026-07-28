@@ -1,9 +1,8 @@
 /// Local encrypted SQLite database.
 /// Stores a local cache of business data for fast offline access.
 /// The encryption key is stored in the OS credential store.
-
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -12,7 +11,8 @@ const CREDENTIAL_SERVICE: &str = "secretaryai-db";
 const CREDENTIAL_KEY: &str = "db-key";
 
 pub fn db_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir()
+    app.path()
+        .app_data_dir()
         .expect("app data dir")
         .join(DB_FILE)
 }
@@ -22,7 +22,9 @@ fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
     use rand::Rng;
 
     // Try to get existing key
-    if let Ok(Some(key)) = get_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string()) {
+    if let Ok(Some(key)) =
+        get_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string())
+    {
         return Ok(key);
     }
 
@@ -31,8 +33,12 @@ fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
         .map(|_| format!("{:02x}", rand::thread_rng().gen::<u8>()))
         .collect();
 
-    store_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string(), key.clone())
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    store_credential(
+        CREDENTIAL_SERVICE.to_string(),
+        CREDENTIAL_KEY.to_string(),
+        key.clone(),
+    )
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok(key)
 }
@@ -70,7 +76,8 @@ pub fn init_local_db(app: &AppHandle) -> Result<()> {
     // The key above would be passed as PRAGMA key = 'key_value';
     let conn = Connection::open(&path)?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
 
@@ -101,7 +108,8 @@ pub fn init_local_db(app: &AppHandle) -> Result<()> {
             details TEXT,
             created_at TEXT DEFAULT (datetime('now'))
         );
-    ")?;
+    ",
+    )?;
 
     log::info!("Local database initialized at {:?}", path);
     Ok(())
@@ -169,8 +177,8 @@ pub fn query_local(
     // Build a safe parameterised query.
     // `filter` is a JSON object whose keys must match column names we whitelist.
     let (sql, bound_value) = if let Some(ref f) = filter {
-        let filter_val: serde_json::Value = serde_json::from_str(f)
-            .map_err(|_| "filter must be valid JSON".to_string())?;
+        let filter_val: serde_json::Value =
+            serde_json::from_str(f).map_err(|_| "filter must be valid JSON".to_string())?;
 
         // Only allow filtering by a single whitelisted column for safety
         let allowed_columns = ["id", "status", "stock_status", "health_status", "event"];
@@ -206,11 +214,7 @@ pub fn query_local(
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
-    let column_names: Vec<String> = stmt
-        .column_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
     let rows = if filter.is_some() && !bound_value.is_empty() {
         stmt.query_map(params![bound_value], |row| {
@@ -243,19 +247,15 @@ pub fn query_local(
 
 fn sqlite_value_to_json(val: rusqlite::types::Value) -> serde_json::Value {
     match val {
-        rusqlite::types::Value::Null    => serde_json::Value::Null,
+        rusqlite::types::Value::Null => serde_json::Value::Null,
         rusqlite::types::Value::Integer(i) => serde_json::Value::Number(i.into()),
-        rusqlite::types::Value::Real(f) => {
-            serde_json::Number::from_f64(f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
-        rusqlite::types::Value::Blob(b) => {
-            serde_json::Value::String(base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                b,
-            ))
-        }
+        rusqlite::types::Value::Blob(b) => serde_json::Value::String(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b,
+        )),
     }
 }

@@ -2,7 +2,6 @@
 /// Captures the primary display and returns a base64-encoded PNG.
 /// Only captures when an active Computer Use session is running
 /// and the user has granted screen capture permission.
-
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +33,9 @@ pub fn deactivate_computer_use() {
 #[tauri::command]
 pub fn capture_screen() -> Result<String, String> {
     if !COMPUTER_USE_ACTIVE.load(Ordering::SeqCst) {
-        return Err("Screen capture is only allowed during an active Computer Use session".to_string());
+        return Err(
+            "Screen capture is only allowed during an active Computer Use session".to_string(),
+        );
     }
     _capture_and_encode().map_err(|e| e.to_string())
 }
@@ -99,14 +100,14 @@ $bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png);
 
 #[cfg(target_os = "macos")]
 fn capture_macos() -> Result<String> {
-    use std::process::Command;
     use std::fs;
+    use std::process::Command;
 
     // screencapture writes to a temp file, then we read + encode it
     let tmp_path = "/tmp/secretaryai_capture.png";
 
     let status = Command::new("screencapture")
-        .args(["-x", "-m", tmp_path])  // -x: no sound, -m: main display only
+        .args(["-x", "-m", tmp_path]) // -x: no sound, -m: main display only
         .status()
         .map_err(|e| anyhow!("screencapture failed: {}", e))?;
 
@@ -114,8 +115,7 @@ fn capture_macos() -> Result<String> {
         return Err(anyhow!("screencapture exited with status: {}", status));
     }
 
-    let bytes = fs::read(tmp_path)
-        .map_err(|e| anyhow!("Failed to read capture file: {}", e))?;
+    let bytes = fs::read(tmp_path).map_err(|e| anyhow!("Failed to read capture file: {}", e))?;
 
     let _ = fs::remove_file(tmp_path); // clean up
 

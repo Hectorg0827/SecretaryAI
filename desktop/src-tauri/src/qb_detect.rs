@@ -11,11 +11,11 @@ pub fn check_qb_installed() -> bool {
 
 #[cfg(target_os = "windows")]
 fn detect_qb() -> bool {
-    use windows::Win32::System::Registry::{
-        RegOpenKeyExW, RegCloseKey, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-    };
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+    };
 
     // Intuit writes this key for every QB Desktop install (2010+)
     let key_path: Vec<u16> = OsStr::new("SOFTWARE\\Intuit\\QuickBooks")
@@ -35,7 +35,9 @@ fn detect_qb() -> bool {
     };
 
     if result.is_ok() {
-        unsafe { let _ = RegCloseKey(hkey); }
+        unsafe {
+            let _ = RegCloseKey(hkey);
+        }
         return true;
     }
 
@@ -56,7 +58,9 @@ fn detect_qb() -> bool {
     };
 
     if result2.is_ok() {
-        unsafe { let _ = RegCloseKey(hkey); }
+        unsafe {
+            let _ = RegCloseKey(hkey);
+        }
         return true;
     }
 

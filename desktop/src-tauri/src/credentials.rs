@@ -2,7 +2,6 @@
 /// - Windows: Windows Credential Manager (DPAPI)
 /// - macOS: Keychain Services
 /// Credentials are NEVER stored in plain text files.
-
 use anyhow::Result;
 
 /// Store a credential securely in the OS credential store.
@@ -37,8 +36,8 @@ mod platform {
     }
 
     pub fn store(service: &str, key: &str, value: &str) -> Result<()> {
-        use windows::Win32::Security::Credentials::*;
         use windows::Win32::Foundation::*;
+        use windows::Win32::Security::Credentials::*;
 
         let target = to_wide(&format!("SecretaryAI/{}/{}", service, key));
         let blob = value.as_bytes();
@@ -92,11 +91,7 @@ mod platform {
 
         let target = to_wide(&format!("SecretaryAI/{}/{}", service, key));
         unsafe {
-            let _ = CredDeleteW(
-                windows::core::PCWSTR(target.as_ptr()),
-                CRED_TYPE_GENERIC,
-                0,
-            );
+            let _ = CredDeleteW(windows::core::PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, 0);
         }
         Ok(())
     }
@@ -107,7 +102,9 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use anyhow::{anyhow, Result};
-    use security_framework::passwords::{delete_generic_password, get_generic_password, set_generic_password};
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
 
     pub fn store(service: &str, key: &str, value: &str) -> Result<()> {
         set_generic_password(service, key, value.as_bytes())
@@ -161,8 +158,10 @@ mod platform {
     fn cred_path(service: &str, key: &str) -> PathBuf {
         // Sanitize: replace any path separators
         let safe_service = service.replace(['/', '\\', '.'], "_");
-        let safe_key     = key.replace(['/', '\\', '.'], "_");
-        cred_dir().join(safe_service).join(format!("{}.enc", safe_key))
+        let safe_key = key.replace(['/', '\\', '.'], "_");
+        cred_dir()
+            .join(safe_service)
+            .join(format!("{}.enc", safe_key))
     }
 
     /// Derive a 32-byte encryption key from the machine-id (or fallback secret).
@@ -185,8 +184,8 @@ mod platform {
         }
 
         let enc_key = derive_key();
-        let cipher  = Aes256Gcm::new_from_slice(&enc_key)
-            .map_err(|e| anyhow!("cipher init: {}", e))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&enc_key).map_err(|e| anyhow!("cipher init: {}", e))?;
 
         let mut nonce_bytes = [0u8; 12];
         rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
@@ -216,10 +215,10 @@ mod platform {
         }
 
         let enc_key = derive_key();
-        let cipher  = Aes256Gcm::new_from_slice(&enc_key)
-            .map_err(|e| anyhow!("cipher init: {}", e))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&enc_key).map_err(|e| anyhow!("cipher init: {}", e))?;
 
-        let nonce      = Nonce::from_slice(&blob[..12]);
+        let nonce = Nonce::from_slice(&blob[..12]);
         let ciphertext = &blob[12..];
 
         let plaintext = cipher

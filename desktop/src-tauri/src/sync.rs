@@ -1,6 +1,5 @@
 /// Background sync loop — pushes local QB data to the cloud backend.
 /// Runs every 5 minutes while the app is active; immediately on user request.
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -10,7 +9,7 @@ use tokio::time::sleep;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SyncStatus {
     pub last_sync_at: Option<String>,
-    pub status: String,   // "idle" | "syncing" | "error"
+    pub status: String, // "idle" | "syncing" | "error"
     pub message: Option<String>,
 }
 
@@ -71,11 +70,9 @@ async fn run_sync(app: &AppHandle) -> Result<SyncStatus> {
         }
     });
 
-    let token = crate::credentials::get_credential(
-        "secretary-auth".to_string(),
-        "token".to_string(),
-    )
-    .map_err(|e| anyhow::anyhow!("credential read error: {}", e))?;
+    let token =
+        crate::credentials::get_credential("secretary-auth".to_string(), "token".to_string())
+            .map_err(|e| anyhow::anyhow!("credential read error: {}", e))?;
 
     let Some(auth_token) = token else {
         // Not authenticated yet — skip sync silently
@@ -110,7 +107,10 @@ async fn run_sync(app: &AppHandle) -> Result<SyncStatus> {
     }
 
     let payload: serde_json::Value = response.json().await.unwrap_or_default();
-    let summary = payload["message"].as_str().unwrap_or("Sync complete").to_string();
+    let summary = payload["message"]
+        .as_str()
+        .unwrap_or("Sync complete")
+        .to_string();
 
     log::info!("Sync complete: {}", summary);
 
@@ -134,7 +134,8 @@ async fn run_sync(app: &AppHandle) -> Result<SyncStatus> {
 
 fn db_path(app: &AppHandle) -> std::path::PathBuf {
     use tauri::Manager;
-    app.path().app_data_dir()
+    app.path()
+        .app_data_dir()
         .expect("app data dir")
         .join("secretaryai.db")
 }
@@ -150,9 +151,8 @@ fn write_sync_log(app: &AppHandle, event: &str, status: &str, details: &str) -> 
 
 fn read_last_sync_status(app: &AppHandle) -> Result<SyncStatus> {
     let conn = rusqlite::Connection::open(db_path(app))?;
-    let mut stmt = conn.prepare(
-        "SELECT created_at, status, details FROM sync_log ORDER BY id DESC LIMIT 1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT created_at, status, details FROM sync_log ORDER BY id DESC LIMIT 1")?;
     let row = stmt.query_row([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -163,7 +163,11 @@ fn read_last_sync_status(app: &AppHandle) -> Result<SyncStatus> {
     match row {
         Ok((created_at, status, details)) => Ok(SyncStatus {
             last_sync_at: Some(created_at),
-            status: if status == "success" { "idle".to_string() } else { "error".to_string() },
+            status: if status == "success" {
+                "idle".to_string()
+            } else {
+                "error".to_string()
+            },
             message: details,
         }),
         Err(_) => Ok(SyncStatus {

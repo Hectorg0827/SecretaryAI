@@ -15,8 +15,8 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 
 | Gate | Area | Status | Notes |
 |---|---|---|---|
-| G0 | Repository integrity | 🟡 in progress | Cargo.lock committed (#16); release workflows consolidated (#13); version single-sourced in backend, desktop/frontend pending (#24). |
-| G1 | Security | 🟢 strong (depth items remain) | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection delimiting (#33) — all fixed + tested. Remaining: typed action payloads (#32), local-cache encryption (#7), secret-history scan. |
+| G0 | Repository integrity | 🟢 strong | Cargo.lock committed (#16); release workflows consolidated (#13); version single-sourced + CI-enforced (#24). |
+| G1 | Security | 🟢 strong | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection (#33), local-cache encryption (#7) — all fixed + tested. Remaining: typed action payloads (#32, partial), secret-history scan (needs repo history access). |
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
 | G3 | Windows installer | 🔒 blocked | Builds & installs (verified), but **unsigned** (#12) — needs Authenticode cert. |
 | G4 | macOS installer | 🔒 blocked | Unsigned/un-notarized (#12) — needs Apple Developer ID + notarization. |
@@ -34,7 +34,7 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 | Authentication & session security | 4 | ↑ refresh rotation/revocation/bounded-window (#19) |
 | Tenant isolation & authorization | 4 | ↑ 2 P0 IDORs fixed + negative tests (#27/#28); RBAC gaps closed (#29) |
 | Secret storage | 3 | ↑ desktop token → OS vault (#5); portal-cred cleartext tracked (#34) |
-| Data encryption & privacy | 3 | ↑ Sentry scrubbing (#22); local cache still plaintext (#7) |
+| Data encryption & privacy | 4 | ↑ Sentry scrubbing (#22); local cache payload encrypted (#7); token encryption at rest |
 | AI / tool safety | 3 | ↑ audited; policy gate (#31), idempotency (#30), prompt-injection delimiting (#33); depth items #32/#35 remain |
 | Backend reliability | 3 | health leak fixed (#20) |
 | Web reliability | 3 | — |
@@ -63,7 +63,7 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 4 | P1 | Desktop reads token from parent localStorage + iframes remote prod app | `desktop/src/App.tsx` | ✅ fixed — **remote iframe removed**; native UI: `Login` → `Setup` → `Dashboard`, all API-driven. Full page parity opens in the external browser (secure — not a privileged webview). Build + lint clean. |
 | 5 | P0 | Sync loop reads token from OS vault; frontend writes localStorage; nothing bridges | `sync.rs` vs `api.ts` | ✅ fixed — new `desktop/src/auth.ts` stores the token in the OS vault (`secretary-auth`/`token`) via `store_credential`, the exact key `sync.rs` reads; all desktop code (Login/Setup/computer-use) uses it. No `localStorage` token anywhere. |
 | 6 | P1 | CSP has no `frame-src` for the app iframe (`default-src 'self'`) | `tauri.conf.json` | ✅ fixed — resolved by removing the iframe; `default-src 'self'` now correctly serves the bundled app and `connect-src` already allows the API/Supabase/WS. |
-| 7 | P1 | Local SQLite cache provisions an encryption key but stores plaintext | `db.rs` | ⬜ open (SQLCipher or drop cache) |
+| 7 | P1 | Local SQLite cache provisions an encryption key but stores plaintext | `db.rs` | ✅ fixed — sensitive `data_json` payload now encrypted at rest with AES-256-GCM (key from the OS vault); ids/statuses stay queryable. Backward-compatible with legacy rows. Rust unit tests: `db::tests` (round-trip, legacy passthrough, wrong-key). Whole-DB SQLCipher noted as a future enhancement (avoided the OpenSSL build risk to the installers). |
 | 8 | P1 | `devtools` feature enabled in release builds | `Cargo.toml` | ✅ fixed — removed `devtools` feature (inspector now debug-only). Desktop `cargo check` clean. |
 | 9 | P1 | Tauri default capability grants broad http/fs/shell/etc. | `capabilities/default.json` | ✅ fixed — reduced to `core:default` + `shell:allow-open` (the only plugin the webview uses). Compiles clean. |
 | 27 | **P0** | Cross-tenant draft approval/execution IDOR — `drafts` mutated by `id` only; a Company-A owner could approve/execute Company B's action (send its email/PO) | `actions.py`, `approval_queue.py` (found in tenant audit) | ✅ fixed — endpoint fetch + queue updates scoped to `company_id`, 404 on cross-tenant. Tests: `tests/test_tenant_isolation.py` |

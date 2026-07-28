@@ -79,22 +79,33 @@ async def approve_draft(
     """Approve a pending draft action and execute it."""
     queue = ApprovalQueue(db)
 
-    # Fetch the draft before approving so we can execute it
+    # Fetch the draft — SCOPED TO THE CALLER'S COMPANY. A draft belonging to
+    # another tenant must be invisible here, so cross-company approval/execution
+    # is impossible (IDOR fix).
     try:
-        draft_result = db.table("drafts").select("*").eq("id", draft_id).execute()
+        draft_result = (
+            db.table("drafts").select("*")
+            .eq("id", draft_id).eq("company_id", user["company_id"]).execute()
+        )
         draft = draft_result.data[0] if draft_result.data else {}
     except Exception:
         draft = {}
+
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
 
     if body.edited_content:
         result = await queue.edit_and_approve(
             draft_id=draft_id,
             edited_content=body.edited_content,
             reviewed_by=user["sub"],
+            company_id=user["company_id"],
         )
         draft["content"] = body.edited_content
     else:
-        result = await queue.approve(draft_id=draft_id, reviewed_by=user["sub"])
+        result = await queue.approve(
+            draft_id=draft_id, reviewed_by=user["sub"], company_id=user["company_id"]
+        )
 
     # Execute the approved action
     if draft:
@@ -137,16 +148,23 @@ async def reject_draft(
     """Reject a pending draft action."""
     queue = ApprovalQueue(db)
 
-    # Fetch draft before rejecting to get workflow_run_id
+    # Fetch draft — SCOPED TO THE CALLER'S COMPANY (IDOR fix).
     try:
-        draft_result = db.table("drafts").select("*").eq("id", draft_id).execute()
+        draft_result = (
+            db.table("drafts").select("*")
+            .eq("id", draft_id).eq("company_id", user["company_id"]).execute()
+        )
         draft = draft_result.data[0] if draft_result.data else {}
     except Exception:
         draft = {}
 
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
     result = await queue.reject(
         draft_id=draft_id,
         reviewed_by=user["sub"],
+        company_id=user["company_id"],
         reason=body.reason,
     )
 

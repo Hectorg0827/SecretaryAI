@@ -64,8 +64,11 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 5 | P0 | Sync loop reads token from OS vault; frontend writes localStorage; nothing bridges | `sync.rs` vs `api.ts` | ⬜ open |
 | 6 | P1 | CSP has no `frame-src` for the app iframe (`default-src 'self'`) | `tauri.conf.json` | ⬜ open |
 | 7 | P1 | Local SQLite cache provisions an encryption key but stores plaintext | `db.rs` | ⬜ open (SQLCipher or drop cache) |
-| 8 | P1 | `devtools` feature enabled in release builds | `Cargo.toml` | ⬜ open |
-| 9 | P1 | Tauri default capability grants broad http/fs/shell/etc. | `capabilities/default.json` | ⬜ open (least privilege) |
+| 8 | P1 | `devtools` feature enabled in release builds | `Cargo.toml` | ✅ fixed — removed `devtools` feature (inspector now debug-only). Desktop `cargo check` clean. |
+| 9 | P1 | Tauri default capability grants broad http/fs/shell/etc. | `capabilities/default.json` | ✅ fixed — reduced to `core:default` + `shell:allow-open` (the only plugin the webview uses). Compiles clean. |
+| 27 | **P0** | Cross-tenant draft approval/execution IDOR — `drafts` mutated by `id` only; a Company-A owner could approve/execute Company B's action (send its email/PO) | `actions.py`, `approval_queue.py` (found in tenant audit) | ✅ fixed — endpoint fetch + queue updates scoped to `company_id`, 404 on cross-tenant. Tests: `tests/test_tenant_isolation.py` |
+| 28 | **P0** | Cross-tenant workflow cancel IDOR — `workflow_runs` failed/cancelled by `id` only | `workflows.py`, `engine.py` (tenant audit) | ✅ fixed — `_get_run`/`fail`/`resume_after_approval` scoped to `company_id`; endpoint ownership 404. Test in `test_tenant_isolation.py` |
+| 29 | P2 | `accounts.py get_account` lacks a role gate; `computer_use` start uses a broken `require_permission` call | tenant audit | ⬜ open (tracked) |
 | 10 | P2 | `capture_screen` unreachable — activation command unregistered | `lib.rs`/`screen_capture.rs` | ⬜ open |
 | 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | ⬜ open |
 | 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🔒 external blocker (certs) |

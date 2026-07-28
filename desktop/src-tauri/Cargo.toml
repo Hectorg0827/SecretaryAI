@@ -18,7 +18,11 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools"] }
+# NOTE: `devtools` is intentionally NOT enabled — that feature turns the webview
+# inspector on in RELEASE builds too. Tauri already enables the inspector in
+# debug builds automatically, so developers keep it locally while shipped
+# builds do not expose it. (Production-readiness defect #8.)
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"

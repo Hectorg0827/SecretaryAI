@@ -136,10 +136,14 @@ class TestWorkflowEnginePolicyHooks:
         from app.workflows.engine import WorkflowEngine
 
         db = MagicMock()
-        db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value \
+        # _get_run is now tenant-scoped: .select().eq(id).eq(company_id).maybe_single()
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value \
             .execute.return_value.data = run
         db.table.return_value.insert.return_value.execute.return_value = None
+        # updates come in both shapes: .update().eq(id).execute() and the
+        # tenant-scoped .update().eq(id).eq(company_id).execute()
         db.table.return_value.update.return_value.eq.return_value.execute.return_value = None
+        db.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = None
         return WorkflowEngine(db=db, company_id="c1")
 
     def test_get_current_step_def_read_step(self):

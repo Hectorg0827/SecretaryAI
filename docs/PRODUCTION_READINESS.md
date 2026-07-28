@@ -70,9 +70,9 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 28 | **P0** | Cross-tenant workflow cancel IDOR — `workflow_runs` failed/cancelled by `id` only | `workflows.py`, `engine.py` (tenant audit) | ✅ fixed — `_get_run`/`fail`/`resume_after_approval` scoped to `company_id`; endpoint ownership 404. Test in `test_tenant_isolation.py` |
 | 29 | P2 | `accounts.py get_account` lacks a role gate; `computer_use` start uses a broken `require_permission` call | tenant audit | ⬜ open (tracked) |
 | 10 | P2 | `capture_screen` unreachable — activation command unregistered | `lib.rs`/`screen_capture.rs` | ⬜ open |
-| 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | ⬜ open |
+| 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | 🔒 blocked — enabling updater artifacts REQUIRES the Tauri signing key (else the build fails); deferred until the key exists (see runbook). |
 | 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🔒 external blocker (certs) |
-| 13 | P1 | Overlapping release workflows disagree (signing/draft/updater/names) | `.github/workflows/*` | ⬜ open (consolidate) |
+| 13 | P1 | Overlapping release workflows disagree (signing/draft/updater/names) | `.github/workflows/*` | ✅ fixed — deleted racing `release.yml` (also invalid YAML) + redundant `tauri-build.yml`. Now 4 clean workflows: `ci`, `codeql`, `release-desktop`, `docker-publish` (all valid). Documented in `docs/RELEASE_RUNBOOK.md`. |
 | 14 | P2 | `install.sh`/`install.ps1` point to wrong repo; install Docker stack | install scripts | ⬜ open |
 | 15 | P2 | `install.ps1` uses `Invoke-Expression`; docs pipe remote script to shell | `install.ps1` | ⬜ open |
 | 16 | P1 | `.gitignore` ignores `Cargo.lock`/`*.lock` | `.gitignore` | ✅ fixed — `Cargo.lock` un-ignored and committed (6685 deps pinned). |
@@ -80,7 +80,7 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 18 | P2 | No `test` script in frontend/desktop package.json | package.json | ⬜ open |
 | 23 | P2 | GitHub Actions use floating versions incl. `@master` | workflows | ⬜ open (pin SHAs) |
 | 25 | P2 | Desktop heartbeat runs with empty company ID + no auth token | `heartbeat.rs`/`lib.rs` | ⬜ open |
-| 26 | P1 | README overclaims one-click/native vs unsigned reality | `README.md` | ⬜ open |
+| 26 | P1 | README overclaims one-click/native vs unsigned reality | `README.md` | ✅ fixed — README now states builds are unsigned (SmartScreen/Gatekeeper prompt) and that the credential-vault migration is in progress. |
 | 1 | P2 | Default branch is a non-conventional agent branch | repo settings | 🔒 owner decision |
 
 ### Pre-existing test failures (not caused by this work)

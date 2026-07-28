@@ -4,14 +4,19 @@ AI operations manager for small importers and distributors. Conversational AI co
 
 ## ⬇ Download the desktop app
 
-**[docs/download.html](docs/download.html)** — one-click installers for Mac and Windows.
-
-Or go directly to the [GitHub Releases page](https://github.com/Hectorg0827/SecretaryAI/releases/latest) and download:
+Download from the [GitHub Releases page](https://github.com/Hectorg0827/SecretaryAI/releases/latest):
 - **macOS** → `SecretaryAI_x.y.z_aarch64.dmg` (Apple Silicon) or `*_x64.dmg` (Intel)
 - **Windows** → `SecretaryAI_x.y.z_x64-setup.exe` — double-click, Next → Install → Finish
 
-No command line. No developer tools. No Docker required on your desktop.
-> The backend runs in the cloud. The desktop app connects to it automatically after sign-in.
+No command line, developer tools, or Docker required on your desktop.
+
+> **Note — builds are currently unsigned.** On first launch you'll see a
+> one-time OS warning (Windows SmartScreen → *More info → Run anyway*; macOS →
+> right-click → *Open*). This is expected for unsigned apps and doesn't affect
+> functionality. Code-signing + notarization (which remove the prompt) are
+> planned — see `docs/RELEASE_RUNBOOK.md`.
+>
+> The backend runs in the cloud; the desktop app connects to it after sign-in.
 
 ## Architecture
 
@@ -67,13 +72,14 @@ Run `database/schema.sql` in your Supabase SQL editor.
 
 | Platform | Desktop App | Web App | QB Connection |
 |----------|-------------|---------|---------------|
-| Windows  | ✅ Native installer (.exe/.msi) | ✅ | QB Desktop via Conductor |
-| macOS    | ✅ Native app (.dmg/.app) | ✅ | QB Desktop via Conductor |
+| Windows  | Installer (.exe/.msi) — unsigned (see note above) | ✅ | QB Desktop via Conductor |
+| macOS    | App (.dmg) — unsigned/un-notarized | ✅ | QB Desktop via Conductor |
 | iOS/Android | PWA (install from browser) | ✅ | QB Online only |
 
-The desktop app uses platform-native credential storage:
-- **Windows**: Windows Credential Manager (DPAPI)
-- **macOS**: Keychain Services
+The desktop app targets platform-native credential storage — **Windows
+Credential Manager (DPAPI)** and **macOS Keychain** — for secrets. Migrating the
+session token off web storage into the vault is in progress (see
+`docs/adr/0001-desktop-ui-architecture.md`).
 
 ## Environment Variables
 

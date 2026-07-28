@@ -127,3 +127,34 @@ class TestAlertRecipientAllowlist:
             assert ok_out is False
         finally:
             email_actions.settings.alert_email_allowlist = ""
+
+
+# ── #32 typed action-payload validation ───────────────────────────────────────
+class TestActionPayloadSchemas:
+    def test_rejects_negative_quantity(self):
+        from app.actions.schemas import validate_action_payload, ActionValidationError
+        with pytest.raises(ActionValidationError):
+            validate_action_payload("update_inventory_count", {"item_id": "SKU1", "quantity": -3})
+
+    def test_rejects_nonnumeric_quantity(self):
+        from app.actions.schemas import validate_action_payload, ActionValidationError
+        with pytest.raises(ActionValidationError):
+            validate_action_payload("update_inventory_count", {"item_id": "SKU1", "quantity": "lots"})
+
+    def test_rejects_missing_item_id(self):
+        from app.actions.schemas import validate_action_payload, ActionValidationError
+        with pytest.raises(ActionValidationError):
+            validate_action_payload("update_inventory_count", {"quantity": 5})
+
+    def test_coerces_and_preserves_extras(self):
+        from app.actions.schemas import validate_action_payload
+        out = validate_action_payload(
+            "update_inventory_count", {"item_id": "SKU1", "quantity": "5", "note": "keep"}
+        )
+        assert out["quantity"] == 5          # coerced str → int
+        assert out["note"] == "keep"          # extra field preserved
+
+    def test_unmapped_action_passes_through(self):
+        from app.actions.schemas import validate_action_payload
+        p = {"anything": 1}
+        assert validate_action_payload("run_sync_check", p) is p

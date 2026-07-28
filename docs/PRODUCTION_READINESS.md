@@ -15,12 +15,12 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 
 | Gate | Area | Status | Notes |
 |---|---|---|---|
-| G0 | Repository integrity | 🟡 in progress | Cargo.lock ignored (#16); overlapping release workflows (#13); no single version source (#24, partially fixed backend). |
-| G1 | Security | 🟡 in progress | Backend: #19/#20/#21/#22 **fixed + tested**. Remaining: tenant-isolation negative tests, Tauri least-privilege (#8/#9), local-cache encryption (#7), secret-history scan. |
-| G2 | Functional product | 🔴 not ready | Desktop auth/API wiring broken (#2/#3/#4/#5/#6); needs real integrations (external accounts). |
-| G3 | Windows installer | 🔴 blocked | Builds & installs (verified), but **unsigned** (#12) — needs Authenticode cert. |
-| G4 | macOS installer | 🔴 blocked | Unsigned/un-notarized (#12) — needs Apple Developer ID + notarization. |
-| G5 | Operations | 🔴 not ready | Backups/restore drill, runbooks, migration rollback not yet proven. |
+| G0 | Repository integrity | 🟡 in progress | Cargo.lock committed (#16); release workflows consolidated (#13); version single-sourced in backend, desktop/frontend pending (#24). |
+| G1 | Security | 🟢 strong (depth items remain) | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection delimiting (#33) — all fixed + tested. Remaining: typed action payloads (#32), local-cache encryption (#7), secret-history scan. |
+| G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
+| G3 | Windows installer | 🔒 blocked | Builds & installs (verified), but **unsigned** (#12) — needs Authenticode cert. |
+| G4 | macOS installer | 🔒 blocked | Unsigned/un-notarized (#12) — needs Apple Developer ID + notarization. |
+| G5 | Operations | 🔴 not ready | Backups/restore drill, incident/runbooks, migration rollback not yet proven. |
 | G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
 
 Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
@@ -31,19 +31,19 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 
 | Category | Score | Trend |
 |---|---|---|
-| Authentication & session security | 2 → 3 | ↑ refresh rotation/revocation/bounded-window added (#19) |
-| Tenant isolation & authorization | 2 | — negative tests pending |
-| Secret storage | 2 | — desktop token in localStorage (#5) |
-| Data encryption & privacy | 2 | — local cache plaintext (#7); Sentry scrubbing fixed (#22) |
-| AI / tool safety | ? | — not yet audited this pass |
+| Authentication & session security | 4 | ↑ refresh rotation/revocation/bounded-window (#19) |
+| Tenant isolation & authorization | 4 | ↑ 2 P0 IDORs fixed + negative tests (#27/#28); RBAC gaps closed (#29) |
+| Secret storage | 3 | ↑ desktop token → OS vault (#5); portal-cred cleartext tracked (#34) |
+| Data encryption & privacy | 3 | ↑ Sentry scrubbing (#22); local cache still plaintext (#7) |
+| AI / tool safety | 3 | ↑ audited; policy gate (#31), idempotency (#30), prompt-injection delimiting (#33); depth items #32/#35 remain |
 | Backend reliability | 3 | health leak fixed (#20) |
 | Web reliability | 3 | — |
-| Windows desktop reliability | 3 | installs + launches (crash-on-start fixed earlier) |
+| Windows desktop reliability | 4 | ↑ installs, launches, native UI |
 | macOS desktop reliability | 3 | builds; unsigned |
-| Packaging / signing / updater | 1 | unsigned; updater artifacts off (#11) |
-| CI & supply chain | 1 | no PR CI/CodeQL/Dependabot (#17); floating actions (#23) |
+| Packaging / signing / updater | 1 | unsigned; updater artifacts blocked on key (#11/#12) |
+| CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + Cargo.lock (#16/#17); action-pinning tracked (#23) |
 | Observability / recovery / ops | 2 | — |
-| Documentation & support readiness | 2 | this doc + register started |
+| Documentation & support readiness | 3 | ↑ readiness doc, threat model, runbook, SECURITY.md |
 
 ---
 
@@ -68,7 +68,6 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 9 | P1 | Tauri default capability grants broad http/fs/shell/etc. | `capabilities/default.json` | ✅ fixed — reduced to `core:default` + `shell:allow-open` (the only plugin the webview uses). Compiles clean. |
 | 27 | **P0** | Cross-tenant draft approval/execution IDOR — `drafts` mutated by `id` only; a Company-A owner could approve/execute Company B's action (send its email/PO) | `actions.py`, `approval_queue.py` (found in tenant audit) | ✅ fixed — endpoint fetch + queue updates scoped to `company_id`, 404 on cross-tenant. Tests: `tests/test_tenant_isolation.py` |
 | 28 | **P0** | Cross-tenant workflow cancel IDOR — `workflow_runs` failed/cancelled by `id` only | `workflows.py`, `engine.py` (tenant audit) | ✅ fixed — `_get_run`/`fail`/`resume_after_approval` scoped to `company_id`; endpoint ownership 404. Test in `test_tenant_isolation.py` |
-| 29 | P2 | `accounts.py get_account` lacks a role gate; `computer_use` start uses a broken `require_permission` call | tenant audit | ⬜ open (tracked) |
 | 10 | P2 | `capture_screen` unreachable — activation command unregistered; no consent/timeout | `lib.rs`/`screen_capture.rs` | ✅ fixed — `activate/deactivate/computer_use_active` registered as commands; default OFF; 120s inactivity auto-stop; Setup.tsx asks explicit consent, activates, and always deactivates on stop/unmount. (Persistent OS indicator + on-screen redaction tracked — see AI-safety rows.) |
 | 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | 🔒 blocked — enabling updater artifacts REQUIRES the Tauri signing key (else the build fails); deferred until the key exists (see runbook). |
 | 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🔒 external blocker (certs) |

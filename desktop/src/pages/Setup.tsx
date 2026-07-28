@@ -63,8 +63,18 @@ export default function Setup({ onComplete }: SetupProps = {}) {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (guidanceRef.current) clearInterval(guidanceRef.current);
+      // Always end any active screen-capture session on unmount.
+      invoke("deactivate_computer_use").catch(() => {});
     };
   }, []);
+
+  function stopGuidance() {
+    if (guidanceRef.current) {
+      clearInterval(guidanceRef.current);
+      guidanceRef.current = null;
+    }
+    invoke("deactivate_computer_use").catch(() => {});
+  }
 
   async function detectQB() {
     setStep("checking");
@@ -123,7 +133,19 @@ export default function Setup({ onComplete }: SetupProps = {}) {
   }
 
   // ── Poll every 15 s for AI visual guidance ────────────────────────────────
-  function startGuidancePolling() {
+  // Screen capture is OFF by default. It only starts here, after the user has
+  // opted into AI setup guidance by reaching this step and confirming, and it
+  // auto-stops (inactivity timeout in Rust + explicit stop below).
+  async function startGuidancePolling() {
+    const consented = window.confirm(
+      "Allow SecretaryAI to view this screen to guide you through QuickBooks setup?\n\n" +
+        "Capture runs only during setup and stops automatically.",
+    );
+    if (!consented) return;
+
+    const activated = await invoke<boolean>("activate_computer_use").catch(() => false);
+    if (!activated) return;
+
     guidanceRef.current = setInterval(async () => {
       try {
         const screenshotB64: string = await invoke("capture_screen");
@@ -135,9 +157,7 @@ export default function Setup({ onComplete }: SetupProps = {}) {
           }),
         });
         setGuidance(resp);
-        if (!resp.needs_action) {
-          if (guidanceRef.current) clearInterval(guidanceRef.current);
-        }
+        if (!resp.needs_action) stopGuidance();
       } catch {
         // Guidance is best-effort — don't show errors
       }

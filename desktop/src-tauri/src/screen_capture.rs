@@ -4,32 +4,52 @@
 /// and the user has granted screen capture permission.
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
-/// Global flag: true while a Computer Use task is actively running.
-/// Screen capture is only allowed while this flag is true.
+/// Global flag: true while a Computer Use screen-capture session is active.
+/// Default OFF — capture is impossible until the user explicitly activates it.
 static COMPUTER_USE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Activate Computer Use mode (called when a CU task starts).
-/// Returns false if the user has not granted screen capture permission.
-pub fn activate_computer_use() -> bool {
-    // Check permission by attempting a silent test capture
-    if _capture_and_encode().is_ok() {
-        COMPUTER_USE_ACTIVE.store(true, Ordering::SeqCst);
-        true
-    } else {
-        false
-    }
+/// Unix seconds of the last activation/capture — drives the inactivity timeout.
+static LAST_ACTIVITY_AT: AtomicU64 = AtomicU64::new(0);
+
+/// Auto-stop a capture session after this many seconds without a capture, so a
+/// session can never be left running silently (e.g. after a caller crash).
+const INACTIVITY_TIMEOUT_SECS: u64 = 120;
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
-/// Deactivate Computer Use mode (called when a CU task ends).
+/// Activate a Computer Use screen-capture session. MUST be called only after an
+/// explicit user action consenting to screen capture. Registered as a command so
+/// the UI drives the consent flow. Default state is OFF.
+#[tauri::command]
+pub fn activate_computer_use() -> bool {
+    LAST_ACTIVITY_AT.store(now_secs(), Ordering::SeqCst);
+    COMPUTER_USE_ACTIVE.store(true, Ordering::SeqCst);
+    true
+}
+
+/// Deactivate the session (explicit stop). Idempotent.
+#[tauri::command]
 pub fn deactivate_computer_use() {
     COMPUTER_USE_ACTIVE.store(false, Ordering::SeqCst);
 }
 
+/// Whether a capture session is currently active (for a UI indicator).
+#[tauri::command]
+pub fn computer_use_active() -> bool {
+    COMPUTER_USE_ACTIVE.load(Ordering::SeqCst)
+}
+
 /// Capture the primary display and return as base64 PNG.
-/// Returns an error if Computer Use is not currently active.
+/// Fails unless a session is active AND has not hit the inactivity timeout.
 #[tauri::command]
 pub fn capture_screen() -> Result<String, String> {
     if !COMPUTER_USE_ACTIVE.load(Ordering::SeqCst) {
@@ -37,6 +57,13 @@ pub fn capture_screen() -> Result<String, String> {
             "Screen capture is only allowed during an active Computer Use session".to_string(),
         );
     }
+    // Inactivity timeout: auto-stop a stale session rather than keep capturing.
+    let last = LAST_ACTIVITY_AT.load(Ordering::SeqCst);
+    if now_secs().saturating_sub(last) > INACTIVITY_TIMEOUT_SECS {
+        deactivate_computer_use();
+        return Err("Computer Use session timed out; re-activate to continue".to_string());
+    }
+    LAST_ACTIVITY_AT.store(now_secs(), Ordering::SeqCst);
     _capture_and_encode().map_err(|e| e.to_string())
 }
 

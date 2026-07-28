@@ -94,6 +94,11 @@ async def approve_draft(
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
 
+    # Idempotency: only a still-pending draft may be approved/executed. A second
+    # approval must NOT re-send the email / re-dispatch the PO.
+    if draft.get("status") != "pending":
+        return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
+
     if body.edited_content:
         result = await queue.edit_and_approve(
             draft_id=draft_id,
@@ -160,6 +165,10 @@ async def reject_draft(
 
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
+
+    # Idempotency: don't re-process an already-resolved draft.
+    if draft.get("status") != "pending":
+        return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
 
     result = await queue.reject(
         draft_id=draft_id,

@@ -160,6 +160,9 @@ pub fn run() {
             sync::get_sync_status,
             db::query_local,
             screen_capture::capture_screen,
+            screen_capture::activate_computer_use,
+            screen_capture::deactivate_computer_use,
+            screen_capture::computer_use_active,
             qb_detect::check_qb_installed,
         ])
         .setup(|app| {

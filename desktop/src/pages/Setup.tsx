@@ -10,20 +10,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
-import { API_URL as API } from "../config";
+import { authFetch } from "../auth";
 
 // ── API base ──────────────────────────────────────────────────────────────────
+// Uses the shared vault-backed client (token from the OS credential store),
+// with automatic 401 refresh — not localStorage.
 
 async function apiFetch(path: string, opts?: RequestInit) {
-  const token = localStorage.getItem("secretary_token") ?? "";
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(opts?.headers ?? {}),
-    },
-  });
+  const res = await authFetch(path, opts);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail ?? `HTTP ${res.status}`);

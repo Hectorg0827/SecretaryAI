@@ -5,6 +5,7 @@ and dispatched as Celery tasks for heavier operations.
 """
 import logging
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,10 +14,52 @@ from pydantic import BaseModel
 from app.api.deps import get_db, get_adapter
 from app.auth.rbac import get_current_user, require_permission
 from app.actions.approval_queue import ApprovalQueue
+from app.domain.contracts import ActionClass, ActionProposal
+from app.domain.policy import PolicyEngine
 from app.utils.audit import write_audit_event
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _content_amount(content: dict) -> Optional[Decimal]:
+    """Best-effort monetary amount from a draft's content for policy checks."""
+    for key in ("amount", "total", "total_amount", "value"):
+        v = content.get(key)
+        if v is not None:
+            try:
+                return Decimal(str(v))
+            except (InvalidOperation, ValueError, TypeError):
+                return None
+    return None
+
+
+async def _execution_policy_effect(db, company_id: str, requested_by: str,
+                                   draft: dict, content: dict) -> str:
+    """
+    Evaluate the tenant PolicyEngine for a COMMIT action about to execute.
+    Returns the effect ('allow' | 'require_approval' | 'deny').
+
+    On an evaluation error we fail OPEN ('allow') and log loudly: the action has
+    ALREADY been through human approval and the static autonomy rules, so a
+    policy-infra hiccup should not block a legitimately-approved action — but an
+    explicit 'deny' (e.g. amount over a hard ceiling) is always honored.
+    """
+    try:
+        proposal = ActionProposal(
+            action_type=draft.get("action_type", "") or "unknown",
+            action_class=ActionClass.COMMIT,
+            description=f"Execute approved draft {draft.get('id')}",
+            company_id=company_id,
+            requested_by=requested_by,
+            amount=_content_amount(content),
+        )
+        decision = await PolicyEngine(company_id, db).evaluate(proposal)
+        return decision.effect
+    except Exception as exc:
+        log.error("Policy evaluation errored for draft %s (failing open): %s",
+                  draft.get("id"), exc)
+        return "allow"
 
 
 async def _execute_approved_draft(draft: dict, adapter) -> None:
@@ -98,6 +141,13 @@ async def approve_draft(
     # approval must NOT re-send the email / re-dispatch the PO.
     if draft.get("status") != "pending":
         return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
+
+    # Policy gate: enforce the tenant PolicyEngine BEFORE approving/executing, so
+    # a human approval can't push an action past a hard ceiling (e.g. an amount
+    # over the company's limit). Blocked → 403, draft stays pending.
+    content_for_policy = body.edited_content or draft.get("content", {}) or {}
+    if await _execution_policy_effect(db, user["company_id"], user["sub"], draft, content_for_policy) == "deny":
+        raise HTTPException(status_code=403, detail="This action is blocked by your company's action policy")
 
     if body.edited_content:
         result = await queue.edit_and_approve(

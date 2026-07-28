@@ -81,3 +81,49 @@ class TestApprovalIdempotency:
         )
         assert r.status_code == 200, r.text
         assert r.json().get("already_processed") is True
+
+
+# ── #31 PolicyEngine on the approval path ─────────────────────────────────────
+class TestPolicyGate:
+    def test_policy_deny_blocks_approval(self, client):
+        app.dependency_overrides[get_db] = lambda: _draft_db("pending")
+        app.dependency_overrides[get_adapter] = lambda: MagicMock()
+
+        class _Deny:
+            async def evaluate(self, proposal):
+                return MagicMock(effect="deny")
+
+        with patch("app.api.actions.PolicyEngine", return_value=_Deny()), \
+             patch("app.api.actions._execute_approved_draft", new=AsyncMock()) as exec_spy:
+            r = client.post(
+                "/api/actions/approve/d1",
+                json={},
+                headers={"Authorization": f"Bearer {_token('owner')}"},
+            )
+        assert r.status_code == 403, r.text
+        exec_spy.assert_not_called()  # denied → never executes
+
+
+# ── #32 alert-email recipient allow-list ──────────────────────────────────────
+class TestAlertRecipientAllowlist:
+    def test_invalid_recipient_rejected(self):
+        from app.actions.email_actions import _recipient_allowed
+        ok, _ = _recipient_allowed("not-an-email")
+        assert ok is False
+
+    def test_valid_recipient_when_no_allowlist(self):
+        from app.actions import email_actions
+        email_actions.settings.alert_email_allowlist = ""
+        ok, _ = email_actions._recipient_allowed("owner@acme.com")
+        assert ok is True
+
+    def test_offdomain_recipient_rejected_when_allowlist_set(self):
+        from app.actions import email_actions
+        email_actions.settings.alert_email_allowlist = "acme.com"
+        try:
+            ok_in, _ = email_actions._recipient_allowed("owner@acme.com")
+            ok_out, _ = email_actions._recipient_allowed("attacker@evil.com")
+            assert ok_in is True
+            assert ok_out is False
+        finally:
+            email_actions.settings.alert_email_allowlist = ""

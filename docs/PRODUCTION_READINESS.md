@@ -20,7 +20,7 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
 | G3 | Windows installer | 🔒 blocked | Builds & installs (verified), but **unsigned** (#12) — needs Authenticode cert. |
 | G4 | macOS installer | 🔒 blocked | Unsigned/un-notarized (#12) — needs Apple Developer ID + notarization. |
-| G5 | Operations | 🔴 not ready | Backups/restore drill, incident/runbooks, migration rollback not yet proven. |
+| G5 | Operations | 🟡 in progress | Runbooks written (release, incident, backup/restore, privacy/data-flow); backup restore DRILL + migration rollback not yet executed. |
 | G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
 
 Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
@@ -43,7 +43,7 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 | Packaging / signing / updater | 1 | unsigned; updater artifacts blocked on key (#11/#12) |
 | CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + Cargo.lock (#16/#17); action-pinning tracked (#23) |
 | Observability / recovery / ops | 2 | — |
-| Documentation & support readiness | 3 | ↑ readiness doc, threat model, runbook, SECURITY.md |
+| Documentation & support readiness | 4 | ↑ + privacy/data-flow, incident-response, backup/restore runbooks |
 
 ---
 
@@ -57,7 +57,7 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 21 | P1 | `/openapi.json` publicly served in production | `app/main.py` FastAPI ctor | ✅ fixed — `openapi_url` disabled in prod; key-gated route. Test: `TestPublicSurface::test_openapi_gated_in_production` |
 | 20 | P1 | `/health` returns raw dependency exception text | `app/main.py` health_check | ✅ fixed — logs detail server-side, returns generic `ok`/`error`. Test: `TestPublicSurface::test_health_never_leaks_exception_text` |
 | 22 | P1 | Sentry scrubbing only 3 local vars; headers/cookies/body/PII leak | `app/main.py` `_scrub_sentry_event` | ✅ fixed — `send_default_pii=False`; scrub all frames + request headers/cookies/body + user PII. Tests: `TestSentryScrub` |
-| 24 | P2 | Version `1.0.0` duplicated across manifests + hardcoded in health | multiple | 🟡 backend now single-sourced (`app.__version__`); desktop/frontend/tauri still separate |
+| 24 | P2 | Version `1.0.0` duplicated across manifests + hardcoded in health | multiple | ✅ fixed — canonical `/VERSION` file is the source of truth; `scripts/check_versions.sh` verifies backend/tauri/cargo/desktop/frontend all match, enforced by a `versions` CI job. |
 | 2 | P0 | CI injects `VITE_API_BASE_URL`; code reads `VITE_API_URL` → localhost fallback | `release-desktop.yml` vs `App.tsx`/`api.ts` | ✅ fixed — CI now injects `VITE_API_URL`; single `config.ts`; **fail-closed build guard** in `vite.config.ts` (verified: build fails on missing/localhost, passes on https). |
 | 3 | P0 | `Setup.tsx` hardcodes `http://localhost:8000` | `desktop/src/pages/Setup.tsx` | ✅ fixed — routed through `config.ts`. |
 | 4 | P1 | Desktop reads token from parent localStorage + iframes remote prod app | `desktop/src/App.tsx` | ✅ fixed — **remote iframe removed**; native UI: `Login` → `Setup` → `Dashboard`, all API-driven. Full page parity opens in the external browser (secure — not a privileged webview). Build + lint clean. |

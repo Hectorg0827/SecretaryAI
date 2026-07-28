@@ -100,6 +100,14 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test
 
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all manifests match /VERSION
+        run: bash scripts/check_versions.sh
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest

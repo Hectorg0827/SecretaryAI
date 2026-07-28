@@ -33,15 +33,15 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 |---|---|---|
 | Authentication & session security | 4 | ↑ refresh rotation/revocation/bounded-window (#19) |
 | Tenant isolation & authorization | 4 | ↑ 2 P0 IDORs fixed + negative tests (#27/#28); RBAC gaps closed (#29) |
-| Secret storage | 3 | ↑ desktop token → OS vault (#5); portal-cred cleartext tracked (#34) |
+| Secret storage | 4 | ↑ desktop token → OS vault (#5); portal creds redacted at rest (#34); token app-encryption |
 | Data encryption & privacy | 4 | ↑ Sentry scrubbing (#22); local cache payload encrypted (#7); token encryption at rest |
-| AI / tool safety | 3 | ↑ audited; policy gate (#31), idempotency (#30), prompt-injection delimiting (#33); depth items #32/#35 remain |
+| AI / tool safety | 4 | ↑ policy gate (#31), idempotency (#30), prompt-injection (#33), typed payloads (#32), screenshot fail-safe (#35) |
 | Backend reliability | 3 | health leak fixed (#20) |
 | Web reliability | 3 | — |
 | Windows desktop reliability | 4 | ↑ installs, launches, native UI |
 | macOS desktop reliability | 3 | builds; unsigned |
 | Packaging / signing / updater | 2 | ↑ signing/notarization/updater WIRED (auto-activate on secrets); needs the actual certs (#12) |
-| CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + Cargo.lock (#16/#17); action-pinning tracked (#23) |
+| CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + gitleaks + version check + Cargo.lock (#16/#17/#24) |
 | Observability / recovery / ops | 2 | — |
 | Documentation & support readiness | 4 | ↑ + privacy/data-flow, incident-response, backup/restore runbooks |
 

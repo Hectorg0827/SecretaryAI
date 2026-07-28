@@ -18,8 +18,8 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | G0 | Repository integrity | 🟢 strong | Cargo.lock committed (#16); release workflows consolidated (#13); version single-sourced + CI-enforced (#24). |
 | G1 | Security | 🟢 strong | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection (#33), local-cache encryption (#7) — all fixed + tested. Remaining: typed action payloads (#32, partial), secret-history scan (needs repo history access). |
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
-| G3 | Windows installer | 🔒 blocked | Builds & installs (verified), but **unsigned** (#12) — needs Authenticode cert. |
-| G4 | macOS installer | 🔒 blocked | Unsigned/un-notarized (#12) — needs Apple Developer ID + notarization. |
+| G3 | Windows installer | 🟡 wired / 🔒 needs cert | Builds & installs (verified); Authenticode signing WIRED (auto-activates on `WINDOWS_CERTIFICATE` secret). Needs the cert. |
+| G4 | macOS installer | 🟡 wired / 🔒 needs cert | Builds (verified); signing+notarization+stapling WIRED (auto-activate on `APPLE_*` secrets). Needs Apple Developer ID. |
 | G5 | Operations | 🟡 in progress | Runbooks written (release, incident, backup/restore, privacy/data-flow); backup restore DRILL + migration rollback not yet executed. |
 | G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
 

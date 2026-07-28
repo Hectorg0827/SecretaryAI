@@ -10,13 +10,9 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
+import { API_URL as API } from "../config";
 
 // ── API base ──────────────────────────────────────────────────────────────────
-
-const API =
-  typeof window !== "undefined" && (window as any).__SECRETARY_API__
-    ? (window as any).__SECRETARY_API__
-    : "http://localhost:8000";
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("secretary_token") ?? "";

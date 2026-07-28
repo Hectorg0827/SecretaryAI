@@ -58,9 +58,9 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 20 | P1 | `/health` returns raw dependency exception text | `app/main.py` health_check | ✅ fixed — logs detail server-side, returns generic `ok`/`error`. Test: `TestPublicSurface::test_health_never_leaks_exception_text` |
 | 22 | P1 | Sentry scrubbing only 3 local vars; headers/cookies/body/PII leak | `app/main.py` `_scrub_sentry_event` | ✅ fixed — `send_default_pii=False`; scrub all frames + request headers/cookies/body + user PII. Tests: `TestSentryScrub` |
 | 24 | P2 | Version `1.0.0` duplicated across manifests + hardcoded in health | multiple | 🟡 backend now single-sourced (`app.__version__`); desktop/frontend/tauri still separate |
-| 2 | P0 | CI injects `VITE_API_BASE_URL`; code reads `VITE_API_URL` → localhost fallback | `release-desktop.yml` vs `App.tsx`/`api.ts` | ⬜ open |
-| 3 | P0 | `Setup.tsx` hardcodes `http://localhost:8000` | `desktop/src/pages/Setup.tsx` | ⬜ open |
-| 4 | P1 | Desktop reads token from parent localStorage + iframes remote prod app | `desktop/src/App.tsx` | ⬜ open (architecture decision needed) |
+| 2 | P0 | CI injects `VITE_API_BASE_URL`; code reads `VITE_API_URL` → localhost fallback | `release-desktop.yml` vs `App.tsx`/`api.ts` | ✅ fixed — CI now injects `VITE_API_URL`; single `config.ts`; **fail-closed build guard** in `vite.config.ts` (verified: build fails on missing/localhost, passes on https). |
+| 3 | P0 | `Setup.tsx` hardcodes `http://localhost:8000` | `desktop/src/pages/Setup.tsx` | ✅ fixed — routed through `config.ts`. |
+| 4 | P1 | Desktop reads token from parent localStorage + iframes remote prod app | `desktop/src/App.tsx` | 🟡 in progress — decision recorded (ADR 0001: **bundle natively**); step 1 done; token-vault bridge + iframe removal tracked. |
 | 5 | P0 | Sync loop reads token from OS vault; frontend writes localStorage; nothing bridges | `sync.rs` vs `api.ts` | ⬜ open |
 | 6 | P1 | CSP has no `frame-src` for the app iframe (`default-src 'self'`) | `tauri.conf.json` | ⬜ open |
 | 7 | P1 | Local SQLite cache provisions an encryption key but stores plaintext | `db.rs` | ⬜ open (SQLCipher or drop cache) |

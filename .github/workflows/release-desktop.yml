@@ -112,7 +112,11 @@ jobs:
       - name: Set build-time environment
         shell: bash
         run: |
-          echo "VITE_API_BASE_URL=${{ vars.API_BASE_URL || 'https://api.secretaryai.com' }}" >> $GITHUB_ENV
+          # NOTE: the app reads VITE_API_URL (see desktop/src/config.ts). The
+          # production build FAILS if this is missing/localhost/http (guard in
+          # desktop/vite.config.ts).
+          echo "VITE_API_URL=${{ vars.API_URL || 'https://api.secretaryai.com' }}" >> $GITHUB_ENV
+          echo "VITE_APP_URL=${{ vars.APP_URL || 'https://app.secretaryai.com' }}" >> $GITHUB_ENV
           echo "VITE_SUPABASE_URL=${{ vars.SUPABASE_URL || '' }}" >> $GITHUB_ENV
           echo "VITE_SUPABASE_ANON_KEY=${{ vars.SUPABASE_ANON_KEY || '' }}" >> $GITHUB_ENV
 

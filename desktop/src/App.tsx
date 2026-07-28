@@ -11,11 +11,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import Setup from './pages/Setup';
-
-const API =
-  typeof window !== 'undefined' && (window as any).__SECRETARY_API__
-    ? (window as any).__SECRETARY_API__
-    : import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+import { API_URL as API } from './config';
 
 const APP_URL =
   typeof window !== 'undefined' && (window as any).__SECRETARY_APP_URL__

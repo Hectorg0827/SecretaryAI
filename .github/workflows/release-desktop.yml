@@ -120,23 +120,78 @@ jobs:
           echo "VITE_SUPABASE_URL=${{ vars.SUPABASE_URL || '' }}" >> $GITHUB_ENV
           echo "VITE_SUPABASE_ANON_KEY=${{ vars.SUPABASE_ANON_KEY || '' }}" >> $GITHUB_ENV
 
+      # ── Signing config: activates ONLY when the secrets exist ───────────────
+      # A *present but empty* signing env var makes Tauri try (and fail) to sign,
+      # so we forward each var to the environment ONLY when its secret is
+      # non-empty. With no secrets set this is a no-op → a working UNSIGNED build.
+      # Add the secrets in repo Settings → Secrets and variables → Actions to
+      # turn signing on. Values are masked by GitHub and never printed here.
+      - name: Configure code-signing (if secrets present)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE:                  ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD:         ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY:             ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                           ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:                     ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:                      ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY:          ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE:                ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          set -u
+          # Flag whether a Windows Authenticode cert is available (used by the
+          # Windows-only import step below).
+          if [ -n "${WINDOWS_CERTIFICATE:-}" ]; then echo "HAS_WIN_CERT=true" >> "$GITHUB_ENV"; fi
+          forward() { # NAME VALUE  — write to env only if VALUE is non-empty (multiline-safe)
+            if [ -n "${2:-}" ]; then
+              { printf '%s<<__EOF__\n' "$1"; printf '%s\n' "$2"; printf '__EOF__\n'; } >> "$GITHUB_ENV"
+              echo "signing: $1 configured"
+            fi
+          }
+          forward APPLE_CERTIFICATE                  "${APPLE_CERTIFICATE}"
+          forward APPLE_CERTIFICATE_PASSWORD         "${APPLE_CERTIFICATE_PASSWORD}"
+          forward APPLE_SIGNING_IDENTITY             "${APPLE_SIGNING_IDENTITY}"
+          forward APPLE_ID                           "${APPLE_ID}"
+          forward APPLE_PASSWORD                     "${APPLE_PASSWORD}"
+          forward APPLE_TEAM_ID                      "${APPLE_TEAM_ID}"
+          forward TAURI_SIGNING_PRIVATE_KEY          "${TAURI_SIGNING_PRIVATE_KEY}"
+          forward TAURI_SIGNING_PRIVATE_KEY_PASSWORD "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}"
+          # When an updater signing key is present, enable updater artifact
+          # generation (closes #11 automatically once the key exists).
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            python3 -c "import json,pathlib; p=pathlib.Path('desktop/src-tauri/tauri.conf.json'); c=json.loads(p.read_text()); c.setdefault('bundle',{})['createUpdaterArtifacts']=True; p.write_text(json.dumps(c,indent=2)+chr(10)); print('updater artifacts enabled')"
+          fi
+          echo "Signing configuration complete (missing secrets => unsigned)."
+
+      # ── Windows Authenticode: import the PFX + set the thumbprint (if present) ─
+      - name: Configure Windows signing (if secret present)
+        if: matrix.platform == 'windows-latest' && env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE:          ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          Set-Content -Path cert.pfx -Value $bytes -AsByteStream
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $c = Import-PfxCertificate -FilePath cert.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item cert.pfx -Force
+          # Inject the imported cert's thumbprint into tauri.conf.json.
+          $conf = "desktop/src-tauri/tauri.conf.json"
+          $json = Get-Content $conf -Raw | ConvertFrom-Json
+          if (-not $json.bundle.windows) { $json.bundle | Add-Member windows (@{}) -Force }
+          $json.bundle.windows.certificateThumbprint = $c.Thumbprint
+          $json | ConvertTo-Json -Depth 32 | Set-Content $conf
+          Write-Host "Windows signing thumbprint set."
+
       # ── Build + bundle with the official Tauri action ───────────────────────
+      # Signing/notarization/updater are driven by the env vars configured above
+      # (present only when their secrets exist).
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NOTE: code-signing is intentionally NOT configured here.
-          # Tauri's bundler treats a *present but empty* APPLE_CERTIFICATE /
-          # APPLE_SIGNING_IDENTITY env var as "sign this app" and then fails when
-          # it tries to import an empty certificate ("security import: ... not
-          # valid"). So these vars must be omitted entirely (not set to "") to
-          # produce a working UNSIGNED build.
-          #
-          # To enable signing later, add the env vars back — but only once the
-          # corresponding repository secrets actually contain real values, e.g.:
-          #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
-          #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID            (macOS notarization)
-          #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
         with:
           projectPath: desktop
           tagName:     ${{ github.event.inputs.version || github.ref_name }}

@@ -40,7 +40,7 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 | Web reliability | 3 | — |
 | Windows desktop reliability | 4 | ↑ installs, launches, native UI |
 | macOS desktop reliability | 3 | builds; unsigned |
-| Packaging / signing / updater | 1 | unsigned; updater artifacts blocked on key (#11/#12) |
+| Packaging / signing / updater | 2 | ↑ signing/notarization/updater WIRED (auto-activate on secrets); needs the actual certs (#12) |
 | CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + Cargo.lock (#16/#17); action-pinning tracked (#23) |
 | Observability / recovery / ops | 2 | — |
 | Documentation & support readiness | 4 | ↑ + privacy/data-flow, incident-response, backup/restore runbooks |
@@ -69,8 +69,8 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 27 | **P0** | Cross-tenant draft approval/execution IDOR — `drafts` mutated by `id` only; a Company-A owner could approve/execute Company B's action (send its email/PO) | `actions.py`, `approval_queue.py` (found in tenant audit) | ✅ fixed — endpoint fetch + queue updates scoped to `company_id`, 404 on cross-tenant. Tests: `tests/test_tenant_isolation.py` |
 | 28 | **P0** | Cross-tenant workflow cancel IDOR — `workflow_runs` failed/cancelled by `id` only | `workflows.py`, `engine.py` (tenant audit) | ✅ fixed — `_get_run`/`fail`/`resume_after_approval` scoped to `company_id`; endpoint ownership 404. Test in `test_tenant_isolation.py` |
 | 10 | P2 | `capture_screen` unreachable — activation command unregistered; no consent/timeout | `lib.rs`/`screen_capture.rs` | ✅ fixed — `activate/deactivate/computer_use_active` registered as commands; default OFF; 120s inactivity auto-stop; Setup.tsx asks explicit consent, activates, and always deactivates on stop/unmount. (Persistent OS indicator + on-screen redaction tracked — see AI-safety rows.) |
-| 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | 🔒 blocked — enabling updater artifacts REQUIRES the Tauri signing key (else the build fails); deferred until the key exists (see runbook). |
-| 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🔒 external blocker (certs) |
+| 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | 🟡 wired — the release workflow now enables updater artifacts automatically when the `TAURI_SIGNING_PRIVATE_KEY` secret is present. Add the key to activate. |
+| 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🟡 wired / 🔒 needs certs — signing + notarization + Windows Authenticode are now wired into `release-desktop.yml` and self-activate when the cert secrets are added (unsigned still works without them). Blocked only on the owner providing the certificates. |
 | 13 | P1 | Overlapping release workflows disagree (signing/draft/updater/names) | `.github/workflows/*` | ✅ fixed — deleted racing `release.yml` (also invalid YAML) + redundant `tauri-build.yml`. Now 4 clean workflows: `ci`, `codeql`, `release-desktop`, `docker-publish` (all valid). Documented in `docs/RELEASE_RUNBOOK.md`. |
 | 14 | P2 | `install.sh`/`install.ps1` point to wrong repo; install Docker stack | install scripts | ✅ fixed — corrected repo slug (`Hectorg0827/SecretaryAI`); headers now state these are the OPERATOR self-hosted backend deployer (NOT the desktop app, which ships via Releases); removed the `curl \| bash` / one-liner pipe usage. |
 | 15 | P2 | `install.ps1` uses `Invoke-Expression`; docs pipe remote script to shell | `install.ps1` | ✅ fixed — replaced all `Invoke-Expression` with an arg-array `Invoke-Compose` helper; removed the `iwr \| iex` pattern. `bash -n install.sh` clean. |

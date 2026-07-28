@@ -25,12 +25,21 @@ surface is exactly four workflows:
 4. `docker-publish.yml` builds the backend/frontend images when the release is
    published.
 
-## Enabling SIGNED releases (blocked on external credentials)
+## Enabling SIGNED releases (wired — just add the secrets)
 
-When the owner provides certificates, add these as repository **secrets** and
-re-enable signing in `release-desktop.yml` (the signing env block + Tauri config
-`signingIdentity` / `certificateThumbprint`, and set
-`bundle.createUpdaterArtifacts: true`):
+Signing is now **wired into `release-desktop.yml`** and activates automatically
+when the matching repository **secrets** are present — no workflow edit needed.
+When a secret is absent that path stays off (unsigned build still works). Add
+secrets in **Settings → Secrets and variables → Actions**; never paste values in
+chat/PRs. What each enables:
+- macOS signing + notarization ← the `APPLE_*` secrets (tauri-action signs/
+  notarizes/staples automatically).
+- Windows Authenticode ← `WINDOWS_CERTIFICATE` (+ password): the workflow imports
+  the PFX and injects its thumbprint into `tauri.conf.json` at build time.
+- Signed auto-updater artifacts ← `TAURI_SIGNING_PRIVATE_KEY` (+ password): the
+  workflow flips `createUpdaterArtifacts` on (closes #11).
+
+Required secret names:
 
 | Secret | For |
 |---|---|

@@ -71,6 +71,24 @@ def is_token_revoked(jti: str) -> bool:
         return False  # Fail open — don't lock out users on Redis failure
 
 
+def blacklist_jti(jti: str, ttl_seconds: int) -> None:
+    """
+    Directly blacklist a JTI for `ttl_seconds`.
+
+    Unlike revoke_token(), this does not decode/verify a token, so it works for
+    already-expired tokens — required for single-use refresh-token rotation
+    (invalidating the presented token when a new one is issued).
+    """
+    if not jti or ttl_seconds <= 0:
+        return
+    try:
+        import redis as redis_lib
+        r = redis_lib.from_url(settings.redis_url, decode_responses=True)
+        r.setex(f"{_REVOKE_PREFIX}{jti}", int(ttl_seconds), "1")
+    except Exception:
+        pass  # Best-effort if Redis is down
+
+
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 

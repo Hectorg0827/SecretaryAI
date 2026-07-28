@@ -21,8 +21,12 @@ TARGET_HEIGHT = 720
 
 
 class ScreenshotManager:
-    def __init__(self, redact_pii: bool = True):
+    def __init__(self, redact_pii: bool = True, strict: bool = False):
         self._redact_pii = redact_pii
+        # Fail-closed: when strict, refuse to return a screenshot if PII
+        # redaction could not actually run (e.g. pytesseract missing), rather
+        # than silently sending an unredacted image to the model.
+        self._strict = strict
 
     async def capture_b64(self) -> str:
         """
@@ -94,9 +98,17 @@ class ScreenshotManager:
                     draw.rectangle([x, y, x + w, y + h], fill='black')
             log.debug("Screenshot PII scan complete")
         except Exception as exc:
-            # pytesseract not installed, data files missing, or other error —
-            # log at debug level and return unmodified image rather than crashing.
-            log.debug("PII redaction skipped (%s)", exc)
+            # pytesseract not installed / data files missing / other error.
+            if self._strict:
+                # Fail closed — do not hand an unredacted screenshot to the model.
+                raise RuntimeError(
+                    f"Screenshot PII redaction unavailable and strict mode is on: {exc}"
+                ) from exc
+            log.warning(
+                "PII redaction skipped (%s) — screenshot may contain sensitive data. "
+                "Install pytesseract or enable strict mode to fail closed.",
+                exc,
+            )
         return img
 
 

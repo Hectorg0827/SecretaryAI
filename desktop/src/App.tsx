@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Setup from './pages/Setup';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import CaptureIndicator from './components/CaptureIndicator';
 import { API_URL } from './config';
 import { loadToken, authFetch } from './auth';
 
@@ -58,24 +59,29 @@ export function App() {
     route();
   }, [route]);
 
+  let content: React.ReactNode;
   if (state === 'loading') {
-    return (
+    content = (
       <div style={loadingStyles.container}>
         <div style={loadingStyles.logo}>SecretaryAI</div>
         <div style={loadingStyles.spinner} />
       </div>
     );
+  } else if (state === 'login') {
+    content = <Login onSuccess={route} />;
+  } else if (state === 'setup') {
+    content = <Setup onComplete={() => setState('app')} />;
+  } else {
+    content = <Dashboard onSignOut={() => setState('login')} />;
   }
 
-  if (state === 'login') {
-    return <Login onSuccess={route} />;
-  }
-
-  if (state === 'setup') {
-    return <Setup onComplete={() => setState('app')} />;
-  }
-
-  return <Dashboard onSignOut={() => setState('login')} />;
+  // CaptureIndicator overlays every view whenever screen capture is active.
+  return (
+    <>
+      <CaptureIndicator />
+      {content}
+    </>
+  );
 }
 
 const loadingStyles: Record<string, React.CSSProperties> = {

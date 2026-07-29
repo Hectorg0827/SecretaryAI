@@ -157,3 +157,18 @@ class TestRefreshHardening:
         # Single-use rotation: the presented token's JTI must be blacklisted.
         spy_blacklist.assert_called_once()
         assert spy_blacklist.call_args.args[0] == "rotate-me"
+
+
+# ── Security response headers ─────────────────────────────────────────────────
+class TestSecurityHeaders:
+    def test_headers_present_on_response(self):
+        from app.main import app
+        client = TestClient(app)
+        r = client.get("/health")
+        h = r.headers
+        assert "max-age=" in h.get("Strict-Transport-Security", "")
+        assert h.get("X-Content-Type-Options") == "nosniff"
+        assert h.get("X-Frame-Options") == "DENY"
+        assert "strict-origin" in h.get("Referrer-Policy", "")
+        assert "Content-Security-Policy" in h
+        assert "Permissions-Policy" in h

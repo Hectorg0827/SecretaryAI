@@ -72,15 +72,17 @@ def test_parses_rejection():
 
 
 def test_extracts_ship_date_natural_language():
+    from datetime import date, timedelta
+
     parser = VendorResponseParser()
     po = _make_po()
-    result = parser.parse(
-        subject="PO Confirmed",
-        body="We will ship your order on April 20, 2026.",
-        po=po,
-    )
+    # Use a date relative to today so the fixture never falls outside the
+    # parser's accepted past-window (it was hardcoded to a now-stale date).
+    ship = date.today() + timedelta(days=30)
+    body = f"We will ship your order on {ship.strftime('%B')} {ship.day}, {ship.year}."
+    result = parser.parse(subject="PO Confirmed", body=body, po=po)
     assert result.ship_date is not None
-    assert "2026" in result.ship_date
+    assert str(ship.year) in result.ship_date
 
 
 def test_detects_issues_in_email():

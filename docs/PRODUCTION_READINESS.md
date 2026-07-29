@@ -20,7 +20,7 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
 | G3 | Windows installer | 🟡 wired / 🔒 needs cert | Builds & installs (verified); Authenticode signing WIRED (auto-activates on `WINDOWS_CERTIFICATE` secret). Needs the cert. |
 | G4 | macOS installer | 🟡 wired / 🔒 needs cert | Builds (verified); signing+notarization+stapling WIRED (auto-activate on `APPLE_*` secrets). Needs Apple Developer ID. |
-| G5 | Operations | 🟡 in progress | Runbooks written (release, incident, backup/restore, privacy/data-flow); backup restore DRILL + migration rollback not yet executed. |
+| G5 | Operations | 🟡 in progress | Runbooks written; **schema-migration validation** now runs in CI (applies schema v1+v2+v3 to a Postgres service, verified locally). Backup restore DRILL + rollback drill still need real infra. |
 | G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
 
 Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
@@ -42,7 +42,7 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 | macOS desktop reliability | 3 | builds; unsigned |
 | Packaging / signing / updater | 2 | ↑ signing/notarization/updater WIRED (auto-activate on secrets); needs the actual certs (#12) |
 | CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + gitleaks + version check + Cargo.lock (#16/#17/#24) |
-| Observability / recovery / ops | 2 | — |
+| Observability / recovery / ops | 3 | ↑ CI schema-migration validation added |
 | Documentation & support readiness | 4 | ↑ + privacy/data-flow, incident-response, backup/restore runbooks |
 
 ---
@@ -68,7 +68,7 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 9 | P1 | Tauri default capability grants broad http/fs/shell/etc. | `capabilities/default.json` | ✅ fixed — reduced to `core:default` + `shell:allow-open` (the only plugin the webview uses). Compiles clean. |
 | 27 | **P0** | Cross-tenant draft approval/execution IDOR — `drafts` mutated by `id` only; a Company-A owner could approve/execute Company B's action (send its email/PO) | `actions.py`, `approval_queue.py` (found in tenant audit) | ✅ fixed — endpoint fetch + queue updates scoped to `company_id`, 404 on cross-tenant. Tests: `tests/test_tenant_isolation.py` |
 | 28 | **P0** | Cross-tenant workflow cancel IDOR — `workflow_runs` failed/cancelled by `id` only | `workflows.py`, `engine.py` (tenant audit) | ✅ fixed — `_get_run`/`fail`/`resume_after_approval` scoped to `company_id`; endpoint ownership 404. Test in `test_tenant_isolation.py` |
-| 10 | P2 | `capture_screen` unreachable — activation command unregistered; no consent/timeout | `lib.rs`/`screen_capture.rs` | ✅ fixed — `activate/deactivate/computer_use_active` registered as commands; default OFF; 120s inactivity auto-stop; Setup.tsx asks explicit consent, activates, and always deactivates on stop/unmount. (Persistent OS indicator + on-screen redaction tracked — see AI-safety rows.) |
+| 10 | P2 | `capture_screen` unreachable — activation command unregistered; no consent/timeout | `lib.rs`/`screen_capture.rs` | ✅ fixed — `activate/deactivate/computer_use_active` registered as commands; default OFF; 120s inactivity auto-stop; Setup.tsx asks explicit consent, activates, and always deactivates on stop/unmount. (In-app persistent capture indicator + Stop control now added, `components/CaptureIndicator.tsx`; a top-level always-on-top OS overlay is a further enhancement. Screenshot redaction fail-safe: #35.) |
 | 11 | P1 | `createUpdaterArtifacts:false` while updater configured | `tauri.conf.json` | 🟡 wired — the release workflow now enables updater artifacts automatically when the `TAURI_SIGNING_PRIVATE_KEY` secret is present. Add the key to activate. |
 | 12 | P0 | macOS/Windows signing identity null — unsigned installers | `tauri.conf.json` | 🟡 wired / 🔒 needs certs — signing + notarization + Windows Authenticode are now wired into `release-desktop.yml` and self-activate when the cert secrets are added (unsigned still works without them). Blocked only on the owner providing the certificates. |
 | 13 | P1 | Overlapping release workflows disagree (signing/draft/updater/names) | `.github/workflows/*` | ✅ fixed — deleted racing `release.yml` (also invalid YAML) + redundant `tauri-build.yml`. Now 4 clean workflows: `ci`, `codeql`, `release-desktop`, `docker-publish` (all valid). Documented in `docs/RELEASE_RUNBOOK.md`. |
@@ -76,7 +76,7 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 15 | P2 | `install.ps1` uses `Invoke-Expression`; docs pipe remote script to shell | `install.ps1` | ✅ fixed — replaced all `Invoke-Expression` with an arg-array `Invoke-Compose` helper; removed the `iwr \| iex` pattern. `bash -n install.sh` clean. |
 | 16 | P1 | `.gitignore` ignores `Cargo.lock`/`*.lock` | `.gitignore` | ✅ fixed — `Cargo.lock` un-ignored and committed (6685 deps pinned). |
 | 17 | P1 | No PR CI, CodeQL, or Dependabot | `.github/` | ✅ fixed — added `ci.yml` (backend pytest, web/desktop lint+typecheck+build, rust fmt/clippy/test, dep-audit), `codeql.yml` (python + js/ts), `dependabot.yml` (6 ecosystems). Clippy `-D warnings` + audit enforcement tracked. |
-| 18 | P2 | No `test` script in frontend/desktop package.json | package.json | ⬜ open |
+| 18 | P2 | No `test` script in frontend/desktop package.json | package.json | 🟡 mostly — frontend now has vitest + tests (`npm run test`, wired in CI, covers the 401→refresh security flow); backend pytest + Rust `cargo test` in CI. Desktop JS now has vitest too (auth vault-token + 401-refresh + login/2FA tests). |
 | 23 | P2 | GitHub Actions use floating versions incl. `@master` | workflows | 🟡 mostly addressed — the `@master` offender (old `release.yml`) was deleted; remaining actions use pinned major tags and are kept current by the github-actions Dependabot. Full SHA-pinning left to Dependabot PRs. |
 | 25 | P2 | Desktop heartbeat runs with empty company ID + no auth token | `heartbeat.rs`/`lib.rs` | ✅ fixed — heartbeat reads the vault token and sends `Bearer`; skips the cycle when unauthenticated. (Backend endpoint was already correct: auth required, `company_id` from the JWT — client payload ignored.) |
 | 29 | P2 | `get_account` lacks role gate; `computer_use` start uses a broken `require_permission` call | tenant audit | ✅ fixed — `get_account` now has the same role gate as `list_accounts`; computer-use start restricted to owner/manager (replaced the broken factory call that raised at runtime). Tests in `test_action_safety.py`. |

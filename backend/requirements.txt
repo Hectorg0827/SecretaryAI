@@ -58,7 +58,7 @@ Pillow==11.0.0              # Image processing (used server-side for resize too)
 
 # Config
 python-dotenv==1.0.1
-pydantic==2.9.2
+pydantic==2.13.4
 pydantic-settings==2.6.0
 
 # Monitoring

@@ -158,3 +158,36 @@ class TestActionPayloadSchemas:
         from app.actions.schemas import validate_action_payload
         p = {"anything": 1}
         assert validate_action_payload("run_sync_check", p) is p
+
+
+# ── Autonomy enforcement (core action-safety control) ─────────────────────────
+class TestAutonomyEnforcement:
+    def _engine(self):
+        from app.actions.engine import ActionEngine
+        return ActionEngine(MagicMock())
+
+    async def test_prohibited_action_is_blocked(self):
+        from app.actions.engine import ActionProhibitedError
+        eng = self._engine()
+        with patch("app.actions.engine.log_action", new=AsyncMock()):
+            with pytest.raises(ActionProhibitedError):
+                await eng.process("delete_qb_data", {}, "co-1", "user-1")
+
+    async def test_unknown_action_defaults_to_prohibited(self):
+        from app.actions.engine import ActionProhibitedError
+        eng = self._engine()
+        with patch("app.actions.engine.log_action", new=AsyncMock()):
+            with pytest.raises(ActionProhibitedError):
+                await eng.process("totally_unknown_action", {}, "co-1", "user-1")
+
+    async def test_autonomous_action_with_invalid_payload_rejected(self):
+        # update_inventory_count is autonomous (no human approval) — an invalid
+        # payload must be rejected before the DB write (#32 wired into process).
+        from app.actions.schemas import ActionValidationError
+        eng = self._engine()
+        with patch("app.actions.engine.log_action", new=AsyncMock()):
+            with pytest.raises(ActionValidationError):
+                await eng.process(
+                    "update_inventory_count", {"item_id": "SKU1", "quantity": -5},
+                    "co-1", "user-1",
+                )

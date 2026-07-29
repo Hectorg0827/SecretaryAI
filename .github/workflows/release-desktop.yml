@@ -58,7 +58,9 @@ jobs:
     runs-on: ${{ matrix.platform }}
     name: Build (${{ matrix.label }})
     permissions:
-      contents: write   # required for tauri-action to create the release & upload installers
+      contents: write      # tauri-action creates the release & uploads installers
+      id-token: write      # OIDC for build-provenance attestation
+      attestations: write  # write the provenance attestation
 
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
@@ -236,6 +238,53 @@ jobs:
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: ignore
           retention-days: 30
+
+      # ── SHA-256 checksums for every installer (release evidence, G6) ─────────
+      - name: Generate checksums
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          OUT="SHA256SUMS-${{ matrix.label }}.txt"
+          : > "$OUT"
+          sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi; }
+          shopt -s nullglob
+          for f in "$BUNDLE"/nsis/*.exe "$BUNDLE"/msi/*.msi "$BUNDLE"/dmg/*.dmg; do
+            sha "$f" | sed "s#$BUNDLE/##" >> "$OUT"
+          done
+          echo "checksums:"; cat "$OUT" || true
+
+      - name: Upload checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecretaryAI-checksums-${{ matrix.label }}
+          path: SHA256SUMS-${{ matrix.label }}.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # ── SBOM of the desktop app (CycloneDX) ─────────────────────────────────
+      - name: Generate SBOM
+        if: always()
+        uses: anchore/sbom-action@v0
+        with:
+          path: desktop
+          format: cyclonedx-json
+          artifact-name: SecretaryAI-sbom-${{ matrix.label }}.cdx.json
+          output-file: SecretaryAI-sbom-${{ matrix.label }}.cdx.json
+
+      # ── Signed build-provenance attestation for the installers ──────────────
+      # Only when installers actually exist (real release commit / signed build).
+      - name: Attest build provenance
+        if: success()
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
   # ── Post-release: update the updater manifest ──────────────────────────────
   publish-update-manifest:

@@ -127,6 +127,34 @@ jobs:
       - name: Check all manifests match /VERSION
         run: bash scripts/check_versions.sh
 
+  migrations:
+    name: DB schema validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: sai
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Validate schema applies cleanly
+        run: bash scripts/validate_schema.sh
+
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest

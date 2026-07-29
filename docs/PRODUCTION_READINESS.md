@@ -20,7 +20,7 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
 | G3 | Windows installer | 🟡 wired / 🔒 needs cert | Builds & installs (verified); Authenticode signing WIRED (auto-activates on `WINDOWS_CERTIFICATE` secret). Needs the cert. |
 | G4 | macOS installer | 🟡 wired / 🔒 needs cert | Builds (verified); signing+notarization+stapling WIRED (auto-activate on `APPLE_*` secrets). Needs Apple Developer ID. |
-| G5 | Operations | 🟡 in progress | Runbooks written (release, incident, backup/restore, privacy/data-flow); backup restore DRILL + migration rollback not yet executed. |
+| G5 | Operations | 🟡 in progress | Runbooks written; **schema-migration validation** now runs in CI (applies schema v1+v2+v3 to a Postgres service, verified locally). Backup restore DRILL + rollback drill still need real infra. |
 | G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
 
 Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
@@ -42,7 +42,7 @@ Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 | macOS desktop reliability | 3 | builds; unsigned |
 | Packaging / signing / updater | 2 | ↑ signing/notarization/updater WIRED (auto-activate on secrets); needs the actual certs (#12) |
 | CI & supply chain | 4 | ↑ PR CI + CodeQL + Dependabot + gitleaks + version check + Cargo.lock (#16/#17/#24) |
-| Observability / recovery / ops | 2 | — |
+| Observability / recovery / ops | 3 | ↑ CI schema-migration validation added |
 | Documentation & support readiness | 4 | ↑ + privacy/data-flow, incident-response, backup/restore runbooks |
 
 ---

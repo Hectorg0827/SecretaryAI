@@ -7,7 +7,7 @@ surface is exactly four workflows:
 |---|---|---|
 | `ci.yml` | every PR + protected-branch push | tests, lint, typecheck, build, fmt/clippy, dep-audit, — the pre-merge gate |
 | `codeql.yml` | PR + push + weekly | SAST (python, js/ts) |
-| `release-desktop.yml` | `workflow_dispatch` (version input) / `v*` tag | Windows `.exe`/`.msi` + macOS `.dmg`, uploaded as **run artifacts** and to a **draft** GitHub release |
+| `release-desktop.yml` | `workflow_dispatch` (version input) / `v*` tag | Windows `.exe`/`.msi` + macOS `.dmg`, **SHA-256 checksums**, a **CycloneDX SBOM**, and a **signed build-provenance attestation** — uploaded as run artifacts + to a **draft** GitHub release |
 | `docker-publish.yml` | push to default branch + `release: published` | backend + frontend Docker images (GHCR) |
 
 > The previous `release.yml` and `tauri-build.yml` were removed — they raced with

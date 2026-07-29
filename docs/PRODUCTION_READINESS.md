@@ -21,7 +21,7 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | G3 | Windows installer | 🟡 wired / 🔒 needs cert | Builds & installs (verified); Authenticode signing WIRED (auto-activates on `WINDOWS_CERTIFICATE` secret). Needs the cert. |
 | G4 | macOS installer | 🟡 wired / 🔒 needs cert | Builds (verified); signing+notarization+stapling WIRED (auto-activate on `APPLE_*` secrets). Needs Apple Developer ID. |
 | G5 | Operations | 🟡 in progress | Runbooks written; **schema-migration validation** now runs in CI (applies schema v1+v2+v3 to a Postgres service, verified locally). Backup restore DRILL + rollback drill still need real infra. |
-| G6 | Release evidence | 🔴 not ready | Depends on G0–G5. |
+| G6 | Release evidence | 🟡 partial | Release build now emits SHA-256 checksums, a CycloneDX SBOM, and a signed build-provenance attestation. Final assembly (signed artifacts + notarization evidence + human-approved publish) still depends on G3/G4. |
 
 Legend: 🟢 pass · 🟡 in progress · 🔴 not ready/blocked
 

@@ -21,7 +21,7 @@ python-multipart==0.0.12
 # Config
 python-dotenv==1.0.1
 pydantic==2.9.2
-pydantic-settings==2.6.0
+pydantic-settings==2.14.2
 
 # Image processing (used in screenshot_manager)
 Pillow==11.0.0

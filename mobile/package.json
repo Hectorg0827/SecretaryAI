@@ -24,7 +24,7 @@
     "expo-notifications": "~0.28.19",
     "expo-speech": "~12.0.2",
     "expo-splash-screen": "~0.27.5",
-    "expo-status-bar": "~1.12.1",
+    "expo-status-bar": "~57.0.1",
     "react": "18.2.0",
     "react-native": "0.74.5",
     "react-native-gesture-handler": "~2.17.1",

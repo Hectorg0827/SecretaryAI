@@ -20,9 +20,23 @@ pub async fn start_heartbeat(api_base_url: String, company_id: String, agent_ver
     let url = format!("{}/api/agent/heartbeat", api_base_url.trim_end_matches('/'));
     let mut failures: u32 = 0;
 
-    info!("Heartbeat: starting for company {} → {}", company_id, url);
+    info!("Heartbeat: starting → {}", url);
 
     loop {
+        // Only beacon when the user is signed in. The token comes from the OS
+        // credential vault (the same store the UI writes on login); if absent we
+        // skip this cycle rather than sending an unauthenticated heartbeat.
+        let token = crate::credentials::get_credential(
+            "secretary-auth".to_string(),
+            "token".to_string(),
+        )
+        .ok()
+        .flatten();
+        let Some(token) = token else {
+            sleep(Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
+            continue;
+        };
+
         let payload = HeartbeatPayload {
             company_id: &company_id,
             agent_version: &agent_version,
@@ -32,6 +46,7 @@ pub async fn start_heartbeat(api_base_url: String, company_id: String, agent_ver
 
         match client
             .post(&url)
+            .bearer_auth(&token)
             .json(&payload)
             .timeout(Duration::from_secs(10))
             .send()

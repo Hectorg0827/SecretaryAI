@@ -429,13 +429,24 @@ class RefreshRequest(BaseModel):
 @router.post("/refresh")
 async def refresh_token(body: RefreshRequest):
     """
-    Issue a new JWT from a valid-but-expiring token.
-    We decode without checking expiry, verify the user still exists and is active,
-    then issue a fresh access token.
+    Issue a new JWT from a recently-valid token, with bounded renewal, revocation
+    enforcement, and single-use rotation.
+
+    Security properties:
+    - A revoked token (logged out, or already rotated) cannot be refreshed.
+    - Renewal is bounded: a token expired longer than the refresh window can NOT
+      be renewed — the user must log in again. This prevents an old leaked token
+      from being renewed indefinitely.
+    - Refresh is single-use: the presented token's JTI is blacklisted when a new
+      token is issued, so a captured token can't be replayed for a second refresh
+      (reuse detection).
     """
     from jose import jwt as jose_jwt, JWTError
+    from app.auth.jwt import is_token_revoked, blacklist_jti
+
     try:
-        # Decode WITHOUT verifying expiry so a just-expired token still works
+        # Decode WITHOUT verifying expiry so a just-expired token can still be
+        # exchanged — bounded explicitly below.
         payload = jose_jwt.decode(
             body.access_token,
             settings.secret_key,
@@ -448,8 +459,22 @@ async def refresh_token(body: RefreshRequest):
     user_id = payload.get("sub")
     company_id = payload.get("company_id")
     role = payload.get("role")
+    jti = payload.get("jti")
+    exp = payload.get("exp")
     if not user_id or not company_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    # Enforce revocation (logout / prior rotation): a blacklisted token is dead.
+    if jti and is_token_revoked(jti):
+        raise HTTPException(status_code=401, detail="Token revoked; please log in again")
+
+    # Bound the renewal window. A token expired for longer than the refresh
+    # window cannot be renewed — this caps the lifetime of a leaked token.
+    refresh_window_seconds = settings.refresh_token_expire_days * 86400
+    if exp is not None:
+        expired_for = datetime.now(timezone.utc).timestamp() - float(exp)
+        if expired_for > refresh_window_seconds:
+            raise HTTPException(status_code=401, detail="Session expired; please log in again")
 
     # Verify the user still exists and is active
     try:
@@ -464,6 +489,11 @@ async def refresh_token(body: RefreshRequest):
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
     new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
+
+    # Single-use rotation: invalidate the presented token so it can't be reused.
+    if jti:
+        blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+
     return {"access_token": new_token, "token_type": "bearer"}
 
 

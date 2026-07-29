@@ -28,6 +28,27 @@ from app.domain.contracts import DataPath
 
 log = logging.getLogger(__name__)
 
+# Parameter keys whose values must never be persisted to the browser_jobs row.
+_SECRET_PARAM_KEYS = (
+    "password", "passwd", "secret", "token", "api_key", "apikey", "credential",
+    "auth", "otp", "pin", "cookie", "session", "username", "user_name", "login",
+)
+
+
+def _redact_job_params(params: dict) -> dict:
+    """Return a copy of browser-job params with secret values redacted, so
+    credentials (portal username/password, tokens) are never stored at rest."""
+    if not isinstance(params, dict):
+        return params
+    redacted: dict = {}
+    for k, v in params.items():
+        if any(marker in str(k).lower() for marker in _SECRET_PARAM_KEYS):
+            redacted[k] = "[redacted]"
+        else:
+            redacted[k] = v
+    return redacted
+
+
 # Age threshold for degrading file confidence from FILE_FRESH to FILE_STALE
 _FILE_STALE_HOURS = 24
 
@@ -405,7 +426,10 @@ class AccessRouter:
                 "company_id": self._company_id,
                 "workflow_name": workflow_name,
                 "capability": capability,
-                "parameters": params,
+                # Never persist secrets in the job row. The live browser run
+                # receives the full params in memory; the DB only needs a
+                # redacted copy for diagnostics. (Defect #34.)
+                "parameters": _redact_job_params(params),
                 "status": "running",
                 "queued_at": now,
                 "started_at": now,

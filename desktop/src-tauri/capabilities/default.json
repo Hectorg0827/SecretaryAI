@@ -1,25 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core capability granting the main window access to the plugin commands SecretaryAI uses.",
+  "description": "Least-privilege capability for the main window. It may call the app's own Rust commands, use core APIs (events/window), and open external URLs via the shell. Broad http/fs/store/dialog/notification/updater/autostart grants are intentionally NOT present: those plugins are driven from the Rust side, not the webview, so exposing their commands to (potentially compromised) web content is unnecessary attack surface. (Production-readiness defect #9.)",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-close",
-    "core:window:allow-set-focus",
-    "core:event:default",
-    "core:app:default",
-    "shell:allow-open",
-    "dialog:default",
-    "notification:default",
-    "store:default",
-    "http:default",
-    "fs:default",
-    "updater:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "shell:allow-open"
   ]
 }

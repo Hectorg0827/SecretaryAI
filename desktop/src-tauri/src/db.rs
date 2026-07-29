@@ -1,9 +1,9 @@
-/// Local encrypted SQLite database.
-/// Stores a local cache of business data for fast offline access.
-/// The encryption key is stored in the OS credential store.
-
+/// Local SQLite cache with field-level (AES-256-GCM) encryption of the sensitive
+/// `data_json` payload. The encryption key is derived from a key held in the OS
+/// credential store, so another local process reading the DB file sees only ids
+/// and statuses — not customer/financial records.
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -12,7 +12,8 @@ const CREDENTIAL_SERVICE: &str = "secretaryai-db";
 const CREDENTIAL_KEY: &str = "db-key";
 
 pub fn db_path(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir()
+    app.path()
+        .app_data_dir()
         .expect("app data dir")
         .join(DB_FILE)
 }
@@ -22,7 +23,9 @@ fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
     use rand::Rng;
 
     // Try to get existing key
-    if let Ok(Some(key)) = get_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string()) {
+    if let Ok(Some(key)) =
+        get_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string())
+    {
         return Ok(key);
     }
 
@@ -31,10 +34,85 @@ fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
         .map(|_| format!("{:02x}", rand::thread_rng().gen::<u8>()))
         .collect();
 
-    store_credential(CREDENTIAL_SERVICE.to_string(), CREDENTIAL_KEY.to_string(), key.clone())
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    store_credential(
+        CREDENTIAL_SERVICE.to_string(),
+        CREDENTIAL_KEY.to_string(),
+        key.clone(),
+    )
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok(key)
+}
+
+// ── Field-level encryption for the cached payload (`data_json`) ───────────────
+// The bulk of the sensitive cached data lives in the `data_json` column. We
+// encrypt it at rest with AES-256-GCM using a key derived from the OS-vault
+// db-key, so another local process reading the SQLite file sees only ids and
+// statuses — not customer/financial records. (Whole-database SQLCipher is a
+// tracked future enhancement; app-layer AES avoids adding an OpenSSL build
+// dependency that could jeopardise the packaged installers.)
+const ENC_PREFIX: &str = "enc:v1:";
+
+fn field_cipher_key(key_str: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(key_str.as_bytes());
+    h.update(b"secretaryai-cache-field-v1");
+    h.finalize().into()
+}
+
+fn encrypt_field(plain: &str, key32: &[u8; 32]) -> Result<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use rand::RngCore;
+
+    let cipher =
+        Aes256Gcm::new_from_slice(key32).map_err(|e| anyhow::anyhow!("cipher init: {}", e))?;
+    let mut nonce = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce), plain.as_bytes())
+        .map_err(|e| anyhow::anyhow!("encrypt: {}", e))?;
+    let mut blob = Vec::with_capacity(12 + ct.len());
+    blob.extend_from_slice(&nonce);
+    blob.extend_from_slice(&ct);
+    Ok(format!("{}{}", ENC_PREFIX, STANDARD.encode(blob)))
+}
+
+fn decrypt_field(stored: &str, key32: &[u8; 32]) -> Result<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    // Backward-compat: values without our prefix are legacy plaintext.
+    let Some(b64) = stored.strip_prefix(ENC_PREFIX) else {
+        return Ok(stored.to_string());
+    };
+    let blob = STANDARD
+        .decode(b64)
+        .map_err(|e| anyhow::anyhow!("b64: {}", e))?;
+    if blob.len() < 12 {
+        return Err(anyhow::anyhow!("ciphertext too short"));
+    }
+    let cipher =
+        Aes256Gcm::new_from_slice(key32).map_err(|e| anyhow::anyhow!("cipher init: {}", e))?;
+    let pt = cipher
+        .decrypt(Nonce::from_slice(&blob[..12]), &blob[12..])
+        .map_err(|_| anyhow::anyhow!("decrypt failed"))?;
+    Ok(String::from_utf8(pt)?)
+}
+
+/// The 32-byte field-encryption key derived from the vault-backed db-key, if
+/// available. `None` → fall back to plaintext (logged) rather than break the app.
+fn cache_key(app: &AppHandle) -> Option<[u8; 32]> {
+    match get_or_create_db_key(app) {
+        Ok(k) => Some(field_cipher_key(&k)),
+        Err(e) => {
+            log::warn!("Cache key unavailable ({e}); caching without field encryption");
+            None
+        }
+    }
 }
 
 pub fn open_db(app: &AppHandle) -> Result<Connection> {
@@ -59,18 +137,17 @@ pub fn init_local_db(app: &AppHandle) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Best-effort: provision a key for future at-rest encryption. This talks to
-    // the OS credential store, which must NOT be allowed to block app startup,
-    // so failures are logged and ignored (the key is not used yet).
+    // Best-effort: provision the field-encryption key (used to encrypt the
+    // data_json payload in upsert/query). This talks to the OS credential store,
+    // which must NOT be allowed to block app startup, so failures are logged.
     if let Err(e) = get_or_create_db_key(app) {
-        log::warn!("Could not provision DB key (continuing without it): {e}");
+        log::warn!("Could not provision DB key (continuing, cache unencrypted): {e}");
     }
 
-    // Note: For SQLite encryption use SQLCipher in production.
-    // The key above would be passed as PRAGMA key = 'key_value';
     let conn = Connection::open(&path)?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         PRAGMA journal_mode = WAL;
         PRAGMA foreign_keys = ON;
 
@@ -101,7 +178,8 @@ pub fn init_local_db(app: &AppHandle) -> Result<()> {
             details TEXT,
             created_at TEXT DEFAULT (datetime('now'))
         );
-    ")?;
+    ",
+    )?;
 
     log::info!("Local database initialized at {:?}", path);
     Ok(())
@@ -111,8 +189,10 @@ pub fn init_local_db(app: &AppHandle) -> Result<()> {
 /// Called by the sync loop after a successful backend sync.
 pub fn upsert_accounts(app: &AppHandle, rows: &[serde_json::Value]) -> Result<()> {
     let conn = open_db(app)?;
+    let key = cache_key(app);
     let tx = conn.unchecked_transaction()?;
     for row in rows {
+        let data_json = encrypt_payload(&row.to_string(), &key);
         tx.execute(
             "INSERT OR REPLACE INTO accounts_cache
              (id, name, health_status, health_score, last_order_date, data_json, synced_at)
@@ -123,7 +203,7 @@ pub fn upsert_accounts(app: &AppHandle, rows: &[serde_json::Value]) -> Result<()
                 row["health_status"].as_str(),
                 row["health_score"].as_i64(),
                 row["last_order_date"].as_str(),
-                row.to_string(),
+                data_json,
             ],
         )?;
     }
@@ -133,8 +213,10 @@ pub fn upsert_accounts(app: &AppHandle, rows: &[serde_json::Value]) -> Result<()
 
 pub fn upsert_inventory(app: &AppHandle, rows: &[serde_json::Value]) -> Result<()> {
     let conn = open_db(app)?;
+    let key = cache_key(app);
     let tx = conn.unchecked_transaction()?;
     for row in rows {
+        let data_json = encrypt_payload(&row.to_string(), &key);
         tx.execute(
             "INSERT OR REPLACE INTO inventory_cache
              (id, product_name, total_qty, stock_status, weeks_remaining, data_json, synced_at)
@@ -145,12 +227,21 @@ pub fn upsert_inventory(app: &AppHandle, rows: &[serde_json::Value]) -> Result<(
                 row["total_qty"].as_i64(),
                 row["stock_status"].as_str(),
                 row["weeks_remaining"].as_f64(),
-                row.to_string(),
+                data_json,
             ],
         )?;
     }
     tx.commit()?;
     Ok(())
+}
+
+/// Encrypt a payload for storage; on any failure (or no key) store plaintext so
+/// the cache still works. Returns the value to persist in the `data_json` column.
+fn encrypt_payload(plain: &str, key: &Option<[u8; 32]>) -> String {
+    match key {
+        Some(k) => encrypt_field(plain, k).unwrap_or_else(|_| plain.to_string()),
+        None => plain.to_string(),
+    }
 }
 
 #[tauri::command]
@@ -169,8 +260,8 @@ pub fn query_local(
     // Build a safe parameterised query.
     // `filter` is a JSON object whose keys must match column names we whitelist.
     let (sql, bound_value) = if let Some(ref f) = filter {
-        let filter_val: serde_json::Value = serde_json::from_str(f)
-            .map_err(|_| "filter must be valid JSON".to_string())?;
+        let filter_val: serde_json::Value =
+            serde_json::from_str(f).map_err(|_| "filter must be valid JSON".to_string())?;
 
         // Only allow filtering by a single whitelisted column for safety
         let allowed_columns = ["id", "status", "stock_status", "health_status", "event"];
@@ -206,56 +297,89 @@ pub fn query_local(
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
-    let column_names: Vec<String> = stmt
-        .column_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    // Key for decrypting the `data_json` payload on read (None → assume legacy plaintext).
+    let key = cache_key(&app);
 
     let rows = if filter.is_some() && !bound_value.is_empty() {
-        stmt.query_map(params![bound_value], |row| {
-            let mut obj = serde_json::Map::new();
-            for (i, col) in column_names.iter().enumerate() {
-                let val: rusqlite::types::Value = row.get(i)?;
-                obj.insert(col.clone(), sqlite_value_to_json(val));
-            }
-            Ok(obj)
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>()
+        stmt.query_map(params![bound_value], |row| row_to_obj(row, &column_names, &key))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>()
     } else {
-        stmt.query_map([], |row| {
-            let mut obj = serde_json::Map::new();
-            for (i, col) in column_names.iter().enumerate() {
-                let val: rusqlite::types::Value = row.get(i)?;
-                obj.insert(col.clone(), sqlite_value_to_json(val));
-            }
-            Ok(obj)
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>()
+        stmt.query_map([], |row| row_to_obj(row, &column_names, &key))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>()
     };
 
     serde_json::to_string(&rows).map_err(|e| e.to_string())
 }
 
+/// Build a JSON object for one row, decrypting the `data_json` payload column.
+fn row_to_obj(
+    row: &rusqlite::Row,
+    column_names: &[String],
+    key: &Option<[u8; 32]>,
+) -> rusqlite::Result<serde_json::Map<String, serde_json::Value>> {
+    let mut obj = serde_json::Map::new();
+    for (i, col) in column_names.iter().enumerate() {
+        let val: rusqlite::types::Value = row.get(i)?;
+        let json_val = match (col.as_str(), &val) {
+            ("data_json", rusqlite::types::Value::Text(s)) => {
+                let plain = match key {
+                    Some(k) => decrypt_field(s, k).unwrap_or_else(|_| s.clone()),
+                    None => s.clone(),
+                };
+                serde_json::Value::String(plain)
+            }
+            _ => sqlite_value_to_json(val),
+        };
+        obj.insert(col.clone(), json_val);
+    }
+    Ok(obj)
+}
+
 fn sqlite_value_to_json(val: rusqlite::types::Value) -> serde_json::Value {
     match val {
-        rusqlite::types::Value::Null    => serde_json::Value::Null,
+        rusqlite::types::Value::Null => serde_json::Value::Null,
         rusqlite::types::Value::Integer(i) => serde_json::Value::Number(i.into()),
-        rusqlite::types::Value::Real(f) => {
-            serde_json::Number::from_f64(f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
-        rusqlite::types::Value::Blob(b) => {
-            serde_json::Value::String(base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                b,
-            ))
-        }
+        rusqlite::types::Value::Blob(b) => serde_json::Value::String(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            b,
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let key = field_cipher_key("test-db-key");
+        let plain = r#"{"customer":"Acme","balance":15000}"#;
+        let enc = encrypt_field(plain, &key).unwrap();
+        assert!(enc.starts_with(ENC_PREFIX));
+        assert_ne!(enc, plain); // not stored in cleartext
+        assert_eq!(decrypt_field(&enc, &key).unwrap(), plain);
+    }
+
+    #[test]
+    fn decrypt_legacy_plaintext_passthrough() {
+        let key = field_cipher_key("k");
+        assert_eq!(decrypt_field("{\"a\":1}", &key).unwrap(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn wrong_key_fails_to_decrypt() {
+        let k1 = field_cipher_key("key-one");
+        let k2 = field_cipher_key("key-two");
+        let enc = encrypt_field("secret-record", &k1).unwrap();
+        assert!(decrypt_field(&enc, &k2).is_err());
     }
 }

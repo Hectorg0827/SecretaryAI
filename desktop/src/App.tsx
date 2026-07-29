@@ -1,59 +1,62 @@
 /**
- * Desktop app root.
+ * Desktop app root — fully native UI (no remote iframe).
  *
- * On first render we check whether QuickBooks is already connected.
- * - Not connected → show the onboarding wizard (Setup page)
- * - Connected (or user skips) → show the main dashboard shell
+ * Flow:
+ *   loading → login (no session)      : native sign-in, token → OS vault
+ *           → setup  (QB not linked)  : QuickBooks Desktop onboarding wizard
+ *           → dashboard               : native dashboard, API-driven
  *
- * The main shell is a lightweight frame that embeds the SecretaryAI web app
- * in a Tauri webview, giving desktop users the full web UI without
- * duplicating all the frontend components.
+ * The session token lives in the OS credential vault (see ./auth), shared with
+ * the Rust background sync agent. No web content is embedded in this privileged
+ * webview. (Defects #4/#5/#6.)
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Setup from './pages/Setup';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import { API_URL } from './config';
+import { loadToken, authFetch } from './auth';
 
-const API =
-  typeof window !== 'undefined' && (window as any).__SECRETARY_API__
-    ? (window as any).__SECRETARY_API__
-    : import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
-
-const APP_URL =
-  typeof window !== 'undefined' && (window as any).__SECRETARY_APP_URL__
-    ? (window as any).__SECRETARY_APP_URL__
-    : import.meta.env.VITE_APP_URL ?? 'https://app.secretaryai.com';
-
-type AppState = 'loading' | 'setup' | 'app';
+type AppState = 'loading' | 'login' | 'setup' | 'app';
 
 export function App() {
   const [state, setState] = useState<AppState>('loading');
 
-  useEffect(() => {
-    checkConnection();
-  }, []);
-
-  async function checkConnection() {
-    const token = localStorage.getItem('secretary_token');
+  const route = useCallback(async () => {
+    const token = await loadToken();
     if (!token) {
-      // No auth token — show setup (it handles its own auth redirect if needed)
-      setState('setup');
+      setState('login');
       return;
     }
+    // Signed in — decide between onboarding and the dashboard.
     try {
-      const res = await fetch(`${API}/api/setup/qb-desktop/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch('/api/setup/qb-desktop/status');
+      if (res.status === 401) {
+        setState('login');
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setState(data.connected ? 'app' : 'setup');
       } else {
-        // 401 or other error — go to setup which will redirect to login
+        // Backend reachable but errored — let the user into setup rather than a blank screen.
         setState('setup');
       }
     } catch {
-      // Network error — default to setup so user isn't stuck on a blank screen
-      setState('setup');
+      // Offline: we still have a token, so show the dashboard (it handles its own
+      // offline/error state) instead of forcing re-login.
+      setState('app');
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    // Fail-closed sanity: never run a shipped build against localhost.
+    if (import.meta.env.PROD && (!API_URL || /localhost|127\.0\.0\.1/.test(API_URL))) {
+      // The build guard should prevent this; this is defense in depth.
+      console.error('Refusing to run: API_URL is not configured for production.');
+    }
+    route();
+  }, [route]);
 
   if (state === 'loading') {
     return (
@@ -64,19 +67,15 @@ export function App() {
     );
   }
 
+  if (state === 'login') {
+    return <Login onSuccess={route} />;
+  }
+
   if (state === 'setup') {
     return <Setup onComplete={() => setState('app')} />;
   }
 
-  // Main app — embed the web frontend in an iframe.
-  // The Tauri CSP allows connecting to the API so the webview has full access.
-  return (
-    <iframe
-      src={APP_URL}
-      style={{ width: '100vw', height: '100vh', border: 'none', display: 'block' }}
-      title="SecretaryAI"
-    />
-  );
+  return <Dashboard onSignOut={() => setState('login')} />;
 }
 
 const loadingStyles: Record<string, React.CSSProperties> = {

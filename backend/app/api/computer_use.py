@@ -118,7 +118,12 @@ async def start_session(
     if not settings.computer_use_enabled:
         raise HTTPException(status_code=403, detail="Computer Use is disabled on this server")
 
-    require_permission(user, "computer_use")
+    # Computer Use reads the user's screen — restrict to privileged roles.
+    # (Was `require_permission(user, "computer_use")`, a broken call: that helper
+    # is a dependency FACTORY taking one arg, so this raised at runtime and the
+    # permission name did not exist.)
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Not authorized to start a Computer Use session")
 
     session_id = str(uuid.uuid4())
     company = db.table("companies").select("*").eq("id", user["company_id"]).execute()

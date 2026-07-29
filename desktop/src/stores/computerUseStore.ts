@@ -4,6 +4,8 @@
  */
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { API_URL as API } from '../config';
+import { currentToken } from '../auth';
 
 export type CUStatus = 'idle' | 'running' | 'waiting_approval' | 'error';
 
@@ -38,13 +40,10 @@ interface CUApproval {
   createdAt: Date;
 }
 
-const API =
-  typeof window !== 'undefined' && (window as any).__SECRETARY_API__
-    ? (window as any).__SECRETARY_API__
-    : import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
-
 function getToken(): string | null {
-  return localStorage.getItem('secretary_token');
+  // Token comes from the OS credential vault (hydrated into memory at app start),
+  // not localStorage.
+  return currentToken();
 }
 
 async function apiFetch<T>(method: string, path: string, body?: unknown): Promise<T> {

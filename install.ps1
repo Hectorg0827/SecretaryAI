@@ -1,8 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SecretaryAI — One-Command Full-Stack Installer (Windows PowerShell)
+# SecretaryAI — Self-Hosted Backend Deployer (Windows PowerShell)
 #
-# Usage (run as Administrator or standard user):
-#   iwr -useb https://get.secretaryai.com/install.ps1 | iex
+# FOR OPERATORS self-hosting the SecretaryAI backend stack with Docker.
+# This is NOT the desktop app — end users download the installer from the
+# GitHub Releases page (see docs/RELEASE_RUNBOOK.md).
+#
+# Usage (download, REVIEW, then run — never pipe a remote script into a shell):
 #   .\install.ps1
 #   .\install.ps1 -Version 1.2.0
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +58,16 @@ try {
     Fail "Docker Desktop is not running. Start Docker Desktop and try again."
 }
 
+# Run `docker compose` (or `docker-compose`) with arguments passed as an array,
+# so we never build a shell string / use Invoke-Expression.
+function Invoke-Compose {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ComposeArgs)
+    $parts = @($ComposeCmd -split '\s+')
+    $exe = $parts[0]
+    $pre = if ($parts.Count -gt 1) { $parts[1..($parts.Count - 1)] } else { @() }
+    & $exe @pre @ComposeArgs
+}
+
 $ComposeCmd = $null
 try {
     docker compose version 2>&1 | Out-Null
@@ -76,8 +89,8 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Set-Location $InstallDir
 
 # ── Download compose file ─────────────────────────────────────────────────────
-$ComposeUrl   = "https://github.com/secretaryai/secretaryai/releases/latest/download/docker-compose.prod.yml"
-$EnvExampleUrl = "https://github.com/secretaryai/secretaryai/releases/latest/download/.env.example"
+$ComposeUrl   = "https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/docker-compose.prod.yml"
+$EnvExampleUrl = "https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/.env.example"
 
 if (Test-Path "docker-compose.prod.yml") {
     Warn "docker-compose.prod.yml already exists — updating."
@@ -162,12 +175,12 @@ if (Test-Path ".env") {
 Write-Host ""
 Log "Pulling Docker images (this may take a few minutes on first run)..."
 $env:VERSION = $Version
-Invoke-Expression "$ComposeCmd -f docker-compose.prod.yml pull"
+Invoke-Compose -f docker-compose.prod.yml pull
 Ok "Images pulled"
 
 # ── Start services ────────────────────────────────────────────────────────────
 Log "Starting SecretaryAI..."
-Invoke-Expression "$ComposeCmd -f docker-compose.prod.yml up -d"
+Invoke-Compose -f docker-compose.prod.yml up -d
 Ok "Services started"
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -183,7 +196,7 @@ for ($i = 1; $i -le 30; $i++) {
 if (-not $ready) {
     Write-Host ""
     Warn "API did not become healthy in time. Recent logs:"
-    Invoke-Expression "$ComposeCmd -f docker-compose.prod.yml logs --tail=20 api" 2>&1 | Write-Host
+    Invoke-Compose -f docker-compose.prod.yml logs --tail=20 api 2>&1 | Write-Host
     Write-Host ""
     Fail "Startup failed. Fix the issue above then run: $ComposeCmd -f docker-compose.prod.yml up -d"
 }
@@ -200,5 +213,5 @@ Write-Host ""
 Write-Host "  Manage:   cd $InstallDir"
 Write-Host "  Logs:     $ComposeCmd -f docker-compose.prod.yml logs -f"
 Write-Host "  Stop:     $ComposeCmd -f docker-compose.prod.yml down"
-Write-Host "  Update:   iwr -useb https://get.secretaryai.com/install.ps1 | iex"
+Write-Host "  Update:   re-run .\install.ps1 after pulling the latest scripts"
 Write-Host ""

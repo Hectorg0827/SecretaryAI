@@ -61,18 +61,23 @@ class ApprovalQueue:
             return result.data or []
         return []
 
-    async def approve(self, draft_id: str, reviewed_by: str) -> dict:
-        """Mark a draft as approved. Caller is responsible for executing the action."""
+    async def approve(self, draft_id: str, reviewed_by: str, company_id: str) -> dict:
+        """Mark a draft as approved. Caller is responsible for executing the action.
+
+        Scoped to `company_id` (defense in depth) so a draft can never be mutated
+        across tenants even if a caller forgets to pre-check ownership.
+        """
         if hasattr(self._db, "table"):
             self._db.table("drafts").update({
                 "status": "approved",
                 "reviewed_by": reviewed_by,
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", draft_id).execute()
+            }).eq("id", draft_id).eq("company_id", company_id).execute()
         return {"draft_id": draft_id, "status": "approved"}
 
-    async def reject(self, draft_id: str, reviewed_by: str, reason: Optional[str] = None) -> dict:
-        """Mark a draft as rejected."""
+    async def reject(self, draft_id: str, reviewed_by: str, company_id: str,
+                     reason: Optional[str] = None) -> dict:
+        """Mark a draft as rejected (scoped to company_id)."""
         update = {
             "status": "rejected",
             "reviewed_by": reviewed_by,
@@ -82,18 +87,19 @@ class ApprovalQueue:
             update["rejection_reason"] = reason
 
         if hasattr(self._db, "table"):
-            self._db.table("drafts").update(update).eq("id", draft_id).execute()
+            self._db.table("drafts").update(update).eq("id", draft_id).eq("company_id", company_id).execute()
         return {"draft_id": draft_id, "status": "rejected"}
 
-    async def edit_and_approve(self, draft_id: str, edited_content: dict, reviewed_by: str) -> dict:
-        """Apply edits to a draft, then approve it."""
+    async def edit_and_approve(self, draft_id: str, edited_content: dict, reviewed_by: str,
+                               company_id: str) -> dict:
+        """Apply edits to a draft, then approve it (scoped to company_id)."""
         if hasattr(self._db, "table"):
             self._db.table("drafts").update({
                 "content": edited_content,
                 "status": "edited_and_approved",
                 "reviewed_by": reviewed_by,
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", draft_id).execute()
+            }).eq("id", draft_id).eq("company_id", company_id).execute()
         return {"draft_id": draft_id, "status": "edited_and_approved", "content": edited_content}
 
     def expire_old_drafts(self, company_id: str) -> int:

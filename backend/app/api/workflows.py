@@ -1,6 +1,6 @@
 """Workflow API — view and manage workflow runs."""
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_db
 from app.auth.rbac import get_current_user
 from app.workflows.engine import WorkflowEngine
@@ -41,6 +41,14 @@ async def cancel_workflow(
     user: dict = Depends(get_current_user),
     db=Depends(get_db),
 ):
+    # Ownership check — a run belonging to another tenant must 404 (IDOR fix).
+    owned = (
+        db.table("workflow_runs").select("id")
+        .eq("id", run_id).eq("company_id", user["company_id"]).execute()
+    )
+    if not owned.data:
+        raise HTTPException(status_code=404, detail="Workflow run not found")
+
     engine = WorkflowEngine(db, user["company_id"])
     engine.fail(run_id, "Cancelled by user")
     _audit(db, user["company_id"], user["sub"], "workflow_cancel", {"run_id": run_id})

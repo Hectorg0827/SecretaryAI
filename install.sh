@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# SecretaryAI — One-Command Full-Stack Installer (Linux / macOS)
+# SecretaryAI — Self-Hosted Backend Deployer (Linux / macOS)
 #
-# Usage:
-#   curl -sSL https://get.secretaryai.com | bash
+# FOR OPERATORS self-hosting the SecretaryAI backend stack with Docker.
+# This is NOT the desktop app — end users download the installer from the
+# GitHub Releases page (see docs/RELEASE_RUNBOOK.md).
+#
+# Usage (download, REVIEW, then run — do not pipe a remote script into a shell):
 #   bash install.sh
 #   bash install.sh --version 1.2.0
 # ─────────────────────────────────────────────────────────────────────────────
@@ -12,8 +15,8 @@ set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
 INSTALL_DIR="${SECRETARY_INSTALL_DIR:-$HOME/secretaryai}"
-COMPOSE_URL="https://github.com/secretaryai/secretaryai/releases/latest/download/docker-compose.prod.yml"
-ENV_EXAMPLE_URL="https://github.com/secretaryai/secretaryai/releases/latest/download/.env.example"
+COMPOSE_URL="https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/docker-compose.prod.yml"
+ENV_EXAMPLE_URL="https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/.env.example"
 VERSION="${SECRETARY_VERSION:-latest}"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -203,5 +206,5 @@ echo ""
 echo -e "  Manage:   ${BOLD}cd $INSTALL_DIR${RESET}"
 echo -e "  Logs:     ${BOLD}$COMPOSE_CMD -f docker-compose.prod.yml logs -f${RESET}"
 echo -e "  Stop:     ${BOLD}$COMPOSE_CMD -f docker-compose.prod.yml down${RESET}"
-echo -e "  Update:   ${BOLD}bash <(curl -sSL https://get.secretaryai.com)${RESET}"
+echo -e "  Update:   ${BOLD}re-run: bash install.sh${RESET} (after pulling the latest scripts)"
 echo ""

@@ -30,8 +30,10 @@ dist/
 
 # Rust / Tauri
 target/
-Cargo.lock
 *.lock
+# Commit the desktop app's Cargo.lock for reproducible release builds.
+!Cargo.lock
+!desktop/src-tauri/Cargo.lock
 
 # Tauri generated
 src-tauri/gen/

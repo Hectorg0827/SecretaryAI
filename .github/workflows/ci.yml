@@ -1,0 +1,146 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pull-request / branch CI — runs BEFORE merge so a release tag is never the
+# first time tests run. (Production-readiness defect #17.)
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [claude/secretaryai-tech-spec-lqBZj, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: Web frontend (lint / typecheck / build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  desktop-js:
+    name: Desktop UI (lint / typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run lint
+        working-directory: desktop
+      - run: npm run typecheck
+        working-directory: desktop
+
+  desktop-rust:
+    name: Desktop native (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: rustfmt
+        working-directory: desktop/src-tauri
+        run: cargo fmt --all --check
+      - name: clippy
+        working-directory: desktop/src-tauri
+        # TODO(readiness): tighten to `-- -D warnings` once the pre-existing
+        # unused-import / dead_code warnings are cleared (tracked in
+        # docs/PRODUCTION_READINESS.md). Fails now on clippy *errors*.
+        run: cargo clippy --all-targets
+      - name: test
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all manifests match /VERSION
+        run: bash scripts/check_versions.sh
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # scan full history, not just the tip
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Report-mode until the current advisory backlog is triaged, then flip to a
+    # hard gate (tracked in docs/PRODUCTION_READINESS.md). Never merge a NEW
+    # critical/high advisory once enforcement is on.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit (frontend)
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: npm audit (desktop)
+        working-directory: desktop
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (backend)
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r backend/requirements.txt

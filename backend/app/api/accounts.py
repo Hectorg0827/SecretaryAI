@@ -117,6 +117,11 @@ async def get_account(
     adapter=Depends(get_adapter),
 ):
     """Get a single account with full order history and velocity analysis."""
+    # Same role gate as list_accounts — viewers cannot read account detail.
+    role = user.get("role", "viewer")
+    if role not in ("owner", "manager", "sales_rep", "back_office"):
+        raise HTTPException(status_code=403, detail="Not authorized to view accounts")
+
     customers = await adapter.get_all_customers()
     customer = next(
         (c for c in customers if getattr(c, "qb_id", "") == account_id),

@@ -180,7 +180,7 @@ class WorkflowEngine:
             self._db.table("workflow_runs").update({
                 "status": "cancelled",
                 "completed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", run_id).execute()
+            }).eq("id", run_id).eq("company_id", self._company_id).execute()
             return
         run = self._get_run(run_id)
         if not run:
@@ -204,14 +204,20 @@ class WorkflowEngine:
     def fail(self, run_id: str, error: str) -> None:
         run = self._get_run(run_id)
         results = (run.get("step_results", []) if run else []) + [{"error": error}]
+        # Scope the write to this tenant so one company can't fail another's run.
         self._db.table("workflow_runs").update({
             "status": "failed",
             "step_results": results,
             "completed_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", run_id).execute()
+        }).eq("id", run_id).eq("company_id", self._company_id).execute()
 
     def _get_run(self, run_id: str) -> Optional[dict]:
-        result = self._db.table("workflow_runs").select("*").eq("id", run_id).maybe_single().execute()
+        # Tenant-scoped: a run belonging to another company is invisible.
+        result = (
+            self._db.table("workflow_runs").select("*")
+            .eq("id", run_id).eq("company_id", self._company_id)
+            .maybe_single().execute()
+        )
         return result.data
 
     def list_active(self) -> list[dict]:

@@ -56,21 +56,62 @@ if settings.sentry_dsn:
         dsn=settings.sentry_dsn,
         traces_sample_rate=0.2,
         environment="development" if settings.debug else "production",
+        send_default_pii=False,  # never attach cookies, headers, or user IP by default
         before_send=lambda event, hint: _scrub_sentry_event(event),
     )
 
 
+# Substrings that mark a value as sensitive (case-insensitive) — matched against
+# local-variable names and request header/cookie keys.
+_SENSITIVE_KEY_MARKERS = (
+    "password", "passwd", "secret", "token", "authorization", "auth", "cookie",
+    "session", "api_key", "apikey", "key", "credential", "card", "cvv", "ssn",
+    "email", "prompt", "screenshot", "otp", "2fa", "totp",
+)
+
+
+def _is_sensitive_key(name: str) -> bool:
+    n = str(name).lower()
+    return any(marker in n for marker in _SENSITIVE_KEY_MARKERS)
+
+
+def _redact_mapping(mapping: dict) -> None:
+    if not isinstance(mapping, dict):
+        return
+    for k in list(mapping.keys()):
+        if _is_sensitive_key(k):
+            mapping[k] = "[redacted]"
+
+
 def _scrub_sentry_event(event: dict) -> dict:
-    """Remove sensitive fields before sending to Sentry."""
-    for frame in (
-        event.get("exception", {})
-            .get("values", [{}])[0]
-            .get("stacktrace", {})
-            .get("frames", [])
-    ):
-        frame.get("vars", {}).pop("password", None)
-        frame.get("vars", {}).pop("secret_key", None)
-        frame.get("vars", {}).pop("access_token", None)
+    """
+    Strip sensitive data before sending to Sentry: local vars in every stack
+    frame, request headers, cookies, and request body. Fail-closed — if the
+    structure is unexpected we still drop the request body.
+    """
+    try:
+        # Scrub local variables in ALL frames of ALL exception values.
+        for value in event.get("exception", {}).get("values", []):
+            for frame in value.get("stacktrace", {}).get("frames", []):
+                _redact_mapping(frame.get("vars", {}))
+
+        # Scrub the request context: headers, cookies, and body.
+        request = event.get("request")
+        if isinstance(request, dict):
+            _redact_mapping(request.get("headers", {}))
+            _redact_mapping(request.get("cookies", {}))
+            # Never ship request bodies (may contain email/accounting/PII/prompts).
+            request.pop("data", None)
+
+        # Never ship user PII beyond an opaque id.
+        user = event.get("user")
+        if isinstance(user, dict):
+            for k in ("email", "ip_address", "username"):
+                user.pop(k, None)
+    except Exception:
+        # If scrubbing itself fails, drop the potentially-sensitive request block.
+        if isinstance(event, dict):
+            event.pop("request", None)
     return event
 
 
@@ -83,30 +124,55 @@ async def lifespan(app: FastAPI):
     log.info("SecretaryAI API shut down")
 
 
-# ── Docs: served behind API key in production ──────────────────────────────────
+# ── Single source of truth for the release version ─────────────────────────────
+# Imported from the package so every artifact/response reports one value.
+from app import __version__ as APP_VERSION
+
+# ── Docs & OpenAPI: closed by default in production ────────────────────────────
+# In production the raw schema (/openapi.json) and the Swagger UI (/docs) are
+# BOTH off unless a valid X-Docs-Key is presented — the schema is not public.
+_EXPOSE_OPENAPI = settings.debug
+
 app = FastAPI(
     title="SecretaryAI API",
-    version="1.0.0",
+    version=APP_VERSION,
     description="AI operations manager for importers and distributors",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
+    # Disable the default public /openapi.json in production; a key-gated route
+    # is registered below instead.
+    openapi_url="/openapi.json" if _EXPOSE_OPENAPI else None,
 )
 
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi import Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+
+
+def _docs_key_ok(request: Request) -> bool:
+    expected = getattr(settings, "docs_api_key", "") or ""
+    provided = request.headers.get("x-docs-key", "") or request.query_params.get("docs_key", "")
+    return bool(expected) and provided == expected
+
+
+if not _EXPOSE_OPENAPI:
+    @app.get("/openapi.json", include_in_schema=False)
+    async def guarded_openapi(request: Request):
+        """Production OpenAPI schema — only for callers with a valid X-Docs-Key."""
+        if not _docs_key_ok(request):
+            return JSONResponse({"detail": "Not authorized."}, status_code=401)
+        return JSONResponse(app.openapi())
 
 
 @app.get("/docs", include_in_schema=False)
 async def custom_docs(request: Request):
     """API docs — accessible with X-Docs-Key header (value from DOCS_API_KEY env var)."""
-    docs_key = request.headers.get("x-docs-key", "")
-    expected = settings.docs_api_key if hasattr(settings, "docs_api_key") else ""
-    if not expected or docs_key != expected:
-        from fastapi.responses import JSONResponse
+    if not _docs_key_ok(request):
         return JSONResponse({"detail": "Not authorized. Include X-Docs-Key header."}, status_code=401)
-    return get_swagger_ui_html(openapi_url="/openapi.json", title="SecretaryAI API")
+    # Pass the key through so the browser can fetch the guarded schema.
+    schema_url = "/openapi.json?docs_key=" + (getattr(settings, "docs_api_key", "") or "")
+    return get_swagger_ui_html(openapi_url=schema_url, title="SecretaryAI API")
 
 
 # ── Middleware (order matters — outermost first) ───────────────────────────────
@@ -172,7 +238,9 @@ async def health_check():
         r.ping()
         checks["redis"] = "ok"
     except Exception as exc:
-        checks["redis"] = f"error: {exc}"
+        # Log the detail server-side only; never leak host/DSN/exception text.
+        log.error("health: redis check failed: %s", exc)
+        checks["redis"] = "error"
         ok = False
 
     # Supabase (lightweight table count query)
@@ -182,11 +250,12 @@ async def health_check():
         db.table("companies").select("id", count="exact").limit(1).execute()
         checks["db"] = "ok"
     except Exception as exc:
-        checks["db"] = f"error: {exc}"
+        log.error("health: db check failed: %s", exc)
+        checks["db"] = "error"
         ok = False
 
     status_code = 200 if ok else 503
     return JSONResponse(
-        {"status": "ok" if ok else "degraded", "version": "1.0.0", "checks": checks},
+        {"status": "ok" if ok else "degraded", "version": APP_VERSION, "checks": checks},
         status_code=status_code,
     )

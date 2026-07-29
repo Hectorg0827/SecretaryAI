@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.actions.audit import log_action
+from app.actions.schemas import ActionValidationError, validate_action_payload
 
 
 class ActionProhibitedError(Exception):
@@ -102,6 +103,22 @@ class ActionEngine:
             raise ActionProhibitedError(
                 f"Action '{action_type}' is permanently blocked by SecretaryAI policy."
             )
+
+        # Validate + normalize the payload against its typed schema before any
+        # side effect (DB write / email). Unmapped actions pass through. (#32)
+        try:
+            payload = validate_action_payload(action_type, payload)
+        except ActionValidationError as exc:
+            await log_action(
+                self._db,
+                company_id=company_id,
+                actor="system",
+                action_type=action_type,
+                autonomy_level=level,
+                payload=payload,
+                status="rejected",
+            )
+            raise
 
         if level == "autonomous":
             result = await self._execute(action_type, payload, company_id)

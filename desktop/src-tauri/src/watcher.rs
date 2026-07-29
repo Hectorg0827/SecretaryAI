@@ -1,11 +1,10 @@
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 /// File system watcher — monitors a designated folder for depletion reports
 /// (PDFs and Excel files) dropped by sub-distributors.
 /// Cross-platform: uses the `notify` crate which works on Windows and macOS.
-
 use std::path::Path;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
 const WATCH_FOLDER_KEY: &str = "watch_folder";
@@ -87,8 +86,7 @@ fn get_watch_folder(_app: &AppHandle) -> String {
         return path;
     }
     // Default to user's Documents/SecretaryAI/Reports
-    let documents = dirs_next::document_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let documents = dirs_next::document_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     documents
         .join("SecretaryAI")
         .join("Reports")
@@ -105,18 +103,17 @@ async fn upload_report(app: &AppHandle, path: &std::path::Path) -> anyhow::Resul
         }
     });
 
-    let token = crate::credentials::get_credential(
-        "secretary-auth".to_string(),
-        "token".to_string(),
-    )
-    .map_err(|e| anyhow::anyhow!("credential read error: {}", e))?;
+    let token =
+        crate::credentials::get_credential("secretary-auth".to_string(), "token".to_string())
+            .map_err(|e| anyhow::anyhow!("credential read error: {}", e))?;
 
     let Some(auth_token) = token else {
         log::warn!("Skipping report upload: no auth token stored");
         return Ok(());
     };
 
-    let file_bytes = tokio::fs::read(path).await
+    let file_bytes = tokio::fs::read(path)
+        .await
         .map_err(|e| anyhow::anyhow!("could not read file: {}", e))?;
 
     let file_name = path
@@ -132,11 +129,11 @@ async fn upload_report(app: &AppHandle, path: &std::path::Path) -> anyhow::Resul
         .to_lowercase();
 
     let mime = match ext.as_str() {
-        "pdf"  => "application/pdf",
+        "pdf" => "application/pdf",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "xls"  => "application/vnd.ms-excel",
-        "csv"  => "text/csv",
-        _      => "application/octet-stream",
+        "xls" => "application/vnd.ms-excel",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
     };
 
     let part = reqwest::multipart::Part::bytes(file_bytes)

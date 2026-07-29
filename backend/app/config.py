@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # SendGrid
     sendgrid_api_key: str = ""
     from_email: str = "secretary@secretaryai.com"
+    # Optional comma-separated domain allow-list for auto-sent (NOTIFY) alert
+    # emails. When set, alerts may only go to these domains. Empty = no restriction.
+    alert_email_allowlist: str = ""
 
     # Security
     access_token_expire_minutes: int = 60

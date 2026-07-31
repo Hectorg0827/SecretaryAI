@@ -12,10 +12,15 @@ const CREDENTIAL_SERVICE: &str = "secretaryai-db";
 const CREDENTIAL_KEY: &str = "db-key";
 
 pub fn db_path(app: &AppHandle) -> PathBuf {
-    app.path()
+    // NEVER `.expect()` here: this runs during `setup()` on the main thread, and
+    // a panic in a `panic = "abort"` build would SIGABRT the whole app before a
+    // window opens. Fall back to a temp-dir path if the platform dir can't be
+    // resolved — the local cache is best-effort, not load-bearing.
+    let base = app
+        .path()
         .app_data_dir()
-        .expect("app data dir")
-        .join(DB_FILE)
+        .unwrap_or_else(|_| std::env::temp_dir().join("SecretaryAI"));
+    base.join(DB_FILE)
 }
 
 fn get_or_create_db_key(app: &AppHandle) -> Result<String> {
@@ -302,10 +307,12 @@ pub fn query_local(
     let key = cache_key(&app);
 
     let rows = if filter.is_some() && !bound_value.is_empty() {
-        stmt.query_map(params![bound_value], |row| row_to_obj(row, &column_names, &key))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>()
+        stmt.query_map(params![bound_value], |row| {
+            row_to_obj(row, &column_names, &key)
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>()
     } else {
         stmt.query_map([], |row| row_to_obj(row, &column_names, &key))
             .map_err(|e| e.to_string())?

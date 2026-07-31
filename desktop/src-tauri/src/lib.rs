@@ -130,17 +130,65 @@ fn release_lock() {
     info!("Lock file released");
 }
 
+// ── Startup breadcrumb log ────────────────────────────────────────────────────
+// A release build is compiled with `panic = "abort"`, so any panic (or a native
+// abort deep inside Tauri's `.build()`) terminates the process before a window
+// ever appears — and on macOS the panic text is easy to miss in the OS crash
+// report. To make startup failures diagnosable, we append timestamped
+// breadcrumbs to `<app-data>/SecretaryAI/startup.log` and register a panic hook
+// that records the panic message + location to that same file. The last line in
+// the file tells us exactly how far startup got.
+
+fn startup_log_path() -> PathBuf {
+    let mut dir = dirs_next();
+    dir.push("SecretaryAI");
+    let _ = fs::create_dir_all(&dir);
+    dir.push("startup.log");
+    dir
+}
+
+fn startup_log(msg: &str) {
+    let line = format!("[{}] {}", chrono::Local::now().to_rfc3339(), msg);
+    // Always mirror to stderr for `Terminal` runs.
+    eprintln!("[startup] {msg}");
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(startup_log_path())
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+fn install_panic_logger() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        startup_log(&format!("PANIC: {info}"));
+        default_hook(info);
+    }));
+}
+
 // ── App entry point ───────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Capture any panic (message + location) to the startup log before the
+    // `panic = "abort"` runtime tears the process down.
+    install_panic_logger();
+    startup_log(&format!(
+        "=== launch: v{} pid {} ===",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id()
+    ));
+
     // Single-instance enforcement with crash recovery
     if !acquire_lock() {
-        eprintln!("Another instance of SecretaryAI is already running. Exiting.");
+        startup_log("another instance already running — exiting");
         std::process::exit(0);
     }
+    startup_log("lock acquired; building app");
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -166,15 +214,25 @@ pub fn run() {
             qb_detect::check_qb_installed,
         ])
         .setup(|app| {
+            startup_log("setup: begin");
+
             // Initialize local encrypted database.
             // Non-fatal: a DB failure must never prevent the window from opening.
-            if let Err(e) = db::init_local_db(app.handle()) {
-                error!("Local DB init failed (continuing): {e}");
+            match db::init_local_db(app.handle()) {
+                Ok(()) => startup_log("setup: db ok"),
+                Err(e) => {
+                    error!("Local DB init failed (continuing): {e}");
+                    startup_log(&format!("setup: db FAILED (continuing): {e}"));
+                }
             }
 
             // Set up system tray. Non-fatal as well.
-            if let Err(e) = tray::setup_tray(app) {
-                error!("Tray setup failed (continuing): {e}");
+            match tray::setup_tray(app) {
+                Ok(()) => startup_log("setup: tray ok"),
+                Err(e) => {
+                    error!("Tray setup failed (continuing): {e}");
+                    startup_log(&format!("setup: tray FAILED (continuing): {e}"));
+                }
             }
 
             // Start background sync loop
@@ -233,6 +291,7 @@ pub fn run() {
                 heartbeat::start_heartbeat(api_url, company_id, version).await;
             });
 
+            startup_log("setup: done");
             Ok(())
         })
         .on_window_event(|_window, event| {
@@ -243,11 +302,27 @@ pub fn run() {
                 let _ = _window.hide();
             }
         })
-        .build(tauri::generate_context!())
-        .expect("error while building SecretaryAI desktop")
-        .run(|_app, event| {
-            if let tauri::RunEvent::Exit = event {
-                release_lock();
-            }
-        });
+        .build(tauri::generate_context!());
+
+    // Don't `.expect()` here: a hard panic in a `panic = "abort"` build turns a
+    // recoverable "couldn't build" into an instant SIGABRT with no useful text.
+    // Log the concrete error and exit cleanly instead.
+    let app = match app {
+        Ok(app) => {
+            startup_log("build: ok — entering run loop");
+            app
+        }
+        Err(e) => {
+            startup_log(&format!("build: FAILED: {e}"));
+            eprintln!("SecretaryAI failed to start: {e}");
+            release_lock();
+            std::process::exit(1);
+        }
+    };
+
+    app.run(|_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            release_lock();
+        }
+    });
 }

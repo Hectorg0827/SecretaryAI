@@ -26,12 +26,10 @@ pub async fn start_heartbeat(api_base_url: String, company_id: String, agent_ver
         // Only beacon when the user is signed in. The token comes from the OS
         // credential vault (the same store the UI writes on login); if absent we
         // skip this cycle rather than sending an unauthenticated heartbeat.
-        let token = crate::credentials::get_credential(
-            "secretary-auth".to_string(),
-            "token".to_string(),
-        )
-        .ok()
-        .flatten();
+        let token =
+            crate::credentials::get_credential("secretary-auth".to_string(), "token".to_string())
+                .ok()
+                .flatten();
         let Some(token) = token else {
             sleep(Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
             continue;

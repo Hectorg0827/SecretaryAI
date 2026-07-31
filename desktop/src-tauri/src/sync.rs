@@ -133,11 +133,9 @@ async fn run_sync(app: &AppHandle) -> Result<SyncStatus> {
 // ── Local DB helpers ──────────────────────────────────────────────────────────
 
 fn db_path(app: &AppHandle) -> std::path::PathBuf {
-    use tauri::Manager;
-    app.path()
-        .app_data_dir()
-        .expect("app data dir")
-        .join("secretaryai.db")
+    // Delegate to the canonical, panic-free resolver in `db` so the path (and
+    // its temp-dir fallback) stays consistent and never aborts the process.
+    crate::db::db_path(app)
 }
 
 fn write_sync_log(app: &AppHandle, event: &str, status: &str, details: &str) -> Result<()> {

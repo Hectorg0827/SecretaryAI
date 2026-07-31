@@ -28,12 +28,6 @@
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.secretaryai.com wss://api.secretaryai.com https://*.supabase.co"
-    },
-    "trayIcon": {
-      "iconPath": "icons/tray-icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false,
-      "title": "SecretaryAI"
     }
   },
   "bundle": {

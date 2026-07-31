@@ -26,19 +26,27 @@ pub async fn start_file_watcher(app: AppHandle) {
 
     let (tx, mut rx) = mpsc::channel(32);
 
-    let mut watcher = RecommendedWatcher::new(
+    // Never `.expect()` in a `panic = "abort"` build: a failure here would
+    // SIGABRT the whole app instead of just disabling the (optional) watcher.
+    let mut watcher = match RecommendedWatcher::new(
         move |result: Result<Event, notify::Error>| {
             if let Ok(event) = result {
                 let _ = tx.blocking_send(event);
             }
         },
         Config::default().with_poll_interval(Duration::from_secs(10)),
-    )
-    .expect("failed to create file watcher");
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            log::warn!("File watcher unavailable (continuing without it): {e}");
+            return;
+        }
+    };
 
-    watcher
-        .watch(Path::new(&watch_path), RecursiveMode::NonRecursive)
-        .expect("failed to start watching folder");
+    if let Err(e) = watcher.watch(Path::new(&watch_path), RecursiveMode::NonRecursive) {
+        log::warn!("Could not watch {watch_path} (continuing without it): {e}");
+        return;
+    }
 
     while let Some(event) = rx.recv().await {
         if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {

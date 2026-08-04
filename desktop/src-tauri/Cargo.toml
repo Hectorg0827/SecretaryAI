@@ -64,7 +64,7 @@ windows = { version = "0.58", features = [
 libc = "0.2"   # kill(pid, 0) for process liveness check
 
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "2"
+security-framework = "3"
 
 [profile.release]
 panic = "abort"

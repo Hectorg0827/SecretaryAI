@@ -16,7 +16,7 @@ cryptography==43.0.3
 
 # HTTP
 httpx==0.27.2
-python-multipart==0.0.12
+python-multipart==0.0.32
 
 # Config
 python-dotenv==1.0.1

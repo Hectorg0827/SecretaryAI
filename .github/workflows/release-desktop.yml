@@ -65,7 +65,7 @@ jobs:
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # ── Node.js ─────────────────────────────────────────────────────────────
       - name: Set up Node.js
@@ -297,7 +297,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Generate latest.json for the Tauri updater plugin.
       # The tauri-action already attaches individual platform signatures;

@@ -23,7 +23,7 @@
     "expo-secure-store": "~13.0.2",
     "expo-av": "~14.0.7",
     "expo-notifications": "~0.28.19",
-    "expo-speech": "~12.0.2",
+    "expo-speech": "~57.0.1",
     "expo-splash-screen": "~0.27.5",
     "expo-status-bar": "~1.12.1",
     "react": "18.2.0",

@@ -242,7 +242,7 @@ jobs:
       # downloadable from this run's "Artifacts" section — no release needed.
       - name: Upload installers as run artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SecretaryAI-installer-${{ matrix.label }}
           path: |
@@ -270,7 +270,7 @@ jobs:
 
       - name: Upload checksums
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SecretaryAI-checksums-${{ matrix.label }}
           path: SHA256SUMS-${{ matrix.label }}.txt

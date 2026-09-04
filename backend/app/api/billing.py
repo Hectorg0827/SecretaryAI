@@ -23,6 +23,13 @@ try:
 except ImportError:
     _stripe = None  # type: ignore
     _stripe_available = False
+    if settings.stripe_secret_key:
+        # Loud, not silent: an operator who configured Stripe must not discover
+        # months later that checkout was returning mock URLs.
+        log.error(
+            "STRIPE_SECRET_KEY is set but the 'stripe' package is not installed — "
+            "billing is running in MOCK mode (no real checkout, webhooks ignored)"
+        )
 
 # ── Request/Response models ────────────────────────────────────────────────────
 

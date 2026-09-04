@@ -13,7 +13,9 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Loopback only: this Redis holds the Celery broker AND the JWT revocation
+      # list — it must never be reachable from the network.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -118,6 +120,9 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       FLOWER_PORT: 5555
+      # Flower exposes task args and can revoke/shut down workers — never run it
+      # unauthenticated. Compose refuses to start this service until set.
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?set FLOWER_BASIC_AUTH=user:password}
     depends_on:
       - redis
     profiles:

@@ -56,12 +56,18 @@ class ChatMessage(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _load_history(db, conversation_id: str) -> list[dict]:
-    """Load conversation history from Supabase, most recent turns first."""
+def _load_history(db, conversation_id: str, company_id: str) -> list[dict]:
+    """Load conversation history from Supabase, most recent turns first.
+
+    Scoped to the caller's tenant: conversation_id is client-supplied, so
+    without the company filter a guessed/leaked UUID pulled another tenant's
+    history into this user's LLM context (and _save_turn appended to it).
+    """
     result = (
         db.table("conversations")
         .select("role, content")
         .eq("conversation_id", conversation_id)
+        .eq("company_id", company_id)
         .order("created_at", desc=False)
         .limit(MAX_HISTORY_TURNS * 2)  # each turn = 2 rows (user + assistant)
         .execute()
@@ -294,7 +300,7 @@ async def send_message(
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
     # 1. Load + trim conversation history
-    history = _load_history(db, conversation_id)
+    history = _load_history(db, conversation_id, company_id)
     history = _trim_history(history)
 
     # 2. Classify intent

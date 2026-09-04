@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from celery_app import app
-from tasks.base import get_supabase, task_lock
+from tasks.base import get_supabase, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -23,15 +23,11 @@ _APPROVAL_TIMEOUT_HOURS = 72
 
 
 @app.task(name="tasks.workflow_reaper.reap_stuck_runs", bind=True, max_retries=1)
+@locked_task("workflow_reaper", ttl_seconds=1800)
 def reap_stuck_runs(self):
     """
     Scan all tenants for stuck workflow runs and fail them with a descriptive error.
     """
-    with task_lock("workflow_reaper", ttl_seconds=1800) as acquired:
-        if not acquired:
-            log.info("Workflow reaper already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
     now = datetime.now(timezone.utc)
 

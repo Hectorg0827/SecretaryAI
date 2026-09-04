@@ -151,9 +151,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 
 def _docs_key_ok(request: Request) -> bool:
+    import hmac
     expected = getattr(settings, "docs_api_key", "") or ""
     provided = request.headers.get("x-docs-key", "") or request.query_params.get("docs_key", "")
-    return bool(expected) and provided == expected
+    # Constant-time compare so the key can't be recovered byte-by-byte via timing.
+    return bool(expected) and hmac.compare_digest(provided, expected)
 
 
 if not _EXPOSE_OPENAPI:
@@ -175,11 +177,22 @@ async def custom_docs(request: Request):
     return get_swagger_ui_html(openapi_url=schema_url, title="SecretaryAI API")
 
 
-# ── Middleware (order matters — outermost first) ───────────────────────────────
+# ── Middleware ─────────────────────────────────────────────────────────────────
+# Starlette wraps in reverse: the LAST add_middleware call is the OUTERMOST.
+# Resulting request order (outer → inner):
+#   CORS → Timeout → Tenant → RateLimit → RequestID → SecurityHeaders → routes
+# Tenant MUST run before RateLimit so request.state.company_id exists when the
+# limiter builds its key — otherwise every tenant shared one "anonymous" bucket
+# and a single client could 429 the whole user base.
+from app.middleware.timeout import TimeoutMiddleware
+
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
-app.add_middleware(TenantMiddleware)
 app.add_middleware(RateLimitMiddleware, redis_url=settings.redis_url)
+app.add_middleware(TenantMiddleware)
+# Hard wall-clock guard against hung upstreams (DB/LLM). Generous on purpose:
+# it is a hang guard, not a latency budget — long LLM turns must not be cut.
+app.add_middleware(TimeoutMiddleware, timeout_seconds=120)
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 _allow_all = "*" in _cors_origins

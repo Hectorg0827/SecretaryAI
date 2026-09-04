@@ -21,7 +21,7 @@ import asyncio
 import logging
 
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, task_lock
+from tasks.base import get_supabase, get_active_companies, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -29,16 +29,12 @@ BATCH_SIZE = 20   # max files processed per company per run
 
 
 @app.task(name="tasks.ingestion_scheduler.run", bind=True, max_retries=1)
+@locked_task("ingestion_scheduler", ttl_seconds=900)
 def run(self):
     """
     Scan watched directories for all active companies and process new /
     retry-eligible files through the ingestion pipeline.
     """
-    with task_lock("ingestion_scheduler", ttl_seconds=900) as acquired:
-        if not acquired:
-            log.info("Ingestion scheduler already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
     companies = get_active_companies(db)
     log.info("Ingestion scheduler: %d companies", len(companies))

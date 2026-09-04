@@ -361,7 +361,9 @@ async def submit_task_result(
 
     now = datetime.now(timezone.utc)
     try:
-        db.table("connector_tasks").update({
+        # Scope the update to the connector's own tenant: the company_id check
+        # above only validates the client-supplied body, not the target row.
+        updated = db.table("connector_tasks").update({
             "status": result.status.value,
             "result_data": result.data,
             "rows_returned": result.rows_returned,
@@ -369,7 +371,11 @@ async def submit_task_result(
             "error_code": result.error_code,
             "duration_ms": result.duration_ms,
             "completed_at": (result.completed_at or now).isoformat(),
-        }).eq("id", result.task_id).execute()
+        }).eq("id", result.task_id).eq("company_id", connector["company_id"]).execute()
+        if not (getattr(updated, "data", None) or []):
+            raise HTTPException(status_code=404, detail="Task not found")
+    except HTTPException:
+        raise
     except Exception as exc:
         log.error("Task result update failed for %s: %s", result.task_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
@@ -645,7 +651,19 @@ async def dispatch_task(
     GET /api/connectors/task-result/{task_id}.
     """
     import uuid
-    from app.domain.connector_protocol import QB_DESKTOP_CAPABILITIES
+    from app.domain.connector_protocol import QB_DESKTOP_CAPABILITIES, TaskType
+
+    # Dispatching work to the tenant's QuickBooks connector is an action, not a
+    # read: only owner/manager may trigger it (viewer/sales_rep/back_office
+    # could previously enqueue create_invoice / create_po / update_item).
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Insufficient role to dispatch connector tasks")
+
+    # The connector executes whatever task_type it is handed — validate it
+    # against the protocol enum instead of accepting a free-form string.
+    valid_types = {t.value for t in TaskType}
+    if body.task_type not in valid_types:
+        raise HTTPException(status_code=422, detail=f"Unknown task_type '{body.task_type}'")
 
     company_id = user["company_id"]
 

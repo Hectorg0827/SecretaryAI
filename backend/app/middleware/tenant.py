@@ -50,10 +50,13 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         if token:
             try:
-                import jwt as pyjwt
-                from app.config import get_settings
-                settings = get_settings()
-                payload = pyjwt.decode(token, settings.secret_key, algorithms=["HS256"])
+                # Use the app's own (python-jose) decoder — PyJWT was only ever an
+                # undeclared transitive dependency, and its absence was masked by
+                # the bare except below.
+                from app.auth.jwt import decode_access_token
+                payload = decode_access_token(token)
+                if not payload:
+                    raise ValueError("undecodable token")
                 company_id = payload.get("company_id")
                 request.state.company_id = company_id
                 request.state.user_id = payload.get("sub")

@@ -28,6 +28,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     )
     to_encode["exp"] = expire
     to_encode.setdefault("jti", str(uuid.uuid4()))  # unique token ID for revocation
+    # Token *scope* separates full user sessions ("access") from special-purpose
+    # tokens minted with the same key (2FA pre-auth "2fa_pending", long-lived
+    # "connector"). get_current_user only accepts "access"; without this, any
+    # HS256 token signed with SECRET_KEY was a full session.
+    to_encode.setdefault("scope", "access")
     return jwt.encode(to_encode, settings.secret_key, algorithm=ALGORITHM)
 
 

@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     intuit_client_secret: str = ""
     intuit_redirect_uri: str = ""
     intuit_environment: str = "production"  # or "sandbox"
+    # Webhook verifier token from the Intuit developer portal; QBO webhooks are
+    # rejected (fail-closed) until this is set.
+    intuit_webhook_verifier_token: str = ""
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
@@ -85,6 +88,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        # An operator-added key that this model doesn't know about (a typo, or a
+        # var meant for another service) must not crash the API at startup.
+        extra = "ignore"
 
     @model_validator(mode="after")
     def _validate(self) -> "Settings":

@@ -5,18 +5,15 @@ Runs every hour.
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock
+from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
 
 @app.task(name="tasks.workflow_runner.run_all", bind=True, max_retries=2)
+@locked_task("workflow_runner", ttl_seconds=3600)
 def run_all(self):
     """Trigger new workflows from recent feed events + expire timed-out awaiting-approval runs."""
-    with task_lock("workflow_runner", ttl_seconds=3600) as acquired:
-        if not acquired:
-            log.info("Workflow runner already running — skipping")
-            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
 

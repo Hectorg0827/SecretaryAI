@@ -31,7 +31,10 @@ def parse_pdf_document(file_bytes: bytes) -> str:
     Returns raw text for the AI to analyze.
     """
     try:
-        import PyPDF2
+        try:
+            import pypdf as PyPDF2  # maintained successor; same PdfReader API
+        except ImportError:  # pragma: no cover — legacy environments
+            import PyPDF2  # type: ignore
         reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
         text = ""
         for page in reader.pages:

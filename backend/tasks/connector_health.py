@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from celery_app import app
-from tasks.base import get_supabase, task_lock
+from tasks.base import get_supabase, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -25,17 +25,13 @@ _ERROR_SECONDS = 3600  # 1 hour
 
 
 @app.task(name="tasks.connector_health.check_all", bind=True, max_retries=1)
+@locked_task("connector_health", ttl_seconds=300)
 def check_all(self):
     """
     Scan all connector_registrations and update stale / error status.
     Sends a push notification to the company owner when a connector first
     transitions to 'stale'.
     """
-    with task_lock("connector_health", ttl_seconds=300) as acquired:
-        if not acquired:
-            log.info("Connector health check already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
     now = datetime.now(timezone.utc)
 

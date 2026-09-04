@@ -34,13 +34,18 @@ services:
   api:
     <<: [*api-image, *backend-env]
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # Not published on the host: nginx (below) is the only ingress. Publishing
+    # 8000 bypassed TLS and the proxy, and --forwarded-allow-ips="*" is only
+    # safe when the proxy is the sole path in.
+    expose:
+      - "8000"
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8000
       --workers ${UVICORN_WORKERS:-2}
+      --proxy-headers
+      --forwarded-allow-ips=*
     depends_on:
       redis:
         condition: service_healthy
@@ -107,6 +112,9 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       FLOWER_PORT: 5555
+      # Flower exposes task args and can revoke/shut down workers — never run it
+      # unauthenticated. Compose refuses to start this service until set.
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?set FLOWER_BASIC_AUTH=user:password}
     depends_on:
       - redis
     profiles:

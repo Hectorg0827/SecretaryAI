@@ -39,6 +39,18 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Only full user-session tokens may act as a user. Special-purpose tokens
+    # signed with the same secret (2FA pre-auth "2fa_pending", connector
+    # "connector") must never resolve here — previously a pre-auth token could
+    # call /auth/2fa/setup + /verify and overwrite the victim's TOTP secret.
+    # Tokens issued before the scope claim existed carry no "scope" and are
+    # treated as "access" so existing sessions keep working.
+    if payload.get("scope", "access") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is not valid for this endpoint",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     jti = payload.get("jti")
     if jti and is_token_revoked(jti):
         raise HTTPException(

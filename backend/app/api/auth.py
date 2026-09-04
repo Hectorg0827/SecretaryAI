@@ -29,7 +29,7 @@ from app.auth.jwt import create_access_token, decode_access_token, verify_passwo
 from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
-from app.utils.rate_limiter import login_limiter, require_rate_limit
+from app.utils.rate_limiter import login_limiter, login_email_limiter, require_rate_limit
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -353,6 +353,16 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
     if not body.email or not body.password:
         raise HTTPException(status_code=422, detail="email and password are required")
 
+    # Per-account throttle (in addition to the per-IP dependency above). The IP
+    # limiter is only meaningful when the proxy's forwarded headers are trusted;
+    # this one holds regardless of where the attempts come from.
+    if not login_email_limiter.is_allowed(body.email.lower().strip()):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many sign-in attempts for this account. Try again in a few minutes.",
+            headers={"Retry-After": str(login_email_limiter.window_seconds)},
+        )
+
     try:
         result = (
             db.table("users")
@@ -476,17 +486,32 @@ async def refresh_token(body: RefreshRequest):
         if expired_for > refresh_window_seconds:
             raise HTTPException(status_code=401, detail="Session expired; please log in again")
 
-    # Verify the user still exists and is active
+    # Only a user-session token can be refreshed into a user-session token.
+    if payload.get("scope", "access") != "access":
+        raise HTTPException(status_code=401, detail="Token is not refreshable")
+
+    # Verify the user still exists and is active, and re-read role/company from
+    # the DB so a demoted or moved user does not keep stale privileges for the
+    # whole refresh window.
     try:
         from supabase import create_client
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        result = db.table("users").select("is_active").eq("id", user_id).execute()
+        result = (
+            db.table("users")
+            .select("is_active, role, company_id")
+            .eq("id", user_id)
+            .execute()
+        )
     except Exception as exc:
         log.error("Refresh token DB query failed: %s", exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     if not result.data or not result.data[0].get("is_active", True):
         raise HTTPException(status_code=401, detail="User not found or disabled")
+
+    current = result.data[0]
+    role = current.get("role") or role
+    company_id = current.get("company_id") or company_id
 
     new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
 

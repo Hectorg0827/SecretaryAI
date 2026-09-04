@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock
+from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 from app.scheduler.morning_briefing import generate_morning_briefing
 from app.scheduler.dashboard_snapshot import compute_dashboard_payload, store_snapshot
 from app.ai.data_summarizer import build_query_context
@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 
 @app.task(name="tasks.morning_briefing.send_morning_briefing_all", bind=True, max_retries=2)
+@locked_task(lambda self, company_id=None: f"morning_briefing_{company_id}" if company_id else "morning_briefing", ttl_seconds=3600)
 def send_morning_briefing_all(self, company_id: str | None = None):
     """
     Generate morning briefings for all active companies (or a single company
@@ -18,11 +19,6 @@ def send_morning_briefing_all(self, company_id: str | None = None):
     Also computes and stores the dashboard_summary snapshot so employees
     read from the cache for the rest of the day instead of hitting QB.
     """
-    lock_key = f"morning_briefing_{company_id}" if company_id else "morning_briefing"
-    with task_lock(lock_key, ttl_seconds=3600) as acquired:
-        if not acquired:
-            log.info("Morning briefing already running — skipping")
-            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
     if company_id:

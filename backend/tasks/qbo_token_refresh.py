@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from celery_app import app
-from tasks.base import get_supabase, task_lock
+from tasks.base import get_supabase, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -25,16 +25,12 @@ REFRESH_THRESHOLD_MINUTES = 15
 
 
 @app.task(name="tasks.qbo_token_refresh.refresh_expiring_tokens", bind=True, max_retries=1)
+@locked_task("qbo_token_refresh", ttl_seconds=600)
 def refresh_expiring_tokens(self):
     """
     Scan all connected companies and refresh any QBO access tokens that will
     expire within REFRESH_THRESHOLD_MINUTES.
     """
-    with task_lock("qbo_token_refresh", ttl_seconds=600) as acquired:
-        if not acquired:
-            log.info("QBO token refresh already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
 
     # Only look at companies with an active QBO connection and tracked expiry

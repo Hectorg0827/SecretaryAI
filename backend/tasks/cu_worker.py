@@ -18,21 +18,17 @@ import asyncio
 import logging
 
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, task_lock
+from tasks.base import get_supabase, get_active_companies, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
 
 @app.task(name="tasks.cu_worker.process_pending_jobs", bind=True, max_retries=0)
+@locked_task("cu_worker", ttl_seconds=120)
 def process_pending_jobs(self):
     """
     Claim and execute one pending CU job per active company.
     """
-    with task_lock("cu_worker", ttl_seconds=120) as acquired:
-        if not acquired:
-            log.info("CU worker already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
     companies = get_active_companies(db)
 

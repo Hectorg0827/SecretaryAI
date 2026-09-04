@@ -5,17 +5,14 @@ Runs daily. Avoids creating duplicate events for the same entity.
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock
+from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
 
 @app.task(name="tasks.proactive_insights.generate_all", bind=True, max_retries=2)
+@locked_task("proactive_insights", ttl_seconds=3600)
 def generate_all(self):
-    with task_lock("proactive_insights", ttl_seconds=3600) as acquired:
-        if not acquired:
-            log.info("Proactive insights already running — skipping")
-            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
     total_events = 0

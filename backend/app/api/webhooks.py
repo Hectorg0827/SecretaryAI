@@ -97,11 +97,13 @@ def _verify_qbo_signature(body: bytes, signature: str | None) -> bool:
     if not signature:
         return False
     # QBO uses HMAC-SHA256 with the webhook verifier token
-    verifier = getattr(settings, "intuit_webhook_verifier_token", "")
+    verifier = settings.intuit_webhook_verifier_token
     if not verifier:
         # Fail closed — never skip verification, even in dev.
         # Set INTUIT_WEBHOOK_VERIFIER_TOKEN in .env to enable QBO webhooks.
         log.warning("QBO webhook received but INTUIT_WEBHOOK_VERIFIER_TOKEN is not set — rejecting")
         return False
-    expected = hmac.new(verifier.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    # Intuit sends the digest BASE64-encoded in `intuit-signature`, not hex.
+    import base64
+    expected = base64.b64encode(hmac.new(verifier.encode(), body, hashlib.sha256).digest()).decode()
+    return hmac.compare_digest(expected, signature.strip())

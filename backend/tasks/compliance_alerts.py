@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, task_lock
+from tasks.base import get_supabase, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -37,17 +37,13 @@ async def _notify_compliance(db, company_id: str, critical: int, warning: int) -
 
 
 @app.task(name="tasks.compliance_alerts.check_all", bind=True, max_retries=2)
+@locked_task("compliance_alerts", ttl_seconds=3600)
 def check_all(self):
     """
     Run the compliance alert check for every active company.
     Results are stored in report_snapshots for review in the Compliance UI.
     Critical and warning alerts also trigger push notifications.
     """
-    with task_lock("compliance_alerts", ttl_seconds=3600) as acquired:
-        if not acquired:
-            log.info("Compliance alert check already running — skipping")
-            return {"skipped": True}
-
     db = get_supabase()
 
     # Fetch all companies (compliance applies regardless of QB connection status)

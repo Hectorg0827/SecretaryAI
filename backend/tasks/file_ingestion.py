@@ -4,7 +4,7 @@ import hashlib
 import logging
 
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, task_lock
+from tasks.base import get_supabase, get_active_companies, task_lock, locked_task
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +54,8 @@ async def _store_ingested_file(db, company_id: str, result: dict) -> None:
 
 
 @app.task(name="tasks.file_ingestion.ingest_watched_files_all", bind=True, max_retries=1)
+@locked_task("file_ingestion", ttl_seconds=1800)
 def ingest_watched_files_all(self):
-    with task_lock("file_ingestion", ttl_seconds=1800) as acquired:
-        if not acquired:
-            log.info("File ingestion already running — skipping")
-            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
     log.info("File ingestion: %d companies", len(companies))

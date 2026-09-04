@@ -4,11 +4,25 @@ API Documentation helpers.
 Exposes /api/docs/openapi.json with enriched metadata,
 and /api/docs/redoc for a human-friendly reference.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 
 router = APIRouter()
+
+
+def _unauthorized() -> JSONResponse:
+    return JSONResponse({"detail": "Not authorized. Include X-Docs-Key header."}, status_code=401)
+
+
+def _docs_allowed(request: Request) -> bool:
+    """Same X-Docs-Key gate as /docs and /openapi.json in app.main.
+
+    Without this, /api/docs/openapi.json and /api/docs/ served the full schema
+    and a ReDoc UI to anyone, bypassing the production docs lock-down.
+    """
+    from app.main import _docs_key_ok  # lazy: app.main imports this module
+    return _docs_key_ok(request)
 
 
 OPENAPI_DESCRIPTION = """
@@ -101,8 +115,10 @@ OPENAPI_TAGS = [
 
 
 @router.get("/openapi.json", include_in_schema=False)
-async def custom_openapi(request=None):
-    """Serve enriched OpenAPI schema."""
+async def custom_openapi(request: Request):
+    """Serve enriched OpenAPI schema (X-Docs-Key gated)."""
+    if not _docs_allowed(request):
+        return _unauthorized()
     # Import here to avoid circular at startup
     from app.main import app as fastapi_app
     schema = get_openapi(
@@ -121,8 +137,10 @@ async def custom_openapi(request=None):
 
 
 @router.get("/", include_in_schema=False)
-async def redoc_ui():
-    """Serve ReDoc-based API reference."""
+async def redoc_ui(request: Request):
+    """Serve ReDoc-based API reference (X-Docs-Key gated)."""
+    if not _docs_allowed(request):
+        return _unauthorized()
     return HTMLResponse("""<!DOCTYPE html>
 <html>
   <head>

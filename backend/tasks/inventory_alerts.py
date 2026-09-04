@@ -2,18 +2,15 @@
 import asyncio
 import logging
 from celery_app import app
-from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock
+from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 from app.scheduler.inventory_alert_check import check_and_alert_inventory
 
 log = logging.getLogger(__name__)
 
 
 @app.task(name="tasks.inventory_alerts.check_all", bind=True, max_retries=2)
+@locked_task("inventory_alerts", ttl_seconds=3600)
 def check_all(self):
-    with task_lock("inventory_alerts", ttl_seconds=3600) as acquired:
-        if not acquired:
-            log.info("Inventory alert check already running — skipping")
-            return {"skipped": True}
     db = get_supabase()
     companies = get_active_companies(db)
 

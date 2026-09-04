@@ -91,8 +91,19 @@ api_limiter          = RedisRateLimiter(max_calls=120, window_seconds=60,  prefi
 login_limiter        = RedisRateLimiter(max_calls=5,   window_seconds=60,  prefix="rl:login")
 
 
+# Per-account login throttle, independent of source IP. Behind a proxy that is
+# not forwarding client IPs, the IP limiter degrades to one global bucket, so
+# brute-force protection must not depend on it alone.
+login_email_limiter = RedisRateLimiter(max_calls=10, window_seconds=300, prefix="rl:login-email")
+
+
 def get_client_key(request: Request) -> str:
-    """Build a rate limit key from user ID + IP."""
+    """Build a rate limit key from user ID + IP.
+
+    NOTE: `request.client.host` is only the real client when uvicorn is started
+    with `--proxy-headers --forwarded-allow-ips` (see backend/Dockerfile);
+    otherwise it is the reverse proxy's address for every request.
+    """
     user_id = getattr(request.state, "user_id", None) or ""
     ip = request.client.host if request.client else "unknown"
     return f"{user_id}:{ip}"

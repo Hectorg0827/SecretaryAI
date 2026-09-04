@@ -32,12 +32,15 @@ def task_lock(task_name: str, ttl_seconds: int = 3600):
     Acquire a Redis distributed lock for a task (keyed by task_name + today's date).
     Yields True if the lock was acquired, False if another worker already holds it.
 
-    Usage:
+    Prefer the `locked_task` decorator below for Celery tasks — it keeps the
+    lock held for the whole run. If you use this context manager directly, the
+    ENTIRE body must sit inside the `with` block:
+
         with task_lock("overnight_scan") as acquired:
             if not acquired:
                 log.info("Already running — skipping")
                 return
-            ... do work ...
+            ... do work (still inside the with) ...
 
     The lock is released automatically on exit (or after ttl_seconds if the
     process dies before the context manager exits).
@@ -56,6 +59,41 @@ def task_lock(task_name: str, ttl_seconds: int = 3600):
                 r.delete(lock_key)
             except Exception:
                 pass  # Lock TTL will expire it anyway
+
+
+def locked_task(task_name, ttl_seconds: int = 3600):
+    """
+    Decorator: hold the idempotency lock for the ENTIRE task run.
+
+    The previous call-site pattern
+        with task_lock(name) as acquired:
+            if not acquired: return {"skipped": True}
+        ...work...
+    released the lock at the end of the `with` block — i.e. before the work
+    started — so two workers could still process the same files/jobs. This
+    keeps the lock held until the wrapped function returns.
+
+    `task_name` may be a str or a callable(*args, **kwargs) -> str (for tasks
+    whose lock key depends on their arguments, e.g. per-company runs).
+    """
+    import functools
+    import sys as _sys
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            name = task_name(*args, **kwargs) if callable(task_name) else task_name
+            # Resolve task_lock through the task's own module so test patches
+            # like patch("tasks.overnight.task_lock") still take effect.
+            mod = _sys.modules.get(fn.__module__)
+            _lock = getattr(mod, "task_lock", task_lock)
+            with _lock(name, ttl_seconds=ttl_seconds) as acquired:
+                if not acquired:
+                    log.info("%s already running — skipping", name)
+                    return {"skipped": True}
+                return fn(*args, **kwargs)
+        return wrapper
+    return deco
 
 
 def get_active_companies(db: Client) -> list[dict]:

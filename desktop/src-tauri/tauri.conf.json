@@ -76,7 +76,6 @@
       "endpoints": [
         "https://github.com/Hectorg0827/SecretaryAI/releases/latest/download/latest.json"
       ],
-      "dialog": true,
       "windows": {
         "installMode": "passive"
       }

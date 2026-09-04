@@ -13,7 +13,7 @@
     "tauri:build:macos": "tauri build --target x86_64-apple-darwin",
     "tauri:build:macos-arm": "tauri build --target aarch64-apple-darwin",
     "preview": "vite preview",
-    "lint": "eslint src --ext ts,tsx",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

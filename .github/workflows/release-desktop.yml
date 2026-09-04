@@ -5,12 +5,16 @@
 #   push tag   v*      → full build + GitHub Release (with installers attached)
 #   workflow_dispatch   → manual build for testing
 #
-# Outputs (attached to the GitHub Release):
+# Outputs (attached to a DRAFT GitHub Release + uploaded as run artifacts):
 #   macOS Intel    SecretaryAI_x.y.z_x64.dmg
 #   macOS ARM      SecretaryAI_x.y.z_aarch64.dmg
 #   Windows NSIS   SecretaryAI_x.y.z_x64-setup.exe   ← double-click installer
 #   Windows MSI    SecretaryAI_x.y.z_x64_en-US.msi
-#   update.json    Tauri updater manifest (consumed by the auto-updater)
+#   latest.json    Tauri updater manifest — generated and merged across the
+#                  matrix by tauri-action itself (includeUpdaterJson) whenever
+#                  updater artifacts exist (i.e. TAURI_SIGNING_PRIVATE_KEY set).
+#                  On macOS the updater consumes SecretaryAI.app.tar.gz, NOT the
+#                  .dmg — tauri-action knows this; do not hand-roll the manifest.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Release Desktop App
@@ -199,20 +203,23 @@ jobs:
           tagName:     ${{ github.event.inputs.version || github.ref_name }}
           releaseName: "SecretaryAI ${{ github.event.inputs.version || github.ref_name }}"
           releaseBody: |
-            ## What's new in ${{ github.ref_name }}
-
-            See the [changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+            ## SecretaryAI ${{ github.event.inputs.version || github.ref_name }}
 
             ## Installation
 
             | Platform | File | Notes |
             |---|---|---|
-            | macOS (Apple Silicon M1/M2/M3) | `*_aarch64.dmg` | Drag to Applications |
-            | macOS (Intel) | `*_x64.dmg` | Drag to Applications |
-            | Windows | `*_x64-setup.exe` | Double-click to install |
+            | macOS (Apple Silicon M1/M2/M3) | `*_aarch64.dmg` | Open, drag to Applications |
+            | macOS (Intel) | `*_x64.dmg` | Open, drag to Applications |
+            | Windows | `*_x64-setup.exe` | Double-click → Next → Install → Finish |
             | Windows (MSI) | `*_x64_en-US.msi` | Enterprise / silent install |
 
-            **First install:** QuickBooks Desktop users need to also run the QB Desktop connector (included in the installer).
+            **Unsigned build notice:** until code-signing certificates are added, the OS shows a one-time warning on first launch.
+            Windows: SmartScreen → *More info* → *Run anyway*. macOS: right-click the app → *Open* → *Open*.
+
+            **Verify your download:** SHA-256 checksums for every installer are in this run's `SecretaryAI-checksums-*` artifacts.
+
+            The app signs in to the cloud backend configured at build time (`VITE_API_URL`); it needs that backend to be deployed and reachable.
           # IMPORTANT: build to a DRAFT release. This repo has GitHub
           # "immutable releases" enabled — once a release is *published* its
           # assets are frozen and uploads fail with "Cannot upload assets to an
@@ -221,6 +228,12 @@ jobs:
           # it WITH the installers already attached).
           releaseDraft: true
           prerelease:   false
+          # Let tauri-action own latest.json: it emits the correct per-platform
+          # updater entries (macOS .app.tar.gz, Windows NSIS .exe) with their
+          # minisign signatures and MERGES across the three matrix jobs. It only
+          # does anything when updater artifacts were built (signing key set).
+          includeUpdaterJson:   true
+          updaterJsonPreferNsis: true
           args:         --target ${{ matrix.target }}
 
       # ── Bulletproof delivery: upload the installers as run artifacts ─────────
@@ -286,85 +299,10 @@ jobs:
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
-  # ── Post-release: update the updater manifest ──────────────────────────────
-  publish-update-manifest:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    name: Publish update manifest
-    permissions:
-      contents: write   # required to upload latest.json to the release
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Generate latest.json for the Tauri updater plugin.
-      # The tauri-action already attaches individual platform signatures;
-      # this step consolidates them into a single manifest file and uploads
-      # it as a release asset so the in-app updater can find it.
-      - name: Download release assets
-        uses: robinraju/release-downloader@v1.9
-        with:
-          tag: ${{ github.ref_name }}
-          fileName: "*.sig"
-          out-file-path: sigs
-
-      - name: Build update manifest (latest.json)
-        shell: bash
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"   # strip leading 'v'
-          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          # Read .sig files if they exist (optional — updater works without them
-          # when TAURI_SIGNING keys are not configured)
-          sig_darwin_x64=""
-          sig_darwin_aarch64=""
-          sig_windows_x64=""
-
-          for f in sigs/*.sig; do
-            [ -f "$f" ] || continue
-            sig=$(cat "$f")
-            case "$f" in
-              *x64.dmg.sig | *x86_64.dmg.sig) sig_darwin_x64="$sig" ;;
-              *aarch64.dmg.sig)                sig_darwin_aarch64="$sig" ;;
-              *x64-setup.exe.sig | *x64_en-US.msi.sig) sig_windows_x64="$sig" ;;
-            esac
-          done
-
-          BASE="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-
-          cat > latest.json <<EOF
-          {
-            "version": "v${VERSION}",
-            "notes": "See https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
-            "pub_date": "${PUB_DATE}",
-            "platforms": {
-              "darwin-x86_64": {
-                "url": "${BASE}/SecretaryAI_${VERSION}_x64.dmg",
-                "signature": "${sig_darwin_x64}"
-              },
-              "darwin-aarch64": {
-                "url": "${BASE}/SecretaryAI_${VERSION}_aarch64.dmg",
-                "signature": "${sig_darwin_aarch64}"
-              },
-              "windows-x86_64": {
-                "url": "${BASE}/SecretaryAI_${VERSION}_x64-setup.exe",
-                "signature": "${sig_windows_x64}"
-              }
-            }
-          }
-          EOF
-
-          echo "Generated latest.json:"
-          cat latest.json
-
-      - name: Upload update manifest to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: latest.json
-          asset_name: latest.json
-          tag: ${{ github.ref }}
-          overwrite: true
+  # NOTE: there is deliberately no separate "publish update manifest" job.
+  # The previous one was broken three ways — it pointed the macOS updater at
+  # .dmg files (Tauri v2 requires .app.tar.gz), matched signature filenames
+  # that tauri never produces, and tried to read assets from a DRAFT release
+  # by tag (drafts have no tag ref yet, so the download step 404'd and failed
+  # the whole workflow on every tag push). tauri-action's includeUpdaterJson
+  # (above) produces the correct, merged latest.json instead.

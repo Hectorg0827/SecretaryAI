@@ -64,7 +64,7 @@ Pillow==11.0.0              # Image processing (used server-side for resize too)
 # Config
 python-dotenv==1.0.1
 pydantic==2.9.2
-pydantic-settings==2.6.0
+pydantic-settings==2.14.2
 
 # Monitoring
 sentry-sdk[fastapi]==2.18.0

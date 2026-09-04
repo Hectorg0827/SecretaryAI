@@ -35,7 +35,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.API_IMAGE_NAME }}
 
       - name: Build and push API Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           push: true
@@ -65,7 +65,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
 
       - name: Build and push Frontend Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           push: true

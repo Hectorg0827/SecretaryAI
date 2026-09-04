@@ -35,7 +35,7 @@ authlib==1.3.2
 python-multipart==0.0.18           # 0.0.12: CVE-2024-53981 (boundary DoS)
 
 # Email
-sendgrid==6.11.0
+sendgrid==6.12.5
 
 # Billing (billing.py runs in MOCK mode if this is missing)
 stripe==11.2.0

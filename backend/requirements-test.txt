@@ -7,7 +7,7 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.0
 
 # AI
-anthropic==0.40.0
+anthropic==0.120.2
 
 # Auth & Security
 python-jose[cryptography]==3.3.0

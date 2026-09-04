@@ -89,8 +89,45 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | 26 | P1 | README overclaims one-click/native vs unsigned reality | `README.md` | ✅ fixed — README now states builds are unsigned (SmartScreen/Gatekeeper prompt) and that the credential-vault migration is in progress. |
 | 1 | P2 | Default branch is a non-conventional agent branch | repo settings | 🔒 owner decision |
 
+### Pass 3 — end-to-end audit (Sep 2026)
+
+Full-stack verification on the tip of the default branch: backend pytest, web/desktop/mobile lint+typecheck+build+vitest, Rust fmt/clippy/test, production-mode boot probe, plus an independent backend security audit. Everything below was verified by reading/executing the code, not inferred.
+
+| # | Sev | Finding | Evidence | Status |
+|---|---|---|---|---|
+| 36 | **P0** | Any HS256 token signed with `SECRET_KEY` was accepted as a full user session — the 5-min 2FA pre-auth token could call `/auth/2fa/setup`+`/verify` and overwrite the victim's TOTP secret (2FA bypass with password only); a leaked 100-day connector token read every tenant endpoint | `auth/rbac.py`, `api/auth.py`, `api/connectors.py` | ✅ fixed — `scope` claim (default `access`); `get_current_user` and `/auth/refresh` accept only `access`; pre-claim tokens still work. Tests: `test_security_pass3.py::TestTokenScope`, `TestRefreshHardening` |
+| 37 | P1 | Middleware order inverted (Starlette wraps last-added outermost): rate limiter ran before `TenantMiddleware` set `company_id` → one global `anonymous` bucket; a single client could 429 the whole user base | `app/main.py` | ✅ fixed — Tenant outer to RateLimit; `TimeoutMiddleware` (existed, never registered) wired as a 120 s hang guard. Test: `TestMiddlewareOrder` |
+| 38 | P1 | Login limiter keyed on `request.client.host`, which behind nginx/Railway is the proxy (uvicorn trusts only 127.0.0.1) → 5 attempts/min shared by every user; trivial denial-of-login | `utils/rate_limiter.py`, `Dockerfile` | ✅ fixed — `--proxy-headers --forwarded-allow-ips` (Dockerfile + prod compose, API no longer host-published so nginx is the sole ingress); per-account `login_email_limiter` (10 / 5 min). Test: `TestLoginEmailThrottle` |
+| 39 | P1 | `/api/connectors/dispatch-task`: any role (viewer) could enqueue QB write tasks; `task_type` free-form string | `api/connectors.py` | ✅ fixed — owner/manager only; validated against `TaskType`. Test: `TestDispatchTaskGate`. Residual → #56 |
+| 40 | P1 | Vulnerable pins: starlette 0.38.6 (CVE-2024-47874, reachable via upload endpoints), python-multipart 0.0.12 (CVE-2024-53981), python-jose 3.3.0 (CVE-2024-33663/-33664), pypdf2 3.0.1 (CVE-2023-36464 via ingested PDFs) | `requirements.txt` | ✅ fixed — fastapi 0.115.6 / starlette 0.41.3, multipart 0.0.18, jose 3.4.0, pypdf 5.1.0. Suite green on new pins |
+| 41 | P1 | `stripe` absent from requirements → billing silently in MOCK mode in prod (checkout returns `mock-stripe.example.com`, webhooks ignored) | `api/billing.py` | 🟡 partial — `stripe` pinned; ERROR logged if key set but package missing. `require_active_subscription` still has zero call sites (product decision) |
+| 42 | P2 | QBO webhooks could never validate: verifier read from a Settings field that didn't exist; HMAC compared as hex while Intuit sends base64 | `api/webhooks.py`, `config.py` | ✅ fixed — field added; base64 compare, fail-closed. Tests: `TestQboWebhookSignature` |
+| 43 | P2 | Following the code's own advice (add `INTUIT_WEBHOOK_VERIFIER_TOKEN` to `.env`) crashed startup — pydantic `extra=forbid` | `config.py` | ✅ fixed — `extra = "ignore"`. Test: `TestSettingsRobustness` |
+| 44 | P2 | Chat history loaded by client-supplied `conversation_id` only → guessed UUID pulled another tenant's history into this user's LLM context (and `_save_turn` appended to it) | `api/chat.py` | ✅ fixed — `company_id` predicate. Test: `TestChatHistoryScope` |
+| 45 | P2 | `/api/connectors/task-result` updated `connector_tasks` by id only (cross-tenant overwrite; body `company_id` check was against attacker input) | `api/connectors.py` | ✅ fixed — scoped update, 404 on miss. Test: `TestTaskResultTenantScope` |
+| 46 | P2 | `/api/docs/openapi.json` + ReDoc UI unauthenticated, bypassing the X-Docs-Key gate; key compared non-constant-time | `api/docs.py`, `main.py` | ✅ fixed — same gate; `hmac.compare_digest`. Tests: `TestDocsGating`, `TestDocsKeyCompare` |
+| 47 | P2 | `/auth/refresh` re-signed role/company from the OLD token → demoted user keeps privileges up to 7 days | `api/auth.py` | ✅ fixed — reloaded from `users`. Test: `TestRefreshHardening` |
+| 48 | P1 | Celery idempotency lock released BEFORE the work in **13** scheduled tasks (`with task_lock() as acquired: if not acquired: return` — body outside the block) → concurrent workers double-process files / CU jobs / token refreshes | `tasks/*.py` | ✅ fixed — `@locked_task` decorator holds the lock for the whole run; guard test scans every task module for the old pattern. Tests: `TestLockedTask` |
+| 49 | P2 | `TenantMiddleware` decoded with PyJWT (undeclared transitive dep) behind a bare `except` that would also hide its absence | `middleware/tenant.py` | ✅ fixed — app's python-jose decoder. Test: `TestTenantMiddleware` |
+| 50 | P2 | Docker: Playwright Chromium installed to `/root/.cache` before `USER appuser` (unreadable → headless workflows fail; `\|\| true` hid the error); Redis published on `0.0.0.0:6379` (dev); Flower unauthenticated (dev+prod); prod API published on :8000 beside nginx; no `HEALTHCHECK` | `Dockerfile`, `docker-compose*.yml` | ✅ fixed — `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` + chown + visible warning; Redis loopback-only; `FLOWER_BASIC_AUTH` required; prod API `expose` only; HEALTHCHECK |
+| 51 | P1 | Web-frontend CI gate red on every push: no ESLint config file, `eslint` undeclared (transitive v10), `--ext` invalid under flat config; desktop lint script had the same flag | `frontend/`, `desktop/package.json` | ✅ fixed — `eslint.config.js` (mirrors desktop), `eslint` + `eslint-plugin-react-hooks` declared, scripts fixed. Frontend 0 errors / desktop 0 errors |
+| 52 | P1 | Release workflow's `publish-update-manifest` job broken three ways (macOS updater pointed at `.dmg` — Tauri v2 needs `.app.tar.gz`; wrong `.sig` names; read a DRAFT release by tag → 404 → red on every tag) and overwrote tauri-action's correct `latest.json` | `release-desktop.yml`, `tauri.conf.json` | ✅ fixed — job removed; `includeUpdaterJson`/`updaterJsonPreferNsis`; dead v1 `updater.dialog` key dropped; honest release notes (no phantom CHANGELOG, no "connector bundled" claim) |
+
+**Open after Pass 3** (verified, not fixed here):
+
+| # | Sev | Finding | Evidence | Next step |
+|---|---|---|---|---|
+| 53 | P1 | Computer-Use sessions live in a per-process dict while the image runs `uvicorn --workers 2` → poll/approve/reject land on a different worker and 404; same class in `auth.py` OAuth-state fallback | `api/computer_use.py`, `Dockerfile` | Move session state + approval signal to Redis (or pin CU to one worker) |
+| 54 | P2 | Token revocation, refresh single-use rotation and rate limiting all fail **open** on a Redis outage (logged-out tokens keep working; refresh tokens replayable) | `auth/jwt.py`, `middleware/rate_limit.py` | Policy decision: fail closed (503) on auth-critical paths, or alert loudly |
+| 55 | P2 | Connector install secret stored in plaintext although the docstring says "hashed" | `api/connectors.py` | Store `sha256(secret)`, compare digests (storage-format migration) |
+| 56 | P2 | Write task types (`create_invoice`/`create_po`/`update_item`) dispatched via `/dispatch-task` bypass `PolicyEngine` / the approval queue that `connector_protocol.py` says they require | `api/connectors.py` | Route write types through the approval queue |
+| 57 | P3 | A few handlers echo raw exception text in error details (`agent.py`, `chat.py`, `dashboard.py`, `admin.py` health payload; `ValueError` handler returns `str(exc)`) | various | Generic client messages; log detail server-side |
+| 58 | **P0 (deployment, not code)** | `api.secretaryai.com` / `app.secretaryai.com` resolve to domain-parking addresses — no backend appears to be deployed there, yet the desktop build bakes that URL in by default. A perfect installer still cannot sign in | DNS + `release-desktop.yml` defaults | Deploy the backend (`RAILWAY_DEPLOYMENT.md`), set the `API_URL` repo variable, then build |
+
+Backend suite after Pass 3: **1086 passed / 4 skipped** (1045 + 41 new). Frontend lint 0 errors, typecheck/build/vitest green; desktop build/typecheck/vitest green; mobile typecheck green; Rust fmt/clippy/test green; version-consistency script green.
+
 ### Pre-existing test failures (not caused by this work)
-- `tests/test_wholesale_distribution/test_logistics/test_vendor_tracker.py::test_extracts_ship_date_natural_language` — date-sensitive: the fixture's absolute ship date (`April 20, 2026`) is now in the past and is filtered out. P2; fix by freezing time in the test or accepting past dates. Confirmed failing on the baseline without any of this pass's changes.
+- `tests/test_wholesale_distribution/test_logistics/test_vendor_tracker.py::test_extracts_ship_date_natural_language` — date-sensitive: the fixture's absolute ship date (`April 20, 2026`) is now in the past and is filtered out. P2; fix by freezing time in the test or accepting past dates. Confirmed failing on the baseline without any of this pass's changes. *(Resolved since: de-flaked with a relative date in `57716d1`.)*
 
 ---
 
@@ -103,8 +140,11 @@ Severity: P0 blocker · P1 high · P2 medium. Status: ✅ fixed (tested) · 🟡
 | Tauri updater signing private key | Updater | Generate; store as protected CI secret |
 | Clean Windows 11 + macOS (ARM & Intel) test machines/VMs | G3/G4 | Provide access for install smoke tests |
 | Production/sandbox vendor accounts (QuickBooks Online, Conductor/QB Desktop, Gmail, SendGrid) + prod secrets | G2/G5 | Provide sandbox credentials |
+| **A deployed backend** — `api.secretaryai.com` currently resolves to domain parking (#58) | G2 (everything user-facing) | Deploy per `RAILWAY_DEPLOYMENT.md`; set the `API_URL` repository variable to its `https://` URL before running the desktop release |
+| GitHub Actions enabled on the repo (the "Release Desktop App" workflow was not appearing in the Actions tab) | G3/G4 | Settings → Actions → General → allow actions; then run the workflow manually and publish the draft it creates |
 
 ---
 
 ## Change log
 - **Pass 1 (security, backend):** fixed #19, #20, #21, #22; single-sourced backend version (#24 partial). Added `tests/test_security_hardening.py` (8 tests, all passing). Full backend suite: 1013 passed / 4 skipped / 1 pre-existing date-flake.
+- **Pass 3 (end-to-end audit, Sep 2026):** fixed #36–#52 (one P0 auth bypass, six P1s, ten P2s) across backend, CI, Docker/compose and the release workflow; #41 partial. Added `tests/test_security_pass3.py` (41 tests). Opened #53–#58; #58 is the deployment blocker that makes the installer unusable regardless of code. Backend suite: 1086 passed / 4 skipped.

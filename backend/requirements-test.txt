@@ -1,32 +1,16 @@
-# Minimal requirements for running tests in CI / headless environments.
-# Excludes desktop-only packages (pyautogui, mss) and packages that
-# require a Rust or C toolchain to build.
+# Test-only dependencies. LAYERS ON TOP OF requirements.txt — install both:
+#
+#     pip install -r requirements.txt -r requirements-test.txt
+#
+# Nothing that is already pinned in requirements.txt may be repeated here.
+# This file previously duplicated 14 runtime pins (fastapi, python-jose,
+# python-multipart, pydantic, httpx, …). When requirements.txt was bumped for
+# the CVE fixes in Pass 3, the copies here still pinned the OLD versions, so
+# pip hit `ResolutionImpossible: Cannot install fastapi==0.115.0 and
+# fastapi==0.115.6` and CI's "Install deps" step failed — and before that, the
+# duplicates silently held the test run on the vulnerable python-jose 3.3.0 /
+# python-multipart 0.0.12. One pin, one place.
 
-# Web framework
-fastapi==0.115.0
-uvicorn[standard]==0.30.0
-
-# AI
-anthropic==0.40.0
-
-# Auth & Security
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-cryptography==43.0.3
-
-# HTTP
-httpx==0.27.2
-python-multipart==0.0.12
-
-# Config
-python-dotenv==1.0.1
-pydantic==2.9.2
-pydantic-settings==2.6.0
-
-# Image processing (used in screenshot_manager)
-Pillow==11.0.0
-
-# Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0
 anyio[trio]==4.6.0

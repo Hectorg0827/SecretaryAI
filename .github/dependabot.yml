@@ -1,43 +1,104 @@
 version: 2
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Update policy
+#
+# The previous settings (weekly, ungrouped, 10 PRs per ecosystem) produced 55
+# open pull requests — 29 of them breaking major-version jumps (typescript 5→7,
+# vite 5→8, tailwind 3→4, react-router 6→7, pandas 2→3, eslint 9→10, thiserror
+# 1→2, expo 12→57 …). None could be merged without hand-fixing the codebase, so
+# the queue only grew. Policy now:
+#
+#   • monthly, not weekly
+#   • grouped — one PR per ecosystem instead of one per package
+#   • major versions ignored: they are breaking changes that need a human and a
+#     green CI run, not an auto-PR
+#   • low PR limits, so the queue can never bury real review again
+#
+# Dependabot *alerts* still fire for every vulnerability regardless of this file
+# — see the Security tab. Only the automatic PR noise is throttled here.
+#
+# Caveat, stated plainly: `ignore` also suppresses an automatic security PR when
+# the only fix is a major bump. Those get handled by hand, as in Pass 3, which
+# bumped starlette / python-jose / python-multipart / pypdf directly. Check the
+# Security tab when triaging a release.
+# ─────────────────────────────────────────────────────────────────────────────
+
 updates:
-  # GitHub Actions — also migrates floating tags toward pinned versions.
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Python backend
   - package-ecosystem: "pip"
     directory: "/backend"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      backend-python:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Web frontend
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      frontend-npm:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Desktop (JS side)
   - package-ecosystem: "npm"
     directory: "/desktop"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      desktop-npm:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Mobile
   - package-ecosystem: "npm"
     directory: "/mobile"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    groups:
+      mobile-npm:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # Desktop (Rust / Tauri)
   - package-ecosystem: "cargo"
     directory: "/desktop/src-tauri"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      desktop-cargo:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

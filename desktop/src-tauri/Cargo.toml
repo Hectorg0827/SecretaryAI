@@ -1,6 +1,6 @@
 [package]
 name = "secretaryai-desktop"
-version = "1.0.0"
+version = "1.0.6"
 description = "SecretaryAI Desktop Agent — connects QuickBooks Desktop to the cloud"
 authors = ["SecretaryAI"]
 edition = "2021"

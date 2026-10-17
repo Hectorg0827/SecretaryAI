@@ -10,8 +10,29 @@ cd "$(dirname "$0")/.."
 psql -v ON_ERROR_STOP=1 -c \
   "CREATE SCHEMA IF NOT EXISTS auth; CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS \$\$ SELECT '{}'::jsonb \$\$ LANGUAGE sql STABLE;"
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql; do
+# Supabase predefines API roles. CI's vanilla PostgreSQL doesn't; emulate
+# them only in this disposable validation database, without production secrets.
+psql -v ON_ERROR_STOP=1 <<'SQL'
+DO $roles$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='anon') THEN
+        CREATE ROLE anon NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='authenticated') THEN
+        CREATE ROLE authenticated NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='service_role') THEN
+        CREATE ROLE service_role NOLOGIN BYPASSRLS;
+    END IF;
+END
+$roles$;
+SQL
+
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
 echo "✓ All schema files applied cleanly."
+echo "── running real PostgreSQL stock-ledger integrity tests"
+psql -v ON_ERROR_STOP=1 -f scripts/test_stock_ledger.sql
+echo "✓ Stock-ledger integrity checks passed."

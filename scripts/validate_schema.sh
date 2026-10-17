@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 psql -v ON_ERROR_STOP=1 -c \
   "CREATE SCHEMA IF NOT EXISTS auth; CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS \$\$ SELECT '{}'::jsonb \$\$ LANGUAGE sql STABLE;"
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done

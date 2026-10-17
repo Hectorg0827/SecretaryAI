@@ -1,3 +1,128 @@
+# SecretaryAI handoff update — October 17, 2026 (Phase 4–6)
+
+**THIS UPDATE SUPERSEDES the older handoff below where the status conflicts.**
+Work exclusively on `claude/blissful-noether-ik7p9l`, PR #74 against
+`claude/secretaryai-tech-spec-lqBZj`. No other branch or PR was opened.
+
+## Confirmed baseline at session start
+
+- HEAD was `5225cebd265000e6f2131e8d71bf463bfdcf0a64`.
+- PR #74 open/mergeable. CI run 39000256749 **success** and CodeQL run
+  39000256734 **success** at that baseline. Individual dependency-audit job
+  **failed**, consistent with preexisting npm advisories; whole CI was success.
+- GitHub releases: v1.0.5, v1.0.4 and v1.0.1 drafts had installer assets,
+  but no published release had any assets. The published v1.0.0 and tag_1
+  releases each had zero assets.
+- `https://api.secretaryai.com/health` could not be accessed; sandbox DNS
+  lookup returned `gaierror`. No externally healthy backend was verified.
+- A local checkout at `/home/user/SecretaryAI` was unavailable to this tool
+  environment; changes were made directly through the authenticated GitHub
+  connector. No local pytest/build exit code was observed. **Fresh CI on the
+  modified tip must pass before calling these fixes tested.**
+
+## Work committed to the single existing PR (NOT YET CERTIFIED)
+
+1. **#53**: `backend/app/api/computer_use.py` now uses Redis hashes for
+   session records, completion results and pending approvals; Lua atomic
+   decision CAS validates tenant, pending status and approval ID, and
+   decisions are polled across worker processes. Redis errors return 503.
+   Test: `test_phase4_release_security.py`. Still needs actual two-worker
+   Redis and frontend/engine validation.
+2. **#56**: all `create_invoice`, `create_po`, `update_item` requests
+   to the unshipped connector reject with 403 **before insertion**.
+   Legacy queued writes are cancelled on task polling. This is an intentionally
+   fail-closed mitigation, not an implemented approval workflow; future
+   connector writes must use PolicyEngine + durable approval and must be
+   tested before enabling.
+3. **#55**: generated install secrets are one-time outputs; DB stores
+   `sha256:` + SHA-256 digest only. Registration accepts only digests.
+   Database migration is in three places for the available deployment paths:
+   `database/schema_v4_connector_secret_digest.sql`,
+   `backend/supabase/migrations/20261017000000_connector_install_secret_digest.sql`,
+   `supabase/migrations/20261017000000_connector_install_secret_digest.sql`.
+   These are equivalent, not three sequential migrations: apply **one**
+   appropriate to the deployment tool. Manual bootstrap now requires
+   schema.sql → schema_v2_additions.sql → schema_v3_integrations.sql →
+   **schema_v4_connector_secret_digest.sql**, before deploying new code.
+   CI schema validation was updated. Actual production migration NOT run.
+4. **#54**: token checks and token rotation reject Redis failures with a
+   dedicated exception; user auth and refresh return 503; critical log and
+   Sentry exception emission added. Production Redis rate limiters also
+   fail closed (503); DEBUG-mode development fallback retained.
+   No real on-call paging is wired yet. Mutation evidence and CI pending.
+
+Added `backend/tests/test_phase4_release_security.py`, covering the above
+negative cases, wrong-tenant CU and duplicated approvals, digest-only
+registration, queued legacy write filtering, Redis-outage token denial, and
+production rate limiting. The CI workflow intentionally mutates the
+connector write gate and requires **three failures** in the negative suite;
+that CI step has not yet been observed completing.
+
+## Additional work
+
+- Corrected the release workflow body, CI connector comment and README:
+  the local Python QB Desktop connector is NOT inside the desktop installer.
+  Its tested source and PyInstaller packaging remain in the repository.
+  **Existing draft release descriptions still have the false claim**.
+  The connected GitHub actions did not expose a release-edit endpoint;
+  an owner must use Releases → draft → Edit → remove it. The published
+  historical v1.0.0 note also needs correction.
+- Added a manual staging workflow `.github/workflows/e2e-contract.yml`,
+  scripts `e2e_web.py` and `integration_contracts.py`, plus
+  `docs/E2E_ACCEPTANCE.md`. These require a real deployed staging web/API
+  host and QuickBooks sandbox, Gmail and SendGrid credentials. **No E2E
+  or live vendor contract test has run.** This is not criterion completion.
+- Added attorney-review-only `docs/TERMS_OF_SERVICE_DRAFT.md` and
+  `docs/PRIVACY_POLICY_DRAFT.md`. They are not linked or published.
+- Added `docs/HEALTH_ALERT_RUNBOOK.md` and a truthful unperformed
+  `docs/BACKUP_DRILL_EVIDENCE.md`; no page or DB restore occurred.
+- `docs/LICENSE_DECISION.md`: owner must choose proprietary or specific
+  open-source license and legal entity; **no LICENSE was invented**.
+- Updated `docs/PRODUCTION_READINESS.md` with unverified status.
+
+## The 15 GA exit criteria — evidence status after these changes
+
+| # | Status |
+|---|---|
+| 1 | Owner-blocked: host/payment/DNS, /health not reached |
+| 2 | Owner-blocked: published release with .dmg and .exe unavailable |
+| 3 | Blocked by #2 and clean Windows VM install proof |
+| 4 | Blocked by #2 and clean macOS install proof |
+| 5 | Blocked by #1; manual browser E2E added but not run |
+| 6 | Owner-blocked: real QuickBooks customer and sync |
+| 7 | Owner-blocked: real briefing and QB reconciliation |
+| 8 | Code from previous session complete; not observed on live host |
+| 9 | Owner-blocked: live Stripe payment and bank settlement |
+| 10 | Drafts only; counsel review, publication and live UI links missing |
+| 11 | Baseline CI green on PR #74 only; fresh tip and default-branch CI still unverified |
+| 12 | Owner-blocked: Apple Developer ID and Windows signing certs/test devices |
+| 13 | Code mitigations committed; CI, integration/migration and approval workflow validation pending |
+| 14 | Owner-blocked: actual funded Postgres backup/restore drill |
+| 15 | Owner-blocked: production monitor + human escalation and observed page |
+
+## Immediate next session steps
+
+1. **Stop committing and inspect the final-tip CI/CodeQL jobs** until done.
+   Only report exact completed-job conclusions and counts. Do not confuse
+   cancelled intermediate runs with failure, and do not call queued jobs green.
+2. Fix any actual CI/test failures **on this same branch/PR**; never skip tests.
+   Ensure the mutation-testing step observes the expected security-test failure.
+3. Validate Redis session state with two real uvicorn workers and a Redis
+   outage/restart; exercise an approval on the opposite worker.
+4. Apply the digest migration to staging before staging rollout, verify old
+   plaintext converted exactly once and digest registration works.
+5. Run the manual E2E workflow only after the owner supplies the real hosting
+   and sandbox credentials; neither deployment nor URLs may be fabricated.
+6. Keep criterion 13 open until the PolicyEngine write path is correctly
+   approval-gated, or explicitly ship this connector with write tasks disabled.
+7. Get counsel decisions and owner license decision; perform backup drill
+   and actual on-call page. Keep all unresolved 15-criterion states accurate.
+
+**Owner decisions remain final:** do NOT bundle the local QB Desktop connector,
+keep the paid/free boundary as implemented, and fail closed with alerting on
+Redis revocation outage. Do not re-ask these.
+---
+
 # Continue here — handoff for a fresh session
 
 Written 2026-10-17 against commit `f9cc58e` on branch

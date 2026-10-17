@@ -332,6 +332,17 @@ async def fetch_connector_tasks(
         for row in rows:
             if len(tasks_out) >= max_tasks:
                 break
+            # Defense in depth: quarantine legacy write tasks already in the
+            # queue before this policy gate was deployed. Never hand them to
+            # an agent without recorded PolicyEngine approval.
+            if row["task_type"] in ("create_invoice", "create_po", "update_item"):
+                db.table("connector_tasks").update({
+                    "status": "cancelled",
+                    "error_message": "Write requires PolicyEngine approval",
+                }).eq("id", row["id"]).eq("company_id", connector["company_id"]).execute()
+                log.warning("Blocked unapproved legacy connector write %s", row["id"])
+                continue
+
             # Skip recently-dispatched tasks (still within redelivery window)
             if (
                 row["status"] == "dispatched"
@@ -680,6 +691,17 @@ async def dispatch_task(
     valid_types = {t.value for t in TaskType}
     if body.task_type not in valid_types:
         raise HTTPException(status_code=422, detail=f"Unknown task_type '{body.task_type}'")
+
+    # The local connector does not implement write tasks. In particular, an
+    # owner role is NOT equivalent to a PolicyEngine-approved action. Block
+    # all three writes until a durable approval-queue consumer, explicit policy
+    # evaluation and an executable connector implementation exist. Do not
+    # enqueue anything that a connector can execute without those gates.
+    if body.task_type in ("create_invoice", "create_po", "update_item"):
+        raise HTTPException(
+            status_code=403,
+            detail="Connector writes require PolicyEngine approval; this path is disabled",
+        )
 
     company_id = user["company_id"]
 

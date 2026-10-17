@@ -117,14 +117,33 @@ jobs:
       # These are read by the Vite build and baked into the app bundle.
       - name: Set build-time environment
         shell: bash
+        env:
+          API_URL:           ${{ vars.API_URL }}
+          APP_URL:           ${{ vars.APP_URL }}
+          SUPABASE_URL:      ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: |
-          # NOTE: the app reads VITE_API_URL (see desktop/src/config.ts). The
-          # production build FAILS if this is missing/localhost/http (guard in
-          # desktop/vite.config.ts).
-          echo "VITE_API_URL=${{ vars.API_URL || 'https://api.secretaryai.com' }}" >> $GITHUB_ENV
-          echo "VITE_APP_URL=${{ vars.APP_URL || 'https://app.secretaryai.com' }}" >> $GITHUB_ENV
-          echo "VITE_SUPABASE_URL=${{ vars.SUPABASE_URL || '' }}" >> $GITHUB_ENV
-          echo "VITE_SUPABASE_ANON_KEY=${{ vars.SUPABASE_ANON_KEY || '' }}" >> $GITHUB_ENV
+          set -euo pipefail
+          # VITE_API_URL is baked into the installer at build time and CANNOT be
+          # changed afterwards (desktop/src/config.ts). This step used to default
+          # to https://api.secretaryai.com, which does not resolve — that builds
+          # an installer indistinguishable from a working one until a customer
+          # tries to sign in and gets a network error. Refuse to build instead.
+          if [ -z "${API_URL:-}" ]; then
+            echo "::error title=API_URL repository variable is not set::Set API_URL before releasing. GitHub: Settings -> Secrets and variables -> Actions -> Variables tab -> New repository variable. Name: API_URL. Value: the https:// address of the deployed backend. Then re-run this workflow."
+            exit 1
+          fi
+          case "$API_URL" in
+            https://*) ;;
+            *) echo "::error title=API_URL must be https::API_URL is '$API_URL'. It must start with https:// — the app refuses insecure backends."; exit 1 ;;
+          esac
+          echo "Building installers against API_URL=$API_URL"
+          echo "VITE_API_URL=$API_URL" >> "$GITHUB_ENV"
+          # APP_URL only drives an "open in browser" link; the app has its own
+          # fallback, so an unset value is not fatal.
+          echo "VITE_APP_URL=${APP_URL:-}" >> "$GITHUB_ENV"
+          echo "VITE_SUPABASE_URL=${SUPABASE_URL:-}" >> "$GITHUB_ENV"
+          echo "VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}" >> "$GITHUB_ENV"
 
       # ── Signing config: activates ONLY when the secrets exist ───────────────
       # A *present but empty* signing env var makes Tauri try (and fail) to sign,

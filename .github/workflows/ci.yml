@@ -106,6 +106,23 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # `tauri::generate_context!()` reads `frontendDist` ("../dist") at COMPILE
+      # time and panics if the directory is absent, so clippy and test cannot
+      # build the crate at all without it. `dist/` is a build output (gitignored)
+      # so CI must produce it. Build in development mode on purpose: the
+      # fail-closed guard in desktop/vite.config.ts refuses a production build
+      # without a real VITE_API_URL, and this job ships nothing — it only checks
+      # Rust. The shippable build is release-desktop.yml, which sets a real URL.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build desktop UI (dist/ must exist to compile the Rust crate)
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build -- --mode development
       - name: rustfmt
         working-directory: desktop/src-tauri
         run: cargo fmt --all --check

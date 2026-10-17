@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # rejected (fail-closed) until this is set.
     intuit_webhook_verifier_token: str = ""
 
+    # Optional local ClamAV daemon socket for private evidence scanning.
+    # Blank means scanning fails closed; never use public TCP clamd.
+    clamav_unix_socket: str = ""
+
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
 

@@ -38,14 +38,15 @@ email or connect QuickBooks until they're set.
    cannot see it again, and you need it in Part C.
 3. Wait for the project to finish provisioning (about 2 minutes).
 4. In the left sidebar click **SQL Editor**, then **New query**.
-5. Now apply the database structure. There are **three files and the order
-   matters** — the second and third build on the first. For each file below,
+5. Now apply the database structure. There are **four files and the order
+   matters** — the later files build on the first. For each file below,
    in order: open it on GitHub, click the **Copy raw file** button, paste it
    into the Supabase SQL Editor, and click **Run**. Wait for "Success" before
    starting the next one.
    1. `database/schema.sql`
    2. `database/schema_v2_additions.sql`
    3. `database/schema_v3_integrations.sql`
+   4. `database/schema_v4_connector_secret_digest.sql` (migrates existing plaintext connector secrets to SHA-256 digests; apply before deploying the upgraded API)
 6. In the left sidebar click **Settings → API**. Leave this tab open — you
    need three values from it in Part C: the **Project URL**, the **anon**
    key, and the **service_role** key.

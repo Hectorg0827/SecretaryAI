@@ -80,6 +80,28 @@ def rewrite(api_url: str) -> bool:
     return True
 
 
+# The hosts baked into the shipped CSP that do not resolve. A build for any
+# other backend must rewrite the directive, so `--check` calls them out.
+_UNRESOLVED_DOMAIN = "secretaryai.com"
+
+
+def _is_under(source_expression: str, domain: str) -> bool:
+    """
+    True when a CSP source expression's host is `domain` or a subdomain of it.
+
+    Deliberately not `domain in source_expression`: a substring test matches
+    `https://secretaryai.com.example.net` and `https://not-secretaryai.com`
+    too. It makes no practical difference to this advisory message, but the
+    habit is how host-check bypasses get written, and CodeQL is right to flag
+    it. Compare the parsed host instead.
+    """
+    host = urlparse(source_expression).netloc.lower()
+    if not host:
+        return False
+    host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host  # strip any port
+    return host == domain or host.endswith("." + domain)
+
+
 def check() -> int:
     """Report the CSP's connect-src without changing anything."""
     conf = json.loads(CONF.read_text())
@@ -88,7 +110,7 @@ def check() -> int:
     directive = m.group(0).strip() if m else "<none>"
     print(f"current: {directive}")
     hosts = [h for h in directive.split()[1:] if h.startswith(("https://", "wss://"))]
-    stale = [h for h in hosts if "secretaryai.com" in h]
+    stale = [h for h in hosts if _is_under(h, _UNRESOLVED_DOMAIN)]
     if stale:
         print(
             "note: the CSP still lists "

@@ -40,7 +40,10 @@ def test_qb_desktop_adapter_is_importable():
     """
     adapter = load_qb_desktop_adapter()
     assert adapter.__name__ == "QBDesktopAdapter"
-    assert adapter.BASE_URL.startswith("https://api.conductor.is")
+    # Exact, not startswith: "https://api.conductor.is" is also a prefix of
+    # https://api.conductor.is.example.net, so a prefix test would accept an
+    # adapter pointed somewhere else entirely.
+    assert adapter.BASE_URL == "https://api.conductor.is/v1"
 
 
 def test_the_old_broken_import_path_is_still_broken():

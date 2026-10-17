@@ -1,5 +1,6 @@
 ## Next milestone — inventory provenance and reconciliation preview (2026-10-17)
 
+- A new `GET /api/logistics/orders/{po_number}` returns tenant-scoped PO lines, staged receipts, posted receipt references, and exact decimal remaining quantities; it declares separate-query consistency and refuses to claim QB accounting reconciliation.
 - A new **read-only** `GET /api/logistics/reconciliation/stock/{sku}` compares
   explicitly mapped QuickBooks inventory with stock-ledger balance buckets
   for the current tenant, without adding overlapping source quantities.

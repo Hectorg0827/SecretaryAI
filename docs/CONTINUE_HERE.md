@@ -58,6 +58,29 @@ production rate limiting. The CI workflow intentionally mutates the
 connector write gate and requires **three failures** in the negative suite;
 that CI step has not yet been observed completing.
 
+## Final safety checks added after the first handoff commit
+
+- Six security mutations now live in `scripts/mutation_phase4.py`. Backend CI
+  runs this after full pytest; it intentionally breaks the CU tenant check,
+  connector write gate, connector secret digest storage, JWT Redis fail-closed
+  branch, production login rate limiter, and production request middleware.
+  Each mutant must cause its targeted negative test to **fail**; the script
+  restores the original file in `finally`. **No passing CI run has yet been
+  observed** for this new gate.
+- The backend CI job was updated to start a **real Redis 7 service** on port
+  6379, because production JWT revocation is correctly fail-closed, and tests
+  that use real JWTs must no longer rely on silently unavailable Redis.
+  New outage-specific negative tests explicitly patch Redis to fail. The
+  test service does not prove production Redis persistence.
+- `docs/BACKUP_RESTORE.md` and `docs/DEPLOY_CHECKLIST.md` now demand
+  durable Redis persistence/AOF. Otherwise restarting Redis with an empty
+  revoked-token blacklist can resurrect previously revoked unexpired JWTs.
+  Verify old revocations survive an actual restart or change the storage model
+  before production sign-off. **No Redis persistence or restart proof exists.**
+- The latest committed workflow and documentation changes were not part of
+  the prior handoff commit; consult the **latest PR #74 SHA**, not the old
+  baseline, and wait for new exact-SHA CI/CodeQL results.
+
 ## Additional work
 
 - Corrected the release workflow body, CI connector comment and README:

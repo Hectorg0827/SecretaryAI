@@ -475,7 +475,14 @@ async def refresh_token(body: RefreshRequest):
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     # Enforce revocation (logout / prior rotation): a blacklisted token is dead.
-    if jti and is_token_revoked(jti):
+    try:
+        revoked = bool(jti and is_token_revoked(jti))
+    except Exception as exc:
+        from app.auth.jwt import RevocationStoreUnavailable
+        if not isinstance(exc, RevocationStoreUnavailable):
+            raise
+        raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
+    if not jti or revoked:
         raise HTTPException(status_code=401, detail="Token revoked; please log in again")
 
     # Bound the renewal window. A token expired for longer than the refresh
@@ -517,7 +524,13 @@ async def refresh_token(body: RefreshRequest):
 
     # Single-use rotation: invalidate the presented token so it can't be reused.
     if jti:
-        blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+        try:
+            blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+        except Exception as exc:
+            from app.auth.jwt import RevocationStoreUnavailable
+            if not isinstance(exc, RevocationStoreUnavailable):
+                raise
+            raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
 
     return {"access_token": new_token, "token_type": "bearer"}
 
@@ -531,7 +544,13 @@ async def logout(
     Revoke the current JWT by adding its JTI to the Redis blacklist.
     The token becomes invalid immediately, even before its natural expiry.
     """
-    revoke_token(token)
+    try:
+        revoke_token(token)
+    except Exception as exc:
+        from app.auth.jwt import RevocationStoreUnavailable
+        if not isinstance(exc, RevocationStoreUnavailable):
+            raise
+        raise HTTPException(status_code=503, detail="Logout could not be confirmed") from exc
     return {"status": "logged_out"}
 
 

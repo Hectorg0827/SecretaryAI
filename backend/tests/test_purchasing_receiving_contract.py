@@ -23,6 +23,7 @@ from app.api.logistics import (
     DurablePORequest, DurableReceiptRequest, _execute_purchasing_rpc,
     create_durable_purchase_order, approve_durable_purchase_order,
     stage_durable_warehouse_receipt, approve_staged_receipt_and_post_inventory,
+    get_durable_purchase_order_detail,
 )
 
 
@@ -148,3 +149,76 @@ def test_db_rejections_do_not_leak_raw_sql_to_clients(code,status):
         _execute_purchasing_rpc(db, "stage_warehouse_receipt", {})
     assert err.value.status_code == status
     assert "password" not in str(err.value.detail)
+
+
+class _ReadQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.filters = []
+    def select(self, *args, **kwargs):
+        return self
+    def eq(self, field, value):
+        self.filters.append((field, value))
+        return self
+    def order(self, *args, **kwargs):
+        return self
+    def limit(self, *args, **kwargs):
+        return self
+    def execute(self):
+        return SimpleNamespace(data=self.rows)
+
+
+@pytest.mark.asyncio
+async def test_po_detail_reveals_receipt_provenance_without_claiming_qb_sync():
+    from types import SimpleNamespace
+    from decimal import Decimal
+    tables = {
+        "purchasing_orders": [{
+            "id": "order-1", "po_number": "PO-2026", "supplier_ref": "SUP",
+            "status": "received",
+        }],
+        "purchasing_order_lines": [{
+            "sku": "A", "qty_ordered": "1200.000", "qty_received": "1200.000",
+        }],
+        "staged_warehouse_receipts": [{
+            "id": "staged-1", "status": "posted",
+            "receipt_key": "RECEIPT-1",
+        }],
+        "warehouse_receipt_documents": [{
+            "id": "posted-1", "receipt_key": "RECEIPT-1",
+        }],
+    }
+    read_queries = []
+    db = MagicMock()
+    def table(name):
+        query = _ReadQuery(tables[name])
+        read_queries.append((name, query))
+        return query
+    db.table.side_effect = table
+    response = await get_durable_purchase_order_detail(
+        "PO-2026", user=_actor("manager"), db=db,
+    )
+    assert response["ordered_cases"] == "1200.000"
+    assert response["received_cases"] == "1200.000"
+    assert response["remaining_cases"] == "0.000"
+    assert response["inventory_posted"] is True
+    assert response["accounting_reconciled"] is False
+    assert len(response["staged_receipts"]) == 1
+    assert len(response["posted_receipts"]) == 1
+    assert all(("company_id", "current-tenant") in query.filters
+               for _, query in read_queries)
+    db.rpc.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_po_detail_missing_tenant_order_does_not_search_other_tenants():
+    db = MagicMock()
+    query = _ReadQuery([])
+    db.table.return_value = query
+    with pytest.raises(HTTPException) as err:
+        await get_durable_purchase_order_detail(
+            "PO-OTHER", user=_actor("manager"), db=db,
+        )
+    assert err.value.status_code == 404
+    assert ("company_id", "current-tenant") in query.filters
+    assert ("po_number", "PO-OTHER") in query.filters

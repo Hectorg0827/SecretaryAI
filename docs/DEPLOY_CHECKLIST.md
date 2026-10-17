@@ -38,7 +38,7 @@ email or connect QuickBooks until they're set.
    cannot see it again, and you need it in Part C.
 3. Wait for the project to finish provisioning (about 2 minutes).
 4. In the left sidebar click **SQL Editor**, then **New query**.
-5. Now apply the database structure. There are **seven files and the order
+5. Now apply the database structure. There are **eight files and the order
    matters** — the later files build on the first. For each file below,
    in order: open it on GitHub, click the **Copy raw file** button, paste it
    into the Supabase SQL Editor, and click **Run**. Wait for "Success" before
@@ -50,6 +50,7 @@ email or connect QuickBooks until they're set.
    5. `database/schema_v5_stock_ledger.sql` (internal stock-ledger tables and protected posting procedure; **only after its exact-commit PostgreSQL CI and staging migration validation pass**).
    6. `database/schema_v6_purchasing_receiving.sql` (tenant-scoped purchase orders, separate approvals and exact-once receipts; **test the migration and rollback plan on staging first**).
    7. `database/schema_v7_purchasing_evidence.sql` (internal unverified procurement evidence metadata, **not** actual uploaded or verified documents).
+   8. `database/schema_v8_evidence_integrity.sql` (private-quarantine byte-integrity records only; no malware or accounting authorization).
 > **Migration safety:** For a real existing database, schedule a backup
 > and test the chosen migration in staging before applying it in production.
 > If your deployment already runs the Supabase migration files, do **not**
@@ -283,3 +284,34 @@ testable. These still need something only you can supply:
 *`backend/app/config.py` and matches `backend/.env.example`. The schema file*
 *order is the order `scripts/validate_schema.sh` applies them in, which CI*
 *verifies on every commit.*
+
+## V8 quarantined file upload / integrity-only check (2026-10-17)
+
+- A new private-storage path `POST /api/logistics/evidence/{id}/upload`
+  streams a maximum 8 MiB, validates PDF/PNG/JPEG signatures against the
+  claimed extension, compares actual SHA-256 bytes to the existing immutable
+  claim, requires `purchasing-evidence-quarantine` to exist with
+  `public=false`, and writes with `upsert=false`.
+- The service stores a distinct append-only `purchasing_evidence_integrity_checks`
+  record through `attest_purchasing_evidence_integrity`, with actor,
+  observed length, MIME and digest. Its `malware_scan_status=not_scanned`,
+  `safe_to_view=false`, `financial_review_status=not_reviewed` and
+  `accounting_reconciled=false` are *non-negotiable* truthful statuses.
+- Read-only `GET /api/logistics/evidence/{id}/integrity` returns the current
+  metadata without a download link or permission to open quarantine files.
+- `database/schema_v8_evidence_integrity.sql` and the two alternative
+  Supabase migrations contain the same schema. Run **one** migration path,
+  after V7, not all copies. Staging migration/dry-run, bucket creation,
+  bucket privacy, object lifecycle/retention, proxy upload size limits and
+  antivirus scanning are **not performed here**.
+- If object upload succeeds but SQL attestation fails, an orphaned private
+  object can remain. Do not overwrite on retry. A restricted recovery and
+  forensic deletion process is required before production.
+- Neither checksum matching nor file signature is a malware scan or proof
+  that freight values/invoices are authentic. Files are never approved for
+  viewing, payment, landed costs, or QuickBooks posting.
+- New real Postgres test `scripts/test_evidence_integrity.sql` and
+  backend tests `backend/tests/test_evidence_upload_integrity.py`.
+  The latest exact-commit CI and CodeQL **must pass**, then real private
+  bucket integration and security/performance testing remain necessary.
+

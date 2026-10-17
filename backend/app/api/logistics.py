@@ -204,6 +204,26 @@ class DurablePORequest(BaseModel):
     lines: list[DurablePOLine] = Field(min_length=1, max_length=100)
 
 
+from decimal import Decimal, InvalidOperation
+from typing import Literal
+
+
+class PurchasingEvidenceClaimRequest(BaseModel):
+    evidence_key: str = Field(min_length=1, max_length=150)
+    document_type: Literal[
+        "purchase_invoice", "packing_list", "bill_of_lading",
+        "receiving_photo", "damage_report", "freight_invoice",
+        "customs_entry", "insurance_invoice", "broker_invoice",
+        "drayage_invoice", "other",
+    ]
+    storage_object_key: str = Field(min_length=1, max_length=400)
+    claimed_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    claimed_amount: Optional[Decimal] = Field(
+        default=None, ge=0, max_digits=18, decimal_places=2
+    )
+    currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
+
+
 class DurableReceiptLine(BaseModel):
     sku: str = Field(min_length=1, max_length=120)
     lot_code: str = Field(default="", max_length=120)
@@ -271,6 +291,108 @@ async def list_durable_purchase_orders(
           .limit(100)
     )
     return {"orders": rows, "count": len(rows)}
+
+
+@router.post("/orders/{po_number}/evidence", status_code=201)
+async def record_purchasing_evidence_metadata(
+    po_number: str,
+    request: PurchasingEvidenceClaimRequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Record unverified storage metadata, never file bytes or an AP expense."""
+    _require_purchasing_employee(user)
+    if (request.claimed_amount is None) != (request.currency is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Claimed amount and currency must be provided together",
+        )
+    return _execute_purchasing_rpc(db, "record_purchasing_evidence_claim", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_evidence_key": request.evidence_key,
+        "p_document_type": request.document_type,
+        "p_storage_object_key": request.storage_object_key,
+        "p_claimed_sha256": request.claimed_sha256,
+        "p_claimed_amount": (
+            str(request.claimed_amount)
+            if request.claimed_amount is not None else None
+        ),
+        "p_currency": request.currency,
+        "p_actor": user["sub"],
+    })
+
+
+@router.get("/orders/{po_number}/evidence")
+async def list_purchasing_evidence_metadata(
+    po_number: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Read cost claims grouped by currency without mistaking them for costs.
+
+    Claimed SHA hashes are NOT proof that referenced bytes exist or match.
+    No land-cost value or QB write should depend on an unverified claim.
+    """
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    if not po_number or len(po_number) > 100:
+        raise HTTPException(status_code=422, detail="Invalid PO number")
+    orders = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,status")
+          .eq("company_id", cid).eq("po_number", po_number).limit(2)
+    )
+    if not orders:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if len(orders) != 1:
+        raise HTTPException(status_code=503, detail="Ambiguous purchase order")
+    claims = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id,evidence_key,document_type,storage_object_key,"
+                  "claimed_sha256,claimed_amount,currency,"
+                  "verification_status,submitted_by,created_at")
+          .eq("company_id", cid).eq("po_id", orders[0]["id"])
+          .order("created_at", desc=True).limit(501)
+    )
+    if len(claims) > 500:
+        raise HTTPException(status_code=503, detail="Evidence list exceeds supported scope")
+    totals: dict[str, Decimal] = {}
+    try:
+        for claim in claims:
+            if claim.get("verification_status") != "unverified":
+                raise ValueError("Unexpected evidence verification status")
+            amount, currency = claim.get("claimed_amount"), claim.get("currency")
+            if amount is None:
+                if currency is not None:
+                    raise ValueError("Currency without an amount")
+                continue
+            qty = Decimal(str(amount))
+            if (not qty.is_finite() or qty < 0 or not isinstance(currency, str)
+                    or len(currency) != 3 or not currency.isascii()
+                    or not currency.isupper() or not currency.isalpha()):
+                raise ValueError("Invalid evidence money")
+            totals[currency] = totals.get(currency, Decimal("0")) + qty
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        log.error("Evidence claims invalid for company %s (%s)", cid, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing evidence unavailable") from exc
+    return {
+        "po_number": po_number,
+        "evidence_claims": claims,
+        "claim_count": len(claims),
+        "unverified_claim_totals_by_currency": {
+            code: str(value) for code, value in sorted(totals.items())
+        },
+        "verification_status": "unverified",
+        "landed_cost_verified": False,
+        "accounting_reconciled": False,
+        "inventory_changed": False,
+        "evidence_status_message": (
+            "Stored paths and digests are user-submitted claims; "
+            "file existence, SHA-256, invoice validity, currency conversion "
+            "and QuickBooks AP reconciliation have not been checked."
+        ),
+    }
 
 
 @router.get("/orders/{po_number}")

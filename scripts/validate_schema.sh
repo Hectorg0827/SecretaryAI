@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 # Supabase provides auth.jwt(), used by the RLS policies; shim it so the schema
 # applies on a plain Postgres in CI.
 psql -v ON_ERROR_STOP=1 -c \
-  "CREATE SCHEMA IF NOT EXISTS auth; CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS \$\$ SELECT '{}'::jsonb \$\$ LANGUAGE sql STABLE;"
+  "CREATE SCHEMA IF NOT EXISTS auth; CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS \$\$ SELECT coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb) \$\$ LANGUAGE sql STABLE;"
 
 # Supabase predefines API roles. CI's vanilla PostgreSQL doesn't; emulate
 # them only in this disposable validation database, without production secrets.
@@ -26,6 +26,7 @@ BEGIN
     END IF;
 END
 $roles$;
+GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
 for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql; do

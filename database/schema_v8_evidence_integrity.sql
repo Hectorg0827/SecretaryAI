@@ -1,6 +1,11 @@
 -- V8: server-computed integrity attestation for private evidence objects.
 -- The claimed document is not malware-cleared, invoice-approved, or posted to QB.
 -- Requires V5 -> V6 -> V7 before this migration.
+-- No two claim IDs may point at the same private storage object. If pre-existing
+-- claim rows violate this, staging migration must fail for manual remediation.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_evidence_storage_object
+ ON purchasing_evidence_claims(company_id,storage_object_key);
+
 CREATE TABLE IF NOT EXISTS purchasing_evidence_integrity_checks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL,

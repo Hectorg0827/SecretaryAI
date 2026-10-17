@@ -246,6 +246,54 @@ def _require_purchasing_employee(user: dict) -> None:
         raise HTTPException(status_code=403, detail="Purchasing access denied")
 
 
+def _read_purchasing_rows(query) -> list[dict]:
+    try:
+        result = query.execute()
+        if not isinstance(result.data, list):
+            raise ValueError("Missing query rows")
+        return result.data
+    except Exception as exc:
+        log.error("Purchasing read temporarily unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing records unavailable") from exc
+
+
+@router.get("/orders")
+async def list_durable_purchase_orders(
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    rows = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,supplier_ref,status,warehouse_id,created_at,approved_at")
+          .eq("company_id", user["company_id"])
+          .order("created_at", desc=True)
+          .limit(100)
+    )
+    return {"orders": rows, "count": len(rows)}
+
+
+@router.get("/receipts/pending")
+async def list_pending_warehouse_receipts(
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    # Approver identity is the JWT subject, and the actual approval SQL
+    # verifies active role, tenant and separation of duties again.
+    rows = _read_purchasing_rows(
+        db.table("staged_warehouse_receipts")
+          .select("id,po_id,receipt_key,payload,submitted_by,created_at")
+          .eq("company_id", user["company_id"])
+          .eq("status", "pending")
+          .order("created_at", desc=False)
+          .limit(100)
+    )
+    return {"pending_receipts": [
+        {**x, "can_approve": str(x.get("submitted_by")) != str(user["sub"])}
+        for x in rows
+    ], "count": len(rows)}
+
+
 @router.post("/orders", status_code=201)
 async def create_durable_purchase_order(
     request: DurablePORequest,

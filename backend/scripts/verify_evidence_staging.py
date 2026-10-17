@@ -138,14 +138,38 @@ def validate_bucket_limits(bucket) -> None:
         raise StagingProbeFailure("Restrict evidence bucket to PDF/JPEG/PNG MIME types")
 
 
-def require_anon_denied(attempt, what: str):
-    """Treat any unexpectedly successful anon action as a security failure."""
+def _error_status(error):
+    """Recognize explicit auth/not-found only, not network or server outages."""
+    if isinstance(error, PermissionError):
+        return 403
+    if isinstance(error, FileNotFoundError):
+        return 404
+    for value in (
+        getattr(error, "status_code", None),
+        getattr(error, "status", None),
+        getattr(error, "code", None),
+        getattr(getattr(error, "response", None), "status_code", None),
+    ):
+        if str(value) in ("401", "403", "404"):
+            return int(value)
+    return None
+
+
+def require_anon_denied(attempt, what: str, *, allow_not_found=False):
+    """Inconclusive 5xx, timeout and unknown SDK errors are NEVER a pass."""
+    statuses = (401, 403, 404) if allow_not_found else (401, 403)
     try:
         response = attempt()
-    except Exception:
-        return
-    if isinstance(response, dict) and response.get("error"):
-        return
+    except Exception as exc:
+        if _error_status(exc) in statuses:
+            return
+        raise StagingProbeFailure(
+            f"Anonymous {what} check inconclusive; review storage policy"
+        ) from exc
+    if isinstance(response, dict):
+        code = response.get("statusCode", response.get("status_code"))
+        if str(code) in tuple(str(x) for x in statuses):
+            return
     raise StagingProbeFailure(f"Anonymous client can {what}")
 
 
@@ -166,7 +190,7 @@ def probe_real_private_storage(service, anon):
             raise StagingProbeFailure("Staging service-role storage roundtrip corrupted bytes")
         require_anon_denied(
             lambda: anon.storage.from_(EVIDENCE_BUCKET).download(clean_key),
-            "download quarantined evidence")
+            "download quarantined evidence", allow_not_found=True)
         require_anon_denied(
             lambda: anon.storage.from_(EVIDENCE_BUCKET).upload(
                 path=attempted_key, file=_CLEAN_PDF,
@@ -183,8 +207,11 @@ def probe_real_private_storage(service, anon):
             for key in keys:
                 try:
                     service.storage.from_(EVIDENCE_BUCKET).download(key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if _error_status(exc) != 404:
+                        raise StagingProbeFailure(
+                            "Cleanup verification inconclusive; inspect temporary objects"
+                        ) from exc
                 else:
                     raise StagingProbeFailure(
                         "Temporary evidence was still readable after cleanup"

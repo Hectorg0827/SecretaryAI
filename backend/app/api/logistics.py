@@ -182,6 +182,135 @@ class SeasonalIndexRequest(BaseModel):
     daily_sales: list[dict]   # [{date: "2024-01-05", units: 12.5}, ...]
 
 
+
+# ─── Durable purchasing & receiving (V6 schema) ──────────────────────────────
+# These endpoints are distinct from the nine-stage *intelligence* pipeline.
+# Drafts cannot book stock. Only separate authenticated approval may post a
+# staged physical receipt. All writes are one atomic SQL RPC (no best-effort
+# multi-table updates), and never write to QuickBooks implicitly.
+
+from uuid import UUID
+
+
+class DurablePOLine(BaseModel):
+    sku: str = Field(min_length=1, max_length=120)
+    qty_ordered: int = Field(gt=0, le=10000000)
+
+
+class DurablePORequest(BaseModel):
+    po_number: str = Field(min_length=1, max_length=100)
+    supplier_ref: str = Field(min_length=1, max_length=200)
+    warehouse_id: UUID
+    lines: list[DurablePOLine] = Field(min_length=1, max_length=100)
+
+
+class DurableReceiptLine(BaseModel):
+    sku: str = Field(min_length=1, max_length=120)
+    lot_code: str = Field(default="", max_length=120)
+    accepted_qty: int = Field(default=0, ge=0, le=10000000)
+    damaged_qty: int = Field(default=0, ge=0, le=10000000)
+    quarantined_qty: int = Field(default=0, ge=0, le=10000000)
+
+
+class DurableReceiptRequest(BaseModel):
+    receipt_key: str = Field(min_length=1, max_length=150)
+    lines: list[DurableReceiptLine] = Field(min_length=1, max_length=200)
+
+
+def _execute_purchasing_rpc(db, name: str, payload: dict) -> dict:
+    """Safe PostgREST error handling; never disclose raw SQL, row or tokens."""
+    try:
+        data = db.rpc(name, payload).execute().data
+    except Exception as exc:
+        code = str(getattr(exc, "code", ""))
+        if code == "42501":
+            raise HTTPException(status_code=403, detail="Purchase approval not permitted") from exc
+        if code == "P0002":
+            raise HTTPException(status_code=404, detail="Purchase or receipt not found") from exc
+        if code == "22023":
+            raise HTTPException(status_code=422, detail="Invalid purchasing data") from exc
+        if code in ("23503", "23505", "23514"):
+            raise HTTPException(status_code=409,
+                detail="Operation conflicts with approval status, quantity or idempotency rules") from exc
+        log.error("Durable purchasing RPC %s unavailable (%s)", name, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing database unavailable") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=503, detail="Purchasing database result unavailable")
+    return data
+
+
+def _require_purchasing_employee(user: dict) -> None:
+    # Never grant broader `manage_inventory` to back-office to enable one
+    # capability. The SQL procedure additionally verifies current DB user.
+    if user.get("role") not in ("owner", "manager", "back_office"):
+        raise HTTPException(status_code=403, detail="Purchasing access denied")
+
+
+@router.post("/orders", status_code=201)
+async def create_durable_purchase_order(
+    request: DurablePORequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    return _execute_purchasing_rpc(db, "create_warehouse_purchase_order", {
+        "p_company_id": user["company_id"],
+        "p_po_number": request.po_number,
+        "p_supplier_ref": request.supplier_ref,
+        "p_warehouse_id": str(request.warehouse_id),
+        "p_lines": [item.model_dump() for item in request.lines],
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/orders/{po_number}/approve")
+async def approve_durable_purchase_order(
+    po_number: str,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    return _execute_purchasing_rpc(db, "approve_warehouse_purchase_order", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/orders/{po_number}/receipts", status_code=201)
+async def stage_durable_warehouse_receipt(
+    po_number: str,
+    request: DurableReceiptRequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    if any(not (x.accepted_qty or x.damaged_qty or x.quarantined_qty)
+           for x in request.lines):
+        raise HTTPException(status_code=422, detail="Each receipt line needs a received quantity")
+    return _execute_purchasing_rpc(db, "stage_warehouse_receipt", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_receipt_key": request.receipt_key,
+        "p_lines": [item.model_dump() for item in request.lines],
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/receipts/{staged_receipt_id}/approve")
+async def approve_staged_receipt_and_post_inventory(
+    staged_receipt_id: UUID,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """Second human approval, atomically books inspected units into stock."""
+    return _execute_purchasing_rpc(db, "approve_staged_warehouse_receipt", {
+        "p_company_id": user["company_id"],
+        "p_staged_receipt_id": str(staged_receipt_id),
+        "p_actor": user["sub"],
+    })
+
+
+
 # ─── Stage 1 — Demand Monitoring & Reorder Intelligence ──────────────────────
 
 

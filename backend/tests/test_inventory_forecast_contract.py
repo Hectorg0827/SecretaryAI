@@ -84,3 +84,47 @@ async def test_unknown_item_is_404_before_invoice_lookup():
         await get_item_forecast("not-found", user={"company_id": "co-1"}, adapter=adapter)
     assert err.value.status_code == 404
     adapter.get_orders_last_n_days.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_qb_and_warehouse_overlap_is_not_double_counted():
+    from decimal import Decimal
+    from app.connectors.base import InventoryItem
+    from app.connectors.unified_adapter import UnifiedDataAdapter
+
+    async def merge_with_policy(policy, rows):
+        # Construct without cloud connector side effects. Exercise the real
+        # merging implementation with mocked authorized source responses.
+        adapter = object.__new__(UnifiedDataAdapter)
+        adapter._config = {"id": "co-1", "inventory_quantity_policy": policy}
+        adapter._db = None
+        adapter.get_inventory_qb = AsyncMock(return_value=[
+            InventoryItem(
+                id="item-1", qb_id="QB-1", name="Malta", sku="MALT-1",
+                quantity_on_hand=Decimal("100"), unit_price=Decimal("10"),
+                purchase_cost=Decimal("6"), reorder_point=Decimal("20"),
+            )
+        ])
+        adapter._get_router = lambda: SimpleNamespace(
+            route=AsyncMock(return_value=SimpleNamespace(data={"rows": rows}))
+        )
+        return (await adapter.get_inventory_merged())[0]
+
+    warehouse = [{"sku": "MALT-1", "product_name": "Malta", "quantity": 60}]
+    default = await merge_with_policy("qb_authoritative", warehouse)
+    assert default["qb_qty"] == 100
+    assert default["warehouse_qty"] == 60
+    assert default["total_qty"] == 100  # NOT 160
+    assert default["reconciliation_required"] is True
+    assert default["quantity_source"] == "quickbooks"
+
+    explicitly_warehouse = await merge_with_policy("warehouse_authoritative", warehouse)
+    assert explicitly_warehouse["total_qty"] == 60
+    assert explicitly_warehouse["quantity_source"] == "warehouse"
+
+    # A fuzzy substring must never associate an unrelated warehouse item.
+    unrelated = await merge_with_policy(
+        "qb_authoritative", [{"product_name": "Malta Extra", "quantity": 500}]
+    )
+    assert unrelated["total_qty"] == 100
+    assert unrelated["source"] == "qb"

@@ -1,3 +1,41 @@
+# Current handoff — Stock-ledger integrity milestone (2026-10-17)
+
+**Newest section supersedes old snapshots below.** Stay on the existing
+`claude/blissful-noether-ik7p9l` branch and PR #74, do not merge or deploy.
+
+## Confirmed prior baseline
+Commit `694d79b4`: GitHub CI run `39063145617` **success**, CodeQL run
+`39063145526` **success**. The report-mode frontend npm dependency-audit
+job remained red. Baseline backend security/test failures had been repaired.
+
+## Later work pending final-tip verification
+- Three equivalent representations of the V5 internal stock-ledger SQL:
+  `database/schema_v5_stock_ledger.sql` and the two Supabase migration
+  directories. Apply **one**, never all three, in a single database.
+- New PostgreSQL CI integration script `scripts/test_stock_ledger.sql`,
+  invoked by `scripts/validate_schema.sh`. Exercises 1,180 acceptable cases
+  and 20 damaged cases, replay, changed-payload rejection, available-stock
+  floor, immutable movements, SQL permissions and tenant-scoped RLS.
+- The V5 SQL intentionally does not expose an HTTP posting endpoint; first
+  implement verified PO/receipt approval and map the warehouse inventory source.
+- Legacy logistics receipt analysis now discloses
+  `inventory_posted: false` and `accounting_reconciled: false`.
+- **Check latest exact-SHA CI and CodeQL now.** No ledger run may be marked
+  verified from the earlier green baseline.
+
+## Immediate next milestones
+1. Repair any PostgreSQL migration/test errors on this same PR, rerun CI.
+2. Validate critical Redis outage/restart and approval multi-worker paths.
+3. Create durable approved PO/receiving documents. Wire approved receipt
+   events into the protected procedure through the backend, never directly
+   from model-generated content.
+4. Prove 1,200/1,180/20 purchase-to-stock accounting reconciliation against
+   an authorized staging database and QuickBooks sandbox.
+5. Keep all existing 15 GA conditions and added advertised-module gates open
+   until independent evidence exists. No production changes authorized.
+
+---
+
 # Current handoff — Business Operations Platform Phase 0 (2026-10-17)
 
 **This is the latest status note; it supersedes older branch SHA and CI claims below.**

@@ -293,6 +293,123 @@ async def list_durable_purchase_orders(
     return {"orders": rows, "count": len(rows)}
 
 
+# ─── Quarantined document-byte upload / integrity only ────────────────────────
+
+from fastapi import File, UploadFile
+from app.services.purchasing_evidence_bytes import (
+    inspect_uploaded_evidence, store_quarantined_evidence,
+)
+
+
+@router.post("/evidence/{evidence_id}/upload", status_code=201)
+async def upload_purchasing_evidence_bytes(
+    evidence_id: UUID,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Check uploaded bytes against a prior claim and store in private quarantine.
+
+    Hash match is *not* malware clearance, invoice approval, or a QuickBooks
+    write. Partial failure may leave a private orphaned object; never
+    overwrite it, retry blindly, or falsely confirm successful attestation.
+    """
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    claim_rows = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id,storage_object_key,claimed_sha256,verification_status")
+          .eq("company_id", cid).eq("id", str(evidence_id)).limit(2)
+    )
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    if len(claim_rows) != 1 or claim_rows[0].get("verification_status") != "unverified":
+        raise HTTPException(status_code=503, detail="Evidence claim invalid")
+    claim = claim_rows[0]
+    existing = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+          .select("id").eq("company_id", cid)
+          .eq("evidence_id", str(evidence_id)).limit(2)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Evidence already has an integrity record")
+
+    # Check actual DB user status before committing file bytes to storage.
+    active = _read_purchasing_rows(
+        db.table("users").select("id,role,is_active")
+          .eq("company_id", cid).eq("id", user["sub"]).limit(2)
+    )
+    if len(active) != 1 or active[0].get("is_active") is not True or (
+        active[0].get("role") not in ("owner", "manager", "back_office")
+    ):
+        raise HTTPException(status_code=403, detail="Evidence upload permission denied")
+
+    inspected = await inspect_uploaded_evidence(
+        file,
+        expected_sha256=claim["claimed_sha256"],
+        storage_key=claim["storage_object_key"],
+        company_id=str(cid),
+    )
+    await store_quarantined_evidence(db, claim["storage_object_key"], inspected)
+    response = _execute_purchasing_rpc(db, "attest_purchasing_evidence_integrity", {
+        "p_company_id": cid,
+        "p_evidence_id": str(evidence_id),
+        "p_computed_sha256": inspected.digest,
+        "p_byte_count": inspected.size,
+        "p_detected_mime": inspected.mime,
+        "p_actor": user["sub"],
+    })
+    return {
+        **response,
+        "bytes_received": inspected.size,
+        "integrity_status": "sha256_matched_at_upload",
+        "malware_scan_status": "not_scanned",
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+        "inventory_changed": False,
+    }
+
+
+@router.get("/evidence/{evidence_id}/integrity")
+async def get_purchasing_evidence_integrity(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    claim_rows = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id").eq("company_id", cid)
+          .eq("id", str(evidence_id)).limit(2)
+    )
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    records = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+          .select("id,computed_sha256,byte_count,detected_mime,"
+                  "integrity_status,malware_scan_status,"
+                  "financial_review_status,created_at")
+          .eq("company_id", cid).eq("evidence_id", str(evidence_id))
+          .limit(2)
+    )
+    if len(records) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous integrity record")
+    return {
+        "evidence_id": str(evidence_id),
+        "integrity": records[0] if records else None,
+        "integrity_status": (
+            records[0]["integrity_status"] if records else "not_checked"
+        ),
+        "malware_scan_status": "not_scanned",
+        "safe_to_view": False,
+        "financial_review_status": "not_reviewed",
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
 @router.post("/orders/{po_number}/evidence", status_code=201)
 async def record_purchasing_evidence_metadata(
     po_number: str,

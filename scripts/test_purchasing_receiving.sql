@@ -92,8 +92,39 @@ BEGIN
     END;
     IF NOT bad THEN RAISE EXCEPTION 'foreign approval accepted'; END IF;
 
-    result:= receive_warehouse_purchase_order(
-      a,'PO-E2E-1200','REC-1',receipt_lines,receiver,reviewer);
+    -- Independent receiving approval is a separate authenticated action.
+    result:=stage_warehouse_receipt(
+      a,'PO-E2E-1200','REC-1',receipt_lines,receiver);
+    IF result->>'status'<>'pending' OR result->>'inventory_posted'<>'false'
+    THEN RAISE EXCEPTION 'receipt was prematurely posted'; END IF;
+    DECLARE
+      v_stage UUID := (result->>'staged_receipt_id')::UUID;
+    BEGIN
+      replay:=stage_warehouse_receipt(
+        a,'PO-E2E-1200','REC-1',receipt_lines,receiver);
+      IF replay->>'replayed'<>'true' OR
+         replay->>'staged_receipt_id'<>result->>'staged_receipt_id'
+      THEN RAISE EXCEPTION 'receipt staging replay failed'; END IF;
+      bad:=FALSE;
+      BEGIN
+        PERFORM stage_warehouse_receipt(
+          a,'PO-E2E-1200','REC-1',
+          '[{"sku":"TEST-WINE","accepted_qty":999}]'::jsonb,receiver);
+      EXCEPTION WHEN unique_violation THEN bad:=TRUE;
+      END;
+      IF NOT bad THEN RAISE EXCEPTION 'staging key reused'; END IF;
+      bad:=FALSE;
+      BEGIN
+        PERFORM approve_staged_warehouse_receipt(a,v_stage,receiver);
+      EXCEPTION WHEN insufficient_privilege THEN bad:=TRUE;
+      END;
+      IF NOT bad THEN RAISE EXCEPTION 'receiver approved own receipt'; END IF;
+      result:=approve_staged_warehouse_receipt(a,v_stage,reviewer);
+      replay:=approve_staged_warehouse_receipt(a,v_stage,reviewer);
+      IF replay->>'replayed'<>'true' OR
+         replay->>'receipt_id'<>result->>'receipt_id'
+      THEN RAISE EXCEPTION 'approval posted twice'; END IF;
+    END;
     IF result->>'po_status'<>'received' OR
        result->>'inventory_posted'<>'true' OR
        result->>'accounting_reconciled'<>'false' THEN
@@ -156,6 +187,9 @@ BEGIN
  IF has_function_privilege('authenticated',
       'receive_warehouse_purchase_order(uuid,text,text,jsonb,uuid,uuid)',
       'EXECUTE') OR
+    has_function_privilege('service_role',
+      'receive_warehouse_purchase_order(uuid,text,text,jsonb,uuid,uuid)',
+      'EXECUTE') OR
     has_table_privilege('service_role','purchasing_orders','INSERT') OR
     has_table_privilege('service_role','warehouse_receipt_documents','INSERT')
  THEN RAISE EXCEPTION 'direct client mutation bypass possible'; END IF;
@@ -173,6 +207,8 @@ BEGIN
  IF n<>1 THEN RAISE EXCEPTION 'company A cannot isolate purchase orders: %',n; END IF;
  SELECT count(*) INTO n FROM warehouse_receipt_documents;
  IF n<>1 THEN RAISE EXCEPTION 'company A cannot isolate receipt documents: %',n; END IF;
+ SELECT count(*) INTO n FROM staged_warehouse_receipts;
+ IF n<>1 THEN RAISE EXCEPTION 'company A cannot isolate receipt approvals: %',n; END IF;
 END
 $rls$;
 RESET ROLE;
@@ -187,6 +223,8 @@ BEGIN
  IF n<>0 THEN RAISE EXCEPTION 'cross-tenant purchasing read leaked'; END IF;
  SELECT count(*) INTO n FROM warehouse_receipt_lines;
  IF n<>0 THEN RAISE EXCEPTION 'cross-tenant receipt read leaked'; END IF;
+ SELECT count(*) INTO n FROM staged_warehouse_receipts;
+ IF n<>0 THEN RAISE EXCEPTION 'cross-tenant receipt approval leaked'; END IF;
 END
 $rls$;
 RESET ROLE;

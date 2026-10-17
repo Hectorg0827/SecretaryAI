@@ -113,14 +113,16 @@ Full-stack verification on the tip of the default branch: backend pytest, web/de
 | 51 | P1 | Web-frontend CI gate red on every push: no ESLint config file, `eslint` undeclared (transitive v10), `--ext` invalid under flat config; desktop lint script had the same flag | `frontend/`, `desktop/package.json` | ✅ fixed — `eslint.config.js` (mirrors desktop), `eslint` + `eslint-plugin-react-hooks` declared, scripts fixed. Frontend 0 errors / desktop 0 errors |
 | 52 | P1 | Release workflow's `publish-update-manifest` job broken three ways (macOS updater pointed at `.dmg` — Tauri v2 needs `.app.tar.gz`; wrong `.sig` names; read a DRAFT release by tag → 404 → red on every tag) and overwrote tauri-action's correct `latest.json` | `release-desktop.yml`, `tauri.conf.json` | ✅ fixed — job removed; `includeUpdaterJson`/`updaterJsonPreferNsis`; dead v1 `updater.dialog` key dropped; honest release notes (no phantom CHANGELOG, no "connector bundled" claim) |
 
-**Open after Pass 3** (verified, not fixed here):
+**Phase 4 work on PR #74 (2026-10-17): code committed, CI/staging
+proof still pending; NONE of these are being marked ✅ merely because code was
+pushed.** The first four rows below remain acceptance-gated.
 
 | # | Sev | Finding | Evidence | Next step |
 |---|---|---|---|---|
-| 53 | P1 | Computer-Use sessions live in a per-process dict while the image runs `uvicorn --workers 2` → poll/approve/reject land on a different worker and 404; same class in `auth.py` OAuth-state fallback | `api/computer_use.py`, `Dockerfile` | Move session state + approval signal to Redis (or pin CU to one worker) |
-| 54 | P2 | Token revocation, refresh single-use rotation and rate limiting all fail **open** on a Redis outage (logged-out tokens keep working; refresh tokens replayable) | `auth/jwt.py`, `middleware/rate_limit.py` | Policy decision: fail closed (503) on auth-critical paths, or alert loudly |
-| 55 | P2 | Connector install secret stored in plaintext although the docstring says "hashed" | `api/connectors.py` | Store `sha256(secret)`, compare digests (storage-format migration) |
-| 56 | P2 | Write task types (`create_invoice`/`create_po`/`update_item`) dispatched via `/dispatch-task` bypass `PolicyEngine` / the approval queue that `connector_protocol.py` says they require | `api/connectors.py` | Route write types through the approval queue |
+| 53 | P1 | Computer-Use sessions live in a per-process dict while the image runs `uvicorn --workers 2` → poll/approve/reject land on a different worker and 404; same class in `auth.py` OAuth-state fallback | `api/computer_use.py`, `Dockerfile` | Redis hashes, atomic decision script and cross-request regression tests added. Must prove with two live uvicorn workers before marking closed; auth OAuth-state fallback remains a separate concern. |
+| 54 | P2 | Token revocation, refresh single-use rotation and rate limiting all fail **open** on a Redis outage (logged-out tokens keep working; refresh tokens replayable) | `auth/jwt.py`, `middleware/rate_limit.py` | Owner chose fail closed. JWT checks/rotation and production rate limiters now 503 on Redis failure; critical logs + Sentry exception alert added. Tests and live on-call paging still require proof. |
+| 55 | P2 | Connector install secret stored in plaintext although the docstring says "hashed" | `api/connectors.py` | Digest-only code and idempotent SQL migration added; MUST apply migration before upgraded API. Confirm real DB migration, regression tests and no plaintext rows. |
+| 56 | P2 | Write task types (`create_invoice`/`create_po`/`update_item`) dispatched via `/dispatch-task` bypass `PolicyEngine` / the approval queue that `connector_protocol.py` says they require | `api/connectors.py` | Fail-closed mitigation: all three unapproved writes refused at dispatch, and queued legacy writes cancelled when polled. Approved write workflow not implemented or available; do not ship the local connector. |
 | 57 | P3 | A few handlers echo raw exception text in error details (`agent.py`, `chat.py`, `dashboard.py`, `admin.py` health payload; `ValueError` handler returns `str(exc)`) | various | Generic client messages; log detail server-side |
 | 58 | **P0 (deployment, not code)** | `api.secretaryai.com` / `app.secretaryai.com` resolve to domain-parking addresses — no backend appears to be deployed there, yet the desktop build bakes that URL in by default. A perfect installer still cannot sign in | DNS + `release-desktop.yml` defaults | Deploy the backend (`RAILWAY_DEPLOYMENT.md`), set the `API_URL` repo variable, then build |
 
@@ -148,3 +150,26 @@ Backend suite after Pass 3: **1086 passed / 4 skipped** (1045 + 41 new). Fronten
 ## Change log
 - **Pass 1 (security, backend):** fixed #19, #20, #21, #22; single-sourced backend version (#24 partial). Added `tests/test_security_hardening.py` (8 tests, all passing). Full backend suite: 1013 passed / 4 skipped / 1 pre-existing date-flake.
 - **Pass 3 (end-to-end audit, Sep 2026):** fixed #36–#52 (one P0 auth bypass, six P1s, ten P2s) across backend, CI, Docker/compose and the release workflow; #41 partial. Added `tests/test_security_pass3.py` (41 tests). Opened #53–#58; #58 is the deployment blocker that makes the installer unusable regardless of code. Backend suite: 1086 passed / 4 skipped.
+
+
+### Phase 4 / 5 / 6 change log (PR #74, 2026-10-17)
+
+- CI was green at initial `5225ceb` baseline. Subsequent commits require
+  fresh CI and CodeQL success before any defect is marked fixed. New negative
+  tests cover cross-worker approvals, wrong-tenant and wrong-ID access, unapproved
+  connector writes, plaintext secret rejection and revocation-store failures.
+  CI includes a deliberate write-gate mutation; do not count it until a run
+  demonstrates the mutants are caught.
+- The four-file SQL deployment order now ends with
+  `database/schema_v4_connector_secret_digest.sql`. No live database migration
+  has been observed.
+- `.github/workflows/e2e-contract.yml` has manual real-browser and vendor
+  sandbox contract checks. Credentials/deployment are absent; NO E2E pass has
+  been observed.
+- Terms and Privacy policy drafts exist only for attorney review and are NOT
+  published. License intent is undecided. Backup drill and on-call paging are
+  documented but neither has occurred.
+- Existing GitHub draft release notes still contain the incorrect bundled
+  connector claim and must be edited by the owner using Releases → Edit;
+  published historical notes likewise need correction. The release workflow
+  body and README now explicitly state the connector is not included.

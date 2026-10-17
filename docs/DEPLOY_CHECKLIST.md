@@ -38,7 +38,7 @@ email or connect QuickBooks until they're set.
    cannot see it again, and you need it in Part C.
 3. Wait for the project to finish provisioning (about 2 minutes).
 4. In the left sidebar click **SQL Editor**, then **New query**.
-5. Now apply the database structure. There are **six files and the order
+5. Now apply the database structure. There are **seven files and the order
    matters** — the later files build on the first. For each file below,
    in order: open it on GitHub, click the **Copy raw file** button, paste it
    into the Supabase SQL Editor, and click **Run**. Wait for "Success" before
@@ -49,6 +49,7 @@ email or connect QuickBooks until they're set.
    4. `database/schema_v4_connector_secret_digest.sql` (migrates existing plaintext connector secrets to SHA-256 digests; apply before deploying the upgraded API)
    5. `database/schema_v5_stock_ledger.sql` (internal stock-ledger tables and protected posting procedure; **only after its exact-commit PostgreSQL CI and staging migration validation pass**).
    6. `database/schema_v6_purchasing_receiving.sql` (tenant-scoped purchase orders, separate approvals and exact-once receipts; **test the migration and rollback plan on staging first**).
+   7. `database/schema_v7_purchasing_evidence.sql` (internal unverified procurement evidence metadata, **not** actual uploaded or verified documents).
 > **Migration safety:** For a real existing database, schedule a backup
 > and test the chosen migration in staging before applying it in production.
 > If your deployment already runs the Supabase migration files, do **not**

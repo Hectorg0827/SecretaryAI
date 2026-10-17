@@ -213,3 +213,58 @@ def test_production_middleware_rejects_requests_without_redis():
         response = TestClient(app).get("/secure")
     assert response.status_code == 503
     assert alarm.called
+
+
+@pytest.mark.asyncio
+async def test_registration_requires_migrated_digest_and_accepts_correct_secret():
+    from app.api.connectors import register_connector
+    from app.domain.connector_protocol import RegisterRequest, ConnectorType
+
+    raw = "high-entropy-test-secret"
+    hashed = "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+    company_table = MagicMock()
+    registration_table = MagicMock()
+    company_table.select.return_value.eq.return_value.execute.return_value.data = [
+        {"connector_install_secret": hashed}
+    ]
+    registration_table.upsert.return_value.execute.return_value.data = [{"id": "reg-1"}]
+    db = MagicMock()
+    db.table.side_effect = lambda name: (
+        company_table if name == "companies" else registration_table
+    )
+    def request(secret):
+        return RegisterRequest(
+            company_id="co1", connector_type=ConnectorType.QB_DESKTOP,
+            connector_id="device1", version="1.0.6", install_secret=secret,
+        )
+    response = await register_connector(request(raw), user={"company_id": "co1"}, db=db)
+    assert response.registration_id == "reg-1"
+    with pytest.raises(HTTPException) as err:
+        await register_connector(request("wrong-secret"), user={"company_id": "co1"}, db=db)
+    assert err.value.status_code == 403
+    # A plaintext legacy DB value MUST NOT become an accepted fallback.
+    company_table.select.return_value.eq.return_value.execute.return_value.data = [
+        {"connector_install_secret": raw}
+    ]
+    with pytest.raises(HTTPException) as err:
+        await register_connector(request(raw), user={"company_id": "co1"}, db=db)
+    assert err.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_queued_legacy_write_is_never_dispatched():
+    from app.api.connectors import fetch_connector_tasks
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value \
+        .in_.return_value.order.return_value.order.return_value.limit.return_value \
+        .execute.return_value.data = [{
+            "id": "legacy-write", "task_type": "create_invoice", "status": "pending",
+        }]
+    response = await fetch_connector_tasks(
+        max_tasks=1,
+        connector={"id": "reg-1", "company_id": "co1", "connector_type": "qb_desktop"},
+        db=db,
+    )
+    assert response.tasks == []
+    update_args = db.table.return_value.update.call_args[0][0]
+    assert update_args["status"] == "cancelled"

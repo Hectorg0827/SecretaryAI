@@ -273,6 +273,77 @@ async def list_durable_purchase_orders(
     return {"orders": rows, "count": len(rows)}
 
 
+@router.get("/orders/{po_number}")
+async def get_durable_purchase_order_detail(
+    po_number: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Trace a PO through approved lines, staged receipts and booked receipts.
+
+    Each query is tenant-scoped, including all child records. Read timestamps
+    can differ between queries during a concurrent post; this is not a DB
+    transaction snapshot, and it does not certify QuickBooks reconciliation.
+    """
+    _require_purchasing_employee(user)
+    if not po_number or len(po_number) > 100:
+        raise HTTPException(status_code=422, detail="Invalid PO number")
+    cid = user["company_id"]
+    orders = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,supplier_ref,warehouse_id,status,"
+                  "created_at,approved_at,created_by,approved_by")
+          .eq("company_id", cid).eq("po_number", po_number).limit(2)
+    )
+    if not orders:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if len(orders) != 1:
+        raise HTTPException(status_code=503, detail="Purchase order data ambiguous")
+    order = orders[0]
+    po_id = order["id"]
+    lines = _read_purchasing_rows(
+        db.table("purchasing_order_lines")
+          .select("sku,qty_ordered,qty_received")
+          .eq("company_id", cid).eq("po_id", po_id).limit(101)
+    )
+    staged = _read_purchasing_rows(
+        db.table("staged_warehouse_receipts")
+          .select("id,receipt_key,status,submitted_by,posted_receipt_id,"
+                  "created_at,approved_at,payload")
+          .eq("company_id", cid).eq("po_id", po_id)
+          .order("created_at", desc=True).limit(501)
+    )
+    posted = _read_purchasing_rows(
+        db.table("warehouse_receipt_documents")
+          .select("id,receipt_key,received_by,approved_by,posted_at")
+          .eq("company_id", cid).eq("po_id", po_id)
+          .order("posted_at", desc=True).limit(501)
+    )
+    if len(lines) > 100 or len(staged) > 500 or len(posted) > 500:
+        raise HTTPException(status_code=503, detail="Purchase record scope exceeds supported page")
+    from decimal import Decimal, InvalidOperation
+    try:
+        ordered = sum((Decimal(str(x["qty_ordered"])) for x in lines), Decimal("0"))
+        received = sum((Decimal(str(x["qty_received"])) for x in lines), Decimal("0"))
+        if not lines or any(not Decimal(str(x["qty_ordered"])).is_finite() for x in lines):
+            raise ValueError("Malformed purchase lines")
+        if received < 0 or ordered < received:
+            raise ValueError("Malformed purchase quantities")
+    except (KeyError, TypeError, InvalidOperation, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Purchase quantities unavailable") from exc
+    return {
+        "order": order, "lines": lines,
+        "staged_receipts": staged, "posted_receipts": posted,
+        "ordered_cases": str(ordered),
+        "received_cases": str(received),
+        "remaining_cases": str(ordered - received),
+        "inventory_posted": bool(posted),
+        "accounting_reconciled": False,
+        "data_source": "secretaryai_purchasing_ledger",
+        "read_consistency": "separate_tenant_scoped_queries",
+    }
+
+
 @router.get("/receipts/pending")
 async def list_pending_warehouse_receipts(
     user: dict = Depends(require_permission("approve_actions")),

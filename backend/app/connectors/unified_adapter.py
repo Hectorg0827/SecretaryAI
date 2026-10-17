@@ -277,17 +277,40 @@ class UnifiedDataAdapter:
                 "source": "qb",
             }
 
+            # Do not add QB and warehouse counts together: they normally
+            # describe the *same* physical stock. No additive policy is
+            # supported until locations and lot ownership are reconciled.
+            entry["quantity_source"] = "quickbooks"
+            entry["reconciliation_required"] = False
+            policy = self._config.get("inventory_quantity_policy", "qb_authoritative")
+            if policy not in ("qb_authoritative", "warehouse_authoritative"):
+                policy = "qb_authoritative"
+            entry["inventory_quantity_policy"] = policy
             for w in warehouse_data:
-                wname = w.get("product_name", "")
-                if wname.lower() in item.name.lower() or item.name.lower() in wname.lower():
-                    qty = w.get("quantity", 0)
+                if not isinstance(w, dict):
+                    continue
+                wsku = str(w.get("sku") or "").strip().casefold()
+                is_same_sku = bool(item.sku and wsku and item.sku.strip().casefold() == wsku)
+                is_same_name = (
+                    not wsku
+                    and str(w.get("product_name") or "").strip().casefold()
+                    == item.name.strip().casefold()
+                )
+                if is_same_sku or is_same_name:
                     try:
-                        qty = float(qty)
+                        qty = float(w.get("quantity", 0))
                     except (TypeError, ValueError):
-                        qty = 0
+                        continue
+                    if not 0 <= qty < float("inf"):
+                        continue
                     entry["warehouse_qty"] = qty
-                    entry["total_qty"] = entry["qb_qty"] + qty
                     entry["source"] = "qb+warehouse"
+                    entry["reconciliation_required"] = qty != entry["qb_qty"]
+                    if policy == "warehouse_authoritative":
+                        entry["total_qty"] = qty
+                        entry["quantity_source"] = "warehouse"
+                    # Default: QB stays authoritative until the business
+                    # explicitly selects an authoritative warehouse source.
                     break
 
             merged.append(entry)

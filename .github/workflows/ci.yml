@@ -136,6 +136,37 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test
 
+  connector:
+    name: QB Desktop connector (package + selfcheck)
+    runs-on: ubuntu-latest
+    # The connector ships inside the Windows installer, built by
+    # release-desktop.yml. This job builds it on Linux on every commit so a
+    # packaging regression is caught here rather than during a release.
+    #
+    # It matters more than it looks: the Conductor adapter lives in the backend
+    # and is loaded by a dynamic import, so PyInstaller cannot see it without
+    # the hidden imports in connector/connector.spec. Get that wrong and the
+    # executable builds perfectly and then fails every QuickBooks task at
+    # runtime with "No module named 'app'" — which is exactly the state this
+    # repository was in. --selfcheck loads the adapter from inside the frozen
+    # bundle, so that cannot regress unnoticed.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pytest -r connector/requirements.txt
+      - name: Connector unit tests
+        run: python -m pytest connector/tests -q
+      - name: Package the connector
+        run: pyinstaller --clean --noconfirm connector/connector.spec
+      - name: Selfcheck the packaged executable
+        run: ./dist/SecretaryAIConnector --selfcheck
+
   versions:
     name: Version consistency
     runs-on: ubuntu-latest

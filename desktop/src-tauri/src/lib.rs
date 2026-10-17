@@ -1,3 +1,4 @@
+mod connector;
 mod credentials;
 mod db;
 mod heartbeat;
@@ -212,6 +213,10 @@ pub fn run() {
             screen_capture::deactivate_computer_use,
             screen_capture::computer_use_active,
             qb_detect::check_qb_installed,
+            connector::connector_status,
+            connector::start_connector,
+            connector::stop_connector,
+            connector::connector_log_tail,
         ])
         .setup(|app| {
             startup_log("setup: begin");

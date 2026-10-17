@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -179,8 +180,11 @@ async def register_connector(
         raise HTTPException(status_code=404, detail="Company not found")
 
     stored_secret = (company.data[0] or {}).get("connector_install_secret")
-    if not stored_secret or not secrets.compare_digest(
-        req.install_secret.encode(), stored_secret.encode()
+    # Only sha256 digests are accepted; database migration must run before
+    # deploying this version. Legacy plaintext rows are deliberately refused.
+    supplied_digest = "sha256:" + hashlib.sha256(req.install_secret.encode()).hexdigest()
+    if not stored_secret or not stored_secret.startswith("sha256:") or not secrets.compare_digest(
+        supplied_digest, stored_secret
     ):
         raise HTTPException(status_code=403, detail="Invalid install secret")
 
@@ -640,7 +644,7 @@ async def generate_install_secret(
     raw_secret = secrets.token_urlsafe(32)
     try:
         db.table("companies").update({
-            "connector_install_secret": raw_secret,
+            "connector_install_secret": "sha256:" + hashlib.sha256(raw_secret.encode()).hexdigest(),
         }).eq("id", user["company_id"]).execute()
     except Exception as exc:
         log.error("Failed to store install secret: %s", exc)

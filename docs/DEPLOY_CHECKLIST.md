@@ -38,7 +38,7 @@ email or connect QuickBooks until they're set.
    cannot see it again, and you need it in Part C.
 3. Wait for the project to finish provisioning (about 2 minutes).
 4. In the left sidebar click **SQL Editor**, then **New query**.
-5. Now apply the database structure. There are **four files and the order
+5. Now apply the database structure. There are **five files and the order
    matters** — the later files build on the first. For each file below,
    in order: open it on GitHub, click the **Copy raw file** button, paste it
    into the Supabase SQL Editor, and click **Run**. Wait for "Success" before
@@ -47,6 +47,14 @@ email or connect QuickBooks until they're set.
    2. `database/schema_v2_additions.sql`
    3. `database/schema_v3_integrations.sql`
    4. `database/schema_v4_connector_secret_digest.sql` (migrates existing plaintext connector secrets to SHA-256 digests; apply before deploying the upgraded API)
+   5. `database/schema_v5_stock_ledger.sql` (internal stock-ledger tables and protected posting procedure; **only after its exact-commit PostgreSQL CI and staging migration validation pass**).
+> **Migration safety:** For a real existing database, schedule a backup
+> and test the chosen migration in staging before applying it in production.
+> If your deployment already runs the Supabase migration files, do **not**
+> paste the equivalent `database/schema_v5_stock_ledger.sql` into SQL Editor
+> again. Never apply the manual, root-Supabase and backend-Supabase copies
+> sequentially. This feature is not a publicly usable receiving workflow yet.
+
 6. In the left sidebar click **Settings → API**. Leave this tab open — you
    need three values from it in Part C: the **Project URL**, the **anon**
    key, and the **service_role** key.

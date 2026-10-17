@@ -301,6 +301,152 @@ from app.services.purchasing_evidence_bytes import (
 )
 
 
+from app.config import get_settings
+from app.services.purchasing_evidence_malware import scan_quarantined_evidence
+
+
+@router.post("/evidence/{evidence_id}/scan")
+async def scan_purchasing_evidence_for_malware(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Invoke a real local ClamAV scanner on private, integrity-matched bytes.
+
+    Clients cannot supply the scan verdict. Clean does not authorize a
+    download, financial approval, or any QuickBooks write.
+    """
+    _require_purchasing_employee(user)
+    company_id = user["company_id"]
+    evidence_id_str = str(evidence_id)
+    claim = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+        .select("id,storage_object_key,claimed_sha256")
+        .eq("company_id", company_id).eq("id", evidence_id_str).limit(2)
+    )
+    if not claim:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    if len(claim) != 1:
+        raise HTTPException(status_code=503, detail="Ambiguous evidence claim")
+    checks = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+        .select("id,computed_sha256,byte_count,detected_mime")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if len(checks) != 1:
+        raise HTTPException(status_code=409, detail="Verified upload integrity required")
+    if checks[0].get("computed_sha256") != claim[0].get("claimed_sha256"):
+        raise HTTPException(status_code=409, detail="Stored integrity does not match claim")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+        .select("id").eq("company_id", company_id)
+        .eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if scans:
+        raise HTTPException(status_code=409, detail="Document already has a malware scan record")
+    active = _read_purchasing_rows(
+        db.table("users").select("id,role,is_active")
+        .eq("company_id", company_id).eq("id", user["sub"]).limit(2)
+    )
+    if len(active) != 1 or active[0].get("is_active") is not True or (
+        active[0].get("role") not in ("owner", "manager", "back_office")
+    ):
+        raise HTTPException(status_code=403, detail="Scanner operator not authorized")
+    result = await scan_quarantined_evidence(
+        db,
+        company_id=company_id,
+        storage_object_key=claim[0]["storage_object_key"],
+        expected_sha256=checks[0]["computed_sha256"],
+        expected_byte_count=checks[0]["byte_count"],
+        expected_mime=checks[0]["detected_mime"],
+        clamav_socket_path=get_settings().clamav_unix_socket,
+    )
+    attestation = _execute_purchasing_rpc(
+        db, "attest_purchasing_evidence_malware_scan", {
+            "p_company_id": company_id,
+            "p_evidence_id": evidence_id_str,
+            "p_computed_sha256": result.digest,
+            "p_byte_count": result.byte_count,
+            "p_scan_status": result.scan_status,
+            "p_actor": user["sub"],
+        },
+    )
+    return {
+        **attestation, "scan_status": result.scan_status,
+        "malware_scan_engine": "clamav",
+        "approved_for_review": False,
+        "safe_to_view": False, "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.post("/evidence/{evidence_id}/approve-review")
+async def approve_purchasing_evidence_review(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """Independent reviewer can acknowledge a previously CLEAN scanned file.
+
+    The SQL enforces current role, same tenant, clean scan, and that the
+    reviewer did not submit or scan the document. No file is made public.
+    """
+    return {
+        **_execute_purchasing_rpc(
+            db, "approve_purchasing_evidence_for_review", {
+                "p_company_id": user["company_id"],
+                "p_evidence_id": str(evidence_id),
+                "p_actor": user["sub"],
+            },
+        ),
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.get("/evidence/{evidence_id}/malware-status")
+async def get_purchasing_evidence_malware_status(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    company_id = user["company_id"]
+    evidence_id_str = str(evidence_id)
+    claims = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims").select("id")
+        .eq("company_id", company_id).eq("id", evidence_id_str).limit(2)
+    )
+    if not claims:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+        .select("id,scan_status,engine,scanned_at")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    approvals = _read_purchasing_rows(
+        db.table("purchasing_evidence_review_approvals")
+        .select("id,review_status,approved_at")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if len(scans) > 1 or len(approvals) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous evidence review state")
+    status = scans[0]["scan_status"] if scans else "not_scanned"
+    if approvals and status != "clean":
+        raise HTTPException(status_code=503, detail="Inconsistent malware review state")
+    return {
+        "evidence_id": evidence_id_str,
+        "malware_scan": scans[0] if scans else None,
+        "scan_status": status,
+        "review_approval": approvals[0] if approvals else None,
+        "approved_for_review": bool(approvals),
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
 @router.post("/evidence/{evidence_id}/upload", status_code=201)
 async def upload_purchasing_evidence_bytes(
     evidence_id: UUID,

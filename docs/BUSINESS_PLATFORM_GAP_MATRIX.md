@@ -10,6 +10,18 @@ Existing FastAPI API routers include authentication, accounts, actions, agent, c
 
 At the starting SHA `f67cdc4e`, GitHub CI run `39004104669` reported **12 failed, 1,138 passed, 5 skipped**, while CodeQL run `39004104676` passed. The failing CI was not a sign-off. Subsequent code and test changes require fresh exact-SHA CI.
 
+## Development continuation — immutable stock ledger (2026-10-17)
+
+Prior tip `694d79b4` was confirmed **CI success** (backend/desktop/web/mobile/schema/secret scan) and **CodeQL success**. The pre-existing report-mode dependency-audit job still failed. This is **baseline evidence only**, not proof of later ledger commits.
+
+The **new internal-only** migration `database/schema_v5_stock_ledger.sql` defines a tenant-scoped SKU master, warehouses, balances and an append-only movement ledger. `post_stock_movement` performs a database-atomic, event-idempotent update, rejects unauthorized actors, cross-tenant locations, changed replay payloads and negative stock. Stock is segregated into available, damaged and quarantine buckets. Only the server `service_role` may invoke the procedure; even that role cannot directly insert movement rows or edit balances. New `scripts/test_stock_ledger.sql` is wired into the live Postgres schema validation CI job and checks the 1,180 accepted / 20 damaged movement example, tenant-specific RLS, replay denial, immutable history, and withdrawal limits.
+
+This does **not** establish approved purchase orders, real receipts, stock reservation/transfer atomics, a QuickBooks-ledger reconciliation, shipment receiving UX or staging validation. The older `/api/logistics/receipt/process` endpoint now explicitly returns `inventory_posted=false` and `accounting_reconciled=false`: it remains **analysis only**, not stock posting.
+
+There are **three equivalent locations** for the V5 SQL: manual `database/schema_v5_stock_ledger.sql`, Supabase root migrations and backend Supabase migrations. Use **one** deployment path per database; they are not three sequential migrations. Nothing has been applied to staging or production in this session. Validate CI and a database backup/restore plan before authorizing staging migration.
+
+---
+ 
 ## Implementation matrix
 
 Status vocabulary: **Existing / incomplete**, **Partially implemented**, **Not identified in audited endpoints**, **Blocked externally**. None indicates production verification.

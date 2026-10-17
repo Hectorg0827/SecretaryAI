@@ -70,6 +70,9 @@ async def list_inventory(
             "weeks_remaining": status.weeks_remaining,
             "needs_po":       status.status in ("critical", "out_of_stock"),
             "source":         item.get("source", "qb"),
+            "quantity_source": item.get("quantity_source", "quickbooks"),
+            "inventory_quantity_policy": item.get("inventory_quantity_policy", "qb_authoritative"),
+            "reconciliation_required": item.get("reconciliation_required", False),
         }
 
         if status_filter and entry["stock_status"] != status_filter:

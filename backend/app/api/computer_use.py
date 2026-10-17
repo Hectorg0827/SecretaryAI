@@ -46,11 +46,12 @@ async def _read(session_id: str) -> dict:
         raise HTTPException(status_code=503, detail="Session store unavailable")
 
 
-async def _write(session_id: str, **fields) -> None:
+async def _write(sid: str, **fields) -> None:
+    """Store a session hash; sid is separate from the persisted session_id field."""
     try:
         async with _redis() as r:
-            await r.hset(_key(session_id), mapping=fields)
-            await r.expire(_key(session_id), _SESSION_TTL_SECONDS)
+            await r.hset(_key(sid), mapping=fields)
+            await r.expire(_key(sid), _SESSION_TTL_SECONDS)
     except Exception:
         log.exception("CU Redis write unavailable")
         raise HTTPException(status_code=503, detail="Session store unavailable")

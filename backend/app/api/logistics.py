@@ -327,7 +327,7 @@ async def get_durable_purchase_order_detail(
         received = sum((Decimal(str(x["qty_received"])) for x in lines), Decimal("0"))
         if not lines or any(not Decimal(str(x["qty_ordered"])).is_finite() for x in lines):
             raise ValueError("Malformed purchase lines")
-        if received < 0 or ordered < received:
+        if not ordered.is_finite() or not received.is_finite() or received < 0 or ordered < received:
             raise ValueError("Malformed purchase quantities")
     except (KeyError, TypeError, InvalidOperation, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Purchase quantities unavailable") from exc

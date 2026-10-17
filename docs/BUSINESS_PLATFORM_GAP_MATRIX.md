@@ -52,6 +52,24 @@ do not call inventory or accounting fully reconciled.
 
 ---
 
+## V7 procurement evidence — metadata-only implementation
+
+Evidence claims for approved purchasing orders now record document type,
+tenant-scoped object key, claimed SHA-256, actor, idempotency key, optional
+claimed monetary amount and currency. Rows are immutable and readable only
+within a tenant. Claims in distinct currencies remain separate and are
+explicitly **unverified**. They do not reflect bytes actually uploaded,
+document authenticity, posted AP invoices, certified landed cost, or an
+accounting tie-out. Claims have no write authority over stock, accounting
+or bank/payments. Exact-commit V7 schema and API tests must pass before
+marking the implementation verified.
+
+`GET /api/logistics/orders/{po_number}/evidence` and matching `POST`
+are API-only; no warehouse operator document-upload UI is certified.
+Production-grade blob upload, cryptographic verification, independent
+acceptance, transport proof, costs, FX and QuickBooks reconciliation are
+separate outstanding implementation tracks.
+
 ## V6 durable PO/warehouse receipt implementation (2026-10-17)
 
 The migration and route implementation now cover PO drafts, independently

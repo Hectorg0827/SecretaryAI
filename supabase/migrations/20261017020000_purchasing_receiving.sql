@@ -427,3 +427,9 @@ GRANT EXECUTE ON FUNCTION stage_warehouse_receipt(UUID,TEXT,TEXT,JSONB,UUID)
   TO service_role;
 GRANT EXECUTE ON FUNCTION approve_staged_warehouse_receipt(UUID,UUID,UUID)
   TO service_role;
+
+-- The original V5 primitive is also internal-only now. A service request
+-- may book stock exclusively through the independently approved receipt path.
+REVOKE EXECUTE ON FUNCTION post_stock_movement(
+  UUID,TEXT,UUID,TEXT,TEXT,TEXT,NUMERIC,TEXT,TEXT,TEXT,UUID
+) FROM service_role;

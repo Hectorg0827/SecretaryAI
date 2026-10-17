@@ -726,7 +726,7 @@ async def parse_freight_invoice(
     """
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_id=request.booking_id)
+    booking = FreightBooking(booking_ref=request.booking_id)
     updated = lm.capture_freight_invoice(booking, request.invoice_text, request.total_cases)
     summary = lm.freight_cost_summary(updated)
 
@@ -829,7 +829,7 @@ async def process_warehouse_receipt(
     """
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_id=request.booking_id)
+    booking = FreightBooking(booking_ref=request.booking_id)
     result = lm.process_warehouse_receipt(
         booking=booking,
         po_number=request.po_number,

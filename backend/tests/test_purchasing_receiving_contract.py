@@ -5,6 +5,7 @@ scripts/test_purchasing_receiving.sql in the CI schema job.
 """
 import os
 from uuid import uuid4
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -170,8 +171,6 @@ class _ReadQuery:
 
 @pytest.mark.asyncio
 async def test_po_detail_reveals_receipt_provenance_without_claiming_qb_sync():
-    from types import SimpleNamespace
-    from decimal import Decimal
     tables = {
         "purchasing_orders": [{
             "id": "order-1", "po_number": "PO-2026", "supplier_ref": "SUP",

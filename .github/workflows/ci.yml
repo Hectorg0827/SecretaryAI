@@ -20,6 +20,19 @@ jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
+    # Authentication now correctly rejects an unavailable revocation store.
+    # Run an actual Redis service for tests that authenticate normally; outage
+    # regression tests deliberately replace the client with a failing one.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

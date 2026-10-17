@@ -16,7 +16,8 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.api.logistics import (preview_stock_reconciliation,
-                               process_warehouse_receipt, WarehouseReceiptRequest)
+                               process_warehouse_receipt, WarehouseReceiptRequest,
+                               parse_freight_invoice, FreightInvoiceRequest)
 
 
 class FakeQuery:
@@ -168,3 +169,24 @@ async def test_legacy_warehouse_analysis_does_not_promote_po_status():
     assert response["status"]=="analysis_only"
     assert response["inventory_posted"] is False
     db.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_freight_parser_uses_correct_booking_reference():
+    captured = {}
+    def capture(booking, text, cases):
+        captured["booking_ref"] = booking.booking_ref
+        captured["cases"] = cases
+        return booking
+    lm = SimpleNamespace(
+        capture_freight_invoice=capture,
+        freight_cost_summary=lambda _: {
+            "total_cost": 100.0, "by_component": {}, "missing_components": []
+        },
+    )
+    with patch("app.api.logistics._get_logistics_module", return_value=lm):
+        result = await parse_freight_invoice(FreightInvoiceRequest(
+            booking_id="BK-LEGACY", invoice_text="Invoice", total_cases=200,
+        ), user=actor(), db=MagicMock())
+    assert captured == {"booking_ref": "BK-LEGACY", "cases": 200}
+    assert result["booking_id"] == "BK-LEGACY"

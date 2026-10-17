@@ -106,8 +106,9 @@ REVOKE ALL ON stock_skus, stock_warehouses, stock_balances, stock_movements
     FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON stock_skus, stock_warehouses, stock_balances, stock_movements
     TO authenticated;
-GRANT ALL ON stock_skus, stock_warehouses, stock_balances, stock_movements
-    TO service_role;
+GRANT SELECT, INSERT, UPDATE ON stock_skus, stock_warehouses TO service_role;
+GRANT SELECT ON stock_balances, stock_movements TO service_role;
+-- Ordinary service queries cannot bypass the ledger to directly post stock.
 
 -- One DB transaction atomically creates the immutable event and updates the
 -- balance. The unique event key is tenant-scoped and payload-checked on replay.
@@ -127,9 +128,9 @@ CREATE OR REPLACE FUNCTION post_stock_movement(
     p_actor_user_id UUID
 ) RETURNS JSONB
 LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = public, pg_temp
-AS $$
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $
 DECLARE
     v_id UUID;
     v_row stock_movements%ROWTYPE;

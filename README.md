@@ -16,7 +16,7 @@ No command line, developer tools, or Docker required on your desktop.
 > functionality. Code-signing + notarization (which remove the prompt) are
 > planned — see `docs/RELEASE_RUNBOOK.md`.
 >
-> The backend runs in the cloud; the desktop app connects to it after sign-in.
+> The backend runs in the cloud; the desktop app connects to it after sign-in. **QuickBooks Desktop connects through QuickBooks Web Connector and Conductor**; the separate Python connector is not included in the installer.
 
 ## Architecture
 
@@ -66,7 +66,7 @@ npm run tauri:build:macos-arm
 ```
 
 ### Database
-Run `database/schema.sql` in your Supabase SQL editor.
+Apply all four database schema files in the exact order in `docs/DEPLOY_CHECKLIST.md`, including the connector install-secret digest migration.
 
 ## Cross-Platform Support
 
@@ -77,8 +77,8 @@ Run `database/schema.sql` in your Supabase SQL editor.
 | iOS/Android | PWA (install from browser) | ✅ | QB Online only |
 
 The desktop app targets platform-native credential storage — **Windows
-Credential Manager (DPAPI)** and **macOS Keychain** — for secrets. Migrating the
-session token off web storage into the vault is in progress (see
+Credential Manager (DPAPI)** and **macOS Keychain** — for secrets. The
+session token is stored in the OS vault (see
 `docs/adr/0001-desktop-ui-architecture.md`).
 
 ## Environment Variables

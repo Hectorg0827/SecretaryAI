@@ -2,6 +2,16 @@
 
 Living scorecard and defect register for the production-release effort.
 
+> **2026-10-17 update — business-platform directive:** The original
+> release gate scorecard below is historical and its green categories are NOT
+> proof of current production readiness. At baseline `f67cdc4e`, CodeQL
+> passed but CI had 12 backend failures and a failing dependency-audit job.
+> Repairs have been committed on the same PR #74 but final-tip CI and staging
+> validation remain outstanding. Consult `docs/CONTINUE_HERE.md` for the
+> latest handoff and `docs/BUSINESS_PLATFORM_GAP_MATRIX.md` for the audited
+> implementation gaps and acceptance requirements. **Do not authorize
+> production deployment, merge or market-ready certification from this page.**
+
 **Status: `NOT RELEASE-ELIGIBLE`** — code-level hardening in progress; several gates
 require external credentials the repository cannot supply (see Blockers).
 

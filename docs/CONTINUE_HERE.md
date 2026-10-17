@@ -1,3 +1,66 @@
+# Latest handoff — P0 purchase-to-stock workflow (2026-10-17)
+
+**Continue only on** `claude/blissful-noether-ik7p9l`, existing PR #74,
+base `claude/secretaryai-tech-spec-lqBZj`. No merge, production database
+migration, release or deployment was authorized.
+
+## Verified prior milestone
+Commit `22cdf429` passed full CI `39064988390` and CodeQL
+`39064988400`, including real Postgres V5 stock-ledger regression.
+The report-mode frontend npm audit remained red.
+
+## New V6 implementation (verify latest PR SHA)
+- `database/schema_v6_purchasing_receiving.sql`, with equivalent
+  `supabase/migrations/20261017020000_purchasing_receiving.sql` and
+  `backend/supabase/migrations/20261017020000_purchasing_receiving.sql`.
+  **Apply ONE migration path to a database, not all three.** Schema V5 must
+  already exist. Nothing has been deployed or applied to a real customer DB.
+- Tenant-scoped immutable ordered PO lines, draft and independent approval,
+  staged physical receipts, second-actor approval, atomic stock ledger posting,
+  lot/bucket inspection and per-PO overreceipt denial.
+- Stock ledger raw posting RPC was revoked from `service_role`; receiving
+  approval is the only exposed API route for recording purchases into stock.
+- New paid API routes in existing `/api/logistics`:
+  `GET /orders`, `POST /orders`,
+  `POST /orders/{po_number}/approve`,
+  `POST /orders/{po_number}/receipts`,
+  `GET /receipts/pending`,
+  `POST /receipts/{staged_receipt_id}/approve`.
+  Receipt approval takes approver identity exclusively from the active JWT,
+  and SQL validates that user against the tenant and current active role.
+- `scripts/test_purchasing_receiving.sql`: real Postgres acceptance for
+  a 1,200-case PO, 1,180 available + 20 damaged, immutable/replay behavior,
+  four-eye approval, negative cross-tenant and direct-mutation ACL checks.
+- `backend/tests/test_purchasing_receiving_contract.py`: unit/API contract
+  tests, impersonation checks, SQL-error mapping and scope isolation.
+
+## Still NOT commercial GA certified
+- Check exact-SHA backend, Postgres, CodeQL and dependency audits after final
+  code edits. Earlier intermediate green jobs prove only earlier SHAs.
+- PO receipt is a structured internal document workflow, not a live supplier
+  e-signature, WMS scanning/3PL integration, QuickBooks AP/landed cost posting,
+  physical stock count, partial-shipment carrier proof or end-user UX.
+- Concurrency, two-worker Redis approval and E2E staging integrations still
+  require controlled infrastructure. No live QB connection was tested.
+- Raw service-role DB requests remain highly privileged; protect server
+  credentials and restrict which RPCs may be invoked.
+- Prior 15 GA gates and independent legal/security review remain required.
+
+## Next engineering actions
+1. Triage any exact-SHA failures without weakening approval or RLS protections.
+2. Independently test concurrent receipts (same/different event keys), auth
+   revocation/Redis restart, and DB migration rollback on staging.
+3. Add procurement supplier/price/currency and warehouse receipt evidence
+   (scanned BOL, packing list, lot/expiration), inventory reconciliation and
+   pending-exception workflows.
+4. Integrate QuickBooks through Conductor, maintain fail-closed accounting
+   approval and outbox/idempotent payment posting. Until then
+   `accounting_reconciled=false` is the correct response.
+5. Add frontend approval queue and warehouse operator UI, then real user
+   acceptance, performance, and incident response drills.
+
+---
+
 # Current handoff — Stock-ledger integrity milestone (2026-10-17)
 
 **Newest section supersedes old snapshots below.** Stay on the existing

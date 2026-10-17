@@ -29,7 +29,7 @@ $roles$;
 GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
@@ -49,3 +49,7 @@ echo '✓ Purchasing evidence isolation and immutability checks passed.'
 echo '── testing V8 document byte-integrity attestations'
 psql -v ON_ERROR_STOP=1 -f scripts/test_evidence_integrity.sql
 echo '✓ Evidence integrity attestation checks passed.'
+
+echo '── testing V9 antivirus attestations and independent review'
+psql -v ON_ERROR_STOP=1 -f scripts/test_evidence_malware_review.sql
+echo '✓ Malware scan and independent review acceptance passed.'

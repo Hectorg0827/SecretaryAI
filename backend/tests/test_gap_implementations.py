@@ -49,113 +49,143 @@ def _make_db(company_row=None):
 # ─── Computer Use Router ───────────────────────────────────────────────────────
 
 class TestComputerUseRouter:
-    """Tests for /api/computer-use/* endpoints."""
+    """Exercise the Redis-backed Computer Use API rather than obsolete process memory."""
 
-    def test_start_session_creates_state(self):
-        """POST /start should create a session and launch background engine."""
-        from app.api.computer_use import _sessions
-        _sessions.clear()
+    @pytest.fixture
+    def session_store(self, monkeypatch):
+        from app.api import computer_use as cu
 
-        with (
-            patch("app.api.computer_use.get_current_user", return_value=_make_user()),
-            patch("app.api.computer_use.get_db", return_value=_make_db()),
-            patch("app.api.computer_use.settings") as mock_settings,
-            patch("asyncio.create_task"),
-        ):
-            mock_settings.computer_use_enabled = True
+        class RedisStore:
+            def __init__(self):
+                self.data = {}
 
-            from app.api.computer_use import _SessionState
-            session = _SessionState("sess-1", "ScribeBase", "Get orders", "co-1")
-            _sessions["sess-1"] = session
+            async def __aenter__(self):
+                return self
 
-            assert _sessions["sess-1"].status == "running"
-            assert _sessions["sess-1"].app_name == "ScribeBase"
+            async def __aexit__(self, *_):
+                return False
 
-    def test_session_status_response(self):
-        """GET /sessions/{id} should return full session state."""
-        from app.api.computer_use import _sessions, _SessionState
+            async def hset(self, key, mapping):
+                self.data.setdefault(key, {}).update(mapping)
 
-        state = _SessionState("sess-2", "ScribeBase", "Get orders", "co-1")
-        state.steps_completed = 3
-        _sessions["sess-2"] = state
+            async def expire(self, key, ttl):
+                assert ttl > 0
 
-        # Simulate what the endpoint returns
-        assert state.session_id == "sess-2"
-        assert state.status == "running"
-        assert state.steps_completed == 3
-        assert state.pending_approval is None
+            async def hgetall(self, key):
+                return dict(self.data.get(key, {}))
 
-    @pytest.mark.asyncio
-    async def test_approval_gate_flow(self):
-        """request_approval waits until resolve_approval is called."""
-        import asyncio
-        from app.api.computer_use import _SessionState
+            async def hget(self, key, field):
+                return self.data.get(key, {}).get(field)
 
-        state = _SessionState("sess-3", "App", "Task", "co-1")
+            async def eval(self, script, numkeys, key, company_id, approval_id, decision):
+                assert numkeys == 1 and "approval_decision" in script
+                row = self.data.get(key)
+                if row is None:
+                    return "missing"
+                if row["company_id"] != company_id:
+                    return "forbidden"
+                if row["status"] != "waiting_approval":
+                    return "not_pending"
+                if row["approval_id"] != approval_id:
+                    return "mismatch"
+                if row["approval_decision"]:
+                    return "already"
+                row["approval_decision"] = decision
+                return "ok"
 
-        async def _approve_after_delay():
-            await asyncio.sleep(0.05)
-            state.resolve_approval("approve")
-
-        asyncio.create_task(_approve_after_delay())
-        decision = await state.request_approval("click", "Click the Submit button")
-        assert decision == "approve"
-        assert state.pending_approval is None
+        store = RedisStore()
+        monkeypatch.setattr(cu, "_redis", lambda: store)
+        return cu, store.data
 
     @pytest.mark.asyncio
-    async def test_reject_gate_flow(self):
-        """reject should propagate 'reject' decision through approval gate."""
+    async def test_start_session_creates_state(self, session_store):
+        """POST /start must persist the session before launching the engine."""
+        cu, data = session_store
+        with patch.object(cu.settings, "computer_use_enabled", True), \
+             patch.object(cu.asyncio, "create_task") as launch:
+            result = await cu.start_session(
+                cu.StartRequest(app_name="ScribeBase", task="Get orders"),
+                user=_make_user(), db=_make_db(),
+            )
+            persisted = await cu._read(result.session_id)
+            assert persisted["status"] == "running"
+            assert persisted["app_name"] == "ScribeBase"
+            assert persisted["company_id"] == "co-1"
+            assert data[cu._key(result.session_id)]["task"] == "Get orders"
+            launch.assert_called_once()
+            # The patched scheduler does not consume its coroutine.
+            launch.call_args.args[0].close()
+
+    @pytest.mark.asyncio
+    async def test_session_status_response(self, session_store):
+        """The API reads the latest durable status, not a stale local object."""
+        cu, _ = session_store
+        state = cu._SessionState("sess-2", "ScribeBase", "Get orders", "co-1")
+        await state.save()
+        await cu._write("sess-2", steps_completed="3")
+        status = await cu.get_session("sess-2", user=_make_user())
+        assert status.session_id == "sess-2"
+        assert status.status == "running"
+        assert status.steps_completed == 3
+        assert status.pending_approval is None
+
+    async def _decision_flow(self, session_store, decision, sid):
         import asyncio
-        from app.api.computer_use import _SessionState
+        cu, data = session_store
+        state = cu._SessionState(sid, "App", "Task", "co-1")
+        await state.save()
+        waiter = asyncio.create_task(state.request_approval("click", "Submit"))
+        for _ in range(30):
+            if data[cu._key(sid)]["status"] == "waiting_approval":
+                break
+            await asyncio.sleep(0)
+        assert data[cu._key(sid)]["status"] == "waiting_approval"
+        pending = data[cu._key(sid)]["approval_id"]
+        request = cu.ApprovalRequest(session_id=sid, approval_id=pending)
+        user = _make_user()
+        response = (await cu.approve_action(request, user=user)) if decision == "approve" \
+            else (await cu.reject_action(request, user=user))
+        assert response["status"] == ("approved" if decision == "approve" else "rejected")
+        assert await asyncio.wait_for(waiter, timeout=2) == decision
+        assert (await cu.get_session(sid, user=user)).pending_approval is None
 
-        state = _SessionState("sess-4", "App", "Task", "co-1")
+    @pytest.mark.asyncio
+    async def test_approval_gate_flow(self, session_store):
+        await self._decision_flow(session_store, "approve", "sess-3")
 
-        async def _reject_after_delay():
-            await asyncio.sleep(0.05)
-            state.resolve_approval("reject")
+    @pytest.mark.asyncio
+    async def test_reject_gate_flow(self, session_store):
+        await self._decision_flow(session_store, "reject", "sess-4")
 
-        asyncio.create_task(_reject_after_delay())
-        decision = await state.request_approval("type", "Type something dangerous")
+    @pytest.mark.asyncio
+    async def test_approval_timeout_defaults_to_reject(self, session_store):
+        """Exhausting the approval polling window must never authorize the action."""
+        cu, _ = session_store
+        state = cu._SessionState("sess-5", "App", "Task", "co-1")
+        await state.save()
+        with patch.object(cu, "_APPROVAL_TIMEOUT_SECONDS", 0):
+            decision = await state.request_approval("delete", "Delete records")
         assert decision == "reject"
+        status = await cu.get_session("sess-5", user=_make_user())
+        assert status.pending_approval is None
+        assert status.status == "running"
 
     @pytest.mark.asyncio
-    async def test_approval_timeout_defaults_to_reject(self):
-        """If no decision is made within timeout, action should be rejected."""
-        import asyncio
-        from app.api.computer_use import _SessionState
-
-        state = _SessionState("sess-5", "App", "Task", "co-1")
-
-        # Override timeout to near-zero for test speed
-        import app.api.computer_use as cu_module
-        original = asyncio.wait_for
-
-        async def fast_wait_for(coro, timeout):
-            # Simulate timeout immediately
-            raise asyncio.TimeoutError()
-
-        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
-            decision = await state.request_approval("delete", "Delete all records")
-        assert decision == "reject"
-
-    def test_unknown_session_raises_404(self):
-        """Accessing a non-existent session should raise HTTPException 404."""
+    async def test_unknown_session_raises_404(self, session_store):
         from fastapi import HTTPException
-        from app.api.computer_use import _sessions
+        cu, _ = session_store
+        with pytest.raises(HTTPException) as err:
+            await cu.get_session("nonexistent-session", user=_make_user())
+        assert err.value.status_code == 404
 
-        session_id = "nonexistent-session"
-        state = _sessions.get(session_id)
-        assert state is None
-
-    def test_session_wrong_company_raises_403(self):
-        """A session belonging to another company should not be accessible."""
-        from app.api.computer_use import _sessions, _SessionState
-
-        state = _SessionState("sess-x", "App", "Task", "co-OTHER")
-        _sessions["sess-x"] = state
-
-        user = _make_user()  # company_id = "co-1"
-        assert state.company_id != user["company_id"]
+    @pytest.mark.asyncio
+    async def test_session_wrong_company_raises_403(self, session_store):
+        from fastapi import HTTPException
+        cu, _ = session_store
+        await cu._SessionState("sess-x", "App", "Task", "co-OTHER").save()
+        with pytest.raises(HTTPException) as err:
+            await cu.get_session("sess-x", user=_make_user())
+        assert err.value.status_code == 403
 
 
 # ─── Morning Briefing ──────────────────────────────────────────────────────────

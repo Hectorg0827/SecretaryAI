@@ -24,7 +24,7 @@ def main() -> None:
         page.get_by_label("Company name").fill("E2E Acceptance " + uuid.uuid4().hex[:8])
         page.get_by_label("Your full name").fill("E2E Tester")
         page.get_by_label("Work email").fill(email)
-        page.get_by_label("Password", exact=True).fill(password)
+        page.locator("#password").fill(password)
         page.get_by_label("Confirm password").fill(password)
         with page.expect_response(lambda r: r.url.endswith("/auth/register"), timeout=30000) as reg:
             page.get_by_role("button", name="Create account").click()
@@ -35,7 +35,7 @@ def main() -> None:
         page.evaluate("localStorage.clear()")
         page.goto(base + "/login", wait_until="domcontentloaded", timeout=30000)
         page.get_by_label("Email address").fill(email)
-        page.get_by_label("Password", exact=True).fill(password)
+        page.locator("#password").fill(password)
         with page.expect_response(lambda r: r.url.endswith("/auth/login"), timeout=30000) as login:
             page.get_by_role("button", name="Sign in").click()
         assert login.value.status == 200, f"Login HTTP {login.value.status}"

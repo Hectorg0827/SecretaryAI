@@ -13,7 +13,7 @@ DECLARE
   draft JSONB;
   first_claim JSONB;
   replay_claim JSONB;
-  po_id UUID;
+  v_po_id UUID;
   n INTEGER;
   bad BOOLEAN;
   qty NUMERIC;
@@ -36,7 +36,7 @@ BEGIN
     VALUES(a,'RECEIVING','Warehouse') RETURNING id INTO wa;
   draft:=create_warehouse_purchase_order(a,'PO-EVIDENCE-1','SUP',wa,
     '[{"sku":"POTEST","qty_ordered":1200}]'::jsonb,creator);
-  po_id:=(draft->>'po_id')::UUID;
+  v_po_id:=(draft->>'po_id')::UUID;
 
   bad:=FALSE;
   BEGIN
@@ -134,7 +134,7 @@ BEGIN
   SELECT count(*) INTO n FROM stock_movements WHERE company_id=a;
   IF n<>0 THEN RAISE EXCEPTION 'evidence metadata illegally posted stock'; END IF;
   SELECT qty_received INTO qty FROM purchasing_order_lines
-    WHERE company_id=a AND po_id=po_id;
+    WHERE company_id=a AND po_id=v_po_id;
   IF qty<>0 THEN RAISE EXCEPTION 'evidence metadata illegally received cases'; END IF;
 END
 $evidence$;

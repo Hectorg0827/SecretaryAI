@@ -181,3 +181,35 @@ async def test_redis_failure_cannot_issue_refreshed_access_token():
         with pytest.raises(HTTPException) as err:
             await refresh_token(RefreshRequest(access_token=token))
         assert err.value.status_code == 503
+
+
+def test_production_login_limiter_fails_closed_without_redis():
+    from app.utils import rate_limiter as mod
+    limiter = mod.RedisRateLimiter(5, 60, "test:failclosed")
+    with patch.object(mod.settings, "debug", False), \
+         patch.object(limiter, "_redis", side_effect=ConnectionError("offline")), \
+         patch("app.auth.jwt._revocation_alarm") as alarm:
+        with pytest.raises(HTTPException) as err:
+            limiter.is_allowed("login-account")
+        assert err.value.status_code == 503
+        assert alarm.called
+
+
+def test_production_middleware_rejects_requests_without_redis():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    from app.middleware import rate_limit as mod
+    app = FastAPI()
+
+    @app.get("/secure")
+    async def secure():
+        return {"ok": True}
+
+    app.add_middleware(mod.RateLimitMiddleware)
+    with patch.object(mod, "get_settings", return_value=SimpleNamespace(debug=False)), \
+         patch.object(mod.RateLimitMiddleware, "_get_redis", return_value=None), \
+         patch("app.auth.jwt._revocation_alarm") as alarm:
+        response = TestClient(app).get("/secure")
+    assert response.status_code == 503
+    assert alarm.called

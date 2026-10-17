@@ -1,3 +1,44 @@
+# Latest V9 handoff — security gates
+
+## V9 local antivirus + independent review gate (2026-10-17)
+
+- New `CLAMAV_UNIX_SOCKET` backend setting defaults empty (**fail closed**).
+  Configure a trusted, locally mounted Unix-domain `clamd` socket;
+  the backend sends binary `zINSTREAM` chunks and recognizes only exact
+  `stream: OK` or `stream: <signature> FOUND` verdicts. Timeouts, malformed
+  replies, absent scanner, connection failure or stale stored bytes deny
+  scan attestation. Never rely on remote plaintext ClamAV TCP.
+- New `POST /api/logistics/evidence/{id}/scan` re-downloads a private
+  quarantine object, re-hashes it, verifies its recorded length and MIME,
+  and obtains a real scanner verdict (clean/infected). It records the
+  signed-in actor and immutable scan metadata through V9 SQL.
+- New `POST /api/logistics/evidence/{id}/approve-review` requires a
+  separate active owner/manager, **different from the document submitter
+  and scanner operator**, and a previously clean scan.
+- New read-only `GET /api/logistics/evidence/{id}/malware-status` shows
+  scan and approval status. Even an independently approved clean scan
+  **does not create a public URL** or authorize viewing untrusted bytes;
+  `safe_to_view=false`, `accounting_reconciled=false` and
+  `landed_cost_verified=false` are maintained.
+- `database/schema_v9_malware_review.sql` is the manual migration
+  equivalent of two Supabase migration paths. Apply **one** schema path
+  after V8 (never all copies); no live migration or deployment took place.
+- `scripts/test_evidence_malware_review.sql` tests scanner verdict and
+  approval RLS/separation/immutability in real PostgreSQL;
+  `backend/tests/test_evidence_malware_review.py` tests actual ClamAV
+  socket protocol, scanner errors, stored-byte re-verification and
+  API-identity controls. Verify **latest exact-tip** CI and CodeQL.
+- **Staging blockers:** actual ClamAV service socket and signatures updates,
+  real Supabase private bucket, streaming preflight/object length limit,
+  multiworker contention and timeout/performance tests, malformed PDF and
+  image processing, quarantine lifecycle and malicious-file incident
+  response, separate safe rendering/CDR, and external security approval.
+- Frontend dependency audit remains red. No QuickBooks writes, supplier
+  payment or receipt stock changes can occur through scanner routes.
+
+
+---
+
 # Next milestone handoff — V8 receipt evidence integrity
 
 ## V8 quarantined file upload / integrity-only check (2026-10-17)

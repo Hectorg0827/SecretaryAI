@@ -1,12 +1,10 @@
-"""
-Computer Use API — manages screen-reading sessions.
+"""Computer-Use sessions persisted in Redis for cross-worker polling and approval.
 
-POST /api/computer-use/start          — start a new CU session (returns session_id)
-GET  /api/computer-use/sessions/{id}  — poll status + pending approvals
-POST /api/computer-use/approve        — approve a pending action
-POST /api/computer-use/reject         — reject a pending action
+Session records have a one-hour TTL. Redis errors fail closed (503) instead
+of returning an incorrect 404 or accepting an unverified approval.
 """
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -16,17 +14,60 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user, require_permission
+from app.auth.rbac import get_current_user
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+_SESSION_TTL_SECONDS = 3600
+_APPROVAL_TIMEOUT_SECONDS = 300
 
-# ── In-memory session registry ─────────────────────────────────────────────────
-# Keyed by session_id. Cleaned up when the frontend confirms completion.
 
-_sessions: dict[str, "_SessionState"] = {}
+def _key(session_id: str) -> str:
+    return f"cu:session:{session_id}"
+
+
+def _redis():
+    import redis.asyncio as redis_lib
+    return redis_lib.from_url(
+        settings.redis_url, decode_responses=True,
+        socket_connect_timeout=2, socket_timeout=2,
+    )
+
+
+async def _read(session_id: str) -> dict:
+    try:
+        async with _redis() as r:
+            state = await r.hgetall(_key(session_id))
+        return state or {}
+    except Exception:
+        log.exception("CU Redis read unavailable")
+        raise HTTPException(status_code=503, detail="Session store unavailable")
+
+
+async def _write(session_id: str, **fields) -> None:
+    try:
+        async with _redis() as r:
+            await r.hset(_key(session_id), mapping=fields)
+            await r.expire(_key(session_id), _SESSION_TTL_SECONDS)
+    except Exception:
+        log.exception("CU Redis write unavailable")
+        raise HTTPException(status_code=503, detail="Session store unavailable")
+
+
+# Atomic compare-and-set: approval must still belong to the expected company,
+# pending action, and session. Only the first decision can win.
+_DECIDE_SCRIPT = """
+local key = KEYS[1]
+if redis.call('EXISTS', key) == 0 then return 'missing' end
+if redis.call('HGET', key, 'company_id') ~= ARGV[1] then return 'forbidden' end
+if redis.call('HGET', key, 'status') ~= 'waiting_approval' then return 'not_pending' end
+if redis.call('HGET', key, 'approval_id') ~= ARGV[2] then return 'mismatch' end
+if redis.call('HGET', key, 'approval_decision') ~= '' then return 'already' end
+redis.call('HSET', key, 'approval_decision', ARGV[3])
+return 'ok'
+"""
 
 
 class _SessionState:
@@ -35,46 +76,53 @@ class _SessionState:
         self.app_name = app_name
         self.task = task
         self.company_id = company_id
-        self.status: str = "running"      # running | waiting_approval | done | error
-        self.steps_completed: int = 0
-        self.result: Optional[dict] = None
-        self.error: Optional[str] = None
         self.started_at = datetime.now(timezone.utc).isoformat()
 
-        # Pending approval request (set by engine task when approval needed)
-        self.pending_approval: Optional[dict] = None
-        # Engine signals this when it needs a decision; router sets it after approve/reject
-        self._approval_event: asyncio.Event = asyncio.Event()
-        self._approval_decision: Optional[str] = None  # "approve" | "reject"
+    async def save(self) -> None:
+        await _write(
+            self.session_id, session_id=self.session_id, app_name=self.app_name,
+            task=self.task, company_id=self.company_id, started_at=self.started_at,
+            status="running", steps_completed="0", result="", error="",
+            pending_approval="", approval_id="", approval_decision="",
+        )
 
-    # Called by the engine when it needs human approval before an action
     async def request_approval(self, action_type: str, description: str) -> str:
-        self.pending_approval = {
-            "id": str(uuid.uuid4()),
-            "action_type": action_type,
+        """Wait for an owner/manager's decision, including on another worker."""
+        approval_id = str(uuid.uuid4())
+        pending = {
+            "id": approval_id, "action_type": action_type,
             "description": description,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self.status = "waiting_approval"
-        self._approval_event.clear()
-        self._approval_decision = None
-
-        # Wait up to 5 minutes for human decision
+        await _write(
+            self.session_id, status="waiting_approval",
+            pending_approval=json.dumps(pending), approval_id=approval_id,
+            approval_decision="",
+        )
+        decision = "reject"
         try:
-            await asyncio.wait_for(self._approval_event.wait(), timeout=300)
-        except asyncio.TimeoutError:
-            self._approval_decision = "reject"
+            # Poll Redis, not a per-process asyncio.Event.
+            for _ in range(_APPROVAL_TIMEOUT_SECONDS * 4):
+                async with _redis() as r:
+                    value = await r.hget(_key(self.session_id), "approval_decision")
+                if value in ("approve", "reject"):
+                    decision = value
+                    break
+                if value is None:  # expired or deleted; never auto-approve
+                    break
+                await asyncio.sleep(0.25)
+        except Exception:
+            log.exception("CU approval store unavailable; rejecting action")
+        finally:
+            try:
+                await _write(
+                    self.session_id, status="running", pending_approval="",
+                    approval_id="", approval_decision="",
+                )
+            except HTTPException:
+                pass
+        return decision
 
-        self.pending_approval = None
-        self.status = "running"
-        return self._approval_decision or "reject"
-
-    def resolve_approval(self, decision: str) -> None:
-        self._approval_decision = decision
-        self._approval_event.set()
-
-
-# ── Schemas ────────────────────────────────────────────────────────────────────
 
 class StartRequest(BaseModel):
     app_name: str
@@ -103,138 +151,109 @@ class ApprovalRequest(BaseModel):
     approval_id: str
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
 @router.post("/start", response_model=StartResponse)
 async def start_session(
     req: StartRequest,
     user: dict = Depends(get_current_user),
     db=Depends(get_db),
 ):
-    """
-    Launch a new Computer Use session.
-    The engine runs in the background and the client polls /sessions/{id} for status.
-    """
     if not settings.computer_use_enabled:
         raise HTTPException(status_code=403, detail="Computer Use is disabled on this server")
-
-    # Computer Use reads the user's screen — restrict to privileged roles.
-    # (Was `require_permission(user, "computer_use")`, a broken call: that helper
-    # is a dependency FACTORY taking one arg, so this raised at runtime and the
-    # permission name did not exist.)
     if user.get("role") not in ("owner", "manager"):
         raise HTTPException(status_code=403, detail="Not authorized to start a Computer Use session")
 
-    session_id = str(uuid.uuid4())
     company = db.table("companies").select("*").eq("id", user["company_id"]).execute()
     if not company.data:
         raise HTTPException(status_code=404, detail="Company not found")
-    company_config = company.data[0]
 
-    state = _SessionState(session_id, req.app_name, req.task, user["company_id"])
-    _sessions[session_id] = state
+    state = _SessionState(str(uuid.uuid4()), req.app_name, req.task, user["company_id"])
+    # Do not start work without a durable session that another worker can read.
+    await state.save()
+    asyncio.create_task(_run_engine(state, company.data[0], db))
+    log.info("CU session %s started", state.session_id)
+    return StartResponse(session_id=state.session_id, status="running")
 
-    # Run the CU engine in the background
-    asyncio.create_task(_run_engine(state, company_config, db))
 
-    log.info("CU session %s started: %s / %s", session_id, req.app_name, req.task)
-    return StartResponse(session_id=session_id, status="running")
+async def _owned_session(session_id: str, user: dict) -> dict:
+    state = await _read(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if state["company_id"] != user["company_id"]:
+        raise HTTPException(status_code=403, detail="Not your session")
+    return state
 
 
 @router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
-async def get_session(
-    session_id: str,
-    user: dict = Depends(get_current_user),
-):
-    """Poll the status of a running Computer Use session."""
-    state = _sessions.get(session_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if state.company_id != user["company_id"]:
-        raise HTTPException(status_code=403, detail="Not your session")
-
+async def get_session(session_id: str, user: dict = Depends(get_current_user)):
+    state = await _owned_session(session_id, user)
     return SessionStatusResponse(
-        session_id=state.session_id,
-        status=state.status,
-        app_name=state.app_name,
-        task=state.task,
-        steps_completed=state.steps_completed,
-        started_at=state.started_at,
-        result=state.result,
-        error=state.error,
-        pending_approval=state.pending_approval,
+        session_id=state["session_id"], status=state["status"],
+        app_name=state["app_name"], task=state["task"],
+        steps_completed=int(state.get("steps_completed") or 0),
+        started_at=state["started_at"],
+        result=json.loads(state["result"]) if state.get("result") else None,
+        error=state.get("error") or None,
+        pending_approval=json.loads(state["pending_approval"])
+        if state.get("pending_approval") else None,
     )
 
 
-@router.post("/approve")
-async def approve_action(
-    req: ApprovalRequest,
-    user: dict = Depends(get_current_user),
-):
-    """Approve a pending Computer Use action."""
-    state = _sessions.get(req.session_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if state.company_id != user["company_id"]:
-        raise HTTPException(status_code=403, detail="Not your session")
-    if state.status != "waiting_approval":
-        raise HTTPException(status_code=400, detail="No pending approval for this session")
-    if not state.pending_approval or state.pending_approval["id"] != req.approval_id:
-        raise HTTPException(status_code=400, detail="Approval ID mismatch")
+async def _decide(req: ApprovalRequest, user: dict, decision: str) -> dict:
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Not authorized to decide approvals")
+    await _owned_session(req.session_id, user)
+    try:
+        async with _redis() as r:
+            outcome = await r.eval(
+                _DECIDE_SCRIPT, 1, _key(req.session_id),
+                user["company_id"], req.approval_id, decision,
+            )
+    except Exception:
+        log.exception("CU Redis decision unavailable")
+        raise HTTPException(status_code=503, detail="Session store unavailable")
+    errors = {
+        "missing": (404, "Session not found"),
+        "forbidden": (403, "Not your session"),
+        "not_pending": (400, "No pending approval for this session"),
+        "mismatch": (400, "Approval ID mismatch"),
+        "already": (409, "Approval already decided"),
+    }
+    if outcome != "ok":
+        status, detail = errors.get(outcome, (503, "Session store unavailable"))
+        raise HTTPException(status_code=status, detail=detail)
+    log.info("CU session %s decision %s", req.session_id, decision)
+    return {"status": "approved" if decision == "approve" else "rejected"}
 
-    state.resolve_approval("approve")
-    log.info("CU session %s: action %s approved", req.session_id, req.approval_id)
-    return {"status": "approved"}
+
+@router.post("/approve")
+async def approve_action(req: ApprovalRequest, user: dict = Depends(get_current_user)):
+    return await _decide(req, user, "approve")
 
 
 @router.post("/reject")
-async def reject_action(
-    req: ApprovalRequest,
-    user: dict = Depends(get_current_user),
-):
-    """Reject a pending Computer Use action (stops the session)."""
-    state = _sessions.get(req.session_id)
-    if not state:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if state.company_id != user["company_id"]:
-        raise HTTPException(status_code=403, detail="Not your session")
-    if state.status != "waiting_approval":
-        raise HTTPException(status_code=400, detail="No pending approval for this session")
-
-    state.resolve_approval("reject")
-    log.info("CU session %s: action %s rejected — session will stop", req.session_id, req.approval_id if hasattr(req, "approval_id") else "?")
-    return {"status": "rejected"}
+async def reject_action(req: ApprovalRequest, user: dict = Depends(get_current_user)):
+    return await _decide(req, user, "reject")
 
 
-# ── Background engine task ─────────────────────────────────────────────────────
-
-async def _run_engine(state: "_SessionState", company_config: dict, db) -> None:
+async def _run_engine(state: _SessionState, company_config: dict, db) -> None:
     try:
         from app.computer_use.engine import ComputerUseEngine
         engine = ComputerUseEngine(company_config)
-        result = await engine.extract_data(
-            app_name=state.app_name,
-            task=state.task,
-        )
-        state.result = result
-        state.status = "done"
+        result = await engine.extract_data(app_name=state.app_name, task=state.task)
+        await _write(state.session_id, status="done", result=json.dumps(result))
         log.info("CU session %s completed successfully", state.session_id)
-
-        # Persist result summary to action_log
         try:
             db.table("action_log").insert({
-                "company_id": state.company_id,
-                "session_id": state.session_id,
-                "event": "computer_use_complete",
-                "app_name": state.app_name,
-                "task": state.task,
-                "status": "success",
+                "company_id": state.company_id, "session_id": state.session_id,
+                "event": "computer_use_complete", "app_name": state.app_name,
+                "task": state.task, "status": "success",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }).execute()
         except Exception as exc:
             log.warning("Could not write CU audit log: %s", exc)
-
     except Exception as exc:
-        state.status = "error"
-        state.error = str(exc)
-        log.error("CU session %s failed: %s", state.session_id, exc)
+        log.exception("CU session %s failed", state.session_id)
+        try:
+            await _write(state.session_id, status="error", error=str(exc)[:500])
+        except HTTPException:
+            log.error("Cannot persist CU failure; Redis unavailable")

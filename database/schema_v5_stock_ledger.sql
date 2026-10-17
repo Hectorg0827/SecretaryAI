@@ -130,7 +130,7 @@ CREATE OR REPLACE FUNCTION post_stock_movement(
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
-AS $
+AS $stock$
 DECLARE
     v_id UUID;
     v_row stock_movements%ROWTYPE;
@@ -229,7 +229,7 @@ BEGIN
         'movement_id', v_id, 'replayed', FALSE, 'balance', v_qty
     );
 END;
-$$;
+$stock$;
 
 -- Direct clients must not invoke this procedure, even with a forged company ID.
 REVOKE ALL ON FUNCTION post_stock_movement(

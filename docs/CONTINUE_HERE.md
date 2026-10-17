@@ -1,3 +1,33 @@
+## Next milestone — inventory provenance and reconciliation preview (2026-10-17)
+
+- A new **read-only** `GET /api/logistics/reconciliation/stock/{sku}` compares
+  explicitly mapped QuickBooks inventory with stock-ledger balance buckets
+  for the current tenant, without adding overlapping source quantities.
+- Missing or ambiguous QB item mappings, incomplete ledger pagination,
+  malformed source quantities, and QuickBooks outages are flagged; **even
+  matching numerical values remain `reconciled=false`** because the ledger
+  lacks verified opening balances/location coverage and QB's sellable versus
+  damaged scope may differ.
+- No accounting write, supplier payment, ledger stock adjustment or hidden
+  source override occurs. The earlier logistics receipt **analysis** no
+  longer updates `procurement_cycles` to a misleading warehouse-received
+  stage.
+- `backend/tests/test_stock_reconciliation_preview.py` covers equal-value
+  scope uncertainty, missing explicit mappings, connector failures, tenant
+  scoping, page limits and analysis-only stage behavior.
+- The older PR tip `c3139cd1` had **1,168 backend tests passing and
+  successful V6 PostgreSQL acceptance**. Check this new **exact tip's**
+  CI and CodeQL before promoting readiness; npm high-severity advisories
+  remain a release gate.
+
+**Remaining integration gate:** prove warehouse/QuickBooks location and unit
+coverage with signed evidence and source timestamps, then reconcile
+documented variances and accounting through Conductor. Without that proof,
+do not call inventory or accounting fully reconciled.
+
+
+---
+
 # Latest handoff — P0 purchase-to-stock workflow (2026-10-17)
 
 **Continue only on** `claude/blissful-noether-ik7p9l`, existing PR #74,

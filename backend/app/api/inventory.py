@@ -49,8 +49,10 @@ async def list_inventory(
         status = evaluate_inventory(
             item_id=item.get("qb_id", ""),
             product_name=item.get("product_name", ""),
-            warehouse_1_qty=int(item.get("warehouse_qty", 0)),
-            warehouse_2_qty=int(item.get("qb_qty", 0)),
+            # total_qty is reconciled by the adapter; QB and warehouse
+            # readings may represent overlapping physical inventory.
+            warehouse_1_qty=int(item.get("total_qty", item.get("qb_qty", 0))),
+            warehouse_2_qty=0,
             weekly_sell_rate=sell_rate,
         )
 
@@ -91,8 +93,10 @@ async def get_inventory_alerts(
         status = evaluate_inventory(
             item_id=item.get("qb_id", ""),
             product_name=item.get("product_name", ""),
-            warehouse_1_qty=int(item.get("warehouse_qty", 0)),
-            warehouse_2_qty=int(item.get("qb_qty", 0)),
+            # total_qty is reconciled by the adapter; QB and warehouse
+            # readings may represent overlapping physical inventory.
+            warehouse_1_qty=int(item.get("total_qty", item.get("qb_qty", 0))),
+            warehouse_2_qty=0,
             weekly_sell_rate=sell_rate,
         )
 

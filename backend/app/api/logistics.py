@@ -359,6 +359,118 @@ async def approve_staged_receipt_and_post_inventory(
 
 
 
+# ─── Read-only stock versus QuickBooks comparison ────────────────────────────
+# The in-app ledger starts from verified receipts; QuickBooks may include
+# opening balances or warehouses that have not been onboarded. Their values
+# MUST NOT be called reconciled until a separate coverage, scope, unit and
+# item-mapping attestation exists. This endpoint never mutates either system.
+
+@router.get("/reconciliation/stock/{sku}")
+async def preview_stock_reconciliation(
+    sku: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    if not sku or len(sku) > 120:
+        raise HTTPException(status_code=422, detail="Invalid SKU")
+    company_id = user["company_id"]
+    stock_rows = _read_purchasing_rows(
+        db.table("stock_skus")
+        .select("sku,product_name,base_unit,qb_item_id")
+        .eq("company_id", company_id).eq("sku", sku).limit(2)
+    )
+    if not stock_rows:
+        raise HTTPException(status_code=404, detail="Stock SKU not found")
+    if len(stock_rows) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous stock SKU record")
+    item = stock_rows[0]
+    balances = _read_purchasing_rows(
+        db.table("stock_balances")
+        .select("warehouse_id,lot_code,bucket,unit,quantity,updated_at")
+        .eq("company_id", company_id).eq("sku", sku).limit(1001)
+    )
+    if len(balances) > 1000:
+        raise HTTPException(status_code=503, detail="Stock ledger snapshot exceeds supported scope")
+
+    from decimal import Decimal, InvalidOperation
+    totals = {"available": Decimal("0"), "damaged": Decimal("0"),
+              "quarantined": Decimal("0")}
+    try:
+        for row in balances:
+            if row["bucket"] not in totals or row["unit"] != item["base_unit"]:
+                raise ValueError("Unexpected ledger unit or bucket")
+            qty = Decimal(str(row["quantity"]))
+            if not qty.is_finite() or qty < 0:
+                raise ValueError("Invalid ledger amount")
+            totals[row["bucket"]] += qty
+    except (KeyError, ValueError, TypeError, InvalidOperation) as exc:
+        log.error("Stock-ledger consistency failure for tenant %s (%s)",
+                  company_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Stock ledger snapshot invalid") from exc
+
+    def _number(qty: Decimal) -> float:
+        return float(qty)
+
+    output = {
+        "sku": item["sku"],
+        "product_name": item["product_name"],
+        "unit": item["base_unit"],
+        "mapped_qb_item_id": item.get("qb_item_id"),
+        "ledger_record_count": len(balances),
+        "ledger_quantities": {k: _number(v) for k, v in totals.items()},
+        "ledger_total": _number(sum(totals.values())),
+        "latest_ledger_update": max(
+            (str(row["updated_at"]) for row in balances
+             if row.get("updated_at")), default=None
+        ),
+        "qb_quantity": None,
+        "indicative_quantity_difference": None,
+        "state": "unverified_scope",
+        "reconciled": False,
+        "inventory_posted_by_comparison": False,
+        "accounting_reconciled": False,
+        "scope_warning": (
+            "Ledger includes only movements onboarded into SecretaryAI. "
+            "QuickBooks may include other locations, opening balances or "
+            "different sellable/damaged quantity semantics. Confirm scope, "
+            "item mapping and units before interpreting a difference."
+        ),
+    }
+    qb_id = str(item.get("qb_item_id") or "").strip()
+    if not qb_id:
+        output["state"] = "missing_explicit_qb_mapping"
+        return output
+
+    from app.api.deps import get_adapter
+    # Resolve credentials from this tenant only; no global/shared QB client.
+    adapter = get_adapter(user=user, db=db)
+    try:
+        qb_items = await adapter.get_inventory_qb()
+    except Exception as exc:
+        log.warning("QB reconciliation read failed for tenant %s: %s",
+                    company_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="QuickBooks inventory unavailable") from exc
+    matches = [row for row in qb_items if str(row.qb_id) == qb_id]
+    if len(matches) != 1:
+        output["state"] = (
+            "qb_item_not_found" if not matches else "ambiguous_qb_mapping"
+        )
+        return output
+    try:
+        qb_qty = Decimal(str(matches[0].quantity_on_hand))
+        if not qb_qty.is_finite():
+            raise ValueError("Non-finite QuickBooks quantity")
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Invalid QuickBooks quantity") from exc
+    output["qb_quantity"] = _number(qb_qty)
+    output["indicative_quantity_difference"] = _number(
+        qb_qty - sum(totals.values())
+    )
+    # Even numerical equality is not proof of source parity.
+    return output
+
+
 # ─── Stage 1 — Demand Monitoring & Reorder Intelligence ──────────────────────
 
 
@@ -662,13 +774,8 @@ async def process_warehouse_receipt(
     # It does NOT persist an authoritative receiving document or book stock.
     # Do not promote it to a completed warehouse-received state until the
     # approved PO, inspected receipt and idempotent stock posting are wired.
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.po_number,
-        stage=7, stage_name="warehouse_receipt_analyzed",
-        total_cases=receipt.total_cases_received,
-    )
-
+    # Analysis is deliberately not persisted as a received stock event.
+    # The separate durable receipt approval endpoint is authoritative.
     return {
         "po_number": request.po_number,
         "status": "analysis_only",

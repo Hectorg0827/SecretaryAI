@@ -1,3 +1,50 @@
+# Latest handoff — procurement evidence metadata V7 (2026-10-17)
+
+Continue only on existing SecretaryAI PR #74 and branch
+`claude/blissful-noether-ik7p9l`; do not merge or deploy.
+
+## Prior confirmed state
+Commit `2532c421`: complete CI run `39067439541` and CodeQL
+`39067439543` both **success**. Backend: **1,178 passed, 5 skipped**.
+Report-only dependency audit remained failed with high frontend advisories.
+
+## Current V7 implementation (reverify latest SHA)
+- Manual schema `database/schema_v7_purchasing_evidence.sql`, plus
+  equivalent Supabase root/backend migrations; apply **one path**, after V6,
+  only in an approved staging validation followed by planned rollout.
+- Append-only, tenant-isolated evidence **claims** tied to an approved PO:
+  document kind, tenant-prefixed storage object key, user-claimed SHA-256,
+  optional claimed monetary amount and ISO-style 3-letter currency code,
+  submitting actor, replay/idempotency key and source timestamp.
+- SQL restricts actor to a current, active staff role; rejects foreign
+  company/path, duplicate conflicting key, NaN, excess decimal precision,
+  unapproved PO and attempted mutation of submitted claims. Browser roles
+  cannot execute the privileged RPC or insert directly.
+- `POST /api/logistics/orders/{po_number}/evidence` registers metadata;
+  `GET /api/logistics/orders/{po_number}/evidence` groups **unverified**
+  claims by currency without netting or converting currency.
+- `scripts/test_purchasing_evidence.sql` applies in real Postgres CI;
+  `backend/tests/test_purchasing_evidence.py` covers actor binding,
+  currency, source validation, tenant isolation and false verification.
+- These routes never upload files, confirm that object bytes exist, compare
+  actual SHA-256, certify a freight invoice, book a landed-cost entry, touch
+  QuickBooks or generate a payment. `verification_status=unverified` and
+  `accounting_reconciled=false` must remain truthful.
+
+## Immediate safe follow-on
+1. Verify latest exact-commit CI, CodeQL and Postgres V7 acceptance output.
+2. Implement actual tenant-private file storage/upload + hash verification and
+   retention policies; enforce MIME/size/antivirus scanning. Only an
+   authorized server-side verifier may record a trusted attestation.
+3. Match verified invoice/BOL/pallet/lot/receiving evidence with booked
+   quantities and freight/duty/broker charges; review discrepancies.
+4. Introduce separately approved, idempotent accounting drafts with a
+   Conductor QuickBooks sandbox, not blind QuickBooks writes.
+5. Complete UI acceptance, infrastructure durability, independent security
+   tests and all original GA gates. Frontend npm advisories remain unresolved.
+
+---
+
 ## Next milestone — inventory provenance and reconciliation preview (2026-10-17)
 
 - A new `GET /api/logistics/orders/{po_number}` returns tenant-scoped PO lines, staged receipts, posted receipt references, and exact decimal remaining quantities; it declares separate-query consistency and refuses to claim QB accounting reconciliation.

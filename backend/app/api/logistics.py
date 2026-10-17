@@ -481,15 +481,23 @@ async def process_warehouse_receipt(
     )
 
     receipt = result["receipt"]
+    # IMPORTANT: this legacy stage computes exceptions and lead times only.
+    # It does NOT persist an authoritative receiving document or book stock.
+    # Do not promote it to a completed warehouse-received state until the
+    # approved PO, inspected receipt and idempotent stock posting are wired.
     _upsert_cycle(
         db, user["company_id"],
         po_number=request.po_number,
-        stage=7, stage_name="warehouse_received",
+        stage=7, stage_name="warehouse_receipt_analyzed",
         total_cases=receipt.total_cases_received,
     )
 
     return {
         "po_number": request.po_number,
+        "status": "analysis_only",
+        "inventory_posted": False,
+        "accounting_reconciled": False,
+        "requires_verified_receipt": True,
         "total_cases_received": receipt.total_cases_received,
         "shortages": result["shortages"],
         "shortage_count": len(result["shortages"]),

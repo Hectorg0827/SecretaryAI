@@ -58,6 +58,7 @@ class Database:
                 "claimed_sha256": _sha(payload), "verification_status": "unverified",
             }],
             "purchasing_evidence_integrity_checks": [],
+            "purchasing_evidence_malware_scans": [],
             "users": [{
                 "id": "actor-1", "role": "back_office", "is_active": active,
             }],
@@ -228,4 +229,14 @@ async def test_integrity_read_does_not_expose_file():
     assert out["integrity_status"]=="sha256_matched_at_upload"
     assert out["safe_to_view"] is False
     assert out["accounting_reconciled"] is False
+    assert out["malware_scan_status"] == "not_scanned"
     db.storage.from_.assert_not_called()
+
+    # V9 scanned files must not be falsely reported as unscanned, and even
+    # a clean result never grants a download or accounting authorization.
+    db.tables["purchasing_evidence_malware_scans"]=[{"scan_status":"clean"}]
+    checked=await get_purchasing_evidence_integrity(
+        eid,user=actor(db),db=db)
+    assert checked["malware_scan_status"] == "clean"
+    assert checked["safe_to_view"] is False
+    assert checked["accounting_reconciled"] is False

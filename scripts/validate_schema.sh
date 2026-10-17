@@ -29,7 +29,7 @@ $roles$;
 GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
@@ -41,3 +41,7 @@ echo "✓ Stock-ledger integrity checks passed."
 echo '── testing approved purchase-to-stock lifecycle'
 psql -v ON_ERROR_STOP=1 -f scripts/test_purchasing_receiving.sql
 echo '✓ Purchase-to-stock acceptance tests passed.'
+
+echo '── testing unverified purchasing evidence and cost claims'
+psql -v ON_ERROR_STOP=1 -f scripts/test_purchasing_evidence.sql
+echo '✓ Purchasing evidence isolation and immutability checks passed.'

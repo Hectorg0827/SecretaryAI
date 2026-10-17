@@ -542,13 +542,22 @@ async def get_purchasing_evidence_integrity(
     )
     if len(records) > 1:
         raise HTTPException(status_code=503, detail="Ambiguous integrity record")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+          .select("scan_status")
+          .eq("company_id", cid).eq("evidence_id", str(evidence_id)).limit(2)
+    )
+    if len(scans) > 1 or (scans and scans[0].get("scan_status") not in ("clean", "infected")):
+        raise HTTPException(status_code=503, detail="Invalid malware scan record")
     return {
         "evidence_id": str(evidence_id),
         "integrity": records[0] if records else None,
         "integrity_status": (
             records[0]["integrity_status"] if records else "not_checked"
         ),
-        "malware_scan_status": "not_scanned",
+        "malware_scan_status": (
+            scans[0]["scan_status"] if scans else "not_scanned"
+        ),
         "safe_to_view": False,
         "financial_review_status": "not_reviewed",
         "accounting_reconciled": False,

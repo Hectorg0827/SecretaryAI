@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_publishable_key: str = ""
 
+    # Billing master switch.
+    #
+    # When true (the default) the paid routers in app/main.py are gated behind
+    # require_active_subscription, and a production start REFUSES unless Stripe
+    # is configured — see the validator below. The two have to move together:
+    # a paywalled deployment with no Stripe is a product nobody can use and
+    # nobody can buy, because every route returns 402 and checkout hands back a
+    # mock URL.
+    #
+    # Set it to false only for an internal or pilot deployment that is
+    # deliberately free. The app then logs, loudly and on every start, that it
+    # is serving the whole product for nothing.
+    billing_enabled: bool = True
+
     # Sentry
     sentry_dsn: str = ""
 
@@ -128,6 +142,38 @@ class Settings(BaseSettings):
             errors.append(
                 f"Partial Google config: {missing} must also be set when using Gmail/Sheets"
             )
+
+        # Billing must not be half-configured in production.
+        #
+        # Before this check, app/api/billing.py fell back to MOCK mode whenever
+        # STRIPE_SECRET_KEY was absent: /billing/checkout returned
+        # https://mock-stripe.example.com/... and webhooks were ignored. In
+        # production that is indistinguishable from working software until
+        # someone notices no money has arrived. With the paywall now live, it is
+        # worse — every paid route answers 402 and there is no way to pay.
+        #
+        # So: fail at startup, where it is unmissable, rather than at the first
+        # customer's checkout.
+        if self.billing_enabled and not self.debug:
+            if not self.stripe_secret_key:
+                errors.append(
+                    "BILLING_ENABLED is true and DEBUG is false, but "
+                    "STRIPE_SECRET_KEY is not set. Billing would silently run in "
+                    "mock mode: checkout would return a fake URL and no customer "
+                    "could pay, while every paid route returns 402. Set "
+                    "STRIPE_SECRET_KEY (Stripe Dashboard > Developers > API keys), "
+                    "or set BILLING_ENABLED=false to run deliberately free."
+                )
+            if not self.stripe_webhook_secret:
+                errors.append(
+                    "BILLING_ENABLED is true and DEBUG is false, but "
+                    "STRIPE_WEBHOOK_SECRET is not set. Stripe webhooks would be "
+                    "rejected, so subscriptions would never activate, renew or "
+                    "cancel in this database and paying customers would still be "
+                    "refused. Set STRIPE_WEBHOOK_SECRET (Stripe Dashboard > "
+                    "Developers > Webhooks > your endpoint > Signing secret), or "
+                    "set BILLING_ENABLED=false to run deliberately free."
+                )
 
         if errors:
             raise ValueError("Configuration errors:\n" + "\n".join(f"  • {e}" for e in errors))

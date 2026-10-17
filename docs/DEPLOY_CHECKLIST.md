@@ -142,9 +142,28 @@ scheduler). Railway lets you paste many at once with its **Raw Editor**.
 **[you]** Also go to developer.intuit.com → your app → **Redirect URIs** and
 add the exact same `https://YOUR-API-ADDRESS/auth/qbo/callback` there.
 
-> Setting `STRIPE_SECRET_KEY` is Part of the billing work and is covered
-> separately. Until it is set, billing runs in a mock mode that charges
-> nobody.
+### Required — billing (the server now refuses to start without these)
+
+The paywall is live, so these are no longer optional in production. If
+`BILLING_ENABLED` is `true` (the default) and `DEBUG` is `false`, the server
+**refuses to start** unless both keys are present, and the deploy log says
+exactly which one is missing.
+
+| Variable | What to put |
+|---|---|
+| `STRIPE_SECRET_KEY` | Stripe Dashboard → Developers → API keys → Secret key |
+| `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard → Developers → Webhooks → add an endpoint pointing at `https://YOUR-API-ADDRESS/webhooks/stripe`, then copy its **Signing secret** |
+| `STRIPE_PUBLISHABLE_KEY` | Same API keys page → Publishable key (safe to expose) |
+
+> **Why it refuses rather than warning.** Without the secret key, billing used
+> to fall back to a mock mode: checkout returned a fake
+> `mock-stripe.example.com` URL and webhooks were ignored. That looks exactly
+> like working software until you notice no money has arrived. Without the
+> webhook secret, subscriptions never activate in the database, so customers
+> who *did* pay still get refused.
+>
+> If you want to run free for a pilot, set `BILLING_ENABLED=false`. The paywall
+> switches off with it, and the log says so on every start.
 
 ---
 

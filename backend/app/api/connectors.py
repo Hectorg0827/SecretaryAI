@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user
+from app.middleware.subscription_guard import require_active_subscription
 from app.auth.jwt import create_access_token
 from app.config import get_settings
 from app.domain.connector_protocol import (
@@ -75,6 +76,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 _bearer = HTTPBearer(auto_error=False)
 
 
+# NOTE on the paywall: the endpoints below that a *person* calls
+# (/register, /status, /status/{id}, /generate-install-secret,
+# /dispatch-task) each carry require_active_subscription individually.
+# The ones a *connector* calls (/heartbeat, /tasks, /task-result,
+# /sync-status, /error) authenticate with a connector token through the
+# helper below and are intentionally NOT gated: they hold no user JWT, so a
+# subscription check would reject the agent with a 401 it cannot act on.
+# Gating /dispatch-task is what stops new work being queued for an unpaid
+# account. (Scheduled Celery tasks enqueue connector work without passing
+# through this router; that path is not subscription-checked yet.)
 def get_connector_identity(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db=Depends(get_db),
@@ -138,6 +149,7 @@ def _mark_stale_connectors(db, company_id: str) -> None:
 async def register_connector(
     req: RegisterRequest,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -483,6 +495,7 @@ def _remediation_hint(error_type: str) -> str | None:
 @router.get("/status")
 async def get_connector_status(
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -556,6 +569,7 @@ async def get_connector_status(
 async def get_single_connector_status(
     registration_id: str,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """Single connector detail with recent sync logs."""
@@ -600,6 +614,7 @@ async def get_single_connector_status(
 @router.post("/generate-install-secret")
 async def generate_install_secret(
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -641,6 +656,7 @@ class DispatchTaskRequest(BaseModel):
 async def dispatch_task(
     body: DispatchTaskRequest,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """

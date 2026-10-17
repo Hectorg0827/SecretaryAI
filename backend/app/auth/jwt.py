@@ -6,6 +6,7 @@ to the token's remaining lifetime. get_current_user checks the blacklist on
 every request.
 """
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -19,6 +20,23 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALGORITHM = "HS256"
 
 _REVOKE_PREFIX = "jwt_revoked:"
+log = logging.getLogger(__name__)
+
+
+class RevocationStoreUnavailable(RuntimeError):
+    """A JWT cannot be trusted while the revocation backend is unavailable."""
+
+
+def _revocation_alarm(operation: str, exc: Exception) -> None:
+    # CRITICAL log goes to the production log stream; Sentry receives an event
+    # when configured. Operations must page on this signal or /health failures.
+    log.critical("SECURITY Redis revocation store unavailable during %s", operation, exc_info=True)
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
+    except Exception:
+        log.exception("Sentry unavailable while reporting revocation outage")
+
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -62,8 +80,9 @@ def revoke_token(token: str) -> None:
         import redis as redis_lib
         r = redis_lib.from_url(settings.redis_url, decode_responses=True)
         r.setex(f"{_REVOKE_PREFIX}{jti}", ttl, "1")
-    except Exception:
-        pass  # If Redis is down, revocation is best-effort
+    except Exception as exc:
+        _revocation_alarm("revoke_token", exc)
+        raise RevocationStoreUnavailable("Redis revocation store unavailable") from exc
 
 
 def is_token_revoked(jti: str) -> bool:
@@ -72,8 +91,9 @@ def is_token_revoked(jti: str) -> bool:
         import redis as redis_lib
         r = redis_lib.from_url(settings.redis_url, decode_responses=True)
         return r.exists(f"{_REVOKE_PREFIX}{jti}") == 1
-    except Exception:
-        return False  # Fail open — don't lock out users on Redis failure
+    except Exception as exc:
+        _revocation_alarm("is_token_revoked", exc)
+        raise RevocationStoreUnavailable("Redis revocation store unavailable") from exc
 
 
 def blacklist_jti(jti: str, ttl_seconds: int) -> None:
@@ -90,8 +110,9 @@ def blacklist_jti(jti: str, ttl_seconds: int) -> None:
         import redis as redis_lib
         r = redis_lib.from_url(settings.redis_url, decode_responses=True)
         r.setex(f"{_REVOKE_PREFIX}{jti}", int(ttl_seconds), "1")
-    except Exception:
-        pass  # Best-effort if Redis is down
+    except Exception as exc:
+        _revocation_alarm("blacklist_jti", exc)
+        raise RevocationStoreUnavailable("Redis revocation store unavailable") from exc
 
 
 def hash_password(password: str) -> str:

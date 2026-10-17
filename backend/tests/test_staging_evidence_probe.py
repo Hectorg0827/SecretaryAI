@@ -17,7 +17,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 from scripts.verify_evidence_staging import (
     _CLEAN_PDF, _EICAR, StagingProbeFailure, staging_config,
     validate_bucket_limits, parse_clamd_signature_date,
-    probe_real_private_storage, probe_real_scanner,
+    probe_real_private_storage, probe_real_scanner, require_anon_denied,
 )
 from app.services.purchasing_evidence_bytes import MAX_BYTES
 
@@ -180,3 +180,37 @@ def test_staging_probe_script_never_has_default_write_mode():
     from scripts.verify_evidence_staging import main
     with pytest.raises(SystemExit):
         main([])
+
+
+def test_storage_outage_is_not_mistaken_for_access_denial():
+    with pytest.raises(StagingProbeFailure, match="inconclusive"):
+        require_anon_denied(
+            lambda: (_ for _ in ()).throw(ConnectionError("staging outage")),
+            "download quarantined evidence", allow_not_found=True,
+        )
+
+
+def test_unexpected_404_not_sufficient_for_anon_write_denial():
+    with pytest.raises(StagingProbeFailure, match="inconclusive"):
+        require_anon_denied(
+            lambda: (_ for _ in ()).throw(FileNotFoundError("path")),
+            "write into private quarantine",
+        )
+
+
+def test_cleanup_failure_refuses_a_pass():
+    class FailedCleanup(FakeStorage):
+        def remove(self, paths):
+            self.deleted.extend(paths)
+            # Purposely leave all objects in staging test store.
+    service=SimpleNamespace(storage=FailedCleanup())
+    anon=SimpleNamespace(storage=FakeStorage())
+    with pytest.raises(StagingProbeFailure,match="cleanup failed"):
+        probe_real_private_storage(service,anon)
+    assert service.storage.objects
+
+
+def test_dict_error_without_status_cannot_pass_storage_acl_probe():
+    with pytest.raises(StagingProbeFailure):
+        require_anon_denied(
+            lambda: {"error":"something went wrong"}, "list private objects")

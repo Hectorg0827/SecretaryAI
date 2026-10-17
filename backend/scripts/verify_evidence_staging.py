@@ -180,12 +180,15 @@ def probe_real_private_storage(service, anon):
     finally:
         try:
             service.storage.from_(EVIDENCE_BUCKET).remove(keys)
-            try:
-                service.storage.from_(EVIDENCE_BUCKET).download(clean_key)
-            except Exception:
-                pass
-            else:
-                raise StagingProbeFailure("Temporary evidence was still readable after cleanup")
+            for key in keys:
+                try:
+                    service.storage.from_(EVIDENCE_BUCKET).download(key)
+                except Exception:
+                    pass
+                else:
+                    raise StagingProbeFailure(
+                        "Temporary evidence was still readable after cleanup"
+                    )
         except Exception as exc:
             raise StagingProbeFailure("Staging probe cleanup failed; investigate objects") from exc
     if failure is not None:

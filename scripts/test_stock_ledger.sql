@@ -171,6 +171,11 @@ $test$;
 -- they supply another company's UUID in a request.
 DO $perms$
 BEGIN
+  IF has_table_privilege('service_role', 'stock_movements', 'INSERT') OR
+     has_table_privilege('service_role', 'stock_balances', 'UPDATE')
+  THEN
+    RAISE EXCEPTION 'service role can bypass atomic stock posting';
+  END IF;
   IF has_function_privilege(
     'authenticated',
     'post_stock_movement(uuid,text,uuid,text,text,text,numeric,text,text,text,uuid)',

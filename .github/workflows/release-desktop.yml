@@ -250,6 +250,8 @@ jobs:
             **Verify your download:** SHA-256 checksums for every installer are in this run's `SecretaryAI-checksums-*` artifacts.
 
             The app signs in to the cloud backend configured at build time (`VITE_API_URL`); it needs that backend to be deployed and reachable.
+
+            QuickBooks Desktop connects through Intuit Web Connector and Conductor setup. The separate local Python connector is NOT included in this installer.
           # IMPORTANT: build to a DRAFT release. This repo has GitHub
           # "immutable releases" enabled — once a release is *published* its
           # assets are frozen and uploads fail with "Cannot upload assets to an

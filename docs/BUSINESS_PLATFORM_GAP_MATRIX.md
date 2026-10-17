@@ -22,6 +22,23 @@ There are **three equivalent locations** for the V5 SQL: manual `database/schema
 
 ---
  
+## V6 durable PO/warehouse receipt implementation (2026-10-17)
+
+The migration and route implementation now cover PO drafts, independently
+approved POs, independently approved inspected receipt drafts, case quantities,
+atomic inventory posting, separate damaged/quarantined buckets, tenant isolation,
+and idempotent replay. Raw `service_role` stock posting was revoked so this
+receiving approval path cannot be bypassed through the low-level RPC.
+`scripts/test_purchasing_receiving.sql` runs against real PostgreSQL in CI.
+`backend/tests/test_purchasing_receiving_contract.py` checks authenticated
+actor binding and fail-closed API behavior. Recheck **latest exact-SHA** CI
+and CodeQL before considering this test-proven.
+
+This does **not** prove external QuickBooks/WMS data exchange, supplier
+approval, transport milestones, signed receiving evidence, user-interface
+readiness, production performance, inventory reservations or GA certification.
+The SQL records returned `accounting_reconciled=false` intentionally.
+
 ## Implementation matrix
 
 Status vocabulary: **Existing / incomplete**, **Partially implemented**, **Not identified in audited endpoints**, **Blocked externally**. None indicates production verification.

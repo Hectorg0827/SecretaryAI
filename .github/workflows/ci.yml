@@ -139,9 +139,8 @@ jobs:
   connector:
     name: QB Desktop connector (package + selfcheck)
     runs-on: ubuntu-latest
-    # The connector ships inside the Windows installer, built by
-    # release-desktop.yml. This job builds it on Linux on every commit so a
-    # packaging regression is caught here rather than during a release.
+    # The connector is NOT bundled into installers. Keep its packaging and
+    # regression tests maintained in case the product strategy changes.
     #
     # It matters more than it looks: the Conductor adapter lives in the backend
     # and is loaded by a dynamic import, so PyInstaller cannot see it without

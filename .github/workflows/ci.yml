@@ -34,6 +34,27 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: python -m pytest -q
+      - name: Mutation-test the connector write-denial regression
+        working-directory: backend
+        run: |
+          cp app/api/connectors.py /tmp/secretary_connector_orig.py
+          trap 'cp /tmp/secretary_connector_orig.py app/api/connectors.py' EXIT
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("app/api/connectors.py")
+          original = 'if body.task_type in ("create_invoice", "create_po", "update_item"):'
+          assert p.read_text().count(original) == 1, "mutation target moved"
+          p.write_text(p.read_text().replace(original, 'if False and body.task_type in ("create_invoice", "create_po", "update_item"):'))
+          PY
+          if python -m pytest -q tests/test_phase4_release_security.py -k unapproved_write > /tmp/write_mutation.log 2>&1; then
+            cat /tmp/write_mutation.log
+            echo "FAIL: write authorization test survived a deliberate guard bypass"
+            exit 1
+          fi
+          cat /tmp/write_mutation.log
+          grep -Eq '3 failed' /tmp/write_mutation.log || { echo "FAIL: mutant did not produce the expected three security failures"; exit 1; }
+          echo "PASS: removing the write gate caused 3 negative tests to fail"
+
 
   frontend:
     name: Web frontend (lint / typecheck / build)

@@ -65,7 +65,7 @@ routinely forget the third one and then wonder why no emails ever arrive.
    method (**Settings → Billing**). The free trial runs out and the services
    stop without warning.
 2. Click **New Project → Empty project**. Name it `secretaryai`.
-3. **Add Redis.** Click **New → Database → Add Redis**. Nothing to configure.
+3. **Add Redis.** Click **New → Database → Add Redis**. Before considering production secure, verify the Redis service has durable persistence/AOF enabled. A revoked JWT must remain revoked after a Redis restart. If your Railway Redis plan cannot guarantee that, do **not** launch; use a durable revocation store or change the Redis deployment. See `docs/BACKUP_RESTORE.md`.
 4. **Add the API service.** Click **New → GitHub Repo → SecretaryAI**.
    - Open the new service, go to **Settings**.
    - Under **Source**, set **Root Directory** to `backend`

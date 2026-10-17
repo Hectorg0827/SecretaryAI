@@ -1,3 +1,58 @@
+# Current handoff — Business Operations Platform Phase 0 (2026-10-17)
+
+**This is the latest status note; it supersedes older branch SHA and CI claims below.**
+The owner supplied the master development directive for a single cross-department,
+secure SecretaryAI product. Continue on `claude/blissful-noether-ik7p9l`, PR #74,
+against `claude/secretaryai-tech-spec-lqBZj`. Do **not** create a new PR or deploy.
+
+See `docs/BUSINESS_PLATFORM_GAP_MATRIX.md` for inspected modules,
+implementation dependencies, acceptance criteria and unverified expansion areas.
+
+## Verified baseline and changes
+
+- Baseline `f67cdc4e`: CI `39004104669` failed (12 failed, 1,138 passed,
+  5 skipped). CodeQL `39004104676` passed. Nonblocking npm dependency audit
+  also failed. All other completed CI jobs were successful.
+- Fixed a real CU `_write(session_id=...)` collision; migrated legacy
+  in-process test assumptions to mocked Redis session/approval API assertions.
+- Kept all connector financial/item write tasks fail-closed; updated the stale
+  test that expected owners could enqueue writes without approvals.
+- Isolated Redis limiter unit-test namespaces without changing production
+  cross-worker enforcement.
+- Repaired the inventory forecast endpoint's incompatible service API and
+  nonexistent result field. It now uses actual QuickBooks invoice line history,
+  returns 503 on source failure, and does not fabricate weekly sales.
+- Removed unconditional QB + warehouse quantity addition; QB quantity stays
+  authoritative by default, optionally overridden by explicit
+  `inventory_quantity_policy=warehouse_authoritative`. Mismatch and quantity
+  authority are exposed in inventory API responses. All low-stock API and
+  scheduled alert paths use reconciled `total_qty` when available.
+- Added focused tests for forecast provenance, missing sales and stock overlap.
+
+**Validation status:** All of the above are code commits and regression tests,
+NOT verified passing CI or real integration evidence. Inspect the **latest**
+PR head SHA and its finished CI/CodeQL after the final commit. Do not cite
+results from earlier intermediate commits as proof of this tip.
+
+## Immediate next engineering tasks
+
+1. Inspect latest backend pytest and security mutation job results. Fix
+   real failures without weakening the fail-closed security controls.
+2. Independently verify Redis approval decisions across two workers and
+   persistent revoked-JWT state through forced Redis outage and restart.
+3. Design tenant-scoped SKU/location/lot inventory movement ledger with
+   durable idempotency and transaction-safe reservation/receipt events.
+   Inventory snapshots remain read-only until authority mapping and migrations
+   are proven. Do not advertise warehouse receipt as posted inventory.
+4. Build and test the 1,200-case PO → 1,180 accepted/20 exception lifecycle,
+   including QB reconciliation, using an authorized staging database and
+   integration sandbox.
+5. Continue to apply existing 15 GA criteria plus all new advertised-feature
+   acceptance gates. Production accounts, legal approval, real payments,
+   signing and independent penetration testing remain owner/external gates.
+
+---
+
 # SecretaryAI handoff update — October 17, 2026 (Phase 4–6)
 
 **THIS UPDATE SUPERSEDES the older handoff below where the status conflicts.**

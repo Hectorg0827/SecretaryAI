@@ -1,3 +1,66 @@
+# Next handoff — isolated staging evidence probe (2026-10-17)
+
+Existing SecretaryAI PR #74 only. Current authorized branch:
+`claude/blissful-noether-ik7p9l` -> `claude/secretaryai-tech-spec-lqBZj`.
+Do NOT merge, deploy or migrate a customer database.
+
+## Verified starting checkpoint
+Previous head `52f401c1`: CI `39078256025` and CodeQL
+`39078256002` both passed. Backend **1,213 passed, 5 skipped**.
+Report-mode frontend npm audit still failed with outstanding advisories.
+
+## This incremental change
+- `backend/scripts/verify_evidence_staging.py` is a fully **opt-in**
+  real-service preflight. It does nothing unless an operator selects
+  `--scanner` and/or `--storage-write-test`, confirms isolated staging,
+  supplies the **exact** expected staging Supabase project reference and
+  URL plus separate staging service/anon credentials.
+- The real clamd probe requires a locally mounted Unix socket, a parseable
+  loaded signature date no older than seven days, and correct outcomes from
+  BOTH a clean sample and the harmless EICAR standard test signature.
+  This is **a staging proof**, not a production-scanner health monitor.
+- The private Storage probe refuses nonprivate buckets, file-size limits
+  over 8 MiB or MIME allowlists beyond PDF/PNG/JPEG. With explicit opt-in,
+  it creates one unique ephemeral object and attempts an anonymous read,
+  write and directory listing. Each must be DENIED; the probe deletes
+  its own temporary keys and verifies that the test object is gone.
+- `backend/tests/test_staging_evidence_probe.py` exercises fail-closed
+  staging config, signature-date failures, scanner mock verdicts, bad ACLs,
+  object cleanup and no default write mode. These offline tests are NOT
+  substitutes for a live probe.
+- No real staging private bucket, ClamAV service, antivirus version, or
+  anonymous access policy has been verified from this environment.
+  **Never claim live staging pass until the actual opt-in script runs on
+  isolated staging with its evidence.**
+
+## Operator staging sequence (only after staging access approved)
+1. Verify that the supplied Supabase project is isolated staging, the
+   quarantine bucket has `public=false`, `file_size_limit<=8388608`,
+   and allowed MIME types restricted to PDF, JPEG and PNG.
+2. Run real ClamAV `clamd` locally with loaded freshclam databases and
+   a mounted Unix socket; never expose unencrypted ClamAV TCP publicly.
+3. Set variables `EVIDENCE_STAGING_CONFIRM=I_CONFIRM_ISOLATED_STAGING`,
+   `EVIDENCE_STAGING_PROJECT_REF`, `EVIDENCE_STAGING_SUPABASE_URL`,
+   `EVIDENCE_STAGING_SERVICE_ROLE_KEY`,
+   `EVIDENCE_STAGING_ANON_KEY`, and `CLAMAV_UNIX_SOCKET`.
+   Never commit, print, or send these secrets.
+4. From `backend/`, run
+   `python scripts/verify_evidence_staging.py --scanner --storage-write-test`.
+   Live results and object cleanup must both pass. The staging probe writes
+   only unique disposable objects; do not run against production.
+5. Follow with authenticated tenant-scoped API E2E: upload real sample,
+   verify SHA-256, scan, independently approve clean sample; then confirm
+   EICAR detection and denial, scanner-offline denial, wrong-tenant denial,
+   duplicate-upload denial and no download/QuickBooks permission.
+6. Close orphan cleanup, rate-limit, HTTP proxy upload size controls, signature
+   update automation, protected rendering/CDR, full live multiworker storage
+   consistency, independent security review and dependency advisory gates.
+
+Revalidate the **latest exact-tip** GitHub CI and CodeQL independently;
+the green checkpoint above is not evidence for this commit.
+
+---
+
 # Latest V9 handoff — security gates
 
 ## V9 local antivirus + independent review gate (2026-10-17)

@@ -300,3 +300,130 @@ GRANT EXECUTE ON FUNCTION approve_warehouse_purchase_order(UUID,TEXT,UUID)
   TO service_role;
 GRANT EXECUTE ON FUNCTION receive_warehouse_purchase_order(UUID,TEXT,TEXT,JSONB,UUID,UUID)
   TO service_role;
+
+-- Receipt submission and approval are two authenticated sessions. Neither
+-- the browser nor the receiving employee can supply the approver identity.
+CREATE TABLE IF NOT EXISTS staged_warehouse_receipts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    po_id UUID NOT NULL,
+    receipt_key TEXT NOT NULL CHECK(length(btrim(receipt_key)) BETWEEN 1 AND 150),
+    payload JSONB NOT NULL,
+    submitted_by UUID NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN('pending','posted')),
+    posted_receipt_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    approved_at TIMESTAMPTZ,
+    UNIQUE(company_id,id),UNIQUE(company_id,receipt_key),
+    FOREIGN KEY(company_id,po_id) REFERENCES purchasing_orders(company_id,id),
+    FOREIGN KEY(company_id,posted_receipt_id)
+      REFERENCES warehouse_receipt_documents(company_id,id)
+);
+CREATE INDEX IF NOT EXISTS idx_staged_receipts_pending
+  ON staged_warehouse_receipts(company_id,status,created_at DESC);
+ALTER TABLE staged_warehouse_receipts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY staged_receipts_tenant_read ON staged_warehouse_receipts FOR SELECT
+  USING(company_id=(auth.jwt()->>'company_id')::UUID);
+REVOKE ALL ON staged_warehouse_receipts FROM PUBLIC,anon,authenticated,service_role;
+GRANT SELECT ON staged_warehouse_receipts TO authenticated,service_role;
+
+CREATE OR REPLACE FUNCTION stage_warehouse_receipt(
+    p_company_id UUID,p_po_number TEXT,p_receipt_key TEXT,
+    p_lines JSONB,p_actor UUID
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $stagereceipt$
+DECLARE v_po purchasing_orders%ROWTYPE;
+        v_previous staged_warehouse_receipts%ROWTYPE;
+        v_id UUID;
+BEGIN
+    IF p_receipt_key IS NULL OR length(btrim(p_receipt_key)) NOT BETWEEN 1 AND 150
+      OR p_lines IS NULL OR jsonb_typeof(p_lines)<>'array'
+      OR jsonb_array_length(p_lines) NOT BETWEEN 1 AND 200
+    THEN RAISE EXCEPTION 'invalid staged receipt' USING ERRCODE='22023'; END IF;
+    IF NOT EXISTS(SELECT 1 FROM users WHERE id=p_actor AND company_id=p_company_id
+                  AND is_active AND role IN('owner','manager','back_office'))
+    THEN RAISE EXCEPTION 'unauthorized receiving employee' USING ERRCODE='42501'; END IF;
+    SELECT * INTO v_po FROM purchasing_orders
+      WHERE company_id=p_company_id AND po_number=p_po_number FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PO not found' USING ERRCODE='P0002'; END IF;
+    SELECT * INTO v_previous FROM staged_warehouse_receipts
+      WHERE company_id=p_company_id AND receipt_key=btrim(p_receipt_key);
+    IF FOUND THEN
+      IF v_previous.po_id<>v_po.id OR v_previous.payload<>p_lines OR
+         v_previous.submitted_by<>p_actor THEN
+         RAISE EXCEPTION 'receipt key already in use'
+           USING ERRCODE='23505';
+      END IF;
+      RETURN jsonb_build_object('staged_receipt_id',v_previous.id,
+        'status',v_previous.status,'replayed',TRUE,'inventory_posted',
+        v_previous.status='posted');
+    END IF;
+    IF v_po.status NOT IN('approved','partially_received') THEN
+       RAISE EXCEPTION 'purchase order not open for receipt'
+         USING ERRCODE='23514';
+    END IF;
+    INSERT INTO staged_warehouse_receipts(
+      company_id,po_id,receipt_key,payload,submitted_by
+    ) VALUES (
+      p_company_id,v_po.id,btrim(p_receipt_key),p_lines,p_actor
+    ) RETURNING id INTO v_id;
+    RETURN jsonb_build_object('staged_receipt_id',v_id,
+      'status','pending','replayed',FALSE,'inventory_posted',FALSE);
+END
+$stagereceipt$;
+
+CREATE OR REPLACE FUNCTION approve_staged_warehouse_receipt(
+    p_company_id UUID,p_staged_receipt_id UUID,p_actor UUID
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,public,pg_temp AS $approve_receipt$
+DECLARE v_stage staged_warehouse_receipts%ROWTYPE;
+        v_po purchasing_orders%ROWTYPE;
+        v_result JSONB;
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM users WHERE id=p_actor AND company_id=p_company_id
+                  AND is_active AND role IN('owner','manager')) THEN
+       RAISE EXCEPTION 'unauthorized receipt approver'
+         USING ERRCODE='42501';
+    END IF;
+    SELECT * INTO v_stage FROM staged_warehouse_receipts
+      WHERE company_id=p_company_id AND id=p_staged_receipt_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'receipt draft not found'
+      USING ERRCODE='P0002'; END IF;
+    IF v_stage.submitted_by=p_actor THEN
+       RAISE EXCEPTION 'receipt requires independent approval'
+         USING ERRCODE='42501';
+    END IF;
+    IF v_stage.status='posted' THEN
+       RETURN jsonb_build_object('staged_receipt_id',v_stage.id,
+         'receipt_id',v_stage.posted_receipt_id,'replayed',TRUE,
+         'inventory_posted',TRUE,'accounting_reconciled',FALSE);
+    END IF;
+    SELECT * INTO v_po FROM purchasing_orders
+      WHERE company_id=p_company_id AND id=v_stage.po_id;
+    v_result:=receive_warehouse_purchase_order(
+      p_company_id,v_po.po_number,v_stage.receipt_key,
+      v_stage.payload,v_stage.submitted_by,p_actor
+    );
+    UPDATE staged_warehouse_receipts SET status='posted',
+      approved_at=now(),posted_receipt_id=(v_result->>'receipt_id')::UUID
+      WHERE id=v_stage.id;
+    RETURN v_result || jsonb_build_object(
+      'staged_receipt_id',v_stage.id,'status','posted'
+    );
+END
+$approve_receipt$;
+
+-- The previous service-executable receive RPC accepted a caller-provided
+-- approver UUID; make it internal-only. The public service boundary is now
+-- stage_warehouse_receipt -> approve_staged_warehouse_receipt.
+REVOKE ALL ON FUNCTION receive_warehouse_purchase_order(
+  UUID,TEXT,TEXT,JSONB,UUID,UUID
+) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION stage_warehouse_receipt(UUID,TEXT,TEXT,JSONB,UUID)
+  FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION approve_staged_warehouse_receipt(UUID,UUID,UUID)
+  FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION stage_warehouse_receipt(UUID,TEXT,TEXT,JSONB,UUID)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION approve_staged_warehouse_receipt(UUID,UUID,UUID)
+  TO service_role;

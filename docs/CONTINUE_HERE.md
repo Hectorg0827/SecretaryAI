@@ -1,3 +1,38 @@
+## Security dependency remediation checkpoint — 2026-10-17/18
+
+Existing SecretaryAI PR #74, no merge or deployment. The front-end
+`frontend/package-lock.json` was updated by one branch-restricted
+GitHub Actions remediation after a clean `npm ci`, lint, typecheck,
+Vitest and production build. Only semver-compatible `npm audit fix`
+changes were committed; `--force` was deliberately **not** used.
+
+- Frontend full-graph advisory count reduced **21 -> 11**:
+  **11 high/9 moderate/1 low -> 6 high/5 moderate** (from
+  remediation run `39087191570`). The dependency audit is NOT CLEAN.
+- Remaining findings involve dev-tool transitive `braces` /
+  `chokidar` /`tailwindcss`, `esbuild`/`vite`, and
+  `postcss-selector-parser`; a production `react-router-dom`
+  chain also has moderate findings. The `braces` high-severity
+  advisory `GHSA-vfj7-8cjw-p6xm` explicitly lists **no patched
+  release** as of Oct 17, 2026. No speculative override or silent
+  suppress/allowlist is authorized.
+- CI runs **separate** runtime-only frontend, full frontend,
+  desktop and backend audits, and reports a red audit job if any
+  is not clean. Ordinary PR CI still permits coding progress;
+  `release-desktop.yml` and `docker-publish.yml` now enforce
+  **hard, fail-closed** package security gates before building or
+  publishing distributable artifacts.
+- Release remains blocked until each remaining issue is fixed by a
+  compatible, tested upgrade or has a *specific, owner-approved,
+  time-limited risk decision* with verified package/runtime exposure.
+  This commit does NOT grant an exception or production-release signoff.
+- Need final exact-tip CI/CodeQL and production-closure audit proof
+  after all changes. The prior release candidates' green badges do
+  not certify the latest dependency lockfile.
+
+
+---
+
 # Next handoff — isolated staging evidence probe (2026-10-17)
 
 Existing SecretaryAI PR #74 only. Current authorized branch:

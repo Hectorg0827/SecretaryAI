@@ -120,24 +120,24 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
         assert aside.get_attribute("role") == "dialog"
         assert aside.get_attribute("aria-modal") == "true"
         close_button = page.get_by_role("button", name="Close navigation", exact=True)
-        assert close_button.is_focused(), "Drawer must focus close control on open"
+        assert close_button.evaluate("(element) => document.activeElement === element"), "Drawer must focus close control on open"
         page.keyboard.press("Shift+Tab")
-        assert page.get_by_role("button", name="Sign out").is_focused(), (
+        assert page.get_by_role("button", name="Sign out").evaluate("(element) => document.activeElement === element"), (
             "Shift+Tab leaked out of navigation modal"
         )
         page.keyboard.press("Tab")
-        assert close_button.is_focused(), "Tab did not wrap to first control"
+        assert close_button.evaluate("(element) => document.activeElement === element"), "Tab did not wrap to first control"
         page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().left >= -1")
         page.screenshot(path=str(artifacts / (engine + "-navigation-open-" + str(width) + ".png")))
         page.get_by_role("link", name="Logistics").click()
         assert open_btn.get_attribute("aria-expanded") == "false"
-        assert open_btn.is_focused(), "Route dismissal did not restore opener focus"
+        assert open_btn.evaluate("(element) => document.activeElement === element"), "Route dismissal did not restore opener focus"
         assert aside.evaluate("(element) => element.inert") is True
         page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().right <= 1")
         open_btn.click()
         page.keyboard.press("Escape")
         assert open_btn.get_attribute("aria-expanded") == "false", "Escape did not close mobile navigation"
-        assert open_btn.is_focused(), "Escape dismissal did not restore opener focus"
+        assert open_btn.evaluate("(element) => document.activeElement === element"), "Escape dismissal did not restore opener focus"
         assert aside.evaluate("(element) => element.inert") is True
     else:
         assert page.get_by_role("button", name="Open navigation").is_hidden()

@@ -98,6 +98,8 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Match the vetted desktop lockfile npm resolver
+        run: npm install --global npm@11.19.1
       - run: npm ci
         working-directory: desktop
       - run: npm run lint
@@ -135,6 +137,8 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Match the vetted desktop lockfile npm resolver
+        run: npm install --global npm@11.19.1
       - name: Build desktop UI (dist/ must exist to compile the Rust crate)
         working-directory: desktop
         run: |

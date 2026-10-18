@@ -1,3 +1,34 @@
+## Desktop dependency remediation — Oct 17, 2026
+
+- Latest existing PR #74 work replaced the earlier desktop lockfile with a
+  **semver-compatible, tested `npm audit fix` outcome** on the same branch.
+  The one-time remediation run
+  [39094191798](https://github.com/Hectorg0827/SecretaryAI/actions/runs/39094191798)
+  passed `npm ci`, desktop lint, typecheck, Vitest and
+  `npm run build -- --mode development` before writing the revised
+  `desktop/package-lock.json`. No `npm audit fix --force` was used.
+- The desktop audit fell from **20 findings (11 high, 8 moderate, 1 low)
+  to 11 findings (6 high, 5 moderate)**. The remaining high-severity
+  `braces` chain has no available patched release in the current audit;
+  other issues involve dev build tools and React Router. Neither runtime
+  exposure nor lack of exploitability has been formally established.
+- To keep the lockfile reproducible, `desktop/package.json`, both desktop
+  CI jobs and the signed installer release workflow now pin
+  `npm@11.19.1`. The temporary privileged remediation workflow has
+  been **removed** after its validated commit.
+- The release-desktop workflow still hard-fails the full desktop and
+  frontend high-severity audit, and also requires a clean backend audit.
+  **Release is still blocked.** Do not install, deploy, merge, tag or
+  distribute anything until those gates and live integration acceptance
+  are satisfied.
+- Proof needed: the final exact-tip CI, CodeQL and a separate real
+  Windows/macOS signed release candidate build in an isolated staging
+  environment. Development-mode Vite build is not a signed installer
+  acceptance test.
+
+
+---
+
 # Latest handoff — FastAPI/Starlette patched and paywall preserved
 
 Verified candidate `35b42cdd`: backend **1,264 passed, 5 skipped** and

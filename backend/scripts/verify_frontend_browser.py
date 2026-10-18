@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Chromium visual smoke: built SecretaryAI web UI at mobile and desktop sizes.
+"""Cross-engine visual smoke: built SecretaryAI web UI at mobile and desktop sizes.
 
 No staging service calls, no real data, no screenshots of user information.
 Test tokens are deliberately NOT signed; backend authentication is not tested.
 Real API staging and human visual-diff review remain independent release gates.
 
-Requires: pip install playwright==1.48.0; python -m playwright install chromium
+Requires: pip install playwright==1.48.0; python -m playwright install chromium firefox webkit
 Invoke after starting Vite preview (serving the BUILT frontend dist folder):
   python backend/scripts/verify_frontend_browser.py --base-url http://127.0.0.1:4173
 """
@@ -63,7 +63,7 @@ def _mock_internal_api(context):
     context.route(re.compile(r"/api/|/auth/me(?:[/?]|$)"), respond)
 
 
-def _login_and_register(browser, base: str, artifacts: Path, width: int, height: int):
+def _login_and_register(browser, engine: str, base: str, artifacts: Path, width: int, height: int):
     context = browser.new_context(viewport={"width": width, "height": height}, device_scale_factor=1)
     page = context.new_page()
     page.goto(base + "/login", wait_until="networkidle")
@@ -79,12 +79,12 @@ def _login_and_register(browser, base: str, artifacts: Path, width: int, height:
     assert background in ("rgb(15, 23, 42)", "oklch(0.208 0.042 265.755)"), (
         "Tailwind slate login background missing: " + background
     )
-    page.screenshot(path=str(artifacts / ("login-" + str(width) + ".png")), full_page=True)
+    page.screenshot(path=str(artifacts / (engine + "-login-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/register", wait_until="networkidle")
     assert page.get_by_role("heading", name="Create your account").is_visible()
     assert page.get_by_label("Company name").is_visible()
     _measure(page, "register " + str(width))
-    page.screenshot(path=str(artifacts / ("register-" + str(width) + ".png")), full_page=True)
+    page.screenshot(path=str(artifacts / (engine + "-register-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/logistics", wait_until="networkidle")
     assert page.get_by_role("heading", name="Welcome back").is_visible(), (
         "Unauthenticated protected navigation did not redirect to login"
@@ -92,7 +92,7 @@ def _login_and_register(browser, base: str, artifacts: Path, width: int, height:
     context.close()
 
 
-def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, height: int):
+def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, width: int, height: int):
     mobile = width < 768
     context = browser.new_context(viewport={"width": width, "height": height}, device_scale_factor=1)
     context.add_init_script(
@@ -105,6 +105,9 @@ def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, h
     aside = page.locator("#secretaryai-sidebar")
     assert aside.count() == 1
     if mobile:
+        assert aside.evaluate("(element) => element.inert") is True, (
+            "Offscreen mobile links are keyboard reachable before opening"
+        )
         open_btn = page.get_by_role("button", name="Open navigation")
         assert open_btn.is_visible()
         aside_box = aside.bounding_box()
@@ -113,16 +116,34 @@ def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, h
         )
         open_btn.click()
         assert open_btn.get_attribute("aria-expanded") == "true"
+        assert aside.evaluate("(element) => element.inert") is False
+        assert aside.get_attribute("role") == "dialog"
+        assert aside.get_attribute("aria-modal") == "true"
+        close_button = page.get_by_role("button", name="Close navigation", exact=True)
+        assert close_button.is_focused(), "Drawer must focus close control on open"
+        page.keyboard.press("Shift+Tab")
+        assert page.get_by_role("button", name="Sign out").is_focused(), (
+            "Shift+Tab leaked out of navigation modal"
+        )
+        page.keyboard.press("Tab")
+        assert close_button.is_focused(), "Tab did not wrap to first control"
         page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().left >= -1")
-        page.screenshot(path=str(artifacts / ("navigation-open-" + str(width) + ".png")))
+        page.screenshot(path=str(artifacts / (engine + "-navigation-open-" + str(width) + ".png")))
         page.get_by_role("link", name="Logistics").click()
         assert open_btn.get_attribute("aria-expanded") == "false"
+        assert open_btn.is_focused(), "Route dismissal did not restore opener focus"
+        assert aside.evaluate("(element) => element.inert") is True
         page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().right <= 1")
         open_btn.click()
         page.keyboard.press("Escape")
         assert open_btn.get_attribute("aria-expanded") == "false", "Escape did not close mobile navigation"
+        assert open_btn.is_focused(), "Escape dismissal did not restore opener focus"
+        assert aside.evaluate("(element) => element.inert") is True
     else:
         assert page.get_by_role("button", name="Open navigation").is_hidden()
+        assert aside.evaluate("(element) => element.inert") is False, (
+            "Desktop sidebar must not remain inert"
+        )
         aside_box = aside.bounding_box()
         assert aside_box is not None and 0 <= aside_box["x"] <= 1
         assert aside_box["width"] >= 200
@@ -131,7 +152,7 @@ def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, h
     # Correct tab switch is verified through the changed active button styling.
     assert "bg-slate-800" in page.get_by_role("button", name="Purchase Orders").get_attribute("class")
     _measure(page, "logistics " + str(width))
-    page.screenshot(path=str(artifacts / ("logistics-" + str(width) + ".png")))
+    page.screenshot(path=str(artifacts / (engine + "-logistics-" + str(width) + ".png")))
     context.close()
 
 
@@ -147,13 +168,17 @@ def main():
     artifacts.mkdir(parents=True, exist_ok=True)
     _ready(base)
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        for width, height in ((390, 844), (1440, 900)):
-            _login_and_register(browser, base, artifacts, width, height)
-            _authenticated_navigation(browser, base, artifacts, width, height)
-        browser.close()
-    print("PASS: local Chromium mobile/desktop login, registration, protected routing, "
-          "computed Tailwind styles, navigation, tabs and horizontal overflow")
+        for engine in ("chromium", "firefox", "webkit"):
+            browser = getattr(playwright, engine).launch(headless=True)
+            try:
+                for width, height in ((390, 844), (1440, 900)):
+                    _login_and_register(browser, engine, base, artifacts, width, height)
+                    _authenticated_navigation(browser, engine, base, artifacts, width, height)
+                print("PASS: " + engine + " mobile/desktop, keyboard and layout checks")
+            finally:
+                browser.close()
+    print("PASS: local Chromium, Firefox and WebKit browser acceptance (6 viewports), "
+          "login/register, modal keyboard focus, protected navigation, CSS and overflow")
     print("Screenshots are evidence for manual comparison, NOT approved visual baselines")
 
 

@@ -1,3 +1,34 @@
+## JWT hardening milestone — PyJWT migration (Oct 17, 2026)
+
+- PR #74 only. The backend replaces `python-jose[cryptography]==3.4.0`
+  with `PyJWT==2.15.1`, removing the vulnerable legacy ecdsa/ASN.1
+  dependency chain when dependency resolution confirms no other requires it.
+- `app/auth/jwt.py` now centralizes signature verification for access tokens
+  and recently expired refresh candidates. All tokens use *only* HS256;
+  8 KiB max serialized token length; require a signed positive integer
+  `exp`; `iat`/`nbf` remain validated even for refresh candidates.
+  Only the refresh candidate skips elapsed-expiry validation — the refresh
+  endpoint still enforces the renewal window and Redis JTI single-use
+  revocation. Login 2FA step-two checks the same verified HMAC and token
+  scope; 2FA pending tokens are never full user sessions.
+- Existing HS256 sessions are wire-compatible: no silent token reissue or
+  secret rotation is required solely to change JWT decoding libraries.
+  Dedicated regression tests build a legacy-compatible HS256 signature
+  independently of both libraries and test expiry, algorithm confusion,
+  malicious payloads, refresh, and scope isolation.
+- **Proof required:** full latest commit CI, Redis-backed authorization and
+  paywall tests, and a fresh independent `pip-audit` showing the old
+  `python-jose`, `pyasn1`, `ecdsa` packages are gone. These claims are
+  implementation intent until the new exact-head CI report has completed.
+- Still blocked: Starlette security updates need a FastAPI-compatible
+  framework migration validated against live subscription and tenant gates;
+  frontend 6-high/5-moderate and desktop 11-high/8-moderate/1-low
+  audit findings, provider-connected staging, recovery, and security signoff
+  remain open. No merge/deploy, release approval or production migration.
+
+
+---
+
 ## Security dependency remediation checkpoint — 2026-10-17/18
 
 Existing SecretaryAI PR #74, no merge or deployment. The front-end

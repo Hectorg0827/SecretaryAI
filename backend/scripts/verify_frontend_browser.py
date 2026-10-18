@@ -76,9 +76,18 @@ def _login_and_register(browser, engine: str, base: str, artifacts: Path, width:
     background = page.locator(".min-h-screen").first.evaluate(
         "(element) => getComputedStyle(element).backgroundColor"
     )
-    assert background in ("rgb(15, 23, 42)", "oklch(0.208 0.042 265.755)"), (
-        "Tailwind slate login background missing: " + background
-    )
+    # Chromium/Firefox/WebKit serialize the same Tailwind OKLCH hue with
+    # slightly different decimal precision. Check the numeric components
+    # with tight tolerance rather than requiring identical string rendering.
+    if background != "rgb(15, 23, 42)":
+        match = re.fullmatch(
+            r"oklch\\((\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\)",
+            background,
+        )
+        assert match is not None and all(
+            abs(float(actual) - expected) < 0.001
+            for actual, expected in zip(match.groups(), (0.208, 0.042, 265.755))
+        ), "Tailwind slate login background missing: " + background
     page.screenshot(path=str(artifacts / (engine + "-login-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/register", wait_until="networkidle")
     assert page.get_by_role("heading", name="Create your account").is_visible()

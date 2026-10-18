@@ -62,22 +62,30 @@ def _subscription_dependencies():
     and collect them.
     """
     from app.main import app
+    from fastapi.routing import iter_route_contexts
 
     found = {}
 
-    def walk(dependant):
-        call = getattr(dependant, "call", None)
-        if call is not None and "require_active_subscription" in getattr(
+    def collect(call):
+        if callable(call) and "require_active_subscription" in getattr(
             call, "__qualname__", ""
         ):
             found[call] = True
+
+    def walk(dependant):
+        if dependant is None:
+            return
+        collect(getattr(dependant, "call", None))
         for sub in getattr(dependant, "dependencies", []) or []:
             walk(sub)
 
-    for route in app.routes:
-        dependant = getattr(route, "dependant", None)
-        if dependant is not None:
-            walk(dependant)
+    # FastAPI >=0.137 preserves router trees instead of flattening app.routes.
+    # The effective context contains router-level dependencies (including
+    # the subscription gate) that were not attached to the original leaf.
+    for context in iter_route_contexts(app.routes):
+        walk(getattr(context, "dependant", None))
+        for dep in getattr(context, "dependencies", ()) or ():
+            collect(getattr(dep, "dependency", None) or getattr(dep, "call", None))
     return list(found)
 
 

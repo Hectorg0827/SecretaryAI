@@ -1,3 +1,50 @@
+## Browser responsive acceptance — October 18, 2026
+
+This milestone continues **existing PR #74**, no merge, deploy or data migration.
+The web frontend's Tailwind 4 / Vite 8 / React Router 7 migration already
+passed isolated `npm ci`, lint, typecheck, Vitest, production build, CSS
+regression and full dependency audit (zero findings).
+
+### Implementation
+- `frontend/src/App.tsx`: responsive `h-dvh` app shell, slim mobile
+  header/menu button, accessible `aria-expanded`/`aria-controls` state,
+  Escape dismissal, and a min-width-safe main container.
+- `frontend/src/components/layout/Sidebar.tsx`: mobile-only modal-style
+  visual overlay (not an authenticated authorization boundary), off-canvas
+  navigation, scrollable links for shorter devices, close-on-navigation.
+- Operational pages: heights bound to the app shell rather than incorrectly
+  extending below a mobile header; dashboard columns collapse to one;
+  logistics tabs scroll horizontally on narrow devices.
+- `backend/scripts/verify_frontend_browser.py`: **real headless Chromium**
+  against the compiled frontend served by a local `vite preview`.
+  Tests unauthenticated login redirect, registration and login render,
+  mobile drawer closed/open/ESC/route navigation, owner Logistics and
+  Purchase Orders tab, computed login Tailwind colors, no document
+  overflow, and desktop sidebar presence at 390x844 and 1440x900.
+  Backend API requests are intentionally mocked with empty data and
+  generated unsigned UI-only tokens; this cannot certify server RBAC,
+  actual billing, or real tenant information.
+- `.github/workflows/ci.yml` adds a **blocking browser acceptance job**,
+  after web build/test, which installs Chromium, creates screenshots and
+  uploads them as a 14-day GitHub Actions artifact. Screenshots prove
+  captured renders only; they still need human approval and ideally
+  baseline-difference review before a visual-signoff.
+- Security restrictions: browser smoke allows localhost preview only and
+  does not read staging production credentials. Existing release
+  dependency gates are unchanged.
+
+### Final acceptance (still separate)
+Current exact-head CI and CodeQL must finish, including the new Chromium job.
+Compare screenshots across supported browsers, physical mobile devices,
+keyboard/screen reader and responsive breakpoints; tests use **only Chromium**
+and local empty-data mocks. Real hosted staging and complete order-to-cash,
+receive-to-ledger, QuickBooks sync, Stripe paid/unpaid, ClamAV, disaster
+recovery and independent security/compliance sign-offs are not proven.
+No release approval is given.
+
+
+---
+
 ## Frontend dependency and routing security milestone — October 18, 2026
 
 - Implemented on the **existing** SecretaryAI PR #74 branch only;

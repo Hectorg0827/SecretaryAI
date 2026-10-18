@@ -24,8 +24,7 @@ celery==5.4.0
 redis==5.1.0
 
 # Auth & Security
-python-jose[cryptography]==3.4.0
-pyasn1==0.6.4                  # constrain vulnerable transitive ASN.1 parser   # 3.3.0: CVE-2024-33663 / CVE-2024-33664 (JWT bomb)
+python-jose[cryptography]==3.4.0   # 3.3.0: CVE-2024-33663 / CVE-2024-33664 (JWT bomb)
 passlib[bcrypt]==1.7.4
 pyotp==2.9.0
 cryptography==49.0.0

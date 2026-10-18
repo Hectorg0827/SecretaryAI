@@ -24,7 +24,7 @@ celery==5.4.0
 redis==5.1.0
 
 # Auth & Security
-python-jose[cryptography]==3.4.0   # 3.3.0: CVE-2024-33663 / CVE-2024-33664 (JWT bomb)
+PyJWT==2.15.1                 # HS256 user/refresh/2FA sessions; removes python-jose/ecdsa/pyasn1 chain
 passlib[bcrypt]==1.7.4
 pyotp==2.9.0
 cryptography==50.0.2

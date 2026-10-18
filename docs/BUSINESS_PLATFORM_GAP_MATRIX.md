@@ -1,3 +1,40 @@
+## Desktop dependency vulnerability closure — October 18, 2026
+
+**Code scope:** Existing PR #74 and branch
+`claude/blissful-noether-ik7p9l` only. No merge, tag, signed installer
+release, migration or production deployment.
+
+- Verified the native desktop application uses React components with inline
+  styles and no desktop imports of React Router, Tailwind CSS, PostCSS or
+  Autoprefixer. Removed these unused direct dependencies and regenerated the
+  desktop lockfile through a temporary one-time workflow
+  [39096651446](https://github.com/Hectorg0827/SecretaryAI/actions/runs/39096651446).
+  The resulting full desktop audit dropped **11 -> 2 findings**.
+- Migrated the desktop Vite build from esbuild-based Vite 5 to
+  **Vite 8.3.4** with **@vitejs/plugin-react 6.1.2**, removing
+  the legacy `minify: 'esbuild'` option to use Oxc defaults.
+  Isolated verification
+  [39096839263](https://github.com/Hectorg0827/SecretaryAI/actions/runs/39096839263)
+  passed `npm ci`, lint, typecheck, Vitest, development build and
+  **full desktop `npm audit --audit-level=high` with zero findings**.
+- Desktop CI (UI and Rust asset jobs) and the installer workflow now use
+  **Node 22**, retaining pinned `npm@11.19.1`. Both temporary workflows
+  containing write credentials were deleted after validated commits.
+- **Next proof:** latest exact-tip CI (including Linux desktop native Rust
+  compilation) and CodeQL. Real signed macOS Intel/ARM and Windows installers,
+  Tauri updater signature validation, physical execution on machines and
+  staging API integration remain **unverified**.
+- Frontend retains **11 full dependency advisories, including 6 high**,
+  from the latest baseline; Python backend pip-audit is clean. The web
+  frontend uses Tailwind utilities directly, so **do not** delete its CSS
+  toolchain as if it were unused. A separately validated Tailwind/Vite/React
+  Router compatibility migration, including visual-regression snapshots,
+  is required. Production release stays blocked by the full frontend
+  security gate even though desktop is now clean.
+
+
+---
+
 ## Desktop dependency remediation — Oct 17, 2026
 
 - Latest existing PR #74 work replaced the earlier desktop lockfile with a

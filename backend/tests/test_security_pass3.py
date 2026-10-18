@@ -38,7 +38,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from jose import jwt as jose_jwt
+import jwt as jose_jwt
 
 from app.config import get_settings
 from app.main import app

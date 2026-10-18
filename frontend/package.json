@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:css": "node scripts/verify-built-css.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

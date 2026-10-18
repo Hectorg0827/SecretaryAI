@@ -29,13 +29,22 @@ const ALL_NAV_ITEMS = [
   { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
 ] as const;
 
-export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
+export function Sidebar({
+  unreadCount = 0,
+  mobileOpen = false,
+  onMobileClose = () => {},
+}: {
+  unreadCount?: number;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}) {
   const { role } = useAuth();
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const inboxUnread = useInboxStore((s) => s.unread_count);
 
   const logout = () => {
+    onMobileClose();
     localStorage.removeItem('secretary_token');
     localStorage.removeItem('secretary_company_id');
     localStorage.removeItem('secretary_role');
@@ -59,7 +68,24 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
   const visibleItems = ALL_NAV_ITEMS.filter((item) => (item.roles as readonly string[]).includes(role));
 
   return (
-    <aside className="w-56 flex-shrink-0 bg-slate-900 text-white flex flex-col h-screen">
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation overlay"
+          className="fixed inset-0 z-40 bg-slate-950/60 md:hidden"
+          onClick={onMobileClose}
+        />
+      )}
+    <aside
+      id="secretaryai-sidebar"
+      aria-label="Primary navigation"
+      className={[
+        'fixed inset-y-0 left-0 z-50 flex h-dvh w-56 flex-shrink-0 flex-col bg-slate-900 text-white',
+        'transition-transform duration-200 md:static md:h-full md:translate-x-0 md:transition-none',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+      ].join(' ')}
+    >
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-5 border-b border-slate-800">
         <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center shadow-sm">
@@ -77,6 +103,7 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
               key={to}
               to={to}
               end={exact}
+              onClick={onMobileClose}
               className={({ isActive }) =>
                 clsx(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
@@ -133,5 +160,6 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
         <div className="text-[10px] text-slate-600 px-1">v1.0.0</div>
       </div>
     </aside>
+    </>
   );
 }

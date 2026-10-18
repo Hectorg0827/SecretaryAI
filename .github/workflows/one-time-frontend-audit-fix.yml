@@ -28,12 +28,20 @@ jobs:
         working-directory: frontend
         shell: bash
         run: |
-          set -uo pipefail
-          # Safe, semver-compatible updates only. NEVER use npm audit fix --force.
+          set -euo pipefail
+          # npm Arborist needs an installed dependency graph in this repo;
+          # audit fix against only the old lock triggered null edgesOut.
+          npm ci --ignore-scripts --no-fund --no-audit
+          # Safe semver-compatible updates ONLY. Never use audit fix --force.
+          set +e
           npm audit fix --ignore-scripts --no-fund
           status=$?
-          echo "npm audit fix exit status: $status (remaining advisories are expected and tracked)"
-          exit 0
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::audit fix was incomplete; attempting a nonbreaking lockfile refresh"
+            npm install --package-lock-only --ignore-scripts --no-fund --no-audit
+          fi
+          echo "Safe remediation pass complete; validation and remaining advisories follow"
       - name: Verify reproducible install and all frontend checks
         working-directory: frontend
         shell: bash

@@ -1,18 +1,16 @@
 # One-time, branch-restricted safe dependency remediation.
-# Runs ONLY when this workflow is added/edited on the existing working branch.
+# Runs ONLY for same-repo PR updates touching this exact workflow.
 # Do not use on fork PRs; repository token is passed only to the final push.
 name: One-time Frontend Audit Fix
 on:
-  push:
-    branches:
-      - claude/blissful-noether-ik7p9l
+  pull_request:
     paths:
       - .github/workflows/one-time-frontend-audit-fix.yml
 permissions:
   contents: read
 jobs:
   remediation:
-    if: github.repository == 'Hectorg0827/SecretaryAI' && github.ref == 'refs/heads/claude/blissful-noether-ik7p9l'
+    if: github.repository == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.repo.full_name == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.ref == 'claude/blissful-noether-ik7p9l'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: claude/blissful-noether-ik7p9l
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

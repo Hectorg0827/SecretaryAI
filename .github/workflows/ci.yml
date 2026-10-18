@@ -103,6 +103,13 @@ jobs:
         run: |
           python -m pip install playwright==1.48.0
           python -m playwright install --with-deps chromium firefox webkit
+      - name: Install pinned axe-core in isolated audit directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/secretaryai-axe
+          npm --prefix /tmp/secretaryai-axe install --no-save --ignore-scripts --no-audit --no-fund axe-core@4.10.3
+          test -f /tmp/secretaryai-axe/node_modules/axe-core/axe.min.js
       - name: Run Chromium Firefox WebKit mobile and desktop smoke
         shell: bash
         run: |
@@ -111,12 +118,21 @@ jobs:
           npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/secretaryai-preview.log 2>&1 &
           cd ..
           python backend/scripts/verify_frontend_browser.py --screenshots frontend/browser-artifacts
+      - name: Block WCAG 2.2 A/AA violations in core screens
+        shell: bash
+        run: |
+          set -euo pipefail
+          python backend/scripts/verify_frontend_accessibility.py \
+            --axe-script /tmp/secretaryai-axe/node_modules/axe-core/axe.min.js \
+            --reports frontend/browser-artifacts/accessibility
       - name: Preserve non-sensitive screenshots for visual inspection
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: secretaryai-frontend-browser-evidence
-          path: frontend/browser-artifacts/*.png
+          path: |
+            frontend/browser-artifacts/*.png
+            frontend/browser-artifacts/accessibility/*.json
           if-no-files-found: ignore
           retention-days: 14
 

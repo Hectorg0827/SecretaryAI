@@ -260,6 +260,67 @@ class TestConnectorEndpointsSplit:
         )
 
 
+# ── HTTP enforcement under preserved FastAPI router trees ──────────────────
+
+
+class TestPaidRouteHttpEnforcement:
+    @pytest.mark.parametrize("path,method", [
+        ("/api/accounts/owned-account", "get"),
+        ("/api/actions/approve/owned-draft", "post"),
+    ])
+    def test_unpaid_authenticated_tenant_gets_402_before_business_action(self, path, method):
+        """Use the actual router guard, NOT the autouse paid-test override."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from app.api.deps import get_db
+        from app.auth.rbac import get_current_user
+        from conftest import _subscription_dependencies
+
+        # The autouse fixture admits ordinary unit tests as a paying tenant.
+        # Temporarily remove only that fixture's overrides and restore every
+        # override exactly afterward, including on an assertion failure.
+        saved = dict(app.dependency_overrides)
+        try:
+            gated = _subscription_dependencies()
+            assert len(gated) >= len(PAID), (
+                "Could not enumerate actual effective paid-route dependencies"
+            )
+            for dep in gated:
+                app.dependency_overrides.pop(dep, None)
+            app.dependency_overrides[get_current_user] = lambda: USER
+            app.dependency_overrides[get_db] = lambda: _sub_db([])
+            client = TestClient(app, raise_server_exceptions=False)
+            payload = {} if method == "post" else None
+            response = getattr(client, method)(path, json=payload) if payload is not None else getattr(client, method)(path)
+            assert response.status_code == 402, response.text
+        finally:
+            app.dependency_overrides.clear()
+            app.dependency_overrides.update(saved)
+
+    def test_active_subscriber_still_hits_role_based_access_control(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from app.api.deps import get_db
+        from app.auth.rbac import get_current_user
+        from conftest import _subscription_dependencies
+
+        saved = dict(app.dependency_overrides)
+        try:
+            for dep in _subscription_dependencies():
+                app.dependency_overrides.pop(dep, None)
+            app.dependency_overrides[get_current_user] = lambda: {
+                "sub": "viewer-1", "company_id": USER["company_id"],
+                "role": "viewer",
+            }
+            app.dependency_overrides[get_db] = lambda: _sub_db([_row("active")])
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/accounts/owned-account")
+            assert response.status_code == 403, response.text
+        finally:
+            app.dependency_overrides.clear()
+            app.dependency_overrides.update(saved)
+
+
 # ── Startup guard: billing must not be half-configured in production ──────────
 
 class TestBillingStartupGuard:

@@ -12,7 +12,29 @@ env:
   FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
 
 jobs:
+  dependency-security-gate:
+    name: Image publish security dependency gate (blocking)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Refuse frontend high/critical advisories
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Refuse known vulnerable backend dependencies
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit -r backend/requirements.txt
+
   build-and-push-api:
+    needs: dependency-security-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,6 +65,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   build-and-push-frontend:
+    needs: dependency-security-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read

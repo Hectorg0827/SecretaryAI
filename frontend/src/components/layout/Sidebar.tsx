@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity } from 'lucide-react';
@@ -42,6 +42,23 @@ export function Sidebar({
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const inboxUnread = useInboxStore((s) => s.unread_count);
+  // A visually offscreen drawer must also be removed from keyboard and
+  // assistive-technology navigation. Desktop links remain fully accessible.
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 767px)').matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (sidebarRef.current) sidebarRef.current.inert = isMobile && !mobileOpen;
+  }, [isMobile, mobileOpen]);
+
 
   const logout = () => {
     onMobileClose();
@@ -78,8 +95,11 @@ export function Sidebar({
         />
       )}
     <aside
+      ref={sidebarRef}
       id="secretaryai-sidebar"
       aria-label="Primary navigation"
+      role={isMobile && mobileOpen ? 'dialog' : undefined}
+      aria-modal={isMobile && mobileOpen ? true : undefined}
       className={[
         'fixed inset-y-0 left-0 z-50 flex h-dvh w-56 flex-shrink-0 flex-col bg-slate-900 text-white',
         'transition-transform duration-200 md:static md:h-full md:translate-x-0 md:transition-none',
@@ -92,6 +112,15 @@ export function Sidebar({
           <Zap size={14} className="text-white" />
         </div>
         <span className="font-bold text-white tracking-tight">SecretaryAI</span>
+        <button
+          type="button"
+          data-mobile-close="true"
+          aria-label="Close navigation"
+          className="ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
+          onClick={onMobileClose}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
       </div>
 
       {/* Navigation */}

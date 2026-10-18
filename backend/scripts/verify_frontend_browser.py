@@ -76,7 +76,9 @@ def _login_and_register(browser, base: str, artifacts: Path, width: int, height:
     background = page.locator(".min-h-screen").first.evaluate(
         "(element) => getComputedStyle(element).backgroundColor"
     )
-    assert background == "rgb(15, 23, 42)", "Tailwind slate login background missing: " + background
+    assert background in ("rgb(15, 23, 42)", "oklch(0.208 0.042 265.755)"), (
+        "Tailwind slate login background missing: " + background
+    )
     page.screenshot(path=str(artifacts / ("login-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/register", wait_until="networkidle")
     assert page.get_by_role("heading", name="Create your account").is_visible()

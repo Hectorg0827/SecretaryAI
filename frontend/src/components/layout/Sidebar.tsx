@@ -95,7 +95,7 @@ export function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {visibleItems.map(({ to, label, icon: Icon, exact, badge }) => {
           const badgeCount = badge === 'inbox' ? (inboxUnread || unreadCount) : 0;
           return (

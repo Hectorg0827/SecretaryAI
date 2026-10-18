@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       # Release is blocked, even when PR-level auditing remains report-only.
       - name: Refuse frontend high/critical advisories
         working-directory: frontend
@@ -101,7 +101,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: desktop/package-lock.json
 

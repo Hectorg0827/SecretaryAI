@@ -1,0 +1,60 @@
+# Temporary PR-branch-only migration validator, deleted after lockfile commit.
+name: One-time Frontend Tailwind 4 Vite 8 Migration
+on:
+  pull_request:
+    paths:
+      - .github/workflows/one-time-frontend-v4-v8-lock.yml
+permissions:
+  contents: read
+jobs:
+  validate-and-lock:
+    name: Validate frontend Tailwind 4 Vite 8 and Router 7
+    if: github.repository == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.repo.full_name == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.ref == 'claude/blissful-noether-ik7p9l'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/blissful-noether-ik7p9l
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Match pinned frontend resolver
+        run: npm install --global npm@11.19.1
+      - name: Resolve upgraded frontend lockfile without force or scripts
+        working-directory: frontend
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify clean install, lint, type safety, app tests, production CSS
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+          npm run test:css
+      - name: Require zero high-severity advisories in FULL web graph
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Commit only independently validated frontend lockfile
+        shell: bash
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- frontend/package-lock.json; then
+            echo "::error::Expected lockfile update"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- frontend/package-lock.json
+          git commit -m "chore(frontend): lock tested Tailwind 4 Vite 8 Router 7 migration"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 -w0)" \
+            push "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/claude/blissful-noether-ik7p9l

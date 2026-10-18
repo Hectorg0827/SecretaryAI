@@ -152,7 +152,7 @@ export function Login() {
           </form>
 
           {!needs2fa && (
-            <p className="text-xs text-slate-300 text-center mt-6">
+            <p className="text-xs text-slate-600 text-center mt-6">
               Forgot your password? Contact your account owner.
             </p>
           )}
@@ -166,7 +166,7 @@ export function Login() {
           )}
         </div>
 
-        <p className="text-xs text-slate-600 text-center mt-6">
+        <p className="text-xs text-slate-300 text-center mt-6">
           SecretaryAI · AI Operations Manager
         </p>
       </div>

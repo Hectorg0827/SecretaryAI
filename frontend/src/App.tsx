@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -16,29 +16,7 @@ import { Compliance } from './pages/Compliance';
 import { Connectors } from './pages/Connectors';
 import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
-import { useAuth, Role } from './hooks/useAuth';
-
-/** Guard: redirects to /login if no JWT is stored. */
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const location = useLocation();
-  const token = localStorage.getItem('secretary_token');
-  if (!token) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-  return <>{children}</>;
-}
-
-/**
- * Role guard: redirects to / if the user's role is not in the allowed list.
- * Must be used inside PrivateRoute (token already confirmed).
- */
-function RoleGuard({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
-  const { role } = useAuth();
-  if (!roles.includes(role)) {
-    return <Navigate to="/" replace />;
-  }
-  return <>{children}</>;
-}
+import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {

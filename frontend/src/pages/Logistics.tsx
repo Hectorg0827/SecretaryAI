@@ -49,9 +49,9 @@ export function Logistics() {
   const delayedCount  = shipments.filter((s) => s.is_delayed).length;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* Page header */}
-      <div className="bg-white border-b border-slate-100 px-6 py-4 flex-shrink-0">
+      <div className="bg-white border-b border-slate-100 px-4 sm:px-6 py-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center">
             <Truck size={18} className="text-blue-600" />
@@ -87,7 +87,7 @@ export function Logistics() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mt-4">
+        <div className="flex gap-1 mt-4 overflow-x-auto pb-1">
           {TABS.map(({ id, label, icon: Icon }) => {
             const badge =
               id === 'reorder'   ? reorderCount  :
@@ -100,7 +100,7 @@ export function Logistics() {
                 key={id}
                 onClick={() => setActiveTab(id)}
                 className={clsx(
-                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                  'flex shrink-0 items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                   activeTab === id
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700',

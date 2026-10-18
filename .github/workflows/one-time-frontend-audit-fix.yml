@@ -1,0 +1,77 @@
+# One-time, branch-restricted safe dependency remediation.
+# Runs ONLY when this workflow is added/edited on the existing working branch.
+# Do not use on fork PRs; repository token is passed only to the final push.
+name: One-time Frontend Audit Fix
+on:
+  push:
+    branches:
+      - claude/blissful-noether-ik7p9l
+    paths:
+      - .github/workflows/one-time-frontend-audit-fix.yml
+permissions:
+  contents: read
+jobs:
+  remediation:
+    if: github.repository == 'Hectorg0827/SecretaryAI' && github.ref == 'refs/heads/claude/blissful-noether-ik7p9l'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply safe npm audit fixes without executing install scripts
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Safe, semver-compatible updates only. NEVER use npm audit fix --force.
+          npm audit fix --ignore-scripts --no-fund
+          status=$?
+          echo "npm audit fix exit status: $status (remaining advisories are expected and tracked)"
+          exit 0
+      - name: Verify reproducible install and all frontend checks
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+      - name: Assess remaining release security advisories
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -uo pipefail
+          npm audit --audit-level=high
+          result=$?
+          if [ "$result" != "0" ]; then
+            echo "::warning::High/critical dependency advisories remain; release gate must stay closed."
+          fi
+          exit 0
+      - name: Commit validated npm changes to THIS PR branch only
+        shell: bash
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- frontend/package.json frontend/package-lock.json; then
+            echo "No safe package changes; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- frontend/package.json frontend/package-lock.json
+          git commit -m "chore(frontend): apply tested semver-safe npm audit remediations"
+          # Checkout has persist-credentials:false. Token exists only in THIS
+          # step; no third-party package install runs with an authenticated git.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 -w0)" \
+            push "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/claude/blissful-noether-ik7p9l
+          echo "Validated dependency lockfile pushed to existing PR branch"

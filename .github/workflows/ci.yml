@@ -77,7 +77,7 @@ jobs:
         working-directory: frontend
 
   frontend-browser:
-    name: Web browser responsive acceptance (Chromium)
+    name: Web browser responsive acceptance (3 engines)
     needs: frontend
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -102,8 +102,8 @@ jobs:
       - name: Install isolated Chromium test runner
         run: |
           python -m pip install playwright==1.48.0
-          python -m playwright install --with-deps chromium
-      - name: Run real Chromium mobile and desktop smoke
+          python -m playwright install --with-deps chromium firefox webkit
+      - name: Run Chromium Firefox WebKit mobile and desktop smoke
         shell: bash
         run: |
           set -euo pipefail

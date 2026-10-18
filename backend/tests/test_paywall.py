@@ -129,10 +129,22 @@ def _gated_prefixes() -> set[str]:
 
     gated = set()
     for route in app.routes:
-        for dep in getattr(route, "dependencies", []) or []:
-            qn = getattr(getattr(dep, "dependency", None), "__qualname__", "")
-            if "require_active_subscription" in qn:
-                gated.add(_group(getattr(route, "path", "")))
+        # Newer FastAPI exposes the *solved* dependency graph through
+        # APIRoute.dependant.dependencies (where the target is .call).
+        # Legacy FastAPI also exposes the unsolved Depends(.dependency).
+        # Inspect both and require the exact subscription closure, rather
+        # than mistaking framework internals for an ungated paid endpoint.
+        raw = getattr(route, "dependencies", ()) or ()
+        compiled = getattr(getattr(route, "dependant", None), "dependencies", ()) or ()
+        dependencies = [
+            getattr(d, "dependency", None) or getattr(d, "call", None)
+            for d in (*raw, *compiled)
+        ]
+        if any(
+            callable(fn) and "require_active_subscription" in getattr(fn, "__qualname__", "")
+            for fn in dependencies
+        ):
+            gated.add(_group(getattr(route, "path", "")))
     return gated
 
 

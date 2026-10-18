@@ -231,25 +231,53 @@ jobs:
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
-    # Report-mode until the current advisory backlog is triaged, then flip to a
-    # hard gate (tracked in docs/PRODUCTION_READINESS.md). Never merge a NEW
-    # critical/high advisory once enforcement is on.
+    # PR development remains report-only until the existing advisory backlog
+    # is fixed or each exceptional finding is independently risk-reviewed.
+    # Production RELEASE and IMAGE PUBLISH gates fail closed regardless.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: npm audit (frontend)
+      - name: Audit runtime frontend dependencies separately
+        id: frontend_runtime
         working-directory: frontend
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit full frontend dependencies
+        id: frontend_all
+        working-directory: frontend
+        continue-on-error: true
         run: npm audit --audit-level=high
-      - name: npm audit (desktop)
+      - name: Audit desktop dependencies
+        id: desktop_all
         working-directory: desktop
+        continue-on-error: true
         run: npm audit --audit-level=high
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: pip-audit (backend)
+      - name: Audit backend requirements
+        id: backend_all
+        continue-on-error: true
         run: |
           python -m pip install pip-audit
-          pip-audit -r backend/requirements.txt
+          python -m pip_audit -r backend/requirements.txt
+      - name: Keep the audit job visibly red if any scan failed
+        if: always()
+        env:
+          FRONTEND_RUNTIME: ${{ steps.frontend_runtime.outcome }}
+          FRONTEND_ALL: ${{ steps.frontend_all.outcome }}
+          DESKTOP_ALL: ${{ steps.desktop_all.outcome }}
+          BACKEND_ALL: ${{ steps.backend_all.outcome }}
+        run: |
+          set -euo pipefail
+          printf 'frontend runtime: %s\nfrontend all: %s\ndesktop: %s\nbackend: %s\n' \
+            "$FRONTEND_RUNTIME" "$FRONTEND_ALL" "$DESKTOP_ALL" "$BACKEND_ALL"
+          for status in "$FRONTEND_RUNTIME" "$FRONTEND_ALL" "$DESKTOP_ALL" "$BACKEND_ALL"; do
+            if [ "$status" != success ]; then
+              echo "::error::Security advisory audit is not clean; release remains blocked."
+              exit 1
+            fi
+          done

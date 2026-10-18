@@ -1,7 +1,8 @@
 # Web framework
 # FastAPI and Starlette versions are independently pinned to a tested pair.
 # Multipart and request size security regressions require staging acceptance.
-fastapi==0.115.6           # framework upgrade needs adapted auth/gating E2E; release BLOCKED
+fastapi==0.143.3           # compatible with Starlette 1.8.0; paywall/auth tests must pass
+starlette==1.8.0           # security audit minimum; no silent downgrade
 uvicorn[standard]==0.30.0
 
 # Database

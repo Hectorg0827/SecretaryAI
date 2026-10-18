@@ -163,14 +163,14 @@ export function Sidebar({
             {userName && (
               <div className="text-xs font-medium text-slate-200 truncate">{userName}</div>
             )}
-            <div className="text-[10px] text-slate-500 capitalize">{ROLE_LABELS[role]}</div>
+            <div className="text-[10px] text-slate-300 capitalize">{ROLE_LABELS[role]}</div>
           </div>
         </div>
 
         {/* Agent status */}
         <div className={clsx(
           'flex items-center gap-2 text-xs px-3 py-2 rounded-lg',
-          connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-500',
+          connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-300',
         )}>
           {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
           <span>{connected ? 'Agent online' : 'Agent offline'}</span>
@@ -181,12 +181,12 @@ export function Sidebar({
 
         <button
           onClick={logout}
-          className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-slate-500 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-slate-300 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
         >
           <LogOut size={12} />
           Sign out
         </button>
-        <div className="text-[10px] text-slate-600 px-1">v1.0.0</div>
+        <div className="text-[10px] text-slate-300 px-1">v1.0.0</div>
       </div>
     </aside>
     </>

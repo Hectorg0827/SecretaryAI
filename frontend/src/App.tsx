@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
@@ -21,11 +22,36 @@ import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // ESC must dismiss the off-canvas navigation without changing route.
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileMenuOpen]);
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
-      <Sidebar unreadCount={unreadCount} />
-      <main className="flex-1 overflow-hidden">
+    <div className="flex h-dvh flex-col bg-slate-50 overflow-hidden md:flex-row">
+      {/* Navigation stays a real landmark on mobile; drawer is closed by default. */}
+      <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 md:hidden">
+        <button
+          type="button"
+          aria-label="Open navigation"
+          aria-expanded={mobileMenuOpen}
+          aria-controls="secretaryai-sidebar"
+          onClick={() => setMobileMenuOpen(true)}
+          className="rounded-lg p-2 text-slate-800 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-600"
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
+        <span className="font-semibold text-slate-900">SecretaryAI</span>
+      </header>
+      <Sidebar unreadCount={unreadCount} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<Dashboard onUnreadChange={setUnreadCount} />} />
           <Route

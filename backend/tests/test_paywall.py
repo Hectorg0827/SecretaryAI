@@ -123,30 +123,33 @@ def _group(path: str) -> str:
     return "/" + parts[0]
 
 
-def _gated_prefixes() -> set[str]:
-    """Route groups carrying the subscription dependency, read off the live app."""
+def _effective_app_routes():
+    """FastAPI 0.137+ keeps included routers as trees, not flat app.routes."""
     from app.main import app
+    from fastapi.routing import iter_route_contexts
+    return list(iter_route_contexts(app.routes))
 
+
+def _gated_prefixes() -> set[str]:
+    """Route groups with an actual effective subscription dependency."""
     gated = set()
-    for route in app.routes:
-        # Newer FastAPI exposes the *solved* dependency graph through
-        # APIRoute.dependant.dependencies (where the target is .call).
-        # Legacy FastAPI also exposes the unsolved Depends(.dependency).
-        # Inspect both and require the exact subscription closure, rather
-        # than mistaking framework internals for an ungated paid endpoint.
-        raw = getattr(route, "dependencies", ()) or ()
-        compiled = getattr(getattr(route, "dependant", None), "dependencies", ()) or ()
-        dependencies = [
+    for context in _effective_app_routes():
+        calls = []
+        dependant = getattr(context, "dependant", None)
+        calls.extend(
+            getattr(d, "call", None)
+            for d in getattr(dependant, "dependencies", ()) or ()
+        )
+        calls.extend(
             getattr(d, "dependency", None) or getattr(d, "call", None)
-            for d in (*raw, *compiled)
-        ]
+            for d in getattr(context, "dependencies", ()) or ()
+        )
         if any(
             callable(fn) and "require_active_subscription" in getattr(fn, "__qualname__", "")
-            for fn in dependencies
+            for fn in calls
         ):
-            gated.add(_group(getattr(route, "path", "")))
+            gated.add(_group(getattr(context, "path", "")))
     return gated
-
 
 # Everything a customer pays for.
 PAID = [
@@ -194,12 +197,10 @@ class TestPaywallBoundary:
         whether it is paid. Without this, a new router defaults to free and
         nobody notices.
         """
-        from app.main import app
-
         mounted = {
-            _group(getattr(r, "path", ""))
-            for r in app.routes
-            if getattr(r, "path", "").startswith(("/api/", "/auth", "/webhooks"))
+            _group(getattr(ctx, "path", ""))
+            for ctx in _effective_app_routes()
+            if getattr(ctx, "path", "").startswith(("/api/", "/auth", "/webhooks"))
         }
         classified = set(PAID) | set(FREE)
         unclassified = {m for m in mounted if m and m not in classified}

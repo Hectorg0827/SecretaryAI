@@ -144,6 +144,12 @@ def run_audit(preview: str, axe_script: Path, report_dir: Path) -> int:
         for issue in failures:
             print(f"FAIL WCAG {issue['page']}: {issue['id']} "
                   f"({issue['impact']}) {issue['nodes_count']} nodes", flush=True)
+            # A synthetic-only browser is safe to report selector targets.
+            # This makes subsequent changes evidence-based, rather than
+            # replacing CSS classes without knowing the violating nodes.
+            for node in issue["nodes"]:
+                print(f"  selector={node['target']} "
+                      f"reason={node['summary'][:220]}", flush=True)
         raise AssertionError(
             f"Automated WCAG A/AA violations: {len(failures)} rule/page failures; "
             "review saved JSON reports, no exemptions configured"

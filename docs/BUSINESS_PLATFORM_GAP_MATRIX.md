@@ -1,3 +1,47 @@
+# Latest handoff — FastAPI/Starlette patched and paywall preserved
+
+Verified candidate `35b42cdd`: backend **1,264 passed, 5 skipped** and
+Phase 4 security mutation checks passed in GitHub CI 39091819323.
+Python `pip-audit` reports **NO KNOWN VULNERABILITIES** on the resolved
+requirements (0 in backend; previously 14 Starlette records). This includes
+`fastapi==0.143.3` and `starlette==1.8.0` on Python 3.11.
+
+## Why previous upgrade broke tests
+FastAPI 0.137+ preserved included routers as a *tree*, rather than
+flattening `app.routes`. SecretaryAI's subscription-test harness and
+test-only automatic active-subscription fixture incorrectly walked
+`app.routes` as if the router were flat. Effective subscription gates were
+executing but the old harness failed to see/override them, leading to
+incorrect "free router" assertions and unrelated 402 responses.
+
+## Corrected and tested
+- Subscription-test fixture and route classification now use the
+  FastAPI-supported `iter_route_contexts(app.routes)` and effective
+  dependency graph, without modifying actual app billing/authorization.
+- All 13 paid groups remain structurally gated; the connector group
+  remains mixed: user-facing connector calls are paywalled, machine-facing
+  connector endpoints authenticate separately.
+- Added explicit *real HTTP* tests: unpaid authenticated tenants get
+  `402` on account/action endpoints; an active but underprivileged
+  viewer still gets `403` on account details. Paid test fixtures are
+  temporarily disabled during those test cases, then restored.
+- The existing role checks, company isolation, approval idempotency,
+  policy denial, session scopes, JTI revocation and security mutation
+  tests remain enabled and passing.
+
+## Release gates
+- The **backend dependency security gate is clean**, but the overall
+  Dependency audit still fails: full frontend **11 (6 high/5 moderate)**,
+  desktop **20 (11 high/8 moderate/1 low)**. Frontend runtime-only
+  high-severity audit is clean; do not translate that into a full clear.
+- Real staging FastAPI/Starlette HTTP traffic, malware/file storage, QB
+  integration, payments, rollback and independent audit remain unverified.
+- Do not merge/deploy or apply migrations on customer data.
+- Verify latest exact-tip GitHub CI and CodeQL separately before any
+  release decision. PR #74 stays open and on its existing base branch.
+
+---
+
 ## Security dependency remediation checkpoint — 2026-10-17/18
 
 Existing SecretaryAI PR #74, no merge or deployment. The front-end

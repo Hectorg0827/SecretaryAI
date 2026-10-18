@@ -56,9 +56,11 @@ jobs:
         working-directory: desktop
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
+          set +e
           npm audit --audit-level=high
           result=$?
+          set -e
           if [ "$result" -ne 0 ]; then
             echo "::warning::Desktop high/critical dependency advisories remain. Release is blocked."
           fi

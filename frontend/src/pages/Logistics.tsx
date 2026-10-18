@@ -58,7 +58,7 @@ export function Logistics() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900">Logistics Manager</h1>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <p className="text-sm text-slate-600 mt-0.5">
               Reordering · Purchase orders · Shipments · Cost analysis
             </p>
           </div>
@@ -68,19 +68,19 @@ export function Logistics() {
             {reorderCount > 0 && (
               <div className="text-center">
                 <div className="text-lg font-bold text-slate-800">{reorderCount}</div>
-                <div className="text-xs text-slate-400">Pending reorders</div>
+                <div className="text-xs text-slate-600">Pending reorders</div>
               </div>
             )}
             {poCount > 0 && (
               <div className="text-center">
                 <div className="text-lg font-bold text-slate-800">{poCount}</div>
-                <div className="text-xs text-slate-400">Open POs</div>
+                <div className="text-xs text-slate-600">Open POs</div>
               </div>
             )}
             {delayedCount > 0 && (
               <div className="text-center">
                 <div className="text-lg font-bold text-red-600">{delayedCount}</div>
-                <div className="text-xs text-slate-400">Delayed</div>
+                <div className="text-xs text-slate-600">Delayed</div>
               </div>
             )}
           </div>

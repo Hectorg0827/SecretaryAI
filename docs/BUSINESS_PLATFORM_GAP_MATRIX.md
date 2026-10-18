@@ -1,3 +1,39 @@
+## Frontend dependency and routing security milestone — October 18, 2026
+
+- Implemented on the **existing** SecretaryAI PR #74 branch only;
+  no separate PR, merge, release tag, deployment or data migration.
+- Replaced the web dependency chains that carried **11 findings
+  (6 high/5 moderate)**: Vite 5 -> **Vite 8.3.4**, React plugin ->
+  **6.1.2**, Tailwind CSS 3 -> **Tailwind 4.3.3** with its
+  `@tailwindcss/vite` plugin, and React Router DOM 6 ->
+  **React Router DOM 7.18.4**. Removed redundant direct PostCSS and
+  Autoprefixer. The temporary dependency-resolution workflow
+  [39099359050](https://github.com/Hectorg0827/SecretaryAI/actions/runs/39099359050)
+  passed `npm ci`, lint, typecheck, existing tests, production build,
+  generated CSS regression, and **full `npm audit --audit-level=high`
+  with 0 vulnerabilities** before committing the lockfile.
+- Converted `frontend/src/index.css` to Tailwind v4 CSS-first tokens
+  preserving colors, card shadows, and animations. Removed obsolete
+  `tailwind.config.js`. `scripts/verify-built-css.mjs` checks that
+  generated production CSS includes real JSX utility classes,
+  SecretaryAI brand colors and motion tokens. The frontend CI and
+  production Docker builder run this check on Node 22 and npm 11.19.1.
+- Extracted `PrivateRoute`/`RoleGuard` unchanged into reusable guards
+  with *new* React Router v7 behavioral regression tests for no token,
+  owner access, sales rep redirection, and unrecognized roles. These
+  additions require independent **latest-head CI** verification.
+- Deleted the temporary workflow with GitHub write permission after the
+  lockfile was committed. The ordinary protected release gate still
+  refuses security audit findings; no exceptions were created.
+- **Not certified for market launch:** UI screenshot comparisons on
+  Chrome/Firefox/Safari and mobile viewports, keyboard/accessibility,
+  physical desktop installers, full user workflows with real connected
+  QB/Stripe/Supabase/ClamAV services, recovery, security review, GA
+  compliance and production release are separate outstanding gates.
+
+
+---
+
 ## Desktop dependency vulnerability closure — October 18, 2026
 
 **Code scope:** Existing PR #74 and branch

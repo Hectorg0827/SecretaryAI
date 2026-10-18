@@ -187,6 +187,15 @@ class TestPaywallBoundary:
 
     @pytest.mark.parametrize("prefix", sorted(FREE))
     def test_free_router_is_not_gated(self, prefix):
+        if prefix == "/api/connectors":
+            # The connector router is intentionally mixed: its user-facing
+            # endpoints ARE paid, while machine calls authenticate with their
+            # own connector credential. The per-endpoint split below checks
+            # both sides; looking only at the group would hide that distinction.
+            assert prefix in _gated_prefixes(), (
+                "User-facing connector endpoints unexpectedly lost the paywall"
+            )
+            return
         assert prefix not in _gated_prefixes(), (
             f"{prefix} must stay free: {FREE[prefix]}"
         )

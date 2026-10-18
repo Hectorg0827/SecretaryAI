@@ -59,7 +59,7 @@ export function Register() {
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <h1 className="text-xl font-bold text-slate-900 mb-1">Create your account</h1>
-          <p className="text-sm text-slate-400 mb-6">Set up your company workspace in seconds.</p>
+          <p className="text-sm text-slate-600 mb-6">Set up your company workspace in seconds.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
@@ -80,7 +80,7 @@ export function Register() {
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="Acme Distributors"
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
               />
             </div>
 
@@ -95,7 +95,7 @@ export function Register() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Jane Smith"
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
               />
             </div>
 
@@ -111,13 +111,13 @@ export function Register() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="jane@acme.com"
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="password">
-                Password <span className="text-slate-400 font-normal">(min. 8 characters)</span>
+                Password <span className="text-slate-600 font-normal">(min. 8 characters)</span>
               </label>
               <input
                 id="password"
@@ -128,7 +128,7 @@ export function Register() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
               />
             </div>
 
@@ -145,7 +145,7 @@ export function Register() {
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
                 />
                 {confirm && password === confirm && (
                   <CheckCircle2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500" />
@@ -163,7 +163,7 @@ export function Register() {
             </button>
           </form>
 
-          <p className="text-xs text-slate-400 text-center mt-6">
+          <p className="text-xs text-slate-300 text-center mt-6">
             Already have an account?{' '}
             <Link to="/login" className="text-blue-600 hover:underline font-medium">
               Sign in

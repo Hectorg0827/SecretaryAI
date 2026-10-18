@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -24,15 +24,57 @@ function AppShell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // ESC must dismiss the off-canvas navigation without changing route.
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const openedRef = useRef(false);
+
+  // Keyboard focus must stay inside the mobile modal navigation. Closing it
+  // restores focus to the opener, rather than stranding it on an inert link.
   useEffect(() => {
-    if (!mobileMenuOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMobileMenuOpen(false);
+    if (!mobileMenuOpen) {
+      if (openedRef.current) menuButtonRef.current?.focus();
+      openedRef.current = false;
+      return;
+    }
+    openedRef.current = true;
+    const sidebar = document.getElementById('secretaryai-sidebar');
+    const closeButton = sidebar?.querySelector<HTMLButtonElement>('[data-mobile-close]');
+    closeButton?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !sidebar) return;
+      const focusable = Array.from(
+        sidebar.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]'),
+      ).filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
   }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)');
+    const dismissOnDesktop = () => {
+      if (desktop.matches) setMobileMenuOpen(false);
+    };
+    desktop.addEventListener('change', dismissOnDesktop);
+    return () => desktop.removeEventListener('change', dismissOnDesktop);
+  }, []);
 
   return (
     <div className="flex h-dvh flex-col bg-slate-50 overflow-hidden md:flex-row">
@@ -43,6 +85,7 @@ function AppShell() {
           aria-label="Open navigation"
           aria-expanded={mobileMenuOpen}
           aria-controls="secretaryai-sidebar"
+          ref={menuButtonRef}
           onClick={() => setMobileMenuOpen(true)}
           className="rounded-lg p-2 text-slate-800 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-600"
         >

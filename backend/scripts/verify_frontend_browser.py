@@ -60,7 +60,7 @@ def _mock_internal_api(context):
     # No actual backend/API/credentials; static UI and CSS only.
     def respond(route):
         route.fulfill(status=200, content_type="application/json", body="{}")
-    context.route(re.compile(r"/(?:api/|auth/me)(?:/|$)"), respond)
+    context.route(re.compile(r"/api/|/auth/me(?:[/?]|$)"), respond)
 
 
 def _login_and_register(browser, base: str, artifacts: Path, width: int, height: int):
@@ -94,8 +94,7 @@ def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, h
     mobile = width < 768
     context = browser.new_context(viewport={"width": width, "height": height}, device_scale_factor=1)
     context.add_init_script(
-        "(token) => localStorage.setItem('secretary_token', token)",
-        arg=_fake_user_role("owner"),
+        "localStorage.setItem('secretary_token', " + json.dumps(_fake_user_role("owner")) + ");"
     )
     _mock_internal_api(context)
     page = context.new_page()
@@ -112,11 +111,11 @@ def _authenticated_navigation(browser, base: str, artifacts: Path, width: int, h
         )
         open_btn.click()
         assert open_btn.get_attribute("aria-expanded") == "true"
-        assert aside.bounding_box()["x"] >= -1
+        page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().left >= -1")
         page.screenshot(path=str(artifacts / ("navigation-open-" + str(width) + ".png")))
         page.get_by_role("link", name="Logistics").click()
         assert open_btn.get_attribute("aria-expanded") == "false"
-        assert aside.bounding_box()["x"] < 0
+        page.wait_for_function("document.querySelector('#secretaryai-sidebar').getBoundingClientRect().right <= 1")
         open_btn.click()
         page.keyboard.press("Escape")
         assert open_btn.get_attribute("aria-expanded") == "false", "Escape did not close mobile navigation"

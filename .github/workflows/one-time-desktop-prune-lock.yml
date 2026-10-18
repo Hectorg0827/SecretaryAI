@@ -1,0 +1,75 @@
+# Temporary branch-restricted lockfile regeneration. Remove after success.
+name: One-time Desktop Unused Dependency Prune
+on:
+  pull_request:
+    paths:
+      - .github/workflows/one-time-desktop-prune-lock.yml
+permissions:
+  contents: read
+jobs:
+  prune:
+    name: Verify desktop unused dependency removal
+    if: github.repository == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.repo.full_name == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.ref == 'claude/blissful-noether-ik7p9l'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout existing PR branch, without persisted write token
+        uses: actions/checkout@v4
+        with:
+          ref: claude/blissful-noether-ik7p9l
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Match pinned npm version
+        run: npm install --global npm@11.19.1
+      - name: Regenerate only lockfile for removed desktop dependencies
+        working-directory: desktop
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Verify clean install, lint, types, tests, build and actual dependency absence
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build -- --mode development
+          # These packages are unused in the native desktop UI; they must
+          # not remain as direct dependencies in the desktop manifest.
+          node -e "const p=require('./package.json');for(const name of ['react-router-dom','tailwindcss','autoprefixer','postcss']){if(p.dependencies?.[name]||p.devDependencies?.[name])process.exit(1)}"
+      - name: Check desktop runtime audit (release block remains independent)
+        working-directory: desktop
+        run: npm audit --omit=dev --audit-level=high
+      - name: Record all remaining advisories without waiving them
+        working-directory: desktop
+        shell: bash
+        run: |
+          set +e
+          npm audit --audit-level=high
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            echo "::warning::Unresolved desktop advisories; release gate remains blocked."
+          fi
+          exit 0
+      - name: Commit tested lockfile only to existing PR branch
+        shell: bash
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- desktop/package-lock.json; then
+            echo "::error::Expected a lockfile diff after unused-dependency removal"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- desktop/package-lock.json
+          git commit -m "chore(desktop): prune unused vulnerable CSS and routing transitive tree"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 -w0)" \
+            push "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/claude/blissful-noether-ik7p9l

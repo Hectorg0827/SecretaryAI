@@ -105,6 +105,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Match the vetted desktop lockfile npm resolver
+        run: npm install --global npm@11.19.1
+
       # ── Rust ────────────────────────────────────────────────────────────────
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable

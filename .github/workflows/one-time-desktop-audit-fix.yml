@@ -1,0 +1,81 @@
+# Temporary single-PR dependency remediation: delete once completed.
+# Explicit path-scoped trigger and exact branch restriction prevent loops.
+name: One-time Desktop Audit Fix
+on:
+  pull_request:
+    paths:
+      - .github/workflows/one-time-desktop-audit-fix.yml
+permissions:
+  contents: read
+
+jobs:
+  remediate-desktop:
+    name: Test semver-safe desktop dependency fixes
+    if: github.repository == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.repo.full_name == 'Hectorg0827/SecretaryAI' && github.event.pull_request.head.ref == 'claude/blissful-noether-ik7p9l'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact development branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: claude/blissful-noether-ik7p9l
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Use vetted lockfile resolver
+        run: npm install --global npm@11.19.1
+      - name: Safe audit remediation
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          set +e
+          npm audit fix --ignore-scripts --no-fund
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            echo "::warning::Safe audit fixes incomplete; refreshing lockfile without force."
+            npm install --package-lock-only --ignore-scripts --no-fund --no-audit
+          fi
+      - name: Verify clean install and desktop functionality
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build -- --mode development
+      - name: Record audit counts without concealing blockers
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -uo pipefail
+          npm audit --audit-level=high
+          result=$?
+          if [ "$result" -ne 0 ]; then
+            echo "::warning::Desktop high/critical dependency advisories remain. Release is blocked."
+          fi
+          exit 0
+      - name: Commit only tested manifest and lockfile on PR branch
+        shell: bash
+        env:
+          GH_PUSH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- desktop/package.json desktop/package-lock.json; then
+            echo "No compatible dependency changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- desktop/package.json desktop/package-lock.json
+          git commit -m "chore(desktop): validate and apply semver-compatible security patches"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 -w0)" \
+            push "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/claude/blissful-noether-ik7p9l

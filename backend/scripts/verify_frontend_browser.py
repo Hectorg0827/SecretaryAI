@@ -81,7 +81,7 @@ def _login_and_register(browser, engine: str, base: str, artifacts: Path, width:
     # with tight tolerance rather than requiring identical string rendering.
     if background != "rgb(15, 23, 42)":
         match = re.fullmatch(
-            r"oklch\\((\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\)",
+            r"oklch\((\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\)",
             background,
         )
         assert match is not None and all(

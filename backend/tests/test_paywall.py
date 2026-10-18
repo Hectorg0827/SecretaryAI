@@ -282,7 +282,9 @@ class TestPaidRouteHttpEnforcement:
         saved = dict(app.dependency_overrides)
         try:
             gated = _subscription_dependencies()
-            assert len(gated) >= len(PAID), (
+            # app.main shares one closure across its 13 paid routers; it is
+            # intentionally not a different callable for every route.
+            assert gated and set(PAID).issubset(_gated_prefixes()), (
                 "Could not enumerate actual effective paid-route dependencies"
             )
             for dep in gated:

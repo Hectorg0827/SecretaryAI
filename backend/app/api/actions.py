@@ -40,10 +40,8 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
     Evaluate the tenant PolicyEngine for a COMMIT action about to execute.
     Returns the effect ('allow' | 'require_approval' | 'deny').
 
-    On an evaluation error we fail OPEN ('allow') and log loudly: the action has
-    ALREADY been through human approval and the static autonomy rules, so a
-    policy-infra hiccup should not block a legitimately-approved action — but an
-    explicit 'deny' (e.g. amount over a hard ceiling) is always honored.
+    On policy evaluation failure, fail CLOSED ('deny'). Human approval cannot
+    override an unavailable policy system or a company hard limit.
     """
     try:
         proposal = ActionProposal(
@@ -57,9 +55,9 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
         decision = await PolicyEngine(company_id, db).evaluate(proposal)
         return decision.effect
     except Exception as exc:
-        log.error("Policy evaluation errored for draft %s (failing open): %s",
+        log.error("Policy evaluation errored for draft %s (failing closed): %s",
                   draft.get("id"), exc)
-        return "allow"
+        return "deny"
 
 
 async def _execute_approved_draft(draft: dict, adapter) -> None:

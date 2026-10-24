@@ -1,6 +1,8 @@
 from pydantic_settings import BaseSettings
 from pydantic import model_validator
 from functools import lru_cache
+from urllib.parse import urlsplit
+import re
 
 
 class Settings(BaseSettings):
@@ -14,6 +16,14 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_role_key: str
     database_url: str
+
+    # A separately deployed staging stack must name its Supabase project
+    # explicitly. These values are not secrets; never reuse Lyo or production.
+    secretaryai_deployment_env: str = ""
+    secretaryai_expected_supabase_project_ref: str = ""
+    secretaryai_email_delivery_mode: str = "disabled"
+    secretaryai_live_email_delivery_approved: bool = False
+    secretaryai_staging_email_pilot_enabled: bool = False
 
     # Anthropic / Claude
     anthropic_api_key: str
@@ -120,6 +130,59 @@ class Settings(BaseSettings):
                 f"SECRET_KEY must be at least 32 characters (got {len(self.secret_key)}). "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
+
+        # Staging is an isolated control plane: reject cross-project credentials
+        # before any database connection, email call or worker startup. Supabase
+        # direct URLs have the project ref in the hostname; pooler URLs encode
+        # it in the username (postgres.<project-ref>).
+        if self.secretaryai_deployment_env.strip().lower() == "staging":
+            ref = self.secretaryai_expected_supabase_project_ref.strip()
+            if not re.fullmatch(r"[a-z0-9]{20}", ref):
+                errors.append(
+                    "Staging requires SECRETARYAI_EXPECTED_SUPABASE_PROJECT_REF "
+                    "set to the isolated Supabase project's 20-character ref."
+                )
+            else:
+                try:
+                    api = urlsplit(self.supabase_url)
+                    if api.scheme != "https" or api.hostname != f"{ref}.supabase.co":
+                        errors.append(
+                            "SUPABASE_URL does not match the expected staging project."
+                        )
+                except ValueError:
+                    errors.append("SUPABASE_URL is invalid for isolated staging.")
+
+                try:
+                    db = urlsplit(self.database_url)
+                    db_host = db.hostname or ""
+                    db_user = db.username or ""
+                    matches_direct = db_host == f"db.{ref}.supabase.co"
+                    matches_pooler = (
+                        db_host.endswith(".pooler.supabase.com")
+                        and db_user == f"postgres.{ref}"
+                    )
+                    if (db.scheme not in ("postgresql", "postgres")
+                            or not (matches_direct or matches_pooler)):
+                        errors.append(
+                            "DATABASE_URL does not target the expected isolated "
+                            "staging Supabase PostgreSQL project."
+                        )
+                except ValueError:
+                    errors.append("DATABASE_URL is invalid for isolated staging.")
+
+            if self.intuit_environment != "sandbox":
+                errors.append("Staging requires INTUIT_ENVIRONMENT=sandbox.")
+            if self.computer_use_enabled:
+                errors.append("Staging requires COMPUTER_USE_ENABLED=false.")
+            if (self.secretaryai_email_delivery_mode.strip().lower() != "disabled"
+                or self.secretaryai_live_email_delivery_approved
+                or self.secretaryai_staging_email_pilot_enabled):
+                errors.append(
+                    "Staging API requires email delivery and pilot workers disabled. "
+                    "Pilot execution must use the separate controlled release procedure."
+                )
+            if self.billing_enabled and self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):
+                errors.append("Staging billing requires a Stripe test-mode secret key.")
 
         # If QBO integration is partially configured, require all three fields
         qbo_fields = {

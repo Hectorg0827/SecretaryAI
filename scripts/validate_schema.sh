@@ -33,11 +33,14 @@ $roles$;
 GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql database/schema_v11_atomic_agent_execution_claims.sql database/schema_v12_dedicated_execution_role.sql database/schema_v13_atomic_durable_draft_approval.sql database/schema_v14_immutable_approved_email_payload.sql database/schema_v15_staging_email_allowlist_claim.sql database/schema_v16_trigger_function_search_paths.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql supabase/migrations/20250322000000_draft_expiry.sql supabase/migrations/20250322000001_ingested_files_hash.sql supabase/migrations/20250325000000_report_snapshots.sql supabase/migrations/20250325000001_memory.sql supabase/migrations/20250325000002_feed_events.sql supabase/migrations/20250325000003_workflows.sql supabase/migrations/20250325000004_connector_fields.sql supabase/migrations/20250325000005_conductor_end_user.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql database/schema_v11_atomic_agent_execution_claims.sql database/schema_v12_dedicated_execution_role.sql database/schema_v13_atomic_durable_draft_approval.sql database/schema_v14_immutable_approved_email_payload.sql database/schema_v15_staging_email_allowlist_claim.sql database/schema_v16_trigger_function_search_paths.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
 echo "✓ All schema files applied cleanly."
+echo '── testing legacy core RLS and no unsafe client grants'
+psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_core_security.sql
+echo '✓ Legacy module security checks passed.'
 echo "── running real PostgreSQL stock-ledger integrity tests"
 psql -v ON_ERROR_STOP=1 -f scripts/test_stock_ledger.sql
 echo "✓ Stock-ledger integrity checks passed."

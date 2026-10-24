@@ -54,6 +54,13 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000010_phase7_cu.
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_internal_queues.sql
 echo '✓ Internal queues RLS and tenant FK checks passed.'
 
+echo '── validating Phase1 connector/automation control-plane schemas'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250328000007_phase1_schema.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000008_phase4_capability_routes.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_phase1_control_plane_security.sql
+echo '✓ Phase1/Phase4 control-plane access checks passed.'
+
+
 
 echo "── running real PostgreSQL stock-ledger integrity tests"
 psql -v ON_ERROR_STOP=1 -f scripts/test_stock_ledger.sql

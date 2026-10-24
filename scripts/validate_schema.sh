@@ -48,6 +48,13 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250325000003_compliance
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_billing_compliance_security.sql
 echo '✓ Billing and compliance schema RLS checks passed.'
 
+echo '── validating internal browser, ingestion and computer-use queues'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000009_phase6_ingestion.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000010_phase7_cu.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_internal_queues.sql
+echo '✓ Internal queues RLS and tenant FK checks passed.'
+
+
 echo "── running real PostgreSQL stock-ledger integrity tests"
 psql -v ON_ERROR_STOP=1 -f scripts/test_stock_ledger.sql
 echo "✓ Stock-ledger integrity checks passed."

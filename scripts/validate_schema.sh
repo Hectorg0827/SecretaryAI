@@ -29,7 +29,7 @@ $roles$;
 GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql database/schema_v11_atomic_agent_execution_claims.sql database/schema_v12_dedicated_execution_role.sql database/schema_v13_atomic_durable_draft_approval.sql database/schema_v14_immutable_approved_email_payload.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql database/schema_v11_atomic_agent_execution_claims.sql database/schema_v12_dedicated_execution_role.sql database/schema_v13_atomic_durable_draft_approval.sql database/schema_v14_immutable_approved_email_payload.sql database/schema_v15_staging_email_allowlist_claim.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
@@ -73,3 +73,7 @@ echo '✓ Atomic approval checks passed.'
 echo '── testing V15 immutable approved email payload and claim'
 psql -v ON_ERROR_STOP=1 -f scripts/test_approved_email_snapshot.sql
 echo '✓ Immutable email snapshot checks passed.'
+
+echo '── testing V17 staging email recipient allowlist'
+psql -v ON_ERROR_STOP=1 -f scripts/test_staging_email_allowlist.sql
+echo '✓ Staging email allowlist checks passed.'

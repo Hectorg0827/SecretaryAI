@@ -41,6 +41,13 @@ echo "✓ All schema files applied cleanly."
 echo '── testing legacy core RLS and no unsafe client grants'
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_core_security.sql
 echo '✓ Legacy module security checks passed.'
+
+echo '── validating legacy billing/compliance migrations in disposable PostgreSQL'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250325000001_billing.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250325000003_compliance.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_billing_compliance_security.sql
+echo '✓ Billing and compliance schema RLS checks passed.'
+
 echo "── running real PostgreSQL stock-ledger integrity tests"
 psql -v ON_ERROR_STOP=1 -f scripts/test_stock_ledger.sql
 echo "✓ Stock-ledger integrity checks passed."

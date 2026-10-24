@@ -173,6 +173,11 @@ async def approve_draft(
             draft_id=draft_id, reviewed_by=user["sub"], company_id=user["company_id"]
         )
 
+    # Another approver may have won the pending -> approved race while
+    # this request was evaluating policy. Never repeat the external action.
+    if result.get("already_processed"):
+        return result
+
     # Record the execution stage separately from human authorization.
     execution_status = await _execute_approved_draft(draft, adapter)
     result["execution_status"] = execution_status

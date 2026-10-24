@@ -22,6 +22,16 @@ BEGIN
  denied:=FALSE;
  BEGIN
    PERFORM secretary_internal.claim_staging_email(
+     a,execution_id,'worker-unconfigured','pilot@example.test');
+ EXCEPTION WHEN insufficient_privilege THEN denied:=TRUE;
+ END;
+ IF NOT denied THEN RAISE EXCEPTION 'staging claim worked without DBA allowlist'; END IF;
+ INSERT INTO secretary_internal.staging_email_allowlist(
+   company_id,recipient,enabled,expires_at
+ ) VALUES(a,'pilot@example.test',TRUE,now()+INTERVAL '1 hour');
+ denied:=FALSE;
+ BEGIN
+   PERFORM secretary_internal.claim_staging_email(
      a,execution_id,'worker-wrong','customer@example.test');
  EXCEPTION WHEN insufficient_privilege THEN denied:=TRUE;
  END;

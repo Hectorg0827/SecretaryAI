@@ -263,7 +263,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15
+        # Match isolated SecretaryAI-Staging's PostgreSQL major version.
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sai
@@ -285,6 +286,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
+      - name: Export disposable schema for read-only staging comparison
+        run: |
+          psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > schema-manifest.json
+          python3 -c 'import json; d=json.load(open("schema-manifest.json")); print("Schema manifest objects:", len(d["objects"]))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: disposable-schema-manifest
+          path: schema-manifest.json
+          retention-days: 14
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -40,6 +40,11 @@ class PostgresDurableGateway:
         "$1::text::uuid,$2::text::uuid,$3::text)"
     )
 
+    _CLAIM_STAGING_EMAIL = (
+        "SELECT secretary_internal.claim_staging_email("
+        "$1::text::uuid,$2::text::uuid,$3::text,$4::text)"
+    )
+
     def __init__(self, dsn: str, *, required_role: str = "secretary_executor"):
         if not dsn or not required_role:
             raise ExecutionDatabaseUnavailable("Execution database is not configured")
@@ -127,6 +132,24 @@ class PostgresDurableGateway:
             data.get(key) is None for key in fields
         ):
             raise ExecutionDatabaseUnavailable("Incomplete approved email claim")
+        return data
+
+    async def claim_staging_email(
+        self, company_id: str, execution_id: str,
+        worker_id: str, allowed_recipient: str,
+    ) -> dict[str, Any]:
+        """DB enforces recipient allowlist before acquiring the claim."""
+        data = await self._call(
+            self._CLAIM_STAGING_EMAIL,
+            company_id, execution_id, worker_id, allowed_recipient,
+        )
+        if data.get("claimed") is False:
+            return {"claimed": False}
+        fields = ("claim_token", "recipient", "subject", "body")
+        if data.get("claimed") is not True or any(
+            data.get(name) is None for name in fields
+        ):
+            raise ExecutionDatabaseUnavailable("Invalid staging email claim")
         return data
 
     async def finish(self, company_id: str, execution_id: str,

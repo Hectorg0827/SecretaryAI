@@ -29,7 +29,7 @@ $roles$;
 GRANT USAGE ON SCHEMA auth TO authenticated, anon, service_role;
 SQL
 
-for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql; do
+for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3_integrations.sql database/schema_v4_connector_secret_digest.sql database/schema_v5_stock_ledger.sql database/schema_v6_purchasing_receiving.sql database/schema_v7_purchasing_evidence.sql database/schema_v8_evidence_integrity.sql database/schema_v9_malware_review.sql database/schema_v10_agent_execution_ledger.sql database/schema_v11_atomic_agent_execution_claims.sql; do
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
@@ -57,3 +57,7 @@ echo '✓ Malware scan and independent review acceptance passed.'
 echo '── testing V10 dormant execution ledger isolation and state guards'
 psql -v ON_ERROR_STOP=1 -f scripts/test_agent_execution_ledger.sql
 echo '✓ Execution ledger checks passed.'
+
+echo '── testing V11 atomic claim and fencing contract'
+psql -v ON_ERROR_STOP=1 -f scripts/test_atomic_agent_execution_claims.sql
+echo '✓ Atomic claim checks passed.'

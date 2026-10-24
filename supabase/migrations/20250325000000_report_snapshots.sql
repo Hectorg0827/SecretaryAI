@@ -25,10 +25,9 @@ CREATE INDEX IF NOT EXISTS report_snapshots_company_type_idx
 ALTER TABLE report_snapshots ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "report_snapshots_company_isolation"
-    ON report_snapshots
-    FOR ALL
-    USING (
-        company_id = (
-            SELECT company_id FROM users WHERE id = auth.uid()
-        )
-    );
+    ON report_snapshots FOR SELECT TO authenticated
+    USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+
+REVOKE ALL ON TABLE report_snapshots FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE report_snapshots TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE report_snapshots TO service_role;

@@ -40,17 +40,36 @@ async def main() -> None:
             "INSERT INTO companies(name) VALUES($1) RETURNING id",
             "V13 Disposable Execution Tenant B"
         )
+        approver_a = await admin.fetchval(
+            "INSERT INTO users(company_id,email,hashed_password,role) "
+            "VALUES($1,$2,'test-only','owner') RETURNING id",
+            company_a, f"v13-approver-a-{company_a}@example.test",
+        )
+        approver_b = await admin.fetchval(
+            "INSERT INTO users(company_id,email,hashed_password,role) "
+            "VALUES($1,$2,'test-only','owner') RETURNING id",
+            company_b, f"v13-approver-b-{company_b}@example.test",
+        )
         draft_a = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{}'::jsonb,'approved') RETURNING id",
+            "VALUES($1,'ai','email_reply','{}'::jsonb,'pending') RETURNING id",
             company_a,
         )
         draft_b = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{}'::jsonb,'approved') RETURNING id",
+            "VALUES($1,'ai','email_reply','{}'::jsonb,'pending') RETURNING id",
             company_b,
         )
         gateway = PostgresDurableGateway.from_environment()
+        approval_a = await gateway.approve_and_enqueue(
+            str(company_a), str(draft_a), str(approver_a),
+            {}, "v13-idem-a",
+        )
+        approval_b = await gateway.approve_and_enqueue(
+            str(company_b), str(draft_b), str(approver_b),
+            {}, "v13-idem-b",
+        )
+        assert approval_a["queued"] and approval_b["queued"]
         effects = 0
 
         async def synthetic_action() -> None:

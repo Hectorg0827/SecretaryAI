@@ -29,6 +29,12 @@ class PostgresDurableGateway:
         "$1::text::uuid,$2::text::uuid,$3::text::uuid,$4::text)"
     )
 
+    _APPROVE = (
+        "SELECT secretary_internal.approve_and_queue_email("
+        "$1::text::uuid,$2::text::uuid,$3::text::uuid,"
+        "$4::text::jsonb,$5::text,$6::text::jsonb)"
+    )
+
     def __init__(self, dsn: str, *, required_role: str = "secretary_executor"):
         if not dsn or not required_role:
             raise ExecutionDatabaseUnavailable("Execution database is not configured")
@@ -69,6 +75,21 @@ class PostgresDurableGateway:
         finally:
             if conn is not None:
                 await conn.close()
+
+    async def approve_and_enqueue(
+        self, company_id: str, draft_id: str, actor_id: str,
+        expected_content: dict, idempotency_key: str,
+        edited_content: dict | None = None,
+    ) -> dict[str, Any]:
+        """Atomically approve and queue; this does not execute the action."""
+        data = await self._call(
+            self._APPROVE, company_id, draft_id, actor_id,
+            json.dumps(expected_content), idempotency_key,
+            json.dumps(edited_content) if edited_content is not None else None,
+        )
+        if not data.get("execution_id") or type(data.get("queued")) is not bool:
+            raise ExecutionDatabaseUnavailable("Invalid durable approval response")
+        return data
 
     async def enqueue(self, company_id: str, draft_id: str, key: str) -> str:
         data = await self._call(self._ENQUEUE, company_id, draft_id, key)

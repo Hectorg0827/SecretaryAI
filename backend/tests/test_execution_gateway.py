@@ -80,3 +80,34 @@ def test_missing_dedicated_connection_fails_closed(monkeypatch):
     monkeypatch.delenv("SECRETARYAI_EXECUTION_DATABASE_URL", raising=False)
     with pytest.raises(ExecutionDatabaseUnavailable):
         PostgresDurableGateway.from_environment()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_uses_gateway_enqueue_claim_and_finish():
+    from app.workflows.approved_execution import run_approved_external_action
+
+    enqueue_conn = connection(result={"execution_id": "exec-7", "state": "queued"})
+    claim_conn = connection(result={
+        "claimed": True, "execution_id": "exec-7", "claim_token": "token-7",
+        "attempt": 1,
+    })
+    finish_conn = connection(result={"finalized": True, "state": "completed"})
+    effect = AsyncMock()
+
+    with patch("app.workflows.execution_gateway.asyncpg.connect",
+               new_callable=AsyncMock,
+               side_effect=[enqueue_conn, claim_conn, finish_conn]):
+        receipt = await run_approved_external_action(
+            gateway=PostgresDurableGateway("postgresql://test"),
+            company_id="tenant-1", draft_id="draft-1",
+            idempotency_key="business-key", worker_id="worker-1",
+            external_action=effect,
+        )
+    assert receipt.state == "completed"
+    effect.assert_awaited_once()
+    assert "secretary_internal.claim_agent_execution" in (
+        claim_conn.fetchval.await_args_list[1].args[0]
+    )
+    assert "secretary_internal.finish_agent_execution" in (
+        finish_conn.fetchval.await_args_list[1].args[0]
+    )

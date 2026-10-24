@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS procurement_cycles (
 ALTER TABLE procurement_cycles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "company_isolation" ON procurement_cycles
-    USING (company_id = (current_setting('app.company_id', true))::uuid);
+    FOR SELECT TO authenticated
+    USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+REVOKE ALL ON TABLE public.procurement_cycles FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.procurement_cycles TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.procurement_cycles TO service_role;
 
 -- Index for common queries
 CREATE INDEX IF NOT EXISTS idx_procurement_cycles_company
@@ -34,4 +38,4 @@ CREATE INDEX IF NOT EXISTS idx_procurement_cycles_po
 -- auto-update updated_at
 CREATE TRIGGER set_updated_at
     BEFORE UPDATE ON procurement_cycles
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();

@@ -60,6 +60,14 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000008_phase4_cap
 psql -v ON_ERROR_STOP=1 -f scripts/test_phase1_control_plane_security.sql
 echo '✓ Phase1/Phase4 control-plane access checks passed.'
 
+echo '── checking procurement and private morning briefing extensions'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000006_qbo_token_expiry.sql
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261024053100_private_morning_briefings.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_procurement_briefing_schema.sql
+echo '✓ Procurement, QBO expiry and briefing checks passed.'
+
+
 
 
 echo "── running real PostgreSQL stock-ledger integrity tests"

@@ -37,7 +37,7 @@ BEGIN
   IF NOT EXISTS (
      SELECT 1 FROM pg_policy
      WHERE polrelid='public.company_features'::regclass AND polcmd='r'
-       AND polqual::text LIKE '%company_id%'
+       AND pg_get_expr(polqual, polrelid) LIKE '%company_id%'
   ) THEN
     RAISE EXCEPTION 'Tenant feature SELECT policy absent';
   END IF;

@@ -5,15 +5,15 @@ Must only run against the disposable localhost 'sai' database in GitHub CI.
 """
 import asyncio
 import os
-import uuid
+import json
 
 import asyncpg
 
 from app.workflows.approved_execution import (
     ExecutionReconciliationRequired,
-    run_approved_external_action,
 )
 from app.workflows.execution_gateway import PostgresDurableGateway
+from app.workflows.approved_email_worker import simulate_approved_email
 
 
 async def main() -> None:
@@ -52,13 +52,13 @@ async def main() -> None:
         )
         draft_a = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{"to":"ci@example.test","body":"Synthetic"}'::jsonb,'pending') RETURNING id",
-            company_a,
+            "VALUES($1,'ai','email_reply',$2::jsonb,'pending') RETURNING id",
+            company_a, json.dumps({"to": "ci@example.test", "body": "Synthetic"}),
         )
         draft_b = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{"to":"ci@example.test","body":"Synthetic"}'::jsonb,'pending') RETURNING id",
-            company_b,
+            "VALUES($1,'ai','email_reply',$2::jsonb,'pending') RETURNING id",
+            company_b, json.dumps({"to": "ci@example.test", "body": "Synthetic"}),
         )
         gateway = PostgresDurableGateway.from_environment()
         approval_a = await gateway.approve_and_enqueue(
@@ -72,45 +72,46 @@ async def main() -> None:
         assert approval_a["queued"] and approval_b["queued"]
         effects = 0
 
-        async def synthetic_action() -> None:
+        async def synthetic_action(to: str, subject: str, body: str) -> None:
             nonlocal effects
+            assert to == "ci@example.test" and body == "Synthetic"
             effects += 1
 
-        first = await run_approved_external_action(
+        first = await simulate_approved_email(
             gateway=gateway, company_id=str(company_a),
-            draft_id=str(draft_a), idempotency_key="v13-idem-a",
-            worker_id="v13-worker-one", external_action=synthetic_action
+            execution_id=str(approval_a["execution_id"]),
+            worker_id="v13-worker-one", synthetic_delivery=synthetic_action
         )
-        second = await run_approved_external_action(
+        second = await simulate_approved_email(
             gateway=gateway, company_id=str(company_a),
-            draft_id=str(draft_a), idempotency_key="v13-idem-a",
-            worker_id="v13-worker-two", external_action=synthetic_action
+            execution_id=str(approval_a["execution_id"]),
+            worker_id="v13-worker-two", synthetic_delivery=synthetic_action
         )
         assert first.state == "completed" and first.claimed
         assert second.state == "not_claimed" and not second.claimed
         assert effects == 1, "duplicate synthetic external effect executed"
 
-        async def uncertain_action() -> None:
+        async def uncertain_action(to: str, subject: str, body: str) -> None:
             nonlocal effects
             effects += 1
             raise TimeoutError("synthetic provider acknowledgement lost")
 
         try:
-            await run_approved_external_action(
+            await simulate_approved_email(
                 gateway=gateway, company_id=str(company_b),
-                draft_id=str(draft_b), idempotency_key="v13-idem-b",
+                execution_id=str(approval_b["execution_id"]),
                 worker_id="v13-worker-three",
-                external_action=uncertain_action,
+                synthetic_delivery=uncertain_action,
             )
         except ExecutionReconciliationRequired:
             pass
         else:
             raise AssertionError("uncertain action did not require reconciliation")
 
-        replay = await run_approved_external_action(
+        replay = await simulate_approved_email(
             gateway=gateway, company_id=str(company_b),
-            draft_id=str(draft_b), idempotency_key="v13-idem-b",
-            worker_id="v13-worker-four", external_action=synthetic_action,
+            execution_id=str(approval_b["execution_id"]),
+            worker_id="v13-worker-four", synthetic_delivery=synthetic_action,
         )
         assert replay.state == "not_claimed"
         assert effects == 2, "uncertain action was run again"

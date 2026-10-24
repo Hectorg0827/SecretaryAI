@@ -16,16 +16,16 @@ BEGIN
  VALUES(b,'outsider-'||b||'@example.test','test','owner')
  RETURNING id INTO outsider;
  INSERT INTO drafts(company_id,created_by,action_type,content,status)
- VALUES(a,'ai','email_reply','{"to":"a@example.test"}'::jsonb,'pending')
+ VALUES(a,'ai','email_reply','{"to":"a@example.test","body":"Synthetic"}'::jsonb,'pending')
  RETURNING id INTO draft_a;
  INSERT INTO drafts(company_id,created_by,action_type,content,status)
- VALUES(a,'ai','email_reply','{"to":"b@example.test"}'::jsonb,'pending')
+ VALUES(a,'ai','email_reply','{"to":"b@example.test","body":"Synthetic"}'::jsonb,'pending')
  RETURNING id INTO draft_b;
 
  denied:=FALSE;
  BEGIN
   PERFORM secretary_internal.approve_and_queue_email(
-    a,draft_a,outsider,'{"to":"a@example.test"}'::jsonb,'same-idem');
+    a,draft_a,outsider,'{"to":"a@example.test","body":"Synthetic"}'::jsonb,'same-idem');
  EXCEPTION WHEN insufficient_privilege THEN denied:=TRUE;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'cross-tenant approver succeeded'; END IF;
@@ -33,15 +33,15 @@ BEGIN
  denied:=FALSE;
  BEGIN
   PERFORM secretary_internal.approve_and_queue_email(
-    a,draft_a,approver,'{"to":"stale@example.test"}'::jsonb,'same-idem');
+    a,draft_a,approver,'{"to":"stale@example.test","body":"Synthetic"}'::jsonb,'same-idem');
  EXCEPTION WHEN serialization_failure THEN denied:=TRUE;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'stale content approved'; END IF;
 
  first:=secretary_internal.approve_and_queue_email(
-   a,draft_a,approver,'{"to":"a@example.test"}'::jsonb,'same-idem');
+   a,draft_a,approver,'{"to":"a@example.test","body":"Synthetic"}'::jsonb,'same-idem');
  replay:=secretary_internal.approve_and_queue_email(
-   a,draft_a,approver,'{"to":"a@example.test"}'::jsonb,'same-idem');
+   a,draft_a,approver,'{"to":"a@example.test","body":"Synthetic"}'::jsonb,'same-idem');
  IF first->>'queued'<>'true' OR replay->>'already_processed'<>'true'
     OR first->>'execution_id'<>replay->>'execution_id' THEN
    RAISE EXCEPTION 'approval replay was not idempotent';
@@ -58,7 +58,7 @@ BEGIN
  denied:=FALSE;
  BEGIN
   PERFORM secretary_internal.approve_and_queue_email(
-    a,draft_b,approver,'{"to":"b@example.test"}'::jsonb,'same-idem');
+    a,draft_b,approver,'{"to":"b@example.test","body":"Synthetic"}'::jsonb,'same-idem');
  EXCEPTION WHEN unique_violation THEN denied:=TRUE;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'conflicting idempotency key accepted'; END IF;
@@ -68,8 +68,8 @@ BEGIN
  END IF;
 
  edited:=secretary_internal.approve_and_queue_email(
-   a,draft_b,approver,'{"to":"b@example.test"}'::jsonb,
-   'new-idem','{"to":"edited@example.test"}'::jsonb);
+   a,draft_b,approver,'{"to":"b@example.test","body":"Synthetic"}'::jsonb,
+   'new-idem','{"to":"edited@example.test","body":"Synthetic"}'::jsonb);
  IF edited->>'status'<>'edited_and_approved' THEN
    RAISE EXCEPTION 'edited approval not persisted';
  END IF;

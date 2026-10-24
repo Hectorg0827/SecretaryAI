@@ -20,4 +20,9 @@ CREATE INDEX IF NOT EXISTS feed_events_entity_idx ON feed_events (company_id, en
 
 ALTER TABLE feed_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "feed_events_company_isolation" ON feed_events
-    FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));
+  FOR SELECT TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+
+REVOKE ALL ON TABLE feed_events FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE feed_events TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE feed_events TO service_role;

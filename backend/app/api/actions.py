@@ -4,6 +4,7 @@ After approval, actions are executed immediately for email_reply type
 and dispatched as Celery tasks for heavier operations.
 """
 import logging
+import os
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -17,6 +18,9 @@ from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine
 from app.utils.audit import write_audit_event
+from app.workflows.execution_gateway import (
+    ExecutionDatabaseUnavailable, PostgresDurableGateway,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -159,6 +163,52 @@ async def approve_draft(
     content_for_policy = body.edited_content or draft.get("content", {}) or {}
     if await _execution_policy_effect(db, user["company_id"], user["sub"], draft, content_for_policy) == "deny":
         raise HTTPException(status_code=403, detail="This action is blocked by your company's action policy")
+
+    # Dark-launch durable mode. One PostgreSQL transaction must approve and
+    # enqueue together; never approve via PostgREST and enqueue afterward.
+    # This mode queues approved email only. No live send or worker dispatch.
+    if os.getenv("SECRETARYAI_DURABLE_APPROVAL_ENABLED") == "1":
+        if draft.get("action_type") != "email_reply":
+            raise HTTPException(
+                status_code=409,
+                detail="Durable approval is not enabled for this action type",
+            )
+        try:
+            gateway = PostgresDurableGateway.from_environment()
+            durable = await gateway.approve_and_enqueue(
+                company_id=user["company_id"],
+                draft_id=draft_id,
+                actor_id=user["sub"],
+                expected_content=draft.get("content", {}) or {},
+                idempotency_key=f"approved-draft:{draft_id}",
+                edited_content=body.edited_content,
+            )
+        except ExecutionDatabaseUnavailable as exc:
+            log.error("Durable approval unavailable for draft %s", draft_id)
+            raise HTTPException(
+                status_code=503, detail="Durable approval unavailable; action not sent"
+            ) from exc
+        except Exception as exc:
+            log.exception("Durable approval rejected for draft %s", draft_id)
+            raise HTTPException(
+                status_code=409, detail="Draft could not be durably approved"
+            ) from exc
+
+        write_audit_event(
+            db, company_id=user["company_id"],
+            event_type="draft_approved", actor_id=user["sub"],
+            approved_by=user["sub"], action_class=draft.get("action_type"),
+            metadata={"draft_id": draft_id, "action_type": "email_reply",
+                      "execution_status": "queued",
+                      "execution_id": durable["execution_id"]},
+        )
+        return {
+            "draft_id": draft_id,
+            "status": durable.get("status", "approved"),
+            "execution_status": "queued",
+            "execution_id": durable["execution_id"],
+            "already_processed": durable.get("already_processed", False),
+        }
 
     if body.edited_content:
         result = await queue.edit_and_approve(

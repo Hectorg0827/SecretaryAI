@@ -52,22 +52,22 @@ async def main() -> None:
         )
         draft_a = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{}'::jsonb,'pending') RETURNING id",
+            "VALUES($1,'ai','email_reply','{"to":"ci@example.test","body":"Synthetic"}'::jsonb,'pending') RETURNING id",
             company_a,
         )
         draft_b = await admin.fetchval(
             "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
-            "VALUES($1,'ai','email_reply','{}'::jsonb,'pending') RETURNING id",
+            "VALUES($1,'ai','email_reply','{"to":"ci@example.test","body":"Synthetic"}'::jsonb,'pending') RETURNING id",
             company_b,
         )
         gateway = PostgresDurableGateway.from_environment()
         approval_a = await gateway.approve_and_enqueue(
             str(company_a), str(draft_a), str(approver_a),
-            {}, "v13-idem-a",
+            {"to": "ci@example.test", "body": "Synthetic"}, "v13-idem-a",
         )
         approval_b = await gateway.approve_and_enqueue(
             str(company_b), str(draft_b), str(approver_b),
-            {}, "v13-idem-b",
+            {"to": "ci@example.test", "body": "Synthetic"}, "v13-idem-b",
         )
         assert approval_a["queued"] and approval_b["queued"]
         effects = 0

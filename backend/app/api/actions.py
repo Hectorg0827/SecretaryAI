@@ -80,10 +80,14 @@ async def _execute_approved_draft(draft: dict, adapter) -> str:
             log.error("Approved email draft %s is missing recipient or body", draft.get("id"))
             return "failed"
         try:
-            await adapter.send_email_reply(
+            receipt = await adapter.send_email_reply(
                 to=to, subject=content.get("subject", ""), body=body
             )
-            log.info("Sent approved email draft %s", draft.get("id"))
+            if not isinstance(receipt, dict) or receipt.get("status") != "sent":
+                log.error("Approved email draft %s has uncertain provider acknowledgment",
+                          draft.get("id"))
+                return "needs_reconciliation"
+            log.info("Provider accepted approved email draft %s", draft.get("id"))
             return "sent"
         except Exception:
             log.exception("Approved email draft %s send outcome uncertain", draft.get("id"))

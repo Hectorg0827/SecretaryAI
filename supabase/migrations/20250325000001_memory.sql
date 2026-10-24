@@ -19,11 +19,16 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
 );
 CREATE INDEX IF NOT EXISTS conv_summaries_company_user_idx ON conversation_summaries (company_id, user_id);
 
--- RLS
+-- Client access is read-only and scoped to verified, server-issued tenant claims.
 ALTER TABLE account_memory ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "account_memory_company_isolation" ON account_memory
-    FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));
-
 ALTER TABLE conversation_summaries ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "account_memory_company_isolation" ON account_memory
+  FOR SELECT TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 CREATE POLICY "conv_summaries_company_isolation" ON conversation_summaries
-    FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));
+  FOR SELECT TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+
+REVOKE ALL ON TABLE account_memory, conversation_summaries FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE account_memory, conversation_summaries TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE account_memory, conversation_summaries TO service_role;

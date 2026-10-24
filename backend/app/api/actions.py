@@ -60,33 +60,46 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
         return "deny"
 
 
-async def _execute_approved_draft(draft: dict, adapter) -> None:
-    """Execute a draft action after it has been approved."""
+async def _execute_approved_draft(draft: dict, adapter) -> str:
+    """Attempt an approved action; report its actual execution stage.
+
+    A human approval is not proof that an external side effect succeeded.
+    Never automatically retry an uncertain email send or PO dispatch here.
+    """
     action_type = draft.get("action_type", "")
-    content = draft.get("content", {})
+    content = draft.get("content", {}) or {}
 
     if action_type == "email_reply":
         to = content.get("to", "")
-        subject = content.get("subject", "")
         body = content.get("body", "")
-        if to and body:
-            try:
-                await adapter.send_email_reply(to=to, subject=subject, body=body)
-                log.info("Executed approved email_reply draft %s to %s", draft.get("id"), to)
-            except Exception as exc:
-                log.error("Failed to execute email_reply draft %s: %s", draft.get("id"), exc)
+        if not to or not body:
+            log.error("Approved email draft %s is missing recipient or body", draft.get("id"))
+            return "failed"
+        try:
+            await adapter.send_email_reply(
+                to=to, subject=content.get("subject", ""), body=body
+            )
+            log.info("Sent approved email draft %s", draft.get("id"))
+            return "sent"
+        except Exception:
+            log.exception("Approved email draft %s failed to send", draft.get("id"))
+            return "failed"
 
-    elif action_type == "purchase_order":
-        # Dispatch to Celery for async processing (vendor integration required)
+    if action_type == "purchase_order":
         try:
             from celery_app import celery_app
             celery_app.send_task(
                 "tasks.actions.process_approved_po",
                 kwargs={"draft_id": draft.get("id"), "content": content},
             )
-            log.info("Dispatched approved PO draft %s to Celery", draft.get("id"))
-        except Exception as exc:
-            log.warning("Could not dispatch PO task (non-fatal): %s", exc)
+            log.info("Dispatched approved PO draft %s", draft.get("id"))
+            return "dispatched"
+        except Exception:
+            log.exception("Approved PO draft %s failed to dispatch", draft.get("id"))
+            return "failed"
+
+    log.warning("No executor for approved action type %s", action_type)
+    return "unsupported"
 
 
 @router.get("/pending")
@@ -160,9 +173,9 @@ async def approve_draft(
             draft_id=draft_id, reviewed_by=user["sub"], company_id=user["company_id"]
         )
 
-    # Execute the approved action
-    if draft:
-        await _execute_approved_draft(draft, adapter)
+    # Record the execution stage separately from human authorization.
+    execution_status = await _execute_approved_draft(draft, adapter)
+    result["execution_status"] = execution_status
 
     # Write audit event
     write_audit_event(
@@ -172,12 +185,13 @@ async def approve_draft(
         actor_id=user["sub"],
         approved_by=user["sub"],
         action_class=draft.get("action_type"),
-        metadata={"draft_id": draft_id, "action_type": draft.get("action_type")},
+        metadata={"draft_id": draft_id, "action_type": draft.get("action_type"),
+                  "execution_status": execution_status},
     )
 
     # Resume linked workflow run if present
     workflow_run_id = draft.get("workflow_run_id")
-    if workflow_run_id:
+    if workflow_run_id and execution_status in ("sent", "dispatched"):
         try:
             from app.workflows.engine import WorkflowEngine
             wf_engine = WorkflowEngine(db, user["company_id"])

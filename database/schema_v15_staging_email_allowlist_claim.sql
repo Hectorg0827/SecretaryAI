@@ -9,7 +9,7 @@ DECLARE p agent_execution_email_payloads%ROWTYPE;
 BEGIN
   IF p_allowed_recipient IS NULL OR
      length(p_allowed_recipient) NOT BETWEEN 3 AND 320 OR
-     p_allowed_recipient !~ '^[^@,;[:space:]]+@[^@,;[:space:]]+\\.[^@,;[:space:]]+$'
+     p_allowed_recipient !~ '^[^@,;[:space:]]+@[^@,;[:space:]]+[.][^@,;[:space:]]+$'
   THEN
     RAISE EXCEPTION 'one explicit staging recipient is required'
       USING ERRCODE='22023';

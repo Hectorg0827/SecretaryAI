@@ -19,14 +19,14 @@ class PostgresDurableGateway:
     """One short transaction per state transition; no direct table mutation."""
 
     _ENQUEUE = (
-        "SELECT secretary_internal.enqueue_agent_execution($1::uuid,$2::uuid,$3::text)"
+        "SELECT secretary_internal.enqueue_agent_execution($1::text::uuid,$2::text::uuid,$3::text)"
     )
     _CLAIM = (
-        "SELECT secretary_internal.claim_agent_execution($1::uuid,$2::uuid,$3::text)"
+        "SELECT secretary_internal.claim_agent_execution($1::text::uuid,$2::text::uuid,$3::text)"
     )
     _FINISH = (
         "SELECT secretary_internal.finish_agent_execution("
-        "$1::uuid,$2::uuid,$3::uuid,$4::text)"
+        "$1::text::uuid,$2::text::uuid,$3::text::uuid,$4::text)"
     )
 
     def __init__(self, dsn: str, *, required_role: str = "secretary_executor"):

@@ -1,0 +1,318 @@
+{
+  "project_ref": "xerktvdgjvjozvckjyfp",
+  "source_commit": "3ec14f78d1f2db16f2a9fbc9b38fe9cd0de76833",
+  "recorded_migrations": [
+    {
+      "version": "20261024041419",
+      "name": "secretaryai_v6_purchasing_receiving",
+      "body_sha256": "833a40a5f03f78d14d45b9531028edb7866689a3965fcd1307f339bf9a0d5ce9",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v6_purchasing_receiving.sql",
+        "supabase/migrations/20261017020000_purchasing_receiving.sql",
+        "backend/supabase/migrations/20261017020000_purchasing_receiving.sql"
+      ]
+    },
+    {
+      "version": "20261024041432",
+      "name": "secretaryai_v7_purchasing_evidence",
+      "body_sha256": "284e61934cb20f922e4535aa0a9e47762b2947413aca57eae0bda9bfb3df9263",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v7_purchasing_evidence.sql",
+        "supabase/migrations/20261017030000_purchasing_evidence.sql",
+        "backend/supabase/migrations/20261017030000_purchasing_evidence.sql"
+      ]
+    },
+    {
+      "version": "20261024041434",
+      "name": "secretaryai_v8_evidence_integrity",
+      "body_sha256": "6ece50675911769eaced492cb6894301e7af75968683b61dfc0c286648edfc85",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v8_evidence_integrity.sql",
+        "supabase/migrations/20261017040000_evidence_integrity.sql",
+        "backend/supabase/migrations/20261017040000_evidence_integrity.sql"
+      ]
+    },
+    {
+      "version": "20261024041436",
+      "name": "secretaryai_v9_malware_review",
+      "body_sha256": "a5327ae080d005bd0535063afffdb849a0e740b968358dcd2cd81f179ab9a168",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v9_malware_review.sql",
+        "supabase/migrations/20261017050000_malware_review.sql",
+        "backend/supabase/migrations/20261017050000_malware_review.sql"
+      ]
+    },
+    {
+      "version": "20261024041442",
+      "name": "secretaryai_v10_agent_execution_ledger",
+      "body_sha256": "ed760439e9381eb560e7e31a1248791571c56c93923a22ee0751d37c708e5b92",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v10_agent_execution_ledger.sql",
+        "supabase/migrations/20261024015157_agent_execution_ledger.sql",
+        "backend/supabase/migrations/20261024015157_agent_execution_ledger.sql"
+      ]
+    },
+    {
+      "version": "20261024041444",
+      "name": "secretaryai_v11_atomic_agent_execution_claims",
+      "body_sha256": "a57950f0ea35636a67812275dc730f38a131761907a4740414ea9be4c491f5e4",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v11_atomic_agent_execution_claims.sql",
+        "supabase/migrations/20261024015412_atomic_agent_execution_claims.sql",
+        "backend/supabase/migrations/20261024015412_atomic_agent_execution_claims.sql"
+      ]
+    },
+    {
+      "version": "20261024041446",
+      "name": "secretaryai_v12_dedicated_execution_role",
+      "body_sha256": "972fbe624e6e088435694cad01d3cea3351e18d8646749905f5ca4c6bf1e588e",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v12_dedicated_execution_role.sql",
+        "supabase/migrations/20261024020218_dedicated_execution_role.sql",
+        "backend/supabase/migrations/20261024020218_dedicated_execution_role.sql"
+      ]
+    },
+    {
+      "version": "20261024041453",
+      "name": "secretaryai_v13_atomic_durable_draft_approval",
+      "body_sha256": "ef212db9b40b4503ff8ab1cd944c5486c639582822a22964507153d5ac1546c5",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v13_atomic_durable_draft_approval.sql",
+        "supabase/migrations/20261024021157_atomic_durable_draft_approval.sql",
+        "backend/supabase/migrations/20261024021157_atomic_durable_draft_approval.sql"
+      ]
+    },
+    {
+      "version": "20261024041455",
+      "name": "secretaryai_v14_immutable_approved_email_payload",
+      "body_sha256": "93ba64cc2e2dda4e0a161a9b82130444a41569bf65bf9823240522b111c18263",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v14_immutable_approved_email_payload.sql",
+        "supabase/migrations/20261024023612_immutable_approved_email_payload.sql",
+        "backend/supabase/migrations/20261024023612_immutable_approved_email_payload.sql"
+      ]
+    },
+    {
+      "version": "20261024041457",
+      "name": "secretaryai_v15_staging_email_allowlist_claim",
+      "body_sha256": "b76d1fc09e0170daf1facd6f986d619c2a3596b0d5362b52eaa66f627168b3e2",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v15_staging_email_allowlist_claim.sql",
+        "supabase/migrations/20261024025115_staging_email_allowlist_claim.sql",
+        "backend/supabase/migrations/20261024025115_staging_email_allowlist_claim.sql"
+      ]
+    },
+    {
+      "version": "20261024041616",
+      "name": "secretaryai_v16_trigger_function_search_paths",
+      "body_sha256": "7368471211a43c284bc55f1bb555daa49d88166d50bb604d6a5c81d7de04753c",
+      "comparison": "byte_exact",
+      "source_files": [
+        "database/schema_v16_trigger_function_search_paths.sql",
+        "supabase/migrations/20261024041600_trigger_function_search_paths.sql",
+        "backend/supabase/migrations/20261024041600_trigger_function_search_paths.sql"
+      ]
+    },
+    {
+      "version": "20261024050017",
+      "name": "secretaryai_legacy_draft_expiry_secure",
+      "body_sha256": "079bc9a57285846097733116fcde72fc4594bd6f45cf16bf8e8d9523cd34a5b0",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250322000000_draft_expiry.sql"
+      ]
+    },
+    {
+      "version": "20261024050020",
+      "name": "secretaryai_legacy_ingested_file_hash",
+      "body_sha256": "d51f111b0dcc312362ddf4645d8d2fdd1759e28f16a2f6bc853c9de8ca0f2829",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250322000001_ingested_files_hash.sql"
+      ]
+    },
+    {
+      "version": "20261024050021",
+      "name": "secretaryai_legacy_reports_tenant_read_only",
+      "body_sha256": "1b45d4f8a2f38e543ce2edd6361cc1b6462171877a50027ac83921cf0b1c44f3",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000000_report_snapshots.sql"
+      ]
+    },
+    {
+      "version": "20261024050023",
+      "name": "secretaryai_legacy_memory_tenant_read_only",
+      "body_sha256": "c3df7d1e6c2f28e926e8325df2132fa515785db54f28c5b425ac1b12d5fac230",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000001_memory.sql"
+      ]
+    },
+    {
+      "version": "20261024050032",
+      "name": "secretaryai_legacy_feed_events_tenant_read_only",
+      "body_sha256": "b4574c3cc8586a5aea86cc027d3bed21872d2ccf745306307d0fc5fba0aea644",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000002_feed_events.sql"
+      ]
+    },
+    {
+      "version": "20261024050034",
+      "name": "secretaryai_legacy_workflows_tenant_read_only",
+      "body_sha256": "ccaad1697459f7296fcdcb127ac6d496e640d84df1f3e3720a7087c542f7fb84",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000003_workflows.sql"
+      ]
+    },
+    {
+      "version": "20261024050036",
+      "name": "secretaryai_legacy_connector_fields",
+      "body_sha256": "8b9e46dcd2b04d1195601516acc420d82cf722725225c05fd101a3fd2595bed0",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000004_connector_fields.sql"
+      ]
+    },
+    {
+      "version": "20261024050041",
+      "name": "secretaryai_legacy_conductor_end_user",
+      "body_sha256": "34e63da08bb2b5989f7593f85c1e3492ddb8212209fbb155be570cca4f65a10b",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20250325000005_conductor_end_user.sql"
+      ]
+    },
+    {
+      "version": "20261024050559",
+      "name": "secretaryai_staging_billing_backend_only",
+      "body_sha256": "2e6984cc642307f383d79bef9504508dd661a5297764983060bc1f441b72d824",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250325000001_billing.sql"
+      ]
+    },
+    {
+      "version": "20261024050601",
+      "name": "secretaryai_staging_compliance_tenant_read_only",
+      "body_sha256": "6778354073247c505b96d6fbefcc4f00e2a525e443f971d4e7eaebf5bd4cbef4",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250325000003_compliance.sql"
+      ]
+    },
+    {
+      "version": "20261024050603",
+      "name": "secretaryai_staging_hardened_ingestion_queues",
+      "body_sha256": "ccf0485e9b67fdc2b762a5d2fa50120aa970427bece739587c3ad92a52028b8f",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250331000009_phase6_ingestion.sql"
+      ]
+    },
+    {
+      "version": "20261024050605",
+      "name": "secretaryai_staging_hardened_computer_use_queue",
+      "body_sha256": "70afa7ad5e440ea593dbb826c67b076874e53c09c3d38fdaeab6533b4d37118a",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250331000010_phase7_cu.sql"
+      ]
+    },
+    {
+      "version": "20261024051615",
+      "name": "secretaryai_staging_phase1_private_control_plane",
+      "body_sha256": "e79dbf6eff80627a9f154d022202f76a77cb15c5c147971b9ee7636eb31c7421",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250328000007_phase1_schema.sql"
+      ]
+    },
+    {
+      "version": "20261024051620",
+      "name": "secretaryai_staging_phase4_capability_routes",
+      "body_sha256": "273b8e662343da173d3086182f9e2f5c5724e58dbc3ba62b062ef93cc27c7df0",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250331000008_phase4_capability_routes.sql"
+      ]
+    },
+    {
+      "version": "20261024051622",
+      "name": "secretaryai_staging_procurement_cycles_read_only",
+      "body_sha256": "eb0ec0f420ecb1e46ae7f0e0652793bd191edd84715572743c7aab53af50fb2f",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250327000005_procurement_cycles.sql"
+      ]
+    },
+    {
+      "version": "20261024051624",
+      "name": "secretaryai_staging_qbo_token_expiry",
+      "body_sha256": "01c5b76607c6ae729869590103c158bbe84bcceb9d51d99030ed040873c5fff7",
+      "comparison": "byte_exact",
+      "source_files": [
+        "backend/supabase/migrations/20250327000006_qbo_token_expiry.sql"
+      ]
+    },
+    {
+      "version": "20261024051626",
+      "name": "secretaryai_staging_private_morning_briefings",
+      "body_sha256": "600ab9293ed133f07388ac852e035e6eb9d1f83aa27958d26d963bfa2fc7e764",
+      "comparison": "byte_exact",
+      "source_files": [
+        "supabase/migrations/20261024053100_private_morning_briefings.sql",
+        "backend/supabase/migrations/20261024053100_private_morning_briefings.sql"
+      ]
+    }
+  ],
+  "untracked_baseline": [
+    {
+      "source_file": "database/schema.sql",
+      "canonical_file": "supabase/migrations/20240101000000_initial_schema.sql",
+      "sha256": "2870db7c154a025d3e99145bd0c85625e3aec6761f40e3a1a3b650c139bbb40c",
+      "physical_schema": "verified_by_1283_object_comparison",
+      "history": "missing_not_repaired"
+    },
+    {
+      "source_file": "database/schema_v2_additions.sql",
+      "canonical_file": "supabase/migrations/20240601000000_v2_additions.sql",
+      "sha256": "e7674a4e41b8cbb47973ccb2b635704f9bb08c08f1ba9b6b9cfb32db14c3ee6a",
+      "physical_schema": "verified_by_1283_object_comparison",
+      "history": "missing_not_repaired"
+    },
+    {
+      "source_file": "database/schema_v3_integrations.sql",
+      "canonical_file": "supabase/migrations/20240901000000_v3_integrations.sql",
+      "sha256": "2921f4e280639be02a359bb6449938db88029a058a470a5c89c202e4604c8eb1",
+      "physical_schema": "verified_by_1283_object_comparison",
+      "history": "missing_not_repaired"
+    },
+    {
+      "source_file": "database/schema_v4_connector_secret_digest.sql",
+      "canonical_file": "supabase/migrations/20261017000000_connector_install_secret_digest.sql",
+      "sha256": "931c60010282c7e1060d0d9dd7d87eda6073e3bfce9a1b8268f02289aab62289",
+      "physical_schema": "verified_by_1283_object_comparison",
+      "history": "missing_not_repaired"
+    },
+    {
+      "source_file": "database/schema_v5_stock_ledger.sql",
+      "canonical_file": "supabase/migrations/20261017010000_stock_ledger.sql",
+      "sha256": "48f6b413c2d40a71f1a5ead0ff56c66a8c6f77526485fa58f83eeb7805ae25d1",
+      "physical_schema": "verified_by_1283_object_comparison",
+      "history": "missing_not_repaired"
+    }
+  ]
+}

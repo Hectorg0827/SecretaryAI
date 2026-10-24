@@ -35,6 +35,11 @@ class PostgresDurableGateway:
         "$4::text::jsonb,$5::text,$6::text::jsonb)"
     )
 
+    _CLAIM_EMAIL = (
+        "SELECT secretary_internal.claim_approved_email("
+        "$1::text::uuid,$2::text::uuid,$3::text)"
+    )
+
     def __init__(self, dsn: str, *, required_role: str = "secretary_executor"):
         if not dsn or not required_role:
             raise ExecutionDatabaseUnavailable("Execution database is not configured")
@@ -107,6 +112,22 @@ class PostgresDurableGateway:
         if data.get("claimed") is not True or not token:
             raise ExecutionDatabaseUnavailable("Claim returned invalid worker token")
         return str(token)
+
+    async def claim_email(
+        self, company_id: str, execution_id: str, worker_id: str,
+    ) -> dict[str, Any]:
+        """Claim an immutable email snapshot, never read a mutable draft."""
+        data = await self._call(
+            self._CLAIM_EMAIL, company_id, execution_id, worker_id,
+        )
+        if data.get("claimed") is False:
+            return {"claimed": False}
+        fields = ("claim_token", "recipient", "subject", "body", "payload_sha256")
+        if data.get("claimed") is not True or any(
+            data.get(key) is None for key in fields
+        ):
+            raise ExecutionDatabaseUnavailable("Incomplete approved email claim")
+        return data
 
     async def finish(self, company_id: str, execution_id: str,
                      claim_token: str, outcome: str) -> bool:

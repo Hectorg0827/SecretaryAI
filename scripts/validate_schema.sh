@@ -5,6 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo '── checking migration SQL source parity (read-only)'
+python3 scripts/check_migration_source_parity.py
+echo '✓ V1–V16 manual and Supabase migration copies match.'
+
 # Supabase provides auth.jwt(), used by the RLS policies; shim it so the schema
 # applies on a plain Postgres in CI.
 psql -v ON_ERROR_STOP=1 -c \

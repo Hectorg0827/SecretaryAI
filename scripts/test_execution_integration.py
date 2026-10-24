@@ -127,11 +127,8 @@ async def main() -> None:
         assert all(row["attempt"] == 1 for row in states)
         print("V13 disposable PostgreSQL end-to-end execution acceptance passed")
     finally:
-        # The guard above confines cleanup to synthetic records in CI only.
-        if company_a:
-            await admin.execute("DELETE FROM companies WHERE id=$1", company_a)
-        if company_b:
-            await admin.execute("DELETE FROM companies WHERE id=$1", company_b)
+        # Do not delete immutable execution history. GitHub CI destroys the
+        # entire disposable PostgreSQL container after this test instead.
         await admin.close()
 
 

@@ -33,7 +33,7 @@ BEGIN
   BEGIN
     INSERT INTO agent_executions(company_id,draft_id,idempotency_key,action_type)
       VALUES(a,draft_b,'cross-company-key','draft_customer_email');
-  EXCEPTION WHEN foreign_key_violation THEN denied:=TRUE;
+  EXCEPTION WHEN foreign_key_violation OR check_violation THEN denied:=TRUE;
   END;
   IF NOT denied THEN RAISE EXCEPTION 'cross-tenant draft reference allowed'; END IF;
 

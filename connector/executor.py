@@ -32,7 +32,14 @@ class TaskExecutor:
     def _get_adapter(self):
         """Lazy-init the QB Desktop adapter."""
         if self._adapter is None:
-            from backend.app.connectors.qb_desktop import QBDesktopAdapter
+            from connector.qb_adapter import load_qb_desktop_adapter
+            QBDesktopAdapter = load_qb_desktop_adapter()
+            if not self._api_key or not self._end_user_id:
+                raise TaskError(
+                    "QuickBooks Desktop is not configured: CONDUCTOR_API_KEY and "
+                    "CONDUCTOR_END_USER_ID must both be set.",
+                    recoverable=False,
+                )
             self._adapter = QBDesktopAdapter(
                 api_key=self._api_key,
                 end_user_id=self._end_user_id,
@@ -77,6 +84,8 @@ class TaskExecutor:
                 "customers": [_serialize(c) for c in customers],
                 "count": len(customers),
             }
+        except TaskError:
+            raise  # already classified; do not downgrade to recoverable
         except Exception as exc:
             raise TaskError(f"fetch_customers failed: {exc}", recoverable=True) from exc
 
@@ -93,6 +102,8 @@ class TaskExecutor:
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
             }
+        except TaskError:
+            raise  # already classified; do not downgrade to recoverable
         except Exception as exc:
             raise TaskError(f"fetch_invoices failed: {exc}", recoverable=True) from exc
 
@@ -104,6 +115,8 @@ class TaskExecutor:
                 "items": [_serialize(i) for i in items],
                 "count": len(items),
             }
+        except TaskError:
+            raise  # already classified; do not downgrade to recoverable
         except Exception as exc:
             raise TaskError(f"fetch_inventory failed: {exc}", recoverable=True) from exc
 
@@ -115,6 +128,8 @@ class TaskExecutor:
                 payments = await qb.get_payments()
                 return {"payments": [_serialize(p) for p in payments], "count": len(payments)}
             return {"payments": [], "count": 0, "note": "payments not supported by this adapter"}
+        except TaskError:
+            raise  # already classified; do not downgrade to recoverable
         except Exception as exc:
             raise TaskError(f"fetch_payments failed: {exc}", recoverable=True) from exc
 
@@ -125,6 +140,8 @@ class TaskExecutor:
                 vendors = await qb.get_vendors()
                 return {"vendors": [_serialize(v) for v in vendors], "count": len(vendors)}
             return {"vendors": [], "count": 0, "note": "vendors not supported by this adapter"}
+        except TaskError:
+            raise  # already classified; do not downgrade to recoverable
         except Exception as exc:
             raise TaskError(f"fetch_vendors failed: {exc}", recoverable=True) from exc
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -149,12 +150,19 @@ class TestConnectorConfig:
         self._tmpdir = tempfile.TemporaryDirectory()
         self._orig_cwd = os.getcwd()
         os.chdir(self._tmpdir.name)
+        # The connector persists its token to a per-user application data
+        # directory, not the working directory. Point that at the temp dir for
+        # the duration of the test: without this the suite writes a real state
+        # file into ~/.local/share/SecretaryAI and leaks tokens between tests.
+        self._state_dir = Path(self._tmpdir.name) / "appdata"
+        os.environ["SECRETARY_STATE_DIR"] = str(self._state_dir)
 
     def teardown_method(self):
         os.chdir(self._orig_cwd)
         self._tmpdir.cleanup()
         for key in ["SECRETARY_CLOUD_URL", "SECRETARY_COMPANY_ID",
-                    "SECRETARY_INSTALL_SECRET", "SECRETARY_CONNECTOR_ID"]:
+                    "SECRETARY_INSTALL_SECRET", "SECRETARY_CONNECTOR_ID",
+                    "SECRETARY_STATE_DIR"]:
             os.environ.pop(key, None)
 
     def _make_config(self, **env_overrides):
@@ -182,20 +190,62 @@ class TestConnectorConfig:
     def test_save_token_persists_to_file(self):
         cfg = self._make_config()
         cfg.save_token("tok-file", "reg-file")
-        state_file = Path("connector_state.json")
-        assert state_file.exists()
-        state = json.loads(state_file.read_text())
+        assert cfg.state_file.exists()
+        state = json.loads(cfg.state_file.read_text())
         assert state["connector_token"] == "tok-file"
         assert state["registration_id"] == "reg-file"
 
+    def test_state_is_not_written_to_the_working_directory(self):
+        """
+        Regression guard. State used to be written to connector_state.json in
+        the CWD. A packaged connector is launched by the desktop app, a
+        shortcut or a scheduled task, each with a different working directory,
+        so it re-registered every time it started from somewhere new — and
+        could drop a file containing a bearer token wherever the user happened
+        to be. It now lives in per-user application data.
+        """
+        cfg = self._make_config()
+        cfg.save_token("tok-cwd", "reg-cwd")
+        assert not Path("connector_state.json").exists()
+        assert cfg.state_file.is_absolute()
+
+    def test_token_file_is_not_world_readable(self):
+        """The state file holds a bearer token for the company's account."""
+        cfg = self._make_config()
+        cfg.save_token("tok-perm", "reg-perm")
+        if os.name != "nt":  # POSIX modes do not map onto Windows ACLs
+            assert stat.S_IMODE(os.stat(cfg.state_file).st_mode) == 0o600
+
     def test_token_loaded_from_existing_state_file(self):
-        Path("connector_state.json").write_text(
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        (self._state_dir / "connector_state.json").write_text(
             json.dumps({"connector_token": "persisted-tok", "registration_id": "persisted-reg"})
         )
         cfg = self._make_config()
         assert cfg.connector_token == "persisted-tok"
         assert cfg.registration_id == "persisted-reg"
         assert cfg.is_registered is True
+
+    def test_unreadable_state_file_falls_back_to_unregistered(self):
+        """A truncated or corrupt state file must not stop the connector
+        starting — it should re-register instead of raising."""
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        (self._state_dir / "connector_state.json").write_text("{ not json")
+        cfg = self._make_config()
+        assert cfg.is_registered is False
+
+    def test_missing_required_env_raises_configerror_not_keyerror(self):
+        """A bare KeyError traceback tells a non-technical user nothing."""
+        import importlib
+
+        import connector.config as mod
+
+        for key in ("SECRETARY_CLOUD_URL", "SECRETARY_COMPANY_ID"):
+            os.environ.pop(key, None)
+        importlib.reload(mod)
+        with pytest.raises(mod.ConfigError) as exc_info:
+            mod.ConnectorConfig()
+        assert "SECRETARY_CLOUD_URL" in str(exc_info.value)
 
     def test_connector_id_defaults_to_hostname(self):
         os.environ.pop("SECRETARY_CONNECTOR_ID", None)

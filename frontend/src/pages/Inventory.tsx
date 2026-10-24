@@ -98,7 +98,7 @@ export function Inventory() {
   const criticalCount = items.filter((a) => a.stock_status !== 'low').length;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 px-6 py-4">
         <div className="flex items-center justify-between">

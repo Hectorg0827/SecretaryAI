@@ -7,7 +7,7 @@
 
 CREATE TABLE IF NOT EXISTS browser_automation_jobs (
     id               uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id       uuid        NOT NULL,
+    company_id       uuid        NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     capability       text        NOT NULL,          -- e.g. 'accounts_receivable'
     parameters       jsonb       NOT NULL DEFAULT '{}',
     status           text        NOT NULL DEFAULT 'pending',
@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_ba_jobs_retry
 
 CREATE TABLE IF NOT EXISTS ingestion_queue (
     id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id          uuid        NOT NULL,
+    company_id          uuid        NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     file_path           text        NOT NULL,
     file_hash           text        NOT NULL,    -- SHA-256 of file content
     file_size           bigint,
@@ -77,3 +77,9 @@ CREATE INDEX IF NOT EXISTS idx_ingestion_queue_company_status
 CREATE INDEX IF NOT EXISTS idx_ingestion_queue_retry
     ON ingestion_queue (next_retry_at)
     WHERE status = 'error' AND next_retry_at IS NOT NULL;
+
+-- Internal queues: workers use service_role, never browser clients.
+ALTER TABLE public.browser_automation_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ingestion_queue ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.browser_automation_jobs, public.ingestion_queue FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.browser_automation_jobs, public.ingestion_queue TO service_role;

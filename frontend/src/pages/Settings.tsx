@@ -561,7 +561,7 @@ export function Settings() {
   const ActiveIcon = activeSection.icon;
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div className="flex h-full bg-slate-50">
       {/* Sidebar */}
       <div className="w-52 flex-shrink-0 bg-white border-r border-slate-100 pt-6">
         <div className="px-4 mb-4">

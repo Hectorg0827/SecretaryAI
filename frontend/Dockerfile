@@ -1,15 +1,17 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 # Install dependencies first (layer-cached separately from source)
 COPY package.json package-lock.json* ./
+# Match the npm resolver used to validate the frontend lockfile in CI.
+RUN npm install --global npm@11.19.1
 RUN npm ci --silent
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN npm run build && npm run test:css
 # Output is in /app/dist
 
 

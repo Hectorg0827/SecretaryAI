@@ -50,17 +50,24 @@ USER appuser
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+  CMD curl -fsS "http://127.0.0.1:${PORT:-8000}/health" || exit 1
 
 # Production: multiple uvicorn workers; override CMD in docker-compose for dev.
 # --proxy-headers/--forwarded-allow-ips make request.client.host the REAL client
 # behind nginx/Railway (default trusts only 127.0.0.1, so every request looked
 # like it came from the proxy and the per-IP login limiter throttled everyone
 # together). This container must only be reachable through the proxy.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*", \
-     "--log-level", "info"]
+# Bind to $PORT when the platform injects one. Railway, Render, Heroku and
+# Cloud Run all assign a port and route only to that port; an app hardcoded to
+# 8000 is unreachable there and the deploy fails its health check with no
+# obvious cause. Falls back to 8000 for local use. docker-compose.prod.yml
+# overrides this command with an explicit port and is unaffected.
+# Shell form with `exec` so uvicorn replaces the shell as PID 1 and still
+# receives SIGTERM for graceful shutdown.
+CMD ["sh", "-c", "exec uvicorn app.main:app \
+     --host 0.0.0.0 \
+     --port ${PORT:-8000} \
+     --workers 2 \
+     --proxy-headers \
+     --forwarded-allow-ips '*' \
+     --log-level info"]

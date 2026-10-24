@@ -5,8 +5,8 @@ Uses an atomic Redis sorted set (ZRANGEBYSCORE + ZADD + EXPIRE) to count
 requests per key across all worker processes. Safe for multi-worker Uvicorn
 and multi-node deployments.
 
-Falls back to in-process counting if Redis is unreachable (best-effort;
-limits won't be cross-worker in that degraded state).
+Production fails closed with HTTP 503 when Redis is unreachable; the
+per-process fallback is used only for local DEBUG development.
 """
 import time
 import logging
@@ -60,7 +60,14 @@ class RedisRateLimiter:
             return count < self.max_calls
 
         except Exception as exc:
-            log.debug("Redis rate limiter unavailable, using fallback: %s", exc)
+            if not settings.debug:
+                from app.auth.jwt import _revocation_alarm
+                _revocation_alarm("rate_limiter", exc)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Rate limiter temporarily unavailable",
+                ) from exc
+            log.warning("DEBUG-only Redis limiter fallback; not safe for production")
             # In-process fallback
             window = self._fallback[key]
             while window and now - window[0] > self.window_seconds:

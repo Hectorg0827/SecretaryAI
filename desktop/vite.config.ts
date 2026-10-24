@@ -39,7 +39,8 @@ export default defineConfig(({ command, mode }) => {
     sourcemap: false,
     // Tauri targets modern WebViews — skip legacy transpilation.
     target: 'es2021',
-    minify: 'esbuild',
+    // Vite 8 defaults to the maintained Oxc minifier; do not pull in
+    // legacy esbuild just for desktop packaging.
   },
   };
 });

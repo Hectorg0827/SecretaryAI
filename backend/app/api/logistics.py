@@ -182,6 +182,760 @@ class SeasonalIndexRequest(BaseModel):
     daily_sales: list[dict]   # [{date: "2024-01-05", units: 12.5}, ...]
 
 
+
+# ─── Durable purchasing & receiving (V6 schema) ──────────────────────────────
+# These endpoints are distinct from the nine-stage *intelligence* pipeline.
+# Drafts cannot book stock. Only separate authenticated approval may post a
+# staged physical receipt. All writes are one atomic SQL RPC (no best-effort
+# multi-table updates), and never write to QuickBooks implicitly.
+
+from uuid import UUID
+
+
+class DurablePOLine(BaseModel):
+    sku: str = Field(min_length=1, max_length=120)
+    qty_ordered: int = Field(gt=0, le=10000000)
+
+
+class DurablePORequest(BaseModel):
+    po_number: str = Field(min_length=1, max_length=100)
+    supplier_ref: str = Field(min_length=1, max_length=200)
+    warehouse_id: UUID
+    lines: list[DurablePOLine] = Field(min_length=1, max_length=100)
+
+
+from decimal import Decimal, InvalidOperation
+from typing import Literal
+
+
+class PurchasingEvidenceClaimRequest(BaseModel):
+    evidence_key: str = Field(min_length=1, max_length=150)
+    document_type: Literal[
+        "purchase_invoice", "packing_list", "bill_of_lading",
+        "receiving_photo", "damage_report", "freight_invoice",
+        "customs_entry", "insurance_invoice", "broker_invoice",
+        "drayage_invoice", "other",
+    ]
+    storage_object_key: str = Field(min_length=1, max_length=400)
+    claimed_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    claimed_amount: Optional[Decimal] = Field(
+        default=None, ge=0, max_digits=18, decimal_places=2
+    )
+    currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
+
+
+class DurableReceiptLine(BaseModel):
+    sku: str = Field(min_length=1, max_length=120)
+    lot_code: str = Field(default="", max_length=120)
+    accepted_qty: int = Field(default=0, ge=0, le=10000000)
+    damaged_qty: int = Field(default=0, ge=0, le=10000000)
+    quarantined_qty: int = Field(default=0, ge=0, le=10000000)
+
+
+class DurableReceiptRequest(BaseModel):
+    receipt_key: str = Field(min_length=1, max_length=150)
+    lines: list[DurableReceiptLine] = Field(min_length=1, max_length=200)
+
+
+def _execute_purchasing_rpc(db, name: str, payload: dict) -> dict:
+    """Safe PostgREST error handling; never disclose raw SQL, row or tokens."""
+    try:
+        data = db.rpc(name, payload).execute().data
+    except Exception as exc:
+        code = str(getattr(exc, "code", ""))
+        if code == "42501":
+            raise HTTPException(status_code=403, detail="Purchase approval not permitted") from exc
+        if code == "P0002":
+            raise HTTPException(status_code=404, detail="Purchase or receipt not found") from exc
+        if code == "22023":
+            raise HTTPException(status_code=422, detail="Invalid purchasing data") from exc
+        if code in ("23503", "23505", "23514"):
+            raise HTTPException(status_code=409,
+                detail="Operation conflicts with approval status, quantity or idempotency rules") from exc
+        log.error("Durable purchasing RPC %s unavailable (%s)", name, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing database unavailable") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=503, detail="Purchasing database result unavailable")
+    return data
+
+
+def _require_purchasing_employee(user: dict) -> None:
+    # Never grant broader `manage_inventory` to back-office to enable one
+    # capability. The SQL procedure additionally verifies current DB user.
+    if user.get("role") not in ("owner", "manager", "back_office"):
+        raise HTTPException(status_code=403, detail="Purchasing access denied")
+
+
+def _read_purchasing_rows(query) -> list[dict]:
+    try:
+        result = query.execute()
+        if not isinstance(result.data, list):
+            raise ValueError("Missing query rows")
+        return result.data
+    except Exception as exc:
+        log.error("Purchasing read temporarily unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing records unavailable") from exc
+
+
+@router.get("/orders")
+async def list_durable_purchase_orders(
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    rows = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,supplier_ref,status,warehouse_id,created_at,approved_at")
+          .eq("company_id", user["company_id"])
+          .order("created_at", desc=True)
+          .limit(100)
+    )
+    return {"orders": rows, "count": len(rows)}
+
+
+# ─── Quarantined document-byte upload / integrity only ────────────────────────
+
+from fastapi import File, UploadFile
+from app.services.purchasing_evidence_bytes import (
+    inspect_uploaded_evidence, store_quarantined_evidence,
+)
+
+
+from app.config import get_settings
+from app.services.purchasing_evidence_malware import scan_quarantined_evidence
+
+
+@router.post("/evidence/{evidence_id}/scan")
+async def scan_purchasing_evidence_for_malware(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Invoke a real local ClamAV scanner on private, integrity-matched bytes.
+
+    Clients cannot supply the scan verdict. Clean does not authorize a
+    download, financial approval, or any QuickBooks write.
+    """
+    _require_purchasing_employee(user)
+    company_id = user["company_id"]
+    evidence_id_str = str(evidence_id)
+    claim = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+        .select("id,storage_object_key,claimed_sha256")
+        .eq("company_id", company_id).eq("id", evidence_id_str).limit(2)
+    )
+    if not claim:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    if len(claim) != 1:
+        raise HTTPException(status_code=503, detail="Ambiguous evidence claim")
+    checks = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+        .select("id,computed_sha256,byte_count,detected_mime")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if len(checks) != 1:
+        raise HTTPException(status_code=409, detail="Verified upload integrity required")
+    if checks[0].get("computed_sha256") != claim[0].get("claimed_sha256"):
+        raise HTTPException(status_code=409, detail="Stored integrity does not match claim")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+        .select("id").eq("company_id", company_id)
+        .eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if scans:
+        raise HTTPException(status_code=409, detail="Document already has a malware scan record")
+    active = _read_purchasing_rows(
+        db.table("users").select("id,role,is_active")
+        .eq("company_id", company_id).eq("id", user["sub"]).limit(2)
+    )
+    if len(active) != 1 or active[0].get("is_active") is not True or (
+        active[0].get("role") not in ("owner", "manager", "back_office")
+    ):
+        raise HTTPException(status_code=403, detail="Scanner operator not authorized")
+    result = await scan_quarantined_evidence(
+        db,
+        company_id=company_id,
+        storage_object_key=claim[0]["storage_object_key"],
+        expected_sha256=checks[0]["computed_sha256"],
+        expected_byte_count=checks[0]["byte_count"],
+        expected_mime=checks[0]["detected_mime"],
+        clamav_socket_path=get_settings().clamav_unix_socket,
+    )
+    attestation = _execute_purchasing_rpc(
+        db, "attest_purchasing_evidence_malware_scan", {
+            "p_company_id": company_id,
+            "p_evidence_id": evidence_id_str,
+            "p_computed_sha256": result.digest,
+            "p_byte_count": result.byte_count,
+            "p_scan_status": result.scan_status,
+            "p_actor": user["sub"],
+        },
+    )
+    return {
+        **attestation, "scan_status": result.scan_status,
+        "malware_scan_engine": "clamav",
+        "approved_for_review": False,
+        "safe_to_view": False, "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.post("/evidence/{evidence_id}/approve-review")
+async def approve_purchasing_evidence_review(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """Independent reviewer can acknowledge a previously CLEAN scanned file.
+
+    The SQL enforces current role, same tenant, clean scan, and that the
+    reviewer did not submit or scan the document. No file is made public.
+    """
+    return {
+        **_execute_purchasing_rpc(
+            db, "approve_purchasing_evidence_for_review", {
+                "p_company_id": user["company_id"],
+                "p_evidence_id": str(evidence_id),
+                "p_actor": user["sub"],
+            },
+        ),
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.get("/evidence/{evidence_id}/malware-status")
+async def get_purchasing_evidence_malware_status(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    company_id = user["company_id"]
+    evidence_id_str = str(evidence_id)
+    claims = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims").select("id")
+        .eq("company_id", company_id).eq("id", evidence_id_str).limit(2)
+    )
+    if not claims:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+        .select("id,scan_status,engine,scanned_at")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    approvals = _read_purchasing_rows(
+        db.table("purchasing_evidence_review_approvals")
+        .select("id,review_status,approved_at")
+        .eq("company_id", company_id).eq("evidence_id", evidence_id_str).limit(2)
+    )
+    if len(scans) > 1 or len(approvals) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous evidence review state")
+    status = scans[0]["scan_status"] if scans else "not_scanned"
+    if approvals and status != "clean":
+        raise HTTPException(status_code=503, detail="Inconsistent malware review state")
+    return {
+        "evidence_id": evidence_id_str,
+        "malware_scan": scans[0] if scans else None,
+        "scan_status": status,
+        "review_approval": approvals[0] if approvals else None,
+        "approved_for_review": bool(approvals),
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.post("/evidence/{evidence_id}/upload", status_code=201)
+async def upload_purchasing_evidence_bytes(
+    evidence_id: UUID,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Check uploaded bytes against a prior claim and store in private quarantine.
+
+    Hash match is *not* malware clearance, invoice approval, or a QuickBooks
+    write. Partial failure may leave a private orphaned object; never
+    overwrite it, retry blindly, or falsely confirm successful attestation.
+    """
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    claim_rows = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id,storage_object_key,claimed_sha256,verification_status")
+          .eq("company_id", cid).eq("id", str(evidence_id)).limit(2)
+    )
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    if len(claim_rows) != 1 or claim_rows[0].get("verification_status") != "unverified":
+        raise HTTPException(status_code=503, detail="Evidence claim invalid")
+    claim = claim_rows[0]
+    existing = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+          .select("id").eq("company_id", cid)
+          .eq("evidence_id", str(evidence_id)).limit(2)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Evidence already has an integrity record")
+
+    # Check actual DB user status before committing file bytes to storage.
+    active = _read_purchasing_rows(
+        db.table("users").select("id,role,is_active")
+          .eq("company_id", cid).eq("id", user["sub"]).limit(2)
+    )
+    if len(active) != 1 or active[0].get("is_active") is not True or (
+        active[0].get("role") not in ("owner", "manager", "back_office")
+    ):
+        raise HTTPException(status_code=403, detail="Evidence upload permission denied")
+
+    inspected = await inspect_uploaded_evidence(
+        file,
+        expected_sha256=claim["claimed_sha256"],
+        storage_key=claim["storage_object_key"],
+        company_id=str(cid),
+    )
+    await store_quarantined_evidence(db, claim["storage_object_key"], inspected)
+    response = _execute_purchasing_rpc(db, "attest_purchasing_evidence_integrity", {
+        "p_company_id": cid,
+        "p_evidence_id": str(evidence_id),
+        "p_computed_sha256": inspected.digest,
+        "p_byte_count": inspected.size,
+        "p_detected_mime": inspected.mime,
+        "p_actor": user["sub"],
+    })
+    return {
+        **response,
+        "bytes_received": inspected.size,
+        "integrity_status": "sha256_matched_at_upload",
+        "malware_scan_status": "not_scanned",
+        "safe_to_view": False,
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+        "inventory_changed": False,
+    }
+
+
+@router.get("/evidence/{evidence_id}/integrity")
+async def get_purchasing_evidence_integrity(
+    evidence_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    claim_rows = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id").eq("company_id", cid)
+          .eq("id", str(evidence_id)).limit(2)
+    )
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Evidence claim not found")
+    records = _read_purchasing_rows(
+        db.table("purchasing_evidence_integrity_checks")
+          .select("id,computed_sha256,byte_count,detected_mime,"
+                  "integrity_status,malware_scan_status,"
+                  "financial_review_status,created_at")
+          .eq("company_id", cid).eq("evidence_id", str(evidence_id))
+          .limit(2)
+    )
+    if len(records) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous integrity record")
+    scans = _read_purchasing_rows(
+        db.table("purchasing_evidence_malware_scans")
+          .select("scan_status")
+          .eq("company_id", cid).eq("evidence_id", str(evidence_id)).limit(2)
+    )
+    if len(scans) > 1 or (scans and scans[0].get("scan_status") not in ("clean", "infected")):
+        raise HTTPException(status_code=503, detail="Invalid malware scan record")
+    return {
+        "evidence_id": str(evidence_id),
+        "integrity": records[0] if records else None,
+        "integrity_status": (
+            records[0]["integrity_status"] if records else "not_checked"
+        ),
+        "malware_scan_status": (
+            scans[0]["scan_status"] if scans else "not_scanned"
+        ),
+        "safe_to_view": False,
+        "financial_review_status": "not_reviewed",
+        "accounting_reconciled": False,
+        "landed_cost_verified": False,
+    }
+
+
+@router.post("/orders/{po_number}/evidence", status_code=201)
+async def record_purchasing_evidence_metadata(
+    po_number: str,
+    request: PurchasingEvidenceClaimRequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Record unverified storage metadata, never file bytes or an AP expense."""
+    _require_purchasing_employee(user)
+    if (request.claimed_amount is None) != (request.currency is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Claimed amount and currency must be provided together",
+        )
+    return _execute_purchasing_rpc(db, "record_purchasing_evidence_claim", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_evidence_key": request.evidence_key,
+        "p_document_type": request.document_type,
+        "p_storage_object_key": request.storage_object_key,
+        "p_claimed_sha256": request.claimed_sha256,
+        "p_claimed_amount": (
+            str(request.claimed_amount)
+            if request.claimed_amount is not None else None
+        ),
+        "p_currency": request.currency,
+        "p_actor": user["sub"],
+    })
+
+
+@router.get("/orders/{po_number}/evidence")
+async def list_purchasing_evidence_metadata(
+    po_number: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Read cost claims grouped by currency without mistaking them for costs.
+
+    Claimed SHA hashes are NOT proof that referenced bytes exist or match.
+    No land-cost value or QB write should depend on an unverified claim.
+    """
+    _require_purchasing_employee(user)
+    cid = user["company_id"]
+    if not po_number or len(po_number) > 100:
+        raise HTTPException(status_code=422, detail="Invalid PO number")
+    orders = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,status")
+          .eq("company_id", cid).eq("po_number", po_number).limit(2)
+    )
+    if not orders:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if len(orders) != 1:
+        raise HTTPException(status_code=503, detail="Ambiguous purchase order")
+    claims = _read_purchasing_rows(
+        db.table("purchasing_evidence_claims")
+          .select("id,evidence_key,document_type,storage_object_key,"
+                  "claimed_sha256,claimed_amount,currency,"
+                  "verification_status,submitted_by,created_at")
+          .eq("company_id", cid).eq("po_id", orders[0]["id"])
+          .order("created_at", desc=True).limit(501)
+    )
+    if len(claims) > 500:
+        raise HTTPException(status_code=503, detail="Evidence list exceeds supported scope")
+    totals: dict[str, Decimal] = {}
+    try:
+        for claim in claims:
+            if claim.get("verification_status") != "unverified":
+                raise ValueError("Unexpected evidence verification status")
+            amount, currency = claim.get("claimed_amount"), claim.get("currency")
+            if amount is None:
+                if currency is not None:
+                    raise ValueError("Currency without an amount")
+                continue
+            qty = Decimal(str(amount))
+            if (not qty.is_finite() or qty < 0 or not isinstance(currency, str)
+                    or len(currency) != 3 or not currency.isascii()
+                    or not currency.isupper() or not currency.isalpha()):
+                raise ValueError("Invalid evidence money")
+            totals[currency] = totals.get(currency, Decimal("0")) + qty
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        log.error("Evidence claims invalid for company %s (%s)", cid, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing evidence unavailable") from exc
+    return {
+        "po_number": po_number,
+        "evidence_claims": claims,
+        "claim_count": len(claims),
+        "unverified_claim_totals_by_currency": {
+            code: str(value) for code, value in sorted(totals.items())
+        },
+        "verification_status": "unverified",
+        "landed_cost_verified": False,
+        "accounting_reconciled": False,
+        "inventory_changed": False,
+        "evidence_status_message": (
+            "Stored paths and digests are user-submitted claims; "
+            "file existence, SHA-256, invoice validity, currency conversion "
+            "and QuickBooks AP reconciliation have not been checked."
+        ),
+    }
+
+
+@router.get("/orders/{po_number}")
+async def get_durable_purchase_order_detail(
+    po_number: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Trace a PO through approved lines, staged receipts and booked receipts.
+
+    Each query is tenant-scoped, including all child records. Read timestamps
+    can differ between queries during a concurrent post; this is not a DB
+    transaction snapshot, and it does not certify QuickBooks reconciliation.
+    """
+    _require_purchasing_employee(user)
+    if not po_number or len(po_number) > 100:
+        raise HTTPException(status_code=422, detail="Invalid PO number")
+    cid = user["company_id"]
+    orders = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("id,po_number,supplier_ref,warehouse_id,status,"
+                  "created_at,approved_at,created_by,approved_by")
+          .eq("company_id", cid).eq("po_number", po_number).limit(2)
+    )
+    if not orders:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if len(orders) != 1:
+        raise HTTPException(status_code=503, detail="Purchase order data ambiguous")
+    order = orders[0]
+    po_id = order["id"]
+    lines = _read_purchasing_rows(
+        db.table("purchasing_order_lines")
+          .select("sku,qty_ordered,qty_received")
+          .eq("company_id", cid).eq("po_id", po_id).limit(101)
+    )
+    staged = _read_purchasing_rows(
+        db.table("staged_warehouse_receipts")
+          .select("id,receipt_key,status,submitted_by,posted_receipt_id,"
+                  "created_at,approved_at,payload")
+          .eq("company_id", cid).eq("po_id", po_id)
+          .order("created_at", desc=True).limit(501)
+    )
+    posted = _read_purchasing_rows(
+        db.table("warehouse_receipt_documents")
+          .select("id,receipt_key,received_by,approved_by,posted_at")
+          .eq("company_id", cid).eq("po_id", po_id)
+          .order("posted_at", desc=True).limit(501)
+    )
+    if len(lines) > 100 or len(staged) > 500 or len(posted) > 500:
+        raise HTTPException(status_code=503, detail="Purchase record scope exceeds supported page")
+    from decimal import Decimal, InvalidOperation
+    try:
+        ordered = sum((Decimal(str(x["qty_ordered"])) for x in lines), Decimal("0"))
+        received = sum((Decimal(str(x["qty_received"])) for x in lines), Decimal("0"))
+        if not lines or any(not Decimal(str(x["qty_ordered"])).is_finite() for x in lines):
+            raise ValueError("Malformed purchase lines")
+        if not ordered.is_finite() or not received.is_finite() or received < 0 or ordered < received:
+            raise ValueError("Malformed purchase quantities")
+    except (KeyError, TypeError, InvalidOperation, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Purchase quantities unavailable") from exc
+    return {
+        "order": order, "lines": lines,
+        "staged_receipts": staged, "posted_receipts": posted,
+        "ordered_cases": str(ordered),
+        "received_cases": str(received),
+        "remaining_cases": str(ordered - received),
+        "inventory_posted": bool(posted),
+        "accounting_reconciled": False,
+        "data_source": "secretaryai_purchasing_ledger",
+        "read_consistency": "separate_tenant_scoped_queries",
+    }
+
+
+@router.get("/receipts/pending")
+async def list_pending_warehouse_receipts(
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    # Approver identity is the JWT subject, and the actual approval SQL
+    # verifies active role, tenant and separation of duties again.
+    rows = _read_purchasing_rows(
+        db.table("staged_warehouse_receipts")
+          .select("id,po_id,receipt_key,payload,submitted_by,created_at")
+          .eq("company_id", user["company_id"])
+          .eq("status", "pending")
+          .order("created_at", desc=False)
+          .limit(100)
+    )
+    return {"pending_receipts": [
+        {**x, "can_approve": str(x.get("submitted_by")) != str(user["sub"])}
+        for x in rows
+    ], "count": len(rows)}
+
+
+@router.post("/orders", status_code=201)
+async def create_durable_purchase_order(
+    request: DurablePORequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    return _execute_purchasing_rpc(db, "create_warehouse_purchase_order", {
+        "p_company_id": user["company_id"],
+        "p_po_number": request.po_number,
+        "p_supplier_ref": request.supplier_ref,
+        "p_warehouse_id": str(request.warehouse_id),
+        "p_lines": [item.model_dump() for item in request.lines],
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/orders/{po_number}/approve")
+async def approve_durable_purchase_order(
+    po_number: str,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    return _execute_purchasing_rpc(db, "approve_warehouse_purchase_order", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/orders/{po_number}/receipts", status_code=201)
+async def stage_durable_warehouse_receipt(
+    po_number: str,
+    request: DurableReceiptRequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    if any(not (x.accepted_qty or x.damaged_qty or x.quarantined_qty)
+           for x in request.lines):
+        raise HTTPException(status_code=422, detail="Each receipt line needs a received quantity")
+    return _execute_purchasing_rpc(db, "stage_warehouse_receipt", {
+        "p_company_id": user["company_id"],
+        "p_po_number": po_number,
+        "p_receipt_key": request.receipt_key,
+        "p_lines": [item.model_dump() for item in request.lines],
+        "p_actor": user["sub"],
+    })
+
+
+@router.post("/receipts/{staged_receipt_id}/approve")
+async def approve_staged_receipt_and_post_inventory(
+    staged_receipt_id: UUID,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """Second human approval, atomically books inspected units into stock."""
+    return _execute_purchasing_rpc(db, "approve_staged_warehouse_receipt", {
+        "p_company_id": user["company_id"],
+        "p_staged_receipt_id": str(staged_receipt_id),
+        "p_actor": user["sub"],
+    })
+
+
+
+# ─── Read-only stock versus QuickBooks comparison ────────────────────────────
+# The in-app ledger starts from verified receipts; QuickBooks may include
+# opening balances or warehouses that have not been onboarded. Their values
+# MUST NOT be called reconciled until a separate coverage, scope, unit and
+# item-mapping attestation exists. This endpoint never mutates either system.
+
+@router.get("/reconciliation/stock/{sku}")
+async def preview_stock_reconciliation(
+    sku: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    _require_purchasing_employee(user)
+    if not sku or len(sku) > 120:
+        raise HTTPException(status_code=422, detail="Invalid SKU")
+    company_id = user["company_id"]
+    stock_rows = _read_purchasing_rows(
+        db.table("stock_skus")
+        .select("sku,product_name,base_unit,qb_item_id")
+        .eq("company_id", company_id).eq("sku", sku).limit(2)
+    )
+    if not stock_rows:
+        raise HTTPException(status_code=404, detail="Stock SKU not found")
+    if len(stock_rows) > 1:
+        raise HTTPException(status_code=503, detail="Ambiguous stock SKU record")
+    item = stock_rows[0]
+    balances = _read_purchasing_rows(
+        db.table("stock_balances")
+        .select("warehouse_id,lot_code,bucket,unit,quantity,updated_at")
+        .eq("company_id", company_id).eq("sku", sku).limit(1001)
+    )
+    if len(balances) > 1000:
+        raise HTTPException(status_code=503, detail="Stock ledger snapshot exceeds supported scope")
+
+    from decimal import Decimal, InvalidOperation
+    totals = {"available": Decimal("0"), "damaged": Decimal("0"),
+              "quarantined": Decimal("0")}
+    try:
+        for row in balances:
+            if row["bucket"] not in totals or row["unit"] != item["base_unit"]:
+                raise ValueError("Unexpected ledger unit or bucket")
+            qty = Decimal(str(row["quantity"]))
+            if not qty.is_finite() or qty < 0:
+                raise ValueError("Invalid ledger amount")
+            totals[row["bucket"]] += qty
+    except (KeyError, ValueError, TypeError, InvalidOperation) as exc:
+        log.error("Stock-ledger consistency failure for tenant %s (%s)",
+                  company_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Stock ledger snapshot invalid") from exc
+
+    def _number(qty: Decimal) -> float:
+        return float(qty)
+
+    output = {
+        "sku": item["sku"],
+        "product_name": item["product_name"],
+        "unit": item["base_unit"],
+        "mapped_qb_item_id": item.get("qb_item_id"),
+        "ledger_record_count": len(balances),
+        "ledger_quantities": {k: _number(v) for k, v in totals.items()},
+        "ledger_total": _number(sum(totals.values())),
+        "latest_ledger_update": max(
+            (str(row["updated_at"]) for row in balances
+             if row.get("updated_at")), default=None
+        ),
+        "qb_quantity": None,
+        "indicative_quantity_difference": None,
+        "state": "unverified_scope",
+        "reconciled": False,
+        "inventory_posted_by_comparison": False,
+        "accounting_reconciled": False,
+        "scope_warning": (
+            "Ledger includes only movements onboarded into SecretaryAI. "
+            "QuickBooks may include other locations, opening balances or "
+            "different sellable/damaged quantity semantics. Confirm scope, "
+            "item mapping and units before interpreting a difference."
+        ),
+    }
+    qb_id = str(item.get("qb_item_id") or "").strip()
+    if not qb_id:
+        output["state"] = "missing_explicit_qb_mapping"
+        return output
+
+    from app.api.deps import get_adapter
+    # Resolve credentials from this tenant only; no global/shared QB client.
+    adapter = get_adapter(user=user, db=db)
+    try:
+        qb_items = await adapter.get_inventory_qb()
+    except Exception as exc:
+        log.warning("QB reconciliation read failed for tenant %s: %s",
+                    company_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="QuickBooks inventory unavailable") from exc
+    matches = [row for row in qb_items if str(row.qb_id) == qb_id]
+    if len(matches) != 1:
+        output["state"] = (
+            "qb_item_not_found" if not matches else "ambiguous_qb_mapping"
+        )
+        return output
+    try:
+        qb_qty = Decimal(str(matches[0].quantity_on_hand))
+        if not qb_qty.is_finite():
+            raise ValueError("Non-finite QuickBooks quantity")
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Invalid QuickBooks quantity") from exc
+    output["qb_quantity"] = _number(qb_qty)
+    output["indicative_quantity_difference"] = _number(
+        qb_qty - sum(totals.values())
+    )
+    # Even numerical equality is not proof of source parity.
+    return output
+
+
 # ─── Stage 1 — Demand Monitoring & Reorder Intelligence ──────────────────────
 
 
@@ -366,7 +1120,7 @@ async def parse_freight_invoice(
     """
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_id=request.booking_id)
+    booking = FreightBooking(booking_ref=request.booking_id)
     updated = lm.capture_freight_invoice(booking, request.invoice_text, request.total_cases)
     summary = lm.freight_cost_summary(updated)
 
@@ -469,7 +1223,7 @@ async def process_warehouse_receipt(
     """
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_id=request.booking_id)
+    booking = FreightBooking(booking_ref=request.booking_id)
     result = lm.process_warehouse_receipt(
         booking=booking,
         po_number=request.po_number,
@@ -481,15 +1235,18 @@ async def process_warehouse_receipt(
     )
 
     receipt = result["receipt"]
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.po_number,
-        stage=7, stage_name="warehouse_received",
-        total_cases=receipt.total_cases_received,
-    )
-
+    # IMPORTANT: this legacy stage computes exceptions and lead times only.
+    # It does NOT persist an authoritative receiving document or book stock.
+    # Do not promote it to a completed warehouse-received state until the
+    # approved PO, inspected receipt and idempotent stock posting are wired.
+    # Analysis is deliberately not persisted as a received stock event.
+    # The separate durable receipt approval endpoint is authoritative.
     return {
         "po_number": request.po_number,
+        "status": "analysis_only",
+        "inventory_posted": False,
+        "accounting_reconciled": False,
+        "requires_verified_receipt": True,
         "total_cases_received": receipt.total_cases_received,
         "shortages": result["shortages"],
         "shortage_count": len(result["shortages"]),

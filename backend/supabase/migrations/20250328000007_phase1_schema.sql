@@ -39,8 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_connector_registrations_status
     ON connector_registrations (status);
 
 ALTER TABLE connector_registrations ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON connector_registrations
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: connector_registrations is a privileged backend-owned table.
 
 COMMENT ON TABLE connector_registrations IS
     'One row per installed connector instance. Heartbeats update last_heartbeat; '
@@ -76,8 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_connector_sync_logs_company
     ON connector_sync_logs (company_id, started_at DESC);
 
 ALTER TABLE connector_sync_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON connector_sync_logs
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: connector_sync_logs is a privileged backend-owned table.
 
 
 -- ---------------------------------------------------------------------------
@@ -123,8 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_sessions_status
     WHERE status NOT IN ('completed','cancelled','failed');
 
 ALTER TABLE automation_sessions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON automation_sessions
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: automation_sessions is a privileged backend-owned table.
 
 COMMENT ON TABLE automation_sessions IS
     'Durable state for computer-use and browser automation sessions. '
@@ -168,8 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_rules_company_active
     ON policy_rules (company_id, is_active, priority);
 
 ALTER TABLE policy_rules ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON policy_rules
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: policy_rules is a privileged backend-owned table.
 
 -- Seed default policy rules for every new company
 -- (Applied at registration time by the backend; these are safe defaults.)
@@ -230,8 +226,7 @@ CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status
     WHERE status NOT IN ('completed','failed','skipped');
 
 ALTER TABLE ingestion_jobs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON ingestion_jobs
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: ingestion_jobs is a privileged backend-owned table.
 
 COMMENT ON TABLE ingestion_jobs IS
     'Tracks every file ingestion job from upload through parsing to DB insertion. '
@@ -280,8 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_browser_jobs_status
     WHERE status NOT IN ('completed','failed','cancelled');
 
 ALTER TABLE browser_jobs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON browser_jobs
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: browser_jobs is a privileged backend-owned table.
 
 
 -- ---------------------------------------------------------------------------
@@ -331,8 +325,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_user
 
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 -- Only owners/managers can read audit events; no updates or deletes allowed
-CREATE POLICY "company_read_only" ON audit_events
-    FOR SELECT USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- Audit event visibility is managed by trusted backend only.
 
 COMMENT ON TABLE audit_events IS
     'Immutable append-only audit log for all privileged events. '
@@ -367,7 +360,8 @@ CREATE TABLE IF NOT EXISTS company_features (
 -- Insert default row when a company is created (handled in app code)
 ALTER TABLE company_features ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "company_isolation" ON company_features
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+    FOR SELECT TO authenticated
+    USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
 COMMENT ON TABLE company_features IS
     'Per-tenant feature flags and safety thresholds. '
@@ -402,19 +396,20 @@ CREATE TABLE IF NOT EXISTS device_push_tokens (
     UNIQUE (company_id, user_id, token)
 );
 ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON device_push_tokens
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- No browser-client policy: device_push_tokens is a privileged backend-owned table.
 
--- Add report_snapshots if not already there (referenced by scheduler)
-CREATE TABLE IF NOT EXISTS report_snapshots (
-    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id      uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    report_type     text NOT NULL,
-    payload         jsonb NOT NULL,
-    generated_at    timestamptz NOT NULL DEFAULT now(),
-    generated_by    text DEFAULT 'scheduler',
-    CONSTRAINT uq_report_snapshots_company_type UNIQUE (company_id, report_type)
-);
-ALTER TABLE report_snapshots ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "company_isolation" ON report_snapshots
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- report_snapshots is provisioned by the canonical
+-- supabase/migrations/20250325000000_report_snapshots.sql migration.
+-- Do not redefine the table or add overlapping RLS policies here.
+
+-- SECURITY: all privileged tables are backend-only. Supabase public schema
+-- does not automatically enforce tenant separation for service-role writes.
+REVOKE ALL ON TABLE public.connector_registrations, public.connector_sync_logs, public.automation_sessions, public.policy_rules, public.ingestion_jobs, public.browser_jobs, public.device_push_tokens, public.audit_events
+  FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.connector_registrations, public.connector_sync_logs, public.automation_sessions, public.policy_rules, public.ingestion_jobs, public.browser_jobs, public.device_push_tokens, public.audit_events
+  TO service_role;
+
+-- A client may view its tenant's own feature flags, not mutate them.
+REVOKE ALL ON TABLE public.company_features FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.company_features TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.company_features TO service_role;

@@ -3,11 +3,12 @@ import logging.config
 
 import redis as redis_lib
 import sentry_sdk
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
+from app.middleware.subscription_guard import require_active_subscription
 from app.config import get_settings
 from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed, setup, computer_use as computer_use_router, billing
 from app.api import docs as docs_router
@@ -206,26 +207,75 @@ app.add_middleware(
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────────
-app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"])
-app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"])
-app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"])
-app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"])
+#
+# The paywall is applied HERE, at the router level, rather than endpoint by
+# endpoint. `require_active_subscription` existed but was wired to zero routes,
+# so every account got the whole product for nothing. Listing it once per
+# router means the paid/free boundary is auditable by reading this block, and a
+# newly added endpoint inside a paid router is covered by default — the failure
+# mode is "accidentally gated" (a 402 someone reports) rather than
+# "accidentally free" (revenue lost silently).
+#
+# PAID: the product itself.
+# FREE, and deliberately so:
+#   auth      — you cannot sign up or sign in to pay if signing in is paywalled
+#   billing    — the subscribe/checkout routes; gating them locks out the very
+#                customer who is trying to start paying
+#   setup      — onboarding runs before a subscription exists
+#   settings   — an unpaid or lapsed account must still be able to see and
+#                change its own configuration, and cancel
+#   webhooks   — called by Stripe and Intuit, which hold no user JWT
+#   admin      — internal; protected by RBAC, not by subscription
+#   docs       — the OpenAPI/ReDoc reference, gated by X-Docs-Key (see
+#                app/api/docs.py). It is developer documentation, not a
+#                customer feature, and it holds no user session to check.
+#
+# The grace period (7 days after canceled/past_due) and `trialing` status are
+# handled inside the dependency, so a lapsed customer is not cut off instantly.
+#
+# The gate is tied to BILLING_ENABLED. Gating routes while billing is switched
+# off would produce a product nobody can use and nobody can buy: every paid
+# route 402s and checkout hands back a mock URL. A production start with
+# billing enabled but Stripe unconfigured is refused outright in app/config.py,
+# so these two cannot drift apart silently.
+if settings.billing_enabled:
+    _PAID = [Depends(require_active_subscription())]
+else:
+    _PAID = []
+    log.warning(
+        "BILLING_ENABLED is false — the subscription paywall is OFF and every "
+        "signup gets the full product for free. This is only correct for an "
+        "internal or pilot deployment."
+    )
+
+app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"],          dependencies=_PAID)
+app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"],     dependencies=_PAID)
+app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"],      dependencies=_PAID)
+app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"],     dependencies=_PAID)
+app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"],       dependencies=_PAID)
+app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"],         dependencies=_PAID)
+app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"], dependencies=_PAID)
+app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"],         dependencies=_PAID)
+app.include_router(workflows.router,        prefix="/api/workflows",     tags=["workflows"],     dependencies=_PAID)
+app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"],          dependencies=_PAID)
+app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"], dependencies=_PAID)
+
+# Free — see the note above for why each one is not gated.
 app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
 app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
-app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"])
 app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
-app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"])
-app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"])
-app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"])
-app.include_router(workflows.router,        prefix="/api/workflows",      tags=["workflows"])
-app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"])
 app.include_router(setup.router,            prefix="/api/setup",         tags=["setup"])
-app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"])
-app.include_router(billing.router,             prefix="/api/billing",       tags=["billing"])
+app.include_router(billing.router,          prefix="/api/billing",       tags=["billing"])
+
 from app.api import logistics as logistics_router
-app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"])
+app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"],  dependencies=_PAID)
 from app.api import compliance as compliance_router
-app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"])
+app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"], dependencies=_PAID)
+# connectors is NOT gated at the router level: /heartbeat, /tasks, /task-result,
+# /sync-status and /error authenticate with a *connector* token via
+# get_connector_identity, not a user JWT. A router-wide user-subscription check
+# would reject the agent with a 401 it can do nothing about. Its user-facing
+# endpoints carry the dependency individually — see app/api/connectors.py.
 from app.api import connectors as connectors_router
 app.include_router(connectors_router.router,   prefix="/api/connectors",     tags=["connectors"])
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])

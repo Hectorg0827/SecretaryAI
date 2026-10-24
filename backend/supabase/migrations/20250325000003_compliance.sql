@@ -119,3 +119,38 @@ CREATE INDEX IF NOT EXISTS idx_compliance_products_company ON compliance_product
 CREATE INDEX IF NOT EXISTS idx_compliance_licenses_company_state ON compliance_licenses(company_id, state_code);
 CREATE INDEX IF NOT EXISTS idx_compliance_brand_reg_company ON compliance_brand_registrations(company_id, state_code);
 CREATE INDEX IF NOT EXISTS idx_compliance_colas_company ON compliance_colas(company_id, product_id);
+
+-- Trusted API owns all compliance mutations; client reads are tenant-scoped.
+-- The audit log remains backend-only to protect integrity and case metadata.
+ALTER TABLE public.compliance_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_federal_permits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_colas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_licenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_brand_registrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_distributors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_check_log ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY compliance_products_tenant_read ON public.compliance_products
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+CREATE POLICY compliance_permits_tenant_read ON public.compliance_federal_permits
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+CREATE POLICY compliance_colas_tenant_read ON public.compliance_colas
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+CREATE POLICY compliance_licenses_tenant_read ON public.compliance_licenses
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+CREATE POLICY compliance_brand_registrations_tenant_read ON public.compliance_brand_registrations
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+CREATE POLICY compliance_distributors_tenant_read ON public.compliance_distributors
+  FOR SELECT TO authenticated USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+
+REVOKE ALL ON TABLE public.compliance_products, public.compliance_federal_permits,
+  public.compliance_colas, public.compliance_licenses,
+  public.compliance_brand_registrations, public.compliance_distributors,
+  public.compliance_check_log FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.compliance_products, public.compliance_federal_permits,
+  public.compliance_colas, public.compliance_licenses,
+  public.compliance_brand_registrations, public.compliance_distributors TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.compliance_products,
+  public.compliance_federal_permits, public.compliance_colas, public.compliance_licenses,
+  public.compliance_brand_registrations, public.compliance_distributors,
+  public.compliance_check_log TO service_role;

@@ -50,9 +50,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         if token:
             try:
-                # Use the app's own (python-jose) decoder — PyJWT was only ever an
-                # undeclared transitive dependency, and its absence was masked by
-                # the bare except below.
+                # Decode via the application's shared PyJWT HS256 verifier.
+                # Middleware adds diagnostic context only; RBAC performs the
+                # authoritative session-scope and Redis revocation checks.
                 from app.auth.jwt import decode_access_token
                 payload = decode_access_token(token)
                 if not payload:

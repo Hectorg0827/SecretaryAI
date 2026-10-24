@@ -23,8 +23,10 @@ async def check_and_alert_inventory(company_id: str, adapter, action_engine, use
         return results
 
     for item in inventory:
-        qty_1 = int(item.get("warehouse_qty", 0))
-        qty_2 = int(item.get("qb_qty", item.get("quantity_on_hand", 0)))
+        # The adapter's reconciled total is authoritative. Never add two
+        # snapshots of the same physical cases to calculate weeks of cover.
+        qty_1 = int(item.get("total_qty", item.get("qb_qty", item.get("quantity_on_hand", 0))))
+        qty_2 = 0
         sell_rate = Decimal(str(item.get("weekly_sell_rate", 0)))
 
         status = evaluate_inventory(

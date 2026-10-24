@@ -12,7 +12,7 @@
 
 CREATE TABLE IF NOT EXISTS computer_use_jobs (
     id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id      uuid        NOT NULL,
+    company_id      uuid        NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     capability      text        NOT NULL,
     parameters      jsonb       NOT NULL DEFAULT '{}',
     status          text        NOT NULL DEFAULT 'pending',
@@ -54,3 +54,8 @@ CREATE INDEX IF NOT EXISTS idx_cu_jobs_pending
 CREATE INDEX IF NOT EXISTS idx_cu_jobs_failed_retry
     ON computer_use_jobs (company_id, created_at)
     WHERE status = 'failed';
+
+-- Internal queues: workers use service_role, never browser clients.
+ALTER TABLE public.computer_use_jobs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.computer_use_jobs FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.computer_use_jobs TO service_role;

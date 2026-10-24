@@ -1,0 +1,137 @@
+"""V13 end-to-end execution gate against disposable CI PostgreSQL.
+
+NO external email, payment, stock, API or production service is contacted.
+Must only run against the disposable localhost 'sai' database in GitHub CI.
+"""
+import asyncio
+import os
+import json
+
+import asyncpg
+
+from app.workflows.approved_execution import (
+    ExecutionReconciliationRequired,
+)
+from app.workflows.execution_gateway import PostgresDurableGateway
+from app.workflows.approved_email_worker import simulate_approved_email
+
+
+async def main() -> None:
+    if (os.environ.get("SECRETARYAI_TEST_DATABASE_ONLY") != "1"
+            or os.environ.get("PGHOST") not in ("localhost", "127.0.0.1")
+            or os.environ.get("PGDATABASE") != "sai"):
+        raise RuntimeError("Refusing non-disposable execution test database")
+
+    admin = await asyncpg.connect(
+        host=os.environ["PGHOST"],
+        port=int(os.environ.get("PGPORT", "5432")),
+        user=os.environ["PGUSER"],
+        password=os.environ["PGPASSWORD"],
+        database=os.environ["PGDATABASE"],
+    )
+    company_a = None
+    company_b = None
+    try:
+        company_a = await admin.fetchval(
+            "INSERT INTO companies(name) VALUES($1) RETURNING id",
+            "V13 Disposable Execution Tenant A"
+        )
+        company_b = await admin.fetchval(
+            "INSERT INTO companies(name) VALUES($1) RETURNING id",
+            "V13 Disposable Execution Tenant B"
+        )
+        approver_a = await admin.fetchval(
+            "INSERT INTO users(company_id,email,hashed_password,role) "
+            "VALUES($1,$2,'test-only','owner') RETURNING id",
+            company_a, f"v13-approver-a-{company_a}@example.test",
+        )
+        approver_b = await admin.fetchval(
+            "INSERT INTO users(company_id,email,hashed_password,role) "
+            "VALUES($1,$2,'test-only','owner') RETURNING id",
+            company_b, f"v13-approver-b-{company_b}@example.test",
+        )
+        draft_a = await admin.fetchval(
+            "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
+            "VALUES($1,'ai','email_reply',$2::jsonb,'pending') RETURNING id",
+            company_a, json.dumps({"to": "ci@example.test", "body": "Synthetic"}),
+        )
+        draft_b = await admin.fetchval(
+            "INSERT INTO drafts(company_id,created_by,action_type,content,status) "
+            "VALUES($1,'ai','email_reply',$2::jsonb,'pending') RETURNING id",
+            company_b, json.dumps({"to": "ci@example.test", "body": "Synthetic"}),
+        )
+        gateway = PostgresDurableGateway.from_environment()
+        approval_a = await gateway.approve_and_enqueue(
+            str(company_a), str(draft_a), str(approver_a),
+            {"to": "ci@example.test", "body": "Synthetic"}, "v13-idem-a",
+        )
+        approval_b = await gateway.approve_and_enqueue(
+            str(company_b), str(draft_b), str(approver_b),
+            {"to": "ci@example.test", "body": "Synthetic"}, "v13-idem-b",
+        )
+        assert approval_a["queued"] and approval_b["queued"]
+        effects = 0
+
+        async def synthetic_action(to: str, subject: str, body: str) -> None:
+            nonlocal effects
+            assert to == "ci@example.test" and body == "Synthetic"
+            effects += 1
+
+        first = await simulate_approved_email(
+            gateway=gateway, company_id=str(company_a),
+            execution_id=str(approval_a["execution_id"]),
+            worker_id="v13-worker-one", synthetic_delivery=synthetic_action
+        )
+        second = await simulate_approved_email(
+            gateway=gateway, company_id=str(company_a),
+            execution_id=str(approval_a["execution_id"]),
+            worker_id="v13-worker-two", synthetic_delivery=synthetic_action
+        )
+        assert first.state == "completed" and first.claimed
+        assert second.state == "not_claimed" and not second.claimed
+        assert effects == 1, "duplicate synthetic external effect executed"
+
+        async def uncertain_action(to: str, subject: str, body: str) -> None:
+            nonlocal effects
+            effects += 1
+            raise TimeoutError("synthetic provider acknowledgement lost")
+
+        try:
+            await simulate_approved_email(
+                gateway=gateway, company_id=str(company_b),
+                execution_id=str(approval_b["execution_id"]),
+                worker_id="v13-worker-three",
+                synthetic_delivery=uncertain_action,
+            )
+        except ExecutionReconciliationRequired:
+            pass
+        else:
+            raise AssertionError("uncertain action did not require reconciliation")
+
+        replay = await simulate_approved_email(
+            gateway=gateway, company_id=str(company_b),
+            execution_id=str(approval_b["execution_id"]),
+            worker_id="v13-worker-four", synthetic_delivery=synthetic_action,
+        )
+        assert replay.state == "not_claimed"
+        assert effects == 2, "uncertain action was run again"
+
+        states = await admin.fetch(
+            "SELECT company_id,state,attempt FROM agent_executions "
+            "WHERE company_id = ANY($1::uuid[])",
+            [company_a, company_b],
+        )
+        by_tenant = {row["company_id"]: row for row in states}
+        assert len(states) == 2
+        assert by_tenant[company_a]["state"] == "completed"
+        assert by_tenant[company_b]["state"] == "needs_reconciliation"
+        assert all(row["attempt"] == 1 for row in states)
+        print("V13 disposable PostgreSQL end-to-end execution acceptance passed")
+    finally:
+        # Do not delete immutable execution history. GitHub CI destroys the
+        # entire disposable PostgreSQL container after this test instead.
+        await admin.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

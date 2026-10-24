@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION secretary_internal.approve_and_queue_email(
 ) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,public,pg_temp AS $approve$
 DECLARE
-  d drafts%ROWTYPE; execution_id UUID; next_status TEXT;
+  d drafts%ROWTYPE; v_execution_id UUID; next_status TEXT;
   payload JSONB; recipient TEXT; subject TEXT; body TEXT;
 BEGIN
   IF p_company_id IS NULL OR p_draft_id IS NULL OR p_actor IS NULL OR
@@ -58,18 +58,18 @@ BEGIN
     RAISE EXCEPTION 'draft changed since policy evaluation' USING ERRCODE='40001';
   END IF;
   IF d.status IN ('approved','edited_and_approved') THEN
-    SELECT id INTO execution_id FROM agent_executions
+    SELECT id INTO v_execution_id FROM agent_executions
      WHERE company_id=p_company_id AND draft_id=p_draft_id
        AND idempotency_key=p_idempotency_key;
     IF NOT FOUND OR NOT EXISTS(
-      SELECT 1 FROM agent_execution_email_payloads
-      WHERE company_id=p_company_id AND execution_id=execution_id
+      SELECT 1 FROM agent_execution_email_payloads e
+      WHERE e.company_id=p_company_id AND e.execution_id=v_execution_id
     ) THEN
       RAISE EXCEPTION 'approved draft lacks matching immutable payload'
         USING ERRCODE='23505';
     END IF;
     RETURN jsonb_build_object('queued',FALSE,'already_processed',TRUE,
-                              'execution_id',execution_id,'status',d.status);
+                              'execution_id',v_execution_id,'status',d.status);
   END IF;
   IF d.status<>'pending' THEN
     RAISE EXCEPTION 'draft is not pending' USING ERRCODE='42501';
@@ -90,15 +90,15 @@ BEGIN
     content=payload WHERE company_id=p_company_id AND id=p_draft_id;
   INSERT INTO agent_executions(company_id,draft_id,idempotency_key,action_type)
     VALUES(p_company_id,p_draft_id,p_idempotency_key,'email_reply')
-    RETURNING id INTO execution_id;
+    RETURNING id INTO v_execution_id;
   INSERT INTO agent_execution_email_payloads(
     company_id,execution_id,recipient,subject,body,payload_sha256
   ) VALUES(
-    p_company_id,execution_id,recipient,subject,body,
+    p_company_id,v_execution_id,recipient,subject,body,
     encode(digest(convert_to(payload::TEXT,'UTF8'),'sha256'),'hex')
   );
   RETURN jsonb_build_object('queued',TRUE,'already_processed',FALSE,
-                            'execution_id',execution_id,'status',next_status);
+                            'execution_id',v_execution_id,'status',next_status);
 END
 $approve$;
 

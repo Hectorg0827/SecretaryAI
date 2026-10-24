@@ -285,6 +285,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned PostgreSQL integration driver
+        run: python -m pip install asyncpg==0.29.0
+      - name: Run V13 disposable PostgreSQL execution integration
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          SECRETARYAI_EXECUTION_DATABASE_URL: postgresql://secretary_executor:ci-execution-only@localhost:5432/sai
+          PYTHONPATH: backend
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_executor LOGIN PASSWORD 'ci-execution-only'"
+          python scripts/test_execution_integration.py
 
   secret-scan:
     name: Secret scan (gitleaks)

@@ -3,6 +3,7 @@ Morning briefing generator — runs daily for each active company.
 Scheduled via Celery beat.
 """
 import logging
+import os
 from datetime import datetime, timezone
 
 import anthropic
@@ -15,6 +16,15 @@ from app.ai.system_prompts import MORNING_BRIEFING_PROMPT
 
 settings = get_settings()
 log = logging.getLogger(__name__)
+
+
+def _direct_briefing_send_enabled() -> bool:
+    """Fail closed. Staging email must use the allowlisted pilot, not Celery."""
+    return (
+        os.getenv("SECRETARYAI_DEPLOYMENT_ENV", "").lower() == "production"
+        and os.getenv("SECRETARYAI_EMAIL_DELIVERY_MODE", "").lower() == "live"
+        and os.getenv("SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED", "") == "1"
+    )
 
 
 async def generate_morning_briefing(
@@ -41,8 +51,10 @@ async def generate_morning_briefing(
 
     briefing_text = response.content[0].text
 
-    # ── Send via SendGrid ──────────────────────────────────────────────────────
-    if settings.sendgrid_api_key and recipient_email:
+    # Only authorized production send attempts can reach SendGrid. A staging
+    # worker cannot bypass the dedicated allowlisted staging pilot.
+    provider_accepted = False
+    if _direct_briefing_send_enabled() and settings.sendgrid_api_key and recipient_email:
         try:
             message = Mail(
                 from_email=settings.from_email,
@@ -51,16 +63,17 @@ async def generate_morning_briefing(
                 html_content=_to_html(briefing_text),
             )
             sg = SendGridAPIClient(settings.sendgrid_api_key)
-            sg.send(message)
-            log.info("Morning briefing sent to %s for company %s", recipient_email, company_id)
-        except Exception as exc:
-            log.error("SendGrid delivery failed for %s: %s", company_id, exc)
+            response = sg.send(message)
+            if getattr(response, "status_code", None) == 202:
+                provider_accepted = True
+                log.info("Morning briefing accepted by provider for company %s", company_id)
+            else:
+                log.warning("Morning briefing provider acceptance unconfirmed for %s", company_id)
+        except Exception:
+            # Treat exceptions as ambiguous. Never assert a successful send.
+            log.exception("Morning briefing provider call failed for company %s", company_id)
     else:
-        log.warning(
-            "Morning briefing generated for %s but not delivered "
-            "(SENDGRID_API_KEY or recipient_email not set)",
-            company_id,
-        )
+        log.info("Morning briefing email not authorized or not configured for %s", company_id)
 
     # ── Persist to DB ──────────────────────────────────────────────────────────
     try:
@@ -70,7 +83,7 @@ async def generate_morning_briefing(
             "company_id": company_id,
             "briefing_text": briefing_text,
             "recipient_email": recipient_email,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "sent_at": datetime.now(timezone.utc).isoformat() if provider_accepted else None,
             "language": preferred_language,
         }).execute()
     except Exception as exc:

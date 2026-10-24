@@ -21,7 +21,7 @@ async def test_email_send_failure_is_not_reported_as_sent():
 @pytest.mark.asyncio
 async def test_email_send_success_reports_sent():
     adapter = MagicMock()
-    adapter.send_email_reply = AsyncMock()
+    adapter.send_email_reply = AsyncMock(return_value={"status": "sent"})
     status = await actions._execute_approved_draft(
         {"id": "d1", "action_type": "email_reply",
          "content": {"to": "a@example.com", "subject": "Hi", "body": "Hello"}},
@@ -60,3 +60,15 @@ async def test_approval_reports_execution_failure_without_resuming_workflow():
     assert result["execution_status"] == "needs_reconciliation"
     workflow.return_value.resume_after_approval.assert_not_called()
     assert audit.call_args.kwargs["metadata"]["execution_status"] == "needs_reconciliation"
+
+
+@pytest.mark.asyncio
+async def test_email_send_without_explicit_provider_receipt_is_uncertain():
+    adapter = MagicMock()
+    adapter.send_email_reply = AsyncMock(return_value={"status": "queued"})
+    status = await actions._execute_approved_draft(
+        {"id": "d1", "action_type": "email_reply",
+         "content": {"to": "a@example.test", "body": "Approved"}},
+        adapter,
+    )
+    assert status == "needs_reconciliation"

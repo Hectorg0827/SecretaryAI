@@ -293,6 +293,7 @@ jobs:
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          SECRETARYAI_EMAIL_WORKER_MODE: simulate
           SECRETARYAI_EXECUTION_DATABASE_URL: postgresql://secretary_executor:ci-execution-only@localhost:5432/sai
           PYTHONPATH: backend
         run: |

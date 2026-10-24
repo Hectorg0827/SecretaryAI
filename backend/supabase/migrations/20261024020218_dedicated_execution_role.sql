@@ -16,3 +16,4 @@ GRANT EXECUTE ON FUNCTION
   secretary_internal.claim_agent_execution(UUID,UUID,TEXT),
   secretary_internal.finish_agent_execution(UUID,UUID,UUID,TEXT,TEXT,TEXT)
   TO secretary_executor;
+\n-- No general-purpose Supabase service-role executor privilege remains.\nREVOKE EXECUTE ON FUNCTION\n  secretary_internal.enqueue_agent_execution(UUID,UUID,TEXT),\n  secretary_internal.claim_agent_execution(UUID,UUID,TEXT),\n  secretary_internal.finish_agent_execution(UUID,UUID,UUID,TEXT,TEXT,TEXT)\n  FROM service_role;\nREVOKE USAGE ON SCHEMA secretary_internal FROM service_role;\n

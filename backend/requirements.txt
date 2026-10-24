@@ -42,7 +42,7 @@ sendgrid==6.11.0
 stripe==11.2.0
 
 # File processing
-pypdf==6.19.0                       # replaces unmaintained pypdf2 3.0.1 (CVE-2023-36464)
+pypdf==6.21.2                       # replaces unmaintained pypdf2 3.0.1 (CVE-2023-36464)
 openpyxl==3.1.5
 pandas==2.2.3
 watchfiles==0.24.0
@@ -59,7 +59,7 @@ google-api-python-client==2.153.0
 # Computer Use — desktop-only; install in Tauri companion process, NOT the cloud API
 # pyautogui==0.9.54
 # mss==9.0.2
-Pillow==12.3.0              # Image processing (used server-side for resize too)
+Pillow==13.0.0              # Image processing (used server-side for resize too)
 # pytesseract==0.3.13       # OCR — optional, requires system tesseract
 
 # Config

@@ -195,7 +195,7 @@ class TestMorningBriefing:
 
     @pytest.mark.asyncio
     async def test_sends_email_via_sendgrid(self):
-        """Briefing should be sent via SendGrid when API key is set."""
+        """Only an explicitly enabled production delivery may call SendGrid."""
         mock_db = _make_db()
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text="Good morning! Here's your briefing.")]
@@ -205,10 +205,16 @@ class TestMorningBriefing:
             patch("app.scheduler.morning_briefing.SendGridAPIClient") as mock_sg,
             patch("app.api.deps.get_db", return_value=mock_db),
             patch("app.scheduler.morning_briefing.settings") as mock_settings,
+            patch.dict(os.environ, {
+                "SECRETARYAI_DEPLOYMENT_ENV": "production",
+                "SECRETARYAI_EMAIL_DELIVERY_MODE": "live",
+                "SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED": "1",
+            }),
         ):
             mock_settings.anthropic_api_key = "test-key"
             mock_settings.sendgrid_api_key = "SG.test"
             mock_settings.from_email = "secretary@test.com"
+            mock_sg.return_value.send.return_value.status_code = 202
             mock_anthropic.return_value.messages.create = AsyncMock(return_value=mock_response)
 
             from app.scheduler.morning_briefing import generate_morning_briefing

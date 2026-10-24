@@ -81,3 +81,7 @@ echo '✓ Staging email allowlist checks passed.'
 echo '── asserting trigger search paths are pinned'
 psql -v ON_ERROR_STOP=1 -Atc "SELECT CASE WHEN count(*) = 3 AND bool_and('search_path=pg_catalog, pg_temp' = ANY(coalesce(p.proconfig, ARRAY[]::text[]))) THEN 'ok' ELSE 'bad' END FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('update_updated_at','reject_stock_movement_rewrite','reject_purchase_evidence_rewrite')" | grep -qx ok
 echo '✓ Trigger search paths are pinned.'
+
+echo '── verifying V1–V5 installed baseline without history mutation'
+psql -v ON_ERROR_STOP=1 -f scripts/verify_staging_schema_baseline.sql
+echo '✓ V1–V5 baseline verified.'

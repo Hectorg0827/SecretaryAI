@@ -29,7 +29,7 @@ class PostgresDurableGateway:
         "$1::uuid,$2::uuid,$3::uuid,$4::text)"
     )
 
-    def __init__(self, dsn: str, *, required_role: str = "service_role"):
+    def __init__(self, dsn: str, *, required_role: str = "secretary_executor"):
         if not dsn or not required_role:
             raise ExecutionDatabaseUnavailable("Execution database is not configured")
         self._dsn = dsn

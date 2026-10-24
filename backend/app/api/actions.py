@@ -82,8 +82,8 @@ async def _execute_approved_draft(draft: dict, adapter) -> str:
             log.info("Sent approved email draft %s", draft.get("id"))
             return "sent"
         except Exception:
-            log.exception("Approved email draft %s failed to send", draft.get("id"))
-            return "failed"
+            log.exception("Approved email draft %s send outcome uncertain", draft.get("id"))
+            return "needs_reconciliation"
 
     if action_type == "purchase_order":
         try:
@@ -95,8 +95,8 @@ async def _execute_approved_draft(draft: dict, adapter) -> str:
             log.info("Dispatched approved PO draft %s", draft.get("id"))
             return "dispatched"
         except Exception:
-            log.exception("Approved PO draft %s failed to dispatch", draft.get("id"))
-            return "failed"
+            log.exception("Approved PO draft %s dispatch outcome uncertain", draft.get("id"))
+            return "needs_reconciliation"
 
     log.warning("No executor for approved action type %s", action_type)
     return "unsupported"

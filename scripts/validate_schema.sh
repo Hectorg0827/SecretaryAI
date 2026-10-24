@@ -69,3 +69,7 @@ echo '✓ Execution role privilege checks passed.'
 echo '── testing atomic durable approval and tenant authorization'
 psql -v ON_ERROR_STOP=1 -f scripts/test_durable_approval.sql
 echo '✓ Atomic approval checks passed.'
+
+echo '── testing V15 immutable approved email payload and claim'
+psql -v ON_ERROR_STOP=1 -f scripts/test_approved_email_snapshot.sql
+echo '✓ Immutable email snapshot checks passed.'

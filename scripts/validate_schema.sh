@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 
 echo '── checking migration SQL source parity (read-only)'
 python3 scripts/check_migration_source_parity.py
+python3 scripts/check_staging_migration_bundle.py
 echo '✓ V1–V16 manual and Supabase migration copies match.'
 
 # Supabase provides auth.jwt(), used by the RLS policies; shim it so the schema

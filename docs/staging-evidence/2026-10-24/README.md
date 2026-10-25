@@ -18,8 +18,9 @@ was performed.
 | Existing PR | [SecretaryAI #74](https://github.com/Hectorg0827/SecretaryAI/pull/74) |
 
 Railway remains pinned to `3ec14f78d1f2db16f2a9fbc9b38fe9cd0de76833`.
-The subsequent PR-only schema-evidence commit is
-`83aeaedfc3912064b89ff435101a6c2fb8822988`; the pin prevents pushes from deploying.
+The configured source pin is reported by Railway, but manual deployments built
+`77eab2bc94cc4d9274b4586182266cf25a8d8eb5`. Do not infer deployed source from
+the source configuration alone. Inspect each deployment commit.
 
 ## Completed actions and checks
 
@@ -66,27 +67,48 @@ The subsequent PR-only schema-evidence commit is
     [CodeQL 40119875543](https://github.com/Hectorg0827/SecretaryAI/actions/runs/40119875543).
     [Disposable schema artifact](https://github.com/Hectorg0827/SecretaryAI/actions/runs/40119875504/artifacts/12570735698),
     archive SHA-256 `90a5891ef3564b0bbf149658d244575d833b91f41d2ffc5882c41610f1ba6d8e`.
-11. Found Redis already running successfully with its existing private network
-    endpoint and persistent `/data` volume. Prepared AOF with `appendfsync always`
-    as a **staged, unapplied** start-command change. Patch
-    `5927964c-fbe5-4734-8457-cb882e798c4d`; Railway reports non-destructive.
-    No restart or durability proof has run.
+11. Redis now has a successful deployment
+    `25aa809b-d9aa-4193-ba51-5df729ac32d2`, with AOF enabled and
+    `appendfsync always` on the existing persistent `/data` volume. Runtime logs
+    confirm creation of AOF base/incremental files and readiness. It has no public
+    domain or TCP proxy. No controlled restart/revocation persistence probe has
+    run; this is configuration/startup evidence only.
 12. Completed Anthropic/Google login and phone verification. Created a dedicated
     SecretaryAI-Staging workspace with **zero keys** and set its monthly usage
     cap to **$1.00**, verified in the UI. Existing organization auto-reload is off;
     no credits were purchased and no payment settings were changed.
-13. Started Stripe sign-in through Google. Google sign-in succeeded; Stripe's
-    own registered passkey is still required. No Stripe test configuration,
-    webhook, products, prices, customers, payments or live-mode settings changed.
+13. The user created a Stripe sandbox/webhook and saved `STRIPE_SECRET_KEY` and
+    `STRIPE_WEBHOOK_SECRET` in Railway. The connector confirms both names are
+    present, but withholds values. Their test mode, validity, matching webhook
+    secret, selected events and delivered signatures are not independently
+    verified. No agent-created payment or customer communication occurred.
+14. Verified staging domain `secretaryai-backend-staging.up.railway.app` targets
+    port 8080. Source mounts the webhook at `/api/billing/webhook`.
+15. CI `40121486228` and CodeQL `40121486219` for the report commit
+    `77eab2bc94cc4d9274b4586182266cf25a8d8eb5` both completed successfully.
+16. Rechecked staging read-only: **28 history entries, 60 public tables, 60 RLS,
+    zero email allowlist recipients**. V1–V16 source parity still passes.
+17. Found and fixed old-shape Stripe webhook assumptions in PR source:
+    subscription periods now support Acacia top-level fields and newer single-item
+    periods; invoice subscription IDs support the newer discriminated parent.
+    Mixed-item periods are rejected instead of guessed. Staging rejects signed
+    events unless `livemode` is explicitly false. Processing/storage errors return
+    HTTP 500 for retry, and only SQLSTATE 23505 duplicate inserts are ignored.
+    Checkout subscription lookup failures also retry instead of activating with
+    unknown periods. No dependency or database schema changes.
+18. Added signed synthetic webhook regression tests. Targeted billing webhook,
+    staging isolation and paywall suites: **79 passed**. Initial local run had
+    25 failures from the host's unsupported `socks5h` proxy setting during app
+    import; rerunning these mocked/local tests without proxy environment settings
+    passed. This does not certify all Endive event fields or live webhook delivery.
 
 ## Existing failure diagnosed
 
-Railway deployment `427f1f7c-e573-458d-a827-82b97a1cdaed` failed before this
-request's changes. Its startup logs show missing required `database_url` and
-`anthropic_api_key` settings, followed by a failed `/health` check. The variable
-inventory also lacks Stripe secret and webhook keys. No new deployment was
-started in this work; later deployment listing still contained that same failed
-backend deployment only.
+The user's latest manual backend deployment
+`b0e5405a-0e24-4f4d-b4be-a3f907bdc51d` is **FAILED**. Runtime logs show two
+required Settings fields missing: `database_url` and `anthropic_api_key`.
+Railway's variable inventory independently confirms both are absent. Both Stripe
+variables are now present. No deployment was initiated by the agent.
 
 The build also reported an unavailable optional Playwright Chromium installation
 on Debian trixie. Browser automation remains disabled; this is not browser or
@@ -106,12 +128,14 @@ computer-use certification.
   directly to Railway; browser security requires action-time confirmation before
   creating this persistent credential. No key exists yet. Validate only synthetic
   prompts within the staging cap.
-- Complete Stripe's passkey authentication. Then verify test mode, retrieve or
-  create staging-only test credentials, configure the staging webhook, validate
-  signature rejection and idempotent event processing. No live charges.
-- No backend public domain is configured. Reserve the staging endpoint only
-  after safety/credential checks, then bind the Stripe test webhook to the actual
-  `/api/billing/webhook` route. Verify the route in current application mounting.
+- Independently verify the Stripe sandbox key and existing webhook destination,
+  API version, event selection and signing secret. Validate hosted signature
+  rejection and idempotent event processing. Local synthetic tests passed; no
+  live charges or real customer events are authorized.
+- The public domain exists but the backend is unhealthy. Existing Stripe target
+  should be `https://secretaryai-backend-staging.up.railway.app/api/billing/webhook`.
+  Do not claim delivery verification until the backend starts and a sandbox
+  test event is received successfully.
 - No private Storage bucket exists and no live ClamAV scan was validated.
   Evidence-file integrations remain unverified and must fail closed.
 - Before any backend deployment: confirm credentials, schema/history, frozen

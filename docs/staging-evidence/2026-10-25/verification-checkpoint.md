@@ -1,3 +1,15 @@
+> **Current status update — October 25, 2026 (supersedes the historical pending items below).** This file preserves the original pre-repair checkpoint. The separate staging-only migration source is documented in [staging_supabase/README.md](../../../staging_supabase/README.md).
+>
+> - **Migration metadata repair completed in isolated SecretaryAI-Staging only:** authenticated, guarded, atomic history-only insertion of five pre-audited baseline entries. Staging migration ledger went from 28 to **33 recorded versions**, exactly matching the 33-file staging manifest; all five new history rows are metadata-only, and **no migration SQL was replayed**. Post-repair readback reported **60 public tables, 60 RLS-enabled public tables and zero company records**. The previous 28 entries were not rewritten.
+> - **Still unverified:** a Supabase CLI `migration list` and `db push --dry-run` in the isolated staging workdir. **Do not perform a real migration push** until no-replay proof is captured and the specific SQL reviewed.
+> - **Stripe dashboard verified by owner-provided screenshots:** SecretaryAI sandbox; active event destination `https://secretaryai-backend-staging.up.railway.app/api/billing/webhook`; **Snapshot** payload style, API version `2026-09-30.endive`; subscribed to exactly `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, and `customer.subscription.deleted`. Actual webhook deliveries, API-key authentication and signing-secret equivalence remain **unverified**.
+> - **GitHub:** PR #74 commit `96acd51440d6d98878cb2a304b3bb80b4c8145ce` (README history update) passed CI #442 and CodeQL #454. A new documentation-only commit requires a fresh exact-tip check.
+> - **Railway:** SecretaryAI-Staging still has three **STAGED / unapplied** changes: `DATABASE_URL`, `ANTHROPIC_API_KEY`, and outbound IPv6 egress enabled. The live source remains pinned to older SHA `3ec14f78d1f2db16f2a9fbc9b38fe9cd0de76833`. No deployment or activation has been initiated. No production or LYO resource was touched.
+>
+> **Release gate:** continue hold until staging-only credential and network authentication, no-replay dry-run, exact source pin and safe runtime verification are complete. Historical statements below that call the migration repair or Stripe destination selection “not yet verified” are superseded by the dated updates above. They remain here as chronological evidence, not as current instructions.
+
+---
+
 # SecretaryAI-Staging verification checkpoint — 2026-10-25
 
 Scope: ONLY Railway project `77513c77-44df-485e-a927-d57d6a80b2c1`, environment `f9dc2025-cd5b-4df2-95bc-c3c54a3c3e36`, backend service `ef05db6e-da57-4e68-a879-7906cd2c0522`, Supabase project `xerktvdgjvjozvckjyfp`, and Anthropic workspace `wrkspc_01A2ZcW6vYqEGFr5rxmsH2Sp`. No production or LYO changes were made. No backend deploy was authorized or initiated in this checkpoint.

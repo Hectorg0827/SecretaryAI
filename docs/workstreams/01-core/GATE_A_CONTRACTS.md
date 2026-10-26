@@ -22,6 +22,8 @@ Represent individual source reads through existing `app.domain.data_result.DataR
 
 Missing source is a **visible data-quality incident**, not an empty-success report. Missing data must not produce a claim of operational health, an automatic PO, or an email.
 
+**Implemented safety check on Chat 1 branch:** `compute_dashboard_payload` now raises `SnapshotSourceUnavailable` if any required account, inventory, or sales read fails rather than fabricating healthy zero metrics. No incomplete snapshot is written by the morning worker. The initial on-demand dashboard request returns HTTP 503 when required data cannot be read. Chat 5 must display a dedicated unavailable-data state for HTTP 503 rather than rendering zero-valued default tiles. Cached snapshots must always show their `generated_at` age; handling of stale existing snapshots remains a Gate B acceptance item.
+
 ## Event v1 and deduplication
 
 A scheduled insight/work item must have `company_id`, stable `event_type`, `entity_type`, `entity_id`, `detected_at` (UTC), `source_ids`, `correlation_id`, rule/model version, and a stable dedupe key over tenant + event type + entity + effective data/version window. Events are tenant-scoped and retry-safe. Changes from Chat 2/3/4 must be visible to Chat 1 before schema additions.

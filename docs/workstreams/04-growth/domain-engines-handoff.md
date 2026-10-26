@@ -16,6 +16,13 @@ records are included in this public repository.
 | People/HR #15 | `hr/onboarding.py` | Opaque staff onboarding/training/license renewal statuses and scoped briefing; no employment decisions |
 | Dynamic pricing #23 | `wholesale_distribution/dynamic_pricing.py` | Observational confidence guard, modeled pass-through using real costs and human price-approval flags |
 
+The legacy compliance expiration scanner previously removed recorded overdue
+permits, COLAs, licenses, registrations and distributor agreements once their
+date passed. It now retains those records as critical daily review alerts and
+keeps states without a currently active license visible as critical in the
+digest. This is a **recorded-date signal**, not a regulator-verified legal
+finding. No renewal submission, shipment approval or communication occurs.
+
 Dynamic-price suggestions fail closed on inadequate samples, nonnegative
 observational elasticity (possible seasonality/promotion/stock-out confounding),
 and invalid or overflowing price/volume projections. These checks are

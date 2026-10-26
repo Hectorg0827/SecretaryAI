@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_db, get_adapter
 from app.auth.rbac import get_current_user, require_permission
@@ -322,16 +322,16 @@ async def reject_draft(
 
 
 class DraftPORequest(BaseModel):
-    item_id: str
-    product_name: str
-    qty: Optional[int] = None
-    notes: Optional[str] = None
+    item_id: str = Field(min_length=1, max_length=128)
+    product_name: str = Field(min_length=1, max_length=255)
+    qty: Optional[int] = Field(default=None, ge=1)
+    notes: Optional[str] = Field(default=None, max_length=4000)
 
 
 @router.post("/draft-po")
 async def draft_purchase_order(
     body: DraftPORequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("draft_purchase_orders")),
     db=Depends(get_db),
 ):
     """

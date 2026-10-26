@@ -2,20 +2,22 @@ import { apiFetch } from './client';
 
 export interface DashboardSummary {
   accounts: {
-    total: number;
-    at_risk: number;
     healthy: number;
-    new_this_month: number;
+    slowing: number;
+    at_risk: number;
+    dormant: number;
   };
   inventory_alerts: InventoryAlert[];
-  pending_actions: number;
-  unread_emails: number;
+  pending_actions: number | null;
+  unread_emails: number | null;
+  generated_at: string | null;
+  cached: boolean;
 }
 
 export interface InventoryAlert {
   item_id: string;
   product_name: string;
-  stock_status: 'critical' | 'low' | 'healthy';
+  stock_status: 'critical' | 'low' | 'out_of_stock';
   total_qty: number;
   weeks_remaining: number | null;
 }

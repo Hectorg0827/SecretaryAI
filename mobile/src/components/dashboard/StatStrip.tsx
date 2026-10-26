@@ -1,12 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { DashboardSummary, SalesData } from '../../api/dashboard';
+import { DashboardSummary } from '../../api/dashboard';
 import { COLORS, RADIUS, SHADOW } from '../../theme';
 
 interface Props {
   summary: DashboardSummary;
-  sales: SalesData;
 }
 
 interface StatCardProps {
@@ -31,7 +30,10 @@ function StatCard({ icon, iconColor, iconBg, label, value, sub }: StatCardProps)
   );
 }
 
-export default function StatStrip({ summary, sales }: Props) {
+export default function StatStrip({ summary }: Props) {
+  const accounts = summary.accounts;
+  const counts = [accounts.healthy, accounts.slowing, accounts.at_risk, accounts.dormant];
+  const scoredAccounts = counts.every(Number.isFinite) ? counts.reduce((sum, count) => sum + count, 0) : '—';
   return (
     <View style={styles.strip}>
       <StatCard
@@ -39,7 +41,7 @@ export default function StatStrip({ summary, sales }: Props) {
         iconColor={COLORS.primary}
         iconBg={COLORS.primaryLight}
         label="Accounts"
-        value={summary.accounts.total}
+        value={scoredAccounts}
         sub={summary.accounts.at_risk > 0 ? `${summary.accounts.at_risk} at risk` : undefined}
       />
       <StatCard
@@ -47,7 +49,7 @@ export default function StatStrip({ summary, sales }: Props) {
         iconColor={COLORS.warning}
         iconBg={COLORS.warningLight}
         label="Emails"
-        value={summary.unread_emails}
+        value={summary.unread_emails ?? '—'}
         sub="unread"
       />
       <StatCard
@@ -63,7 +65,7 @@ export default function StatStrip({ summary, sales }: Props) {
         iconColor={COLORS.success}
         iconBg={COLORS.successLight}
         label="Approvals"
-        value={summary.pending_actions}
+        value={summary.pending_actions ?? '—'}
         sub="pending"
       />
     </View>

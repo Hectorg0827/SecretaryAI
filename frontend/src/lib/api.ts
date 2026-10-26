@@ -108,8 +108,8 @@ export interface FeedEvent {
 export interface DashboardSummary {
   accounts: { healthy: number; slowing: number; at_risk: number; dormant: number };
   inventory_alerts: InventoryAlert[];
-  pending_actions: number;
-  unread_emails: number;
+  pending_actions: number | null;
+  unread_emails: number | null;
   /** ISO timestamp of when the QB-derived data was last computed by the scheduler */
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */
@@ -175,6 +175,13 @@ export interface Draft {
   content: Record<string, unknown>;
   created_at: string;
   status: 'pending' | 'approved' | 'rejected';
+}
+
+export interface ActionApprovalResult {
+  draft_id: string;
+  status: string;
+  execution_status?: string;
+  already_processed?: boolean;
 }
 
 export interface AgentStatus {
@@ -303,7 +310,7 @@ export const api = {
   actions: {
     pending: () => api.get<{ drafts: Draft[] }>('/api/actions/pending'),
     approve: (id: string, edits?: Record<string, unknown>) =>
-      api.post<void>(`/api/actions/approve/${id}`, edits ?? {}),
+      api.post<ActionApprovalResult>(`/api/actions/approve/${id}`, edits ?? {}),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
   },

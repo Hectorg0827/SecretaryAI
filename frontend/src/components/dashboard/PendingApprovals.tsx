@@ -42,8 +42,14 @@ function DraftCard({ draft, onRemove, canApprove }: { draft: Draft; onRemove: (i
   const approve = async () => {
     setBusy('approve');
     try {
-      await api.actions.approve(draft.id);
-      toast.success('Approved & sent');
+      const result = await api.actions.approve(draft.id);
+      if (result.execution_status === 'sent') {
+        toast.success('Approved; provider confirmed delivery');
+      } else if (result.execution_status === 'failed' || result.execution_status === 'needs_reconciliation') {
+        toast.error('Approved, but execution was not confirmed. Check the audit trail.');
+      } else {
+        toast.success('Approval recorded. Execution is not yet confirmed.');
+      }
       onRemove(draft.id);
     } catch { toast.error('Could not approve'); }
     finally   { setBusy(null); }

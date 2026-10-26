@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { StatStrip } from '../components/dashboard/StatStrip';
 import { EmailInbox } from '../components/dashboard/EmailInbox';
@@ -9,6 +9,7 @@ import { InventoryPanel } from '../components/dashboard/InventoryPanel';
 import { PendingApprovals } from '../components/dashboard/PendingApprovals';
 import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel';
 import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
+import { MorningBriefing } from '../components/dashboard/MorningBriefing';
 import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
@@ -18,30 +19,31 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
   const [summary, setSummary]       = useState<DashboardSummary | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { hasPermission, canApprove, canAccessChat } = useAuth();
+  const [loadError, setLoadError]   = useState(false);
+  const { role, hasPermission, canApprove, canAccessChat } = useAuth();
 
-  const loadSummary = () => {
+  const loadSummary = useCallback(async () => {
     setLoading(true);
-    api.dashboard.summary()
-      .then((s) => {
-        setSummary(s);
-        onUnreadChange?.(s.unread_emails ?? 0);
-      })
-      .catch(() => setSummary(null))
-      .finally(() => setLoading(false));
-  };
+    setLoadError(false);
+    try {
+      const s = await api.dashboard.summary();
+      setSummary(s);
+      onUnreadChange?.(s.unread_emails ?? 0);
+    } catch {
+      setSummary(null);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [onUnreadChange]);
 
-  useEffect(() => { loadSummary(); }, []);
+  useEffect(() => { void loadSummary(); }, [loadSummary]);
 
   const handleRefresh = () => {
+    // This is intentionally a READ ONLY reload. POST /dashboard/refresh
+    // currently schedules a morning-briefing worker and is not safe for UI refresh.
     setRefreshing(true);
-    api.dashboard.refresh()
-      .then(() => {
-        // Re-fetch after a short delay so the worker has time to store the snapshot
-        setTimeout(loadSummary, 3000);
-      })
-      .catch(() => {})
-      .finally(() => setRefreshing(false));
+    void loadSummary().finally(() => setRefreshing(false));
   };
 
   const accounts = summary?.accounts  ?? { healthy: 0, slowing: 0, at_risk: 0, dormant: 0 };
@@ -52,12 +54,12 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
   const showAccountHealth = hasPermission('view_all') || hasPermission('view_customers'); // owner, manager, back_office
   const showInventory     = hasPermission('view_inventory') || hasPermission('view_all'); // all except viewer
   const showApprovals     = canApprove;                         // owner, manager
-  const showNotes         = hasPermission('view_own_accounts') || hasPermission('view_all'); // owner, manager, sales_rep
+  const showNotes         = hasPermission('view_all'); // per-rep notes lack a scoped backend contract
 
   // Build stat tiles based on what this role can see
   const statItems = summary ? [
-    ...(showEmailInbox    ? [{ label: 'Unread Emails',    value: summary.unread_emails,                    accent: 'blue'    as const }] : []),
-    ...(showApprovals     ? [{ label: 'Pending Approvals',value: summary.pending_actions,                  accent: 'amber'   as const }] : []),
+    ...(showEmailInbox    ? [{ label: 'Unread Emails',    value: summary.unread_emails ?? 'Unavailable',     accent: 'blue'    as const }] : []),
+    ...(showApprovals     ? [{ label: 'Pending Approvals',value: summary.pending_actions ?? 'Unavailable',   accent: 'amber'   as const }] : []),
     ...(showAccountHealth ? [{ label: 'Accounts At Risk', value: accounts.at_risk + accounts.dormant,      accent: 'red'     as const }] : []),
     ...(showInventory     ? [{ label: 'Inventory Alerts', value: alerts.length,                            accent: 'amber'   as const }] : []),
   ] : [];
@@ -79,17 +81,15 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
               {new Date(summary.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           ) : (
-            <span>Live data</span>
+            <span>Snapshot timestamp unavailable — freshness unverified</span>
           )}
-          {hasPermission('run_reports') && (
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="ml-1 underline hover:text-slate-600 disabled:opacity-50"
-            >
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
-          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="ml-1 underline hover:text-slate-600 disabled:opacity-50"
+          >
+            {refreshing ? 'Reloading…' : 'Reload view'}
+          </button>
         </div>
       )}
 
@@ -106,6 +106,18 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
 
       {/* Main grid */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6 pt-4">
+        {loadError && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          Dashboard summary unavailable. The absence of figures is not evidence of zero activity.
+          <button onClick={handleRefresh} className="ml-2 underline font-semibold" disabled={refreshing}>Try again</button>
+        </div>}
+        {role === 'sales_rep' && <div role="status" className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          Your assigned customer portfolio is awaiting server-side assignment verification. Account details and private follow-ups remain unavailable until access can be scoped safely.
+        </div>}
+        {(role === 'owner' || role === 'manager') && (
+          <div className="mb-5">
+            <MorningBriefing summary={summary} summaryLoading={loading} />
+          </div>
+        )}
         {hasLeftColumn ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
             {/* Column 1: Email + Sales */}
@@ -124,9 +136,9 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
                 </>
               ) : (
                 <>
-                  {showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                  {summary && showAccountHealth && <AccountHealthPanel summary={accounts} />}
                   <ProactiveFeed />
-                  {showInventory     && <InventoryPanel alerts={alerts} />}
+                  {summary && showInventory     && <InventoryPanel alerts={alerts} />}
                   {showApprovals     && <PendingApprovals />}
                   {showApprovals     && <WorkflowStatusPanel />}
                   {showNotes         && <FollowUpNotes />}
@@ -144,9 +156,8 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
               </>
             ) : (
               <>
-                {showAccountHealth && <AccountHealthPanel summary={accounts} />}
-                <ProactiveFeed />
-                {showInventory     && <InventoryPanel alerts={alerts} />}
+                {summary && showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                {summary && showInventory     && <InventoryPanel alerts={alerts} />}
                 {showNotes         && <FollowUpNotes />}
               </>
             )}

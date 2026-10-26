@@ -24,7 +24,6 @@ function TwoFASection() {
 
   const [step,     setStep]     = useState<Step>('idle');
   const [secret,   setSecret]   = useState('');
-  const [qrUrl,    setQrUrl]    = useState('');
   const [code,     setCode]     = useState('');
   const [loading,  setLoading]  = useState(false);
   const [enabled,  setEnabled]  = useState(false);
@@ -37,7 +36,6 @@ function TwoFASection() {
     try {
       const res = await api.post<{ secret: string; otpauth_url: string }>('/auth/2fa/setup', {});
       setSecret(res.secret);
-      setQrUrl(res.otpauth_url);
       setStep('setup');
     } catch {
       toast.error('Could not start 2FA setup. Please try again.');
@@ -54,6 +52,7 @@ function TwoFASection() {
       await api.post('/auth/2fa/verify', { totp_code: code });
       setEnabled(true);
       setStep('enabled');
+      setSecret('');
       setCode('');
       toast.success('Two-factor authentication enabled.');
     } catch {
@@ -118,20 +117,14 @@ function TwoFASection() {
       {step === 'setup' && (
         <div className="py-5 space-y-4 border-b border-slate-100">
           <p className="text-sm text-slate-600">
-            Scan this QR code with your authenticator app (e.g. Google Authenticator or Authy), then enter the 6-digit code below to confirm.
+            Add the setup key below to your authenticator app manually, then enter its 6-digit code to confirm.
           </p>
 
-          {/* QR code rendered as a link to an online renderer to keep bundle size down */}
+          {/* Do not send a TOTP enrollment URI or secret to an external QR service. */}
           <div className="flex items-center gap-4">
-            <div className="w-32 h-32 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 flex-shrink-0">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrUrl)}`}
-                alt="2FA QR code"
-                className="w-28 h-28 rounded"
-              />
-            </div>
+            <p className="text-xs text-slate-600 max-w-40">For your security, enter the setup key manually in your authenticator app. SecretaryAI never sends it to a QR-image provider.</p>
             <div className="min-w-0">
-              <p className="text-xs text-slate-500 mb-1">Or enter this secret manually:</p>
+              <p className="text-xs text-slate-500 mb-1">Authenticator setup key:</p>
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                 <code className="text-xs font-mono text-slate-700 break-all">{secret}</code>
                 <button onClick={copySecret} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
@@ -159,7 +152,7 @@ function TwoFASection() {
               {loading && <Loader2 size={13} className="animate-spin" />}
               Verify & activate
             </button>
-            <button onClick={() => setStep('idle')} className="text-xs text-slate-400 hover:text-slate-600 px-2">
+            <button onClick={() => { setStep('idle'); setSecret(''); }} className="text-xs text-slate-400 hover:text-slate-600 px-2">
               Cancel
             </button>
           </div>

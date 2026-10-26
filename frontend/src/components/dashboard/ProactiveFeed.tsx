@@ -71,9 +71,7 @@ export function ProactiveFeed() {
             </div>
             {ev.action_label && (
               <div className="pl-3.5 mt-1.5">
-                <button className="text-xs text-blue-600 hover:underline font-medium">
-                  {ev.action_label} &rarr;
-                </button>
+                <p className="text-xs text-slate-600">Suggested next step: {ev.action_label}</p>
               </div>
             )}
           </div>

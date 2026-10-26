@@ -124,7 +124,7 @@ function AppShell() {
           <Route
             path="/accounts"
             element={
-              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+              <RoleGuard roles={['owner', 'manager', 'back_office']}>
                 <Accounts />
               </RoleGuard>
             }

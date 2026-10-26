@@ -30,34 +30,44 @@ import NotesList from '../components/dashboard/NotesList';
 
 export default function DashboardScreen() {
   const { user } = useAuthStore();
+  const isLeader = user?.role === 'owner' || user?.role === 'manager';
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [sales, setSales] = useState<SalesData | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
   const [notes, setNotes] = useState<FollowUpNote[]>([]);
+  const [emailsAvailable, setEmailsAvailable] = useState(false);
+  const [notesAvailable, setNotesAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      setError(null);
-      const [s, sl, em, no] = await Promise.all([
-        getDashboardSummary(),
-        getSalesData(30),
-        getEmails(),
-        getNotes(),
-      ]);
-      setSummary(s);
-      setSales(sl);
-      setEmails(em.emails);
-      setNotes(no.notes);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    setError(null);
+    // Independently settle each permitted source. One failure must not hide the
+    // others or turn a failed read into a misleading empty business result.
+    const [summaryResult, salesResult, emailsResult, notesResult] = await Promise.allSettled([
+      getDashboardSummary(),
+      isLeader ? getSalesData(30) : Promise.resolve(null),
+      isLeader ? getEmails() : Promise.resolve(null),
+      isLeader ? getNotes() : Promise.resolve(null),
+    ]);
+    const failures: string[] = [];
+    if (summaryResult.status === 'fulfilled') setSummary(summaryResult.value);
+    else { setSummary(null); failures.push('Dashboard summary'); }
+    if (salesResult.status === 'fulfilled') setSales(salesResult.value);
+    else { setSales(null); failures.push('Sales'); }
+    if (emailsResult.status === 'fulfilled') {
+      setEmails(emailsResult.value?.emails ?? []);
+      setEmailsAvailable(!!emailsResult.value);
+    } else { setEmails([]); setEmailsAvailable(false); failures.push('Inbox'); }
+    if (notesResult.status === 'fulfilled') {
+      setNotes(notesResult.value?.notes ?? []);
+      setNotesAvailable(!!notesResult.value);
+    } else { setNotes([]); setNotesAvailable(false); failures.push('Follow-ups'); }
+    if (failures.length) setError(`Unavailable: ${failures.join(', ')}. Pull to retry; values are not confirmed.`);
+    setLoading(false);
+    setRefreshing(false);
+  }, [isLeader]);
 
   useEffect(() => {
     load();
@@ -120,12 +130,20 @@ export default function DashboardScreen() {
         ) : null}
 
         {/* KPI Strip */}
-        {summary && sales ? (
-          <StatStrip summary={summary} sales={sales} />
+        {summary && isLeader ? (
+          <StatStrip summary={summary} />
         ) : null}
 
+        {summary?.generated_at && isLeader ? (
+          <Text style={styles.sourceNote}>Dashboard snapshot: {new Date(summary.generated_at).toLocaleString()}</Text>
+        ) : isLeader ? (
+          <Text style={styles.sourceNote}>Dashboard source freshness not verified</Text>
+        ) : (
+          <Text style={styles.sourceNote}>Your role-limited workspace. Department metrics require authorized access.</Text>
+        )}
+
         {/* Revenue card */}
-        {sales ? (
+        {isLeader && sales ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Revenue (30 days)</Text>
             <Text style={styles.revenueAmount}>${sales.total_revenue.toLocaleString()}</Text>
@@ -154,21 +172,25 @@ export default function DashboardScreen() {
         ) : null}
 
         {/* Emails */}
-        <View style={styles.sectionHeader}>
+        {isLeader && <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Priority Inbox</Text>
           {summary?.unread_emails ? (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{summary.unread_emails}</Text>
             </View>
           ) : null}
-        </View>
-        <EmailList emails={emails.slice(0, 5)} onMarkRead={handleMarkRead} />
+        </View>}
+        {isLeader && (emailsAvailable ?
+          <EmailList emails={emails.slice(0, 5)} onMarkRead={handleMarkRead} /> :
+          <Text style={styles.sourceNote}>Priority inbox is unavailable; no zero-item conclusion.</Text>)}
 
         {/* Follow-ups */}
-        <View style={styles.sectionHeader}>
+        {isLeader && <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Follow-ups</Text>
-        </View>
-        <NotesList notes={notes} onToggle={handleToggleNote} />
+        </View>}
+        {isLeader && (notesAvailable ?
+          <NotesList notes={notes} onToggle={handleToggleNote} /> :
+          <Text style={styles.sourceNote}>Follow-ups are unavailable; no zero-item conclusion.</Text>)}
       </ScrollView>
     </SafeAreaView>
   );
@@ -205,6 +227,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   errorText: { color: COLORS.danger, fontSize: 13, flex: 1 },
+  sourceNote: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 12 },
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,

@@ -384,7 +384,11 @@ async def mark_email_read(
     try:
         await adapter.mark_email_read(email_id)
     except Exception as exc:
-        log.warning("mark-read failed for %s: %s", email_id, exc)
+        log.warning("mark-read failed for %s", email_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Email read status could not be confirmed",
+        ) from exc
     return {"status": "ok"}
 
 
@@ -402,8 +406,11 @@ async def get_sales_data(
     try:
         invoices = await adapter.get_orders_last_n_days(days)
     except Exception as exc:
-        log.error("Sales data fetch failed: %s", exc)
-        invoices = []
+        log.error("Sales data fetch failed for company %s", user["company_id"])
+        raise HTTPException(
+            status_code=503,
+            detail="Sales source unavailable; revenue and order counts not verified",
+        ) from exc
 
     daily: dict[str, dict] = defaultdict(lambda: {"revenue": 0.0, "order_count": 0})
     account_revenue: dict[str, float] = defaultdict(float)

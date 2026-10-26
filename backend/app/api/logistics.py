@@ -35,6 +35,7 @@ from app.api.deps import get_current_user, get_db
 from app.auth.rbac import require_permission
 from app.intelligence.wholesale_distribution.logistics import LogisticsModule
 from app.intelligence.wholesale_distribution.logistics.logistics_module import LogisticsConfig
+from app.intelligence.wholesale_distribution.logistics.vendor_tracker import VendorResponseParser
 from app.intelligence.wholesale_distribution.logistics.pipeline import (
     FreightBooking,
     LandedCostBreakdown,
@@ -141,10 +142,10 @@ class GeneratePORequest(BaseModel):
 
 
 class VendorResponseRequest(BaseModel):
-    po_number: str
-    supplier_id: str
-    email_subject: str
-    email_body: str
+    po_number: str = Field(min_length=1, max_length=100)
+    supplier_id: str = Field(min_length=1, max_length=200)
+    email_subject: str = Field(max_length=500)
+    email_body: str = Field(min_length=1, max_length=25000)
 
 
 class FreightInvoiceRequest(BaseModel):
@@ -1095,38 +1096,52 @@ async def generate_purchase_orders(
 async def parse_vendor_response(
     request: VendorResponseRequest,
     user: dict = Depends(require_permission("view_inventory")),
-    db=Depends(get_db),
 ):
     """
-    Parse a vendor email response for a PO.
-    Detects confirmation, rejection, ship date, price changes.
-    """
-    lm = _get_logistics_module(user, db)
+    Preview a vendor email response without changing an order or pipeline state.
 
-    # Build a minimal PO stub for the parser
+    The caller controls the subject/body, PO number and claimed supplier ID.
+    Until Chat 2 supplies verified message identity and Chat 1 specifies the
+    durable approval/event contract, these are *candidates*, not confirmations.
+    """
+    # The parser needs a PO object to read its line items. No authenticated PO
+    # lines are available in this preview, so price/quantity changes cannot be
+    # verified and no operational notification may be generated.
     po = PurchaseOrder(
         po_number=request.po_number,
         supplier_id=request.supplier_id,
+        supplier_name=request.supplier_id,
+        supplier_email="",
+        ship_to_address="",
+        payment_terms="",
+        requested_ship_date="",
     )
-
-    result = lm.parse_vendor_response(po, request.email_subject, request.email_body)
-    parsed = result["parsed"]
-
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.po_number,
-        stage=3, stage_name="vendor_response_received",
-        supplier_id=request.supplier_id,
-    )
+    parsed = VendorResponseParser().parse(request.email_subject, request.email_body, po)
 
     return {
         "po_number": request.po_number,
-        "is_confirmation": parsed.is_confirmation,
-        "promised_ship_date": parsed.promised_ship_date,
-        "price_change_detected": parsed.price_change_detected,
-        "issues_detected": parsed.issues_detected,
-        "raw_summary": parsed.raw_summary,
-        "alert": _serialize_alert(result["alert"]),
+        "status": "analysis_only",
+        "candidate_confirmation": parsed.order_confirmed,
+        "candidate_rejection": parsed.rejection,
+        "possible_ship_date": parsed.ship_date,
+        "possible_arrival_date": parsed.arrival_date,
+        "possible_supplier_reference": parsed.supplier_ref or None,
+        "issues_detected": parsed.issues,
+        # With no authenticated PO lines, absence of a price/quantity mention
+        # does not constitute a positive reconciliation result.
+        "price_review_required": True,
+        "quantity_review_required": True,
+        "requires_human_review": True,
+        "review_reason": (
+            "Supplier sender and PO association are unverified; inspect the "
+            "original message and independently approved PO before acting."
+            + (f" Parser notes: {parsed.review_reason}" if parsed.review_reason else "")
+        ),
+        "message_verified": False,
+        "po_link_verified": False,
+        "supplier_action_permitted": False,
+        "pipeline_status_changed": False,
+        "inventory_posted": False,
     }
 
 

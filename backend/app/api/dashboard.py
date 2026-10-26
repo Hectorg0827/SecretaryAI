@@ -25,6 +25,9 @@ from app.scheduler.dashboard_snapshot import (
     SnapshotSourceUnavailable,
     SnapshotPersistenceUnavailable,
     snapshot_freshness,
+    _invoice_amount,
+    _invoice_date,
+    _row_value,
 )
 
 log = logging.getLogger(__name__)
@@ -418,9 +421,9 @@ async def get_sales_data(
     order_count = 0
 
     for inv in invoices:
-        inv_date = getattr(inv, "date", None) or inv.get("order_date")
-        inv_total = float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
-        customer_name = getattr(inv, "customer_name", "") or inv.get("customer_name", "")
+        inv_date = _invoice_date(inv)
+        inv_total = _invoice_amount(inv)
+        customer_name = _row_value(inv, "customer_name", "")
 
         if inv_date:
             d = str(inv_date)[:10]
@@ -449,13 +452,17 @@ async def get_sales_data(
         prior_invoices = await adapter.get_orders_last_n_days(days * 2)
         prior_total = 0.0
         for inv in prior_invoices:
-            d = str(getattr(inv, "date", None) or inv.get("order_date", "") or "")[:10]
-            if d and d < cutoff_str:
-                prior_total += float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
+            d = _invoice_date(inv).isoformat()
+            if d < cutoff_str:
+                prior_total += _invoice_amount(inv)
         if prior_total > 0:
             vs_prior_pct = round((total_revenue - prior_total) / prior_total * 100, 1)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.error("Prior-period sales data failed for company %s", user["company_id"])
+        raise HTTPException(
+            status_code=503,
+            detail="Prior-period sales source unavailable; comparison not verified",
+        ) from exc
 
     top_account = (
         max(account_revenue, key=lambda k: account_revenue[k])

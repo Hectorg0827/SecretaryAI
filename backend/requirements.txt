@@ -26,7 +26,7 @@ redis==5.1.0
 
 # Auth & Security
 PyJWT==2.15.1                 # HS256 user/refresh/2FA sessions; removes python-jose/ecdsa/pyasn1 chain
-passlib[bcrypt]==1.7.4
+bcrypt==5.0.0                  # Direct API; passlib 1.7.4 probes fail on bcrypt 5
 pyotp==2.9.0
 cryptography==50.0.2
 

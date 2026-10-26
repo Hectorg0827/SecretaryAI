@@ -587,6 +587,8 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72 or "\x00" in v:
+            raise ValueError("Password must be at most 72 UTF-8 bytes and contain no null characters")
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
         if not re.search(r'[A-Za-z]', v):
@@ -620,6 +622,13 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     if existing.data:
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    # Hash before any insert: a hashing failure must not orphan a company.
+    try:
+        password_hash = hash_password(body.password)
+    except Exception:
+        log.error("Registration password hashing unavailable")
+        raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
+
     # Create company
     try:
         company_result = (
@@ -640,7 +649,7 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     # Create user
     user_payload: dict = {
         "email": body.email,
-        "password_hash": hash_password(body.password),
+        "password_hash": password_hash,
         "role": "owner",
         "company_id": company_id,
         "is_active": True,

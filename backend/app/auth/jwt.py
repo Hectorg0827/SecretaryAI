@@ -12,12 +12,11 @@ from typing import Optional
 
 import jwt
 from jwt.exceptions import PyJWTError
-from passlib.context import CryptContext
+import bcrypt
 
 from app.config import get_settings
 
 settings = get_settings()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALGORITHM = "HS256"
 
 _REVOKE_PREFIX = "jwt_revoked:"
@@ -148,8 +147,17 @@ def blacklist_jti(jti: str, ttl_seconds: int) -> None:
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    encoded = password.encode("utf-8")
+    if len(encoded) > 72 or b"\x00" in encoded:
+        raise ValueError("Password must be at most 72 UTF-8 bytes and contain no null characters")
+    return bcrypt.hashpw(encoded, bcrypt.gensalt(rounds=12)).decode("ascii")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        encoded = plain.encode("utf-8")
+        if len(encoded) > 72 or b"\x00" in encoded:
+            return False  # Never silently truncate a submitted credential.
+        return bcrypt.checkpw(encoded, hashed.encode("ascii"))
+    except (ValueError, TypeError, UnicodeError):
+        return False  # Malformed stored hashes cannot authenticate or crash login.

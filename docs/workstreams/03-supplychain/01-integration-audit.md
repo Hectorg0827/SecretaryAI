@@ -9,13 +9,13 @@ live-provider or database-backed acceptance test. No side effects authorized.
 | Stage | Real entry points | Integration result / evidence required |
 | --- | --- | --- |
 | 1. Demand/reorder | `app/api/logistics.py:evaluate_reorder_queue` -> `LogisticsModule.evaluate_reorder_queue` -> `ReorderEngine.build_reorder_queue` | Broken API-to-engine field contract and missing `supplier_name`; fixed in workstream 03 with an HTTP regression. API still accepts caller-supplied stock/history, not a source-verified company snapshot. |
-| 2. Draft PO | `app/api/logistics.py:generate_purchase_orders` -> `POGenerator.generate_pos` | Returns a synthetic draft/email body and best-effort `procurement_cycles` status. `SimpleNamespace(**dict)` is not a `ReorderDecisionPackage` with `sku_profile`; this route is not the independently approved durable PO workflow. In-memory PO counter is not a durable identity. |
+| 2. Draft PO | `app/api/logistics.py:generate_purchase_orders`; separate durable `/orders` RPC | Baseline route crashed for flat `SimpleNamespace` packages, could mint in-memory PO numbers, and falsely upsert stage 2 for caller-supplied `approved=true`. The legacy endpoint is now explicitly blocked with HTTP 409 until a server-verified approval contract exists. Independently approved durable `/orders` remains available but is not connected to reorder proposals. |
 | 3. Supplier response | `parse_vendor_response` -> `VendorResponseParser.parse` | Baseline route constructed an incomplete `PurchaseOrder`, read nonexistent response fields and best-effort advanced the pipeline. Now repaired as a pure unverified analysis preview: no DB write, supplier alert or status promotion. Authenticated inbound message association, authoritative PO lines and durable response event are still missing. |
 | 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Parses caller-supplied invoice text on a new booking object; does not retrieve verified invoice bytes or durably attach line items to a shipment. |
 | 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist carrier/vessel milestone and source timestamp. Live provider acceptance absent. |
 | 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Computes events/alerts on a fresh per-request module; not linked to a durable booking, port clock or signed customs evidence. |
 | 7. Receiving/stock | Legacy `process_warehouse_receipt` and separate `/orders` + `/receipts` routes | Legacy endpoint explicitly returns `analysis_only`. Durable V6 SQL supports distinct PO submit/approve, receipt stage/independent approval and atomic ledger posting (`supabase/migrations/20261017020000_purchasing_receiving.sql`, `20261017010000_stock_ledger.sql`). No verified integration between generated PO, freight, and durable receipts. SQL contract tests are not proof of deployed provider acceptance. |
-| 8. Landed-cost variances | `reconcile_costs` -> `CostReconciliationEngine` | Compares client-submitted component totals; does not independently match approved invoice documents, freight, duties, currency rates, or received quantities. Best-effort pipeline upsert must not mean financially reconciled. |
+| 8. Landed-cost variances | `reconcile_costs` -> `CostReconciliationEngine` | Baseline accepted incomplete/mismatched cost payloads and falsely upserted stage 8 from client text. The route now validates source identity, same SKU, finite nonnegative components and positive cases; result is `analysis_only` with candidate alerts, never a verified invoice or stage transition. Independent invoice/currency/receipt match is still missing. |
 | 9. Learning/report | `build_seasonal_indices`, `monthly_logistics_report`, `LearningEngine` | Seasonal arithmetic exists; `LogisticsModule` is created fresh per request with empty `_lead_time_records`, so supplier performance/lead-time memory is not persisted or recovered from verified receipts. |
 
 Independent engines (`stochastic_inv.py`, `scor_toc.py`, `returns_mgmt.py`,
@@ -45,6 +45,18 @@ provided text. The repaired endpoint uses the real parser shape and returns
 It performs no company lookup, cycle upsert, supplier alert, email send or
 inventory action. A parsed response is **not** evidence that the named supplier
 confirmed or rejected a durable purchase order.
+
+## Third owned regression — no phantom procurement states
+
+`tests/test_wholesale_distribution/test_logistics/test_pipeline_status_guard.py`
+first reproduced four failures: client-forged approval crashed the PO generator;
+landed-cost comparison lacked an analysis-only status, accepted mismatched SKU
+and allowed missing source identity. The stage 2 route is now a documented
+HTTP 409 until a canonical, server-verified human approval exists. Stage 8
+calculations remain available as previews with typed finite per-case inputs,
+no `procurement_cycles` upsert, no accounting claim, no actual alerts and no
+inventory/financial side effect. Suggested alerts require human review. The
+legacy best-effort `_upsert_cycle` helper was removed from the API file.
 
 ## Interface requests — owner to forward manually
 

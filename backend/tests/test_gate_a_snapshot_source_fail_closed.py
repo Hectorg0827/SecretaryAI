@@ -30,10 +30,11 @@ class CompleteReader:
 async def test_verified_empty_business_is_legitimately_zero():
     adapter = CompleteReader()
     result = await compute_dashboard_payload(adapter)
-    assert result["source_quality"] == "verified"
+    assert result["source_quality"] == "partial"
     assert result["accounts"]["total"] == 0
     assert result["inventory_alerts"] == []
     assert result["sales_30d"] == 0
+    assert result["source_read_status"] == "completed"
     assert adapter.read_count == 2
 
 
@@ -95,7 +96,7 @@ async def test_zero_total_invoice_dataclass_is_valid_not_a_mapping_error():
         )
     ]
     result = await compute_dashboard_payload(adapter)
-    assert result["source_quality"] == "verified"
+    assert result["source_quality"] == "partial"
     assert result["accounts"]["total"] == 1
     assert result["sales_30d"] == 0
 

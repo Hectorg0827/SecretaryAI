@@ -11,9 +11,9 @@ live-provider or database-backed acceptance test. No side effects authorized.
 | 1. Demand/reorder | `app/api/logistics.py:evaluate_reorder_queue` -> `LogisticsModule.evaluate_reorder_queue` -> `ReorderEngine.build_reorder_queue` | Broken API-to-engine field contract and missing `supplier_name`; fixed in workstream 03 with an HTTP regression. API still accepts caller-supplied stock/history, not a source-verified company snapshot. |
 | 2. Draft PO | `app/api/logistics.py:generate_purchase_orders`; separate durable `/orders` RPC | Baseline route crashed for flat `SimpleNamespace` packages, could mint in-memory PO numbers, and falsely upsert stage 2 for caller-supplied `approved=true`. The legacy endpoint is now explicitly blocked with HTTP 409 until a server-verified approval contract exists. Independently approved durable `/orders` remains available but is not connected to reorder proposals. |
 | 3. Supplier response | `parse_vendor_response` -> `VendorResponseParser.parse` | Baseline route constructed an incomplete `PurchaseOrder`, read nonexistent response fields and best-effort advanced the pipeline. Now repaired as a pure unverified analysis preview: no DB write, supplier alert or status promotion. Authenticated inbound message association, authoritative PO lines and durable response event are still missing. |
-| 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Parses caller-supplied invoice text on a new booking object; does not retrieve verified invoice bytes or durably attach line items to a shipment. |
-| 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist carrier/vessel milestone and source timestamp. Live provider acceptance absent. |
-| 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Computes events/alerts on a fresh per-request module; not linked to a durable booking, port clock or signed customs evidence. |
+| 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Stage 3.4 fixes multi-line extraction, overlapping cost-label double count, repeated component allocation and non-USD input rejection. The route returns explicitly unverified candidate USD amounts, not independently matched invoices or durable shipment costs. |
+| 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist a provider-verified carrier milestone and source timestamp. The default adapter previously fabricated coordinates, vessel name and `in_transit` status; it now reports unavailable/unknown instead. Live provider acceptance absent. |
+| 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Stage 3.4 validates port-day/date inputs, rejects future arrival and invalid dates, guards negated release and pending duty statements, and labels all API outcomes as candidate/estimate only. No verified booking/arrival, duty evidence, real alerts or durable status transition. |
 | 7. Receiving/stock | Legacy `process_warehouse_receipt` and separate `/orders` + `/receipts` routes | Legacy endpoint explicitly returns `analysis_only`. Durable V6 SQL supports distinct PO submit/approve, receipt stage/independent approval and atomic ledger posting (`supabase/migrations/20261017020000_purchasing_receiving.sql`, `20261017010000_stock_ledger.sql`). No verified integration between generated PO, freight, and durable receipts. SQL contract tests are not proof of deployed provider acceptance. |
 | 8. Landed-cost variances | `reconcile_costs` -> `CostReconciliationEngine` | Baseline accepted incomplete/mismatched cost payloads and falsely upserted stage 8 from client text. The route now validates source identity, same SKU, finite nonnegative components and positive cases; result is `analysis_only` with candidate alerts, never a verified invoice or stage transition. Independent invoice/currency/receipt match is still missing. |
 | 9. Learning/report | `build_seasonal_indices`, `monthly_logistics_report`, `LearningEngine` | Seasonal arithmetic exists; `LogisticsModule` is created fresh per request with empty `_lead_time_records`, so supplier performance/lead-time memory is not persisted or recovered from verified receipts. |
@@ -58,6 +58,28 @@ no `procurement_cycles` upsert, no accounting claim, no actual alerts and no
 inventory/financial side effect. Suggested alerts require human review. The
 legacy best-effort `_upsert_cycle` helper was removed from the API file.
 
+## Fourth owned regression — freight, tracking and customs evidence boundaries
+
+`tests/test_wholesale_distribution/test_logistics/test_freight_customs_api_contract.py`
+reproduced 13 initial API/engine failures and additional cost/negation failures.
+The original freight parser broke on the first invoice line, omitted valid
+later components, double-counted overlapping THC labels and overwrote repeated
+component costs in SKU allocation. Now parsed lines are individually labeled
+candidate costs, ambiguous multi-amount lines are skipped, unsupported EUR/GBP
+inputs are rejected pending a reviewed FX contract, and allocation accumulates
+repeated components before rounding. A syntactically parsed USD amount is not
+evidence of invoice currency, supplier identity, PO match, or case-count unit.
+
+The fallback vessel adapter once returned invented coordinates and status;
+now it returns an unavailable/unknown observation. Customs holds and broker
+messages from caller text, and demurrage based on supplied dates, return only
+analysis-only estimates and candidate milestones. No authentic operational
+alert is returned or sent, and no cycle/stock/accounting state is changed.
+Invalid/future port dates are rejected rather than converted to zero cost.
+Negated releases and unpaid-duty messages cannot become positive milestones.
+These are synthetic HTTP and calculation checks, **not** real vessel, broker,
+forwarder or warehouse integration acceptance.
+
 ## Interface requests — owner to forward manually
 
 **Chat 1 — architecture / approval gate:** Define tenant-scoped
@@ -76,6 +98,11 @@ and `synced_at` UTC). Specify units, warehouse/QB overlap, pagination,
 completeness and provider-failure reason codes. Verify inbound supplier email
 thread, shipment/carrier milestones and customs evidence separately from
 parsed free text. Missing provider data cannot silently mean zero quantities.
+For stages 4–6, specify verified invoice byte/hash, currency and approved FX
+rate source/date; booking/container/PO association; carrier status source,
+provider timestamp and unknown/outage semantics; broker message identity;
+port arrival/free-time rules, terminal tariff schedule and independent invoice
+review. No caller text may be upgraded to a customs release or duty payment.
 
 ## Acceptance still outstanding
 

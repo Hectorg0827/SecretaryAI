@@ -39,6 +39,9 @@ def test_documented_hr_task_statuses_are_deterministic():
     result = assess_hr_requirements("synthetic-tenant", tasks, as_of=AS_OF)
     assert [x.status for x in result] == ["overdue", "due_soon", "upcoming", "completed", "source_review_required"]
     assert all(x.employee_ref == "emp-a" for x in result)
+    assert result[0].company_id == "synthetic-tenant"
+    assert result[0].source_record_id == "synthetic-hr"
+    assert result[0].source_revision == "v1"
 
 
 def test_hr_aggregates_are_limited_to_policy_scoped_employee_refs():
@@ -81,3 +84,20 @@ def test_no_scope_produces_no_employee_count_leak():
                                    access=_access(scoped_employee_refs=frozenset()))
     assert briefing.total == 0
     assert briefing.detailed_tasks == ()
+
+
+def test_cross_tenant_employee_id_collision_is_rejected_before_aggregation():
+    [own] = assess_hr_requirements("synthetic-tenant", (_task(),), as_of=AS_OF)
+    # Internal employee references can overlap across independent companies.
+    foreign = replace(own, company_id="other-tenant", status="overdue")
+    with pytest.raises(PermissionError):
+        private_hr_briefing("synthetic-tenant", (own, foreign), access=_access())
+
+
+def test_unrecognized_or_undocumented_hr_status_fails_closed():
+    [documented] = assess_hr_requirements("synthetic-tenant", (_task(),), as_of=AS_OF)
+    for bad in (replace(documented, status="approved_for_termination"),
+                replace(documented, status="completed", source_documented=False),
+                replace(documented, source_revision="")):
+        with pytest.raises(ValueError):
+            private_hr_briefing("synthetic-tenant", (bad,), access=_access())

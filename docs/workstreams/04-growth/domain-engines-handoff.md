@@ -16,6 +16,15 @@ records are included in this public repository.
 | People/HR #15 | `hr/onboarding.py` | Opaque staff onboarding/training/license renewal statuses and scoped briefing; no employment decisions |
 | Dynamic pricing #23 | `wholesale_distribution/dynamic_pricing.py` | Observational confidence guard, modeled pass-through using real costs and human price-approval flags |
 
+HR task projections retain an explicit tenant ID and underlying source
+record/revision alongside opaque employee refs. The private read projection
+rejects mixed-tenant task lists *before* counting or revealing tasks, including
+when two tenants reuse the same employee reference. It also rejects invalid
+or provenance-inconsistent task statuses. Gate A must authenticate the HR role
+and per-employee grant server-side; an `HRTaskAccess` value is never an
+authorization credential by itself. No actual HR records or decisions are
+stored or published by this workstream.
+
 The legacy compliance expiration scanner previously removed recorded overdue
 permits, COLAs, licenses, registrations and distributor agreements once their
 date passed. It now retains those records as critical daily review alerts and

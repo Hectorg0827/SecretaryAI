@@ -10,7 +10,7 @@ Base path: /api/logistics
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -88,7 +88,8 @@ class SKUDataItem(BaseModel):
     sku: str
     name: str
     supplier_id: str
-    supply_chain_type: str = "overseas"
+    supplier_name: str = ""
+    supply_chain_type: SupplyChainType = SupplyChainType.OVERSEAS
     origin_country: str = ""
     unit_cost_fob: float = 0.0
     cases_per_pallet: int = 50
@@ -96,15 +97,42 @@ class SKUDataItem(BaseModel):
     stock_on_hand: int = 0
     stock_committed: int = 0
     stock_in_transit: int = 0
-    daily_sales: list[float] = Field(default_factory=list)
-    lead_time_days: list[float] = Field(default_factory=list)
-    seasonal_indices: Optional[dict[int, float]] = None
+    minimum_order_cases: int = Field(default=0, ge=0)
+    # Demand is required: silently returning an empty queue for absent history
+    # would incorrectly look like evidence that every SKU is sufficiently stocked.
+    daily_sales: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] = Field(min_length=1)
+    # An empty lead-time history invokes the engine's documented fallback.
+    lead_time_days: list[Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(default_factory=list)
+    seasonal_indices: Optional[list[float] | dict[int, float]] = None
     last_fob_price: Optional[float] = None
     current_fob_price: Optional[float] = None
 
 
 class ReorderQueueRequest(BaseModel):
     skus: list[SKUDataItem]
+
+
+def _weekly_seasonal_indices(
+    indices: Optional[list[float] | dict[int, float]],
+) -> Optional[list[float]]:
+    """Map explicit 0- or 1-based API week keys to engine's 52-value array.
+
+    Reject ambiguous/incomplete calendars rather than silently applying the
+    wrong seasonal multiplier to a forecast.
+    """
+    if indices is None:
+        return None
+    if isinstance(indices, list):
+        values = indices
+    elif set(indices) == set(range(52)):
+        values = [indices[i] for i in range(52)]
+    elif set(indices) == set(range(1, 53)):
+        values = [indices[i] for i in range(1, 53)]
+    else:
+        raise HTTPException(status_code=422, detail="Seasonal indices must cover exactly 52 weeks")
+    if len(values) != 52 or any(not 0 <= v < float("inf") for v in values):
+        raise HTTPException(status_code=422, detail="Seasonal indices must be 52 finite nonnegative multipliers")
+    return values
 
 
 class GeneratePORequest(BaseModel):
@@ -955,16 +983,12 @@ async def evaluate_reorder_queue(
 
     sku_data = []
     for item in request.skus:
-        try:
-            sct = SupplyChainType(item.supply_chain_type)
-        except ValueError:
-            sct = SupplyChainType.OVERSEAS
-
         profile = SKUProfile(
             sku=item.sku,
             name=item.name,
             supplier_id=item.supplier_id,
-            supply_chain_type=sct,
+            supplier_name=item.supplier_name or item.supplier_id,
+            supply_chain_type=item.supply_chain_type,
             origin_country=item.origin_country,
             unit_cost_fob=item.unit_cost_fob,
             cases_per_pallet=item.cases_per_pallet,
@@ -972,12 +996,13 @@ async def evaluate_reorder_queue(
             stock_on_hand=item.stock_on_hand,
             stock_committed=item.stock_committed,
             stock_in_transit=item.stock_in_transit,
+            minimum_order_cases=item.minimum_order_cases,
         )
         sku_data.append({
             "profile": profile,
-            "daily_sales": item.daily_sales,
-            "lead_time_days": item.lead_time_days,
-            "seasonal_indices": item.seasonal_indices,
+            "daily_sales_history": item.daily_sales,
+            "lead_time_history": item.lead_time_days,
+            "seasonal_indices": _weekly_seasonal_indices(item.seasonal_indices),
             "last_fob_price": item.last_fob_price,
             "current_fob_price": item.current_fob_price,
         })
@@ -990,7 +1015,7 @@ async def evaluate_reorder_queue(
         "yellow_count": sum(1 for r in results if r["package"].urgency.value == "yellow"),
         "reorder_queue": [
             {
-                "sku": r["package"].sku,
+                "sku": r["package"].sku_profile.sku,
                 "urgency": r["package"].urgency.value,
                 "days_of_supply": round(r["package"].days_of_supply, 1),
                 "recommended_qty": r["package"].recommended_qty,

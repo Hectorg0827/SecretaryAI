@@ -96,3 +96,11 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - Missing/invalid/stale snapshots, unverified read status, invalid figures and aggregate inconsistencies return HTTP 503 rather than misrepresenting an operational all-clear. Currently supports company totals and critical/low inventory counts, not record-level account data.
 - Chat 5 may consume this endpoint as an additional executive prototype but must prominently display the partial-coverage disclaimer and 503 unavailable state. Do NOT substitute it as the validated full morning briefing until real provider evidence, account-level RBAC, worker execution receipts and proof of source coverage are integrated.
 - Before enabling sales-rep or logistics views, Chat 1/2/3 must agree on record-level ownership, territory, permission checks and per-source reliability. Client role hiding is not authorization.
+
+
+## Gate A source-observation compatibility (Chat 1 ↔ Chat 2)
+
+- `UnifiedDataAdapter.get_inventory_merged` currently emits `weekly_sell_rate=0.0` when Supabase inventory velocity is missing but also emits `weekly_sell_rate_observed=false` and `weekly_sell_rate_source_status=missing|unavailable`. This is a **placeholder** zero, not a measured business zero.
+- `compute_dashboard_payload` now REQUIRES `weekly_sell_rate_observed is True` for every reported inventory row. Missing/false observation raises `SnapshotSourceUnavailable('inventory')`; no stale/unknown velocity is silently converted to zero demand. An actually observed zero rate remains accepted as numeric zero but overall source quality is still `partial` until the provider coverage is proven.
+- **Chat 2 handoff:** Preserve `weekly_sell_rate_observed` and its source status, ideally also attach the observation time and window. Do not silently change the flag to true or remove it without a versioned contract migration. If the rate is missing, return unavailable/partial in a future per-SKU diagnostic contract rather than false healthy stock.
+- **Chat 3/5 handoff:** Do not calculate confident reorder health or display 'no stock risk' when weekly demand was never measured. A 503 dashboard refresh is preferable to an inaccurate green status. Account for partially complete inventory at per-item level in Gate B.

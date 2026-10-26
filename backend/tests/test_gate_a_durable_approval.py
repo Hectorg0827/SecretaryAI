@@ -94,3 +94,58 @@ async def test_approval_with_durable_mode_rejects_unsupported_po_without_side_ef
             )
     assert err.value.status_code == 409
     unsafe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_durable_approval_does_not_claim_new_dispatch_or_audit():
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+        {"id": "draft-x", "status": "pending", "action_type": "email_reply",
+         "content": {"to": "test@example.invalid", "body": "No send"}}
+    ]
+    adapter = MagicMock()
+    adapter.send_email_reply = AsyncMock()
+    gateway = MagicMock()
+    gateway.approve_and_enqueue = AsyncMock(return_value={
+        "execution_id": "existing-execution", "queued": False,
+        "already_processed": True, "status": "approved",
+    })
+    with patch.dict("os.environ", {"SECRETARYAI_DURABLE_APPROVAL_ENABLED": "1"}), \
+         patch.object(actions, "_execution_policy_effect", new=AsyncMock(return_value="require_approval")), \
+         patch.object(actions.PostgresDurableGateway, "from_environment", return_value=gateway), \
+         patch.object(actions, "write_audit_event") as audit:
+        response = await actions.approve_draft(
+            "draft-x", actions.ApprovalRequest(),
+            user={"company_id": "tenant-x", "sub": "actor-x"},
+            db=db, adapter=adapter,
+        )
+    assert response["execution_status"] == "already_processed"
+    assert response["already_processed"] is True
+    assert response["execution_id"] == "existing-execution"
+    adapter.send_email_reply.assert_not_awaited()
+    audit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unqueued_durable_response_without_prior_processing_is_rejected():
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+        {"id": "draft-x", "status": "pending", "action_type": "email_reply",
+         "content": {"to": "test@example.invalid", "body": "No send"}}
+    ]
+    gateway = MagicMock()
+    gateway.approve_and_enqueue = AsyncMock(return_value={
+        "execution_id": "ambiguous-id", "queued": False, "already_processed": False,
+    })
+    with patch.dict("os.environ", {"SECRETARYAI_DURABLE_APPROVAL_ENABLED": "1"}), \
+         patch.object(actions, "_execution_policy_effect", new=AsyncMock(return_value="allow")), \
+         patch.object(actions.PostgresDurableGateway, "from_environment", return_value=gateway), \
+         patch.object(actions, "write_audit_event") as audit:
+        with pytest.raises(HTTPException) as caught:
+            await actions.approve_draft(
+                "draft-x", actions.ApprovalRequest(),
+                user={"company_id": "tenant-x", "sub": "actor-x"},
+                db=db, adapter=MagicMock(),
+            )
+    assert caught.value.status_code == 409
+    audit.assert_not_called()

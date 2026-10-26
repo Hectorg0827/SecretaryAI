@@ -169,6 +169,8 @@ class DynamicPricingEngine:
     """
 
     def __init__(self, company_id: str, target_gross_margin_pct: float = 30.0):
+        if not company_id or not isinstance(company_id, str):
+            raise ValueError("A tenant identifier is required for pricing intelligence")
         if not math.isfinite(target_gross_margin_pct) or not 0 <= target_gross_margin_pct < 100:
             raise ValueError("Target gross margin must be finite and in [0, 100)")
         self.company_id = company_id
@@ -195,14 +197,15 @@ class DynamicPricingEngine:
             q1 = event.get("units_before", 0)
             q2 = event.get("units_after", 0)
 
-            if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (p1, p2, q1, q2)):
+            if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+                       for x in (p1, p2, q1, q2)):
                 continue
             if p1 <= 0 or p2 <= 0 or q1 <= 0 or q2 < 0:
                 continue
 
             # Normalise quantities to same period length
             period = event.get("period_days", 30)
-            if not isinstance(period, (int, float)) or not math.isfinite(period) or period <= 0:
+            if not isinstance(period, (int, float)) or isinstance(period, bool) or not math.isfinite(period) or period <= 0:
                 continue
             q1_daily = q1 / period
             q2_daily = q2 / period
@@ -212,7 +215,9 @@ class DynamicPricingEngine:
             pct_p = (p2 - p1) / ((p2 + p1) / 2)
 
             if pct_p != 0:
-                peds.append(pct_q / pct_p)
+                event_ped = pct_q / pct_p
+                if math.isfinite(event_ped):
+                    peds.append(event_ped)
 
         if not peds:
             return ElasticityEstimate(
@@ -257,6 +262,8 @@ class DynamicPricingEngine:
         Balances margin target with volume retention based on elasticity.
         """
         self._validate_inputs(current_price, unit_cost, annual_units)
+        if not sku or not segment or not isinstance(pricing_tier, PricingTier):
+            raise ValueError("SKU, segment and a valid pricing tier are required")
         if not math.isfinite(elasticity.ped) or not 0 <= elasticity.confidence <= 1:
             raise ValueError("Invalid elasticity estimate")
         current_margin = self._margin_pct(current_price, unit_cost)
@@ -269,14 +276,18 @@ class DynamicPricingEngine:
 
         # A default PED or thin observational sample is not actionable evidence.
         # Keep a draft hold recommendation until verified observations arrive.
-        if elasticity.sample_size < 3 or elasticity.confidence < 0.5:
+        # Nonnegative observational PED is not evidence that raising prices
+        # increases demand. Seasonality, promotions and stock-outs can confound
+        # price/volume comparisons. Require manual causal review before any
+        # change is modeled as a recommendation.
+        if elasticity.sample_size < 3 or elasticity.confidence < 0.5 or elasticity.ped >= 0:
             return PricingRecommendation(
                 sku=sku, segment=segment, pricing_tier=pricing_tier,
                 current_price=current_price, recommended_price=current_price,
                 price_change_pct=0.0, current_margin_pct=current_margin,
                 projected_margin_pct=current_margin, revenue_impact_estimate=0.0,
                 volume_impact_estimate_pct=0.0, confidence=elasticity.confidence,
-                rationale="Insufficient observed price-change evidence; hold price for human review.",
+                rationale="Insufficient or confounded price-change evidence; hold price for human review.",
             )
 
         notes: list[str] = []
@@ -345,6 +356,8 @@ class DynamicPricingEngine:
         revenue_delta = annual_units * (
             recommended_price * (1 + volume_impact_pct / 100) - current_price
         )
+        if not all(math.isfinite(x) for x in (recommended_price, volume_impact_pct, revenue_delta)):
+            raise ValueError("Price or impact projection exceeds finite numeric range")
 
         proj_margin = self._margin_pct(recommended_price, unit_cost)
 
@@ -384,6 +397,8 @@ class DynamicPricingEngine:
         """
         self._validate_inputs(current_price, unit_cost_before, 0)
         self._validate_inputs(current_price, unit_cost_after, 0)
+        if not supplier or not sku or not segment_data:
+            raise ValueError("Supplier, SKU and segment evidence are required")
         if unit_cost_before <= 0 or unit_cost_after < unit_cost_before:
             raise ValueError("This scenario requires a positive starting cost and a non-decreasing cost")
         increase_pct = (unit_cost_after - unit_cost_before) / unit_cost_before * 100
@@ -392,7 +407,7 @@ class DynamicPricingEngine:
         total_units = 0.0
         for segment in segment_data:
             units = segment.get("annual_units", 0)
-            if not isinstance(units, (int, float)) or not math.isfinite(units) or units < 0:
+            if not isinstance(units, (int, float)) or isinstance(units, bool) or not math.isfinite(units) or units < 0:
                 raise ValueError("Segment annual units must be nonnegative and finite")
             total_units += units
 
@@ -402,7 +417,7 @@ class DynamicPricingEngine:
             annual_units = seg.get("annual_units", 0)
             ped = seg.get("elasticity_ped")
             comp_prices = seg.get("competitive_prices")
-            if ped is not None and (not isinstance(ped, (int, float)) or not math.isfinite(ped)):
+            if ped is not None and (not isinstance(ped, (int, float)) or isinstance(ped, bool) or not math.isfinite(ped)):
                 raise ValueError("Segment elasticity must be finite")
 
             # Determine pass-through strategy for this segment
@@ -437,6 +452,11 @@ class DynamicPricingEngine:
             )
             rec.pass_through_strategy = strategy
             rec.staged_timeline_days = staged_days
+            if not all(math.isfinite(x) for x in (
+                rec.recommended_price, rec.projected_margin_pct,
+                rec.revenue_impact_estimate, rec.volume_impact_estimate_pct,
+            )):
+                raise ValueError("Supplier scenario exceeds finite numeric range")
             recommendations.append(rec)
 
             if total_units > 0:
@@ -470,7 +490,8 @@ class DynamicPricingEngine:
 
     @staticmethod
     def _validate_inputs(price: float, cost: float, units: float) -> None:
-        if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in (price, cost, units)):
+        if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
+               for v in (price, cost, units)):
             raise ValueError("Pricing inputs must be finite numbers")
         if price <= 0 or cost < 0 or units < 0:
             raise ValueError("Price must be positive; cost and units cannot be negative")

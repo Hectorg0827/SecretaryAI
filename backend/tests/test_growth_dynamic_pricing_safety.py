@@ -6,6 +6,7 @@ import pytest
 
 from app.intelligence.wholesale_distribution.dynamic_pricing import (
     DynamicPricingEngine,
+    ElasticityEstimate,
     PricingTier,
 )
 
@@ -40,6 +41,47 @@ def test_target_margin_cannot_generate_division_by_zero():
         DynamicPricingEngine("synthetic-tenant", 100)
 
 
+def test_nonnegative_observational_elasticity_cannot_justify_a_price_change():
+    estimate = ElasticityEstimate(
+        segment="segment", sku_category="category", ped=0.8,
+        confidence=0.95, sample_size=40,
+    )
+    draft = _engine().recommend_price(
+        "synthetic-sku", "segment", PricingTier.TIER_2,
+        current_price=10, unit_cost=9, annual_units=1000, elasticity=estimate,
+    )
+    assert draft.recommended_price == 10
+    assert draft.revenue_impact_estimate == 0
+    assert "confounded" in draft.rationale
+    assert draft.to_dict()["requires_human_approval"] is True
+
+
+def test_missing_tenant_and_segment_identity_are_invalid():
+    with pytest.raises(ValueError):
+        DynamicPricingEngine("")
+    estimate = ElasticityEstimate("segment", "category", -0.5, 0.8, 20)
+    for sku, segment in (("", "segment"), ("synthetic-sku", "")):
+        with pytest.raises(ValueError):
+            _engine().recommend_price(sku, segment, PricingTier.TIER_2, 10, 5, 100, estimate)
+
+
+def test_boolean_and_numeric_overflow_inputs_fail_closed():
+    estimate = ElasticityEstimate("segment", "category", -1.0, 0.8, 10)
+    with pytest.raises(ValueError):
+        _engine().recommend_price("sku", "segment", PricingTier.TIER_2, True, 5, 100, estimate)
+    with pytest.raises(ValueError):
+        _engine().recommend_price("sku", "segment", PricingTier.TIER_2, 1000, 900, 1e308, estimate)
+
+
+def test_invalid_price_events_not_counted_as_observations():
+    estimate = _engine().estimate_elasticity("segment", "category", [
+        {"old_price": True, "new_price": 2, "units_before": 10, "units_after": 8},
+        {"old_price": 1, "new_price": 1 + 1e-16, "units_before": 10, "units_after": 8},
+    ])
+    assert estimate.sample_size == 0
+    assert estimate.confidence < 0.5
+
+
 def test_supplier_cost_scenario_uses_real_cost_and_dollar_pass_through():
     plan = _engine().supplier_increase_strategy(
         supplier="supplier", sku="sku", unit_cost_before=5, unit_cost_after=6,
@@ -68,3 +110,18 @@ def test_supplier_scenario_with_no_elasticity_discloses_low_confidence():
     )
     assert plan.recommendations[0].confidence == 0.0
     assert "Unverified" in plan.recommendations[0].rationale
+
+
+def test_supplier_scenario_rejects_missing_segments_and_boolean_units():
+    with pytest.raises(ValueError):
+        _engine().supplier_increase_strategy("supplier", "sku", 5, 6, 10, [])
+    with pytest.raises(ValueError):
+        _engine().supplier_increase_strategy(
+            "supplier", "sku", 5, 6, 10,
+            [{"segment": "segment", "annual_units": True}],
+        )
+    with pytest.raises(ValueError):
+        _engine().supplier_increase_strategy(
+            "supplier", "sku", 500, 600, 1000,
+            [{"segment": "segment", "annual_units": 1e308, "elasticity_ped": -2}],
+        )

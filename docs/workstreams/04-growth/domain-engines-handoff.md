@@ -16,6 +16,14 @@ records are included in this public repository.
 | People/HR #15 | `hr/onboarding.py` | Opaque staff onboarding/training/license renewal statuses and scoped briefing; no employment decisions |
 | Dynamic pricing #23 | `wholesale_distribution/dynamic_pricing.py` | Observational confidence guard, modeled pass-through using real costs and human price-approval flags |
 
+Dynamic-price suggestions fail closed on inadequate samples, nonnegative
+observational elasticity (possible seasonality/promotion/stock-out confounding),
+and invalid or overflowing price/volume projections. These checks are
+mathematical safeguards, **not** proof of causal price elasticity. Chat 2 must
+provide independent account/SKU transaction lineage, comparable pre/post
+observation windows and event revisions before any real recommendation can be
+considered operationally grounded. Pricing changes always require review.
+
 ## Chat 5 opportunity classification and drilldowns
 
 The owned `growth/opportunity_taxonomy.py` is a pure projection helper for

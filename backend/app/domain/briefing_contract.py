@@ -71,12 +71,34 @@ class DigestEntry:
         _require_aware(self.detected_at, "detected_at")
         if not self.evidence:
             raise ValueError("Evidence is mandatory, even for an unavailable source")
-        if self.status == "source_unavailable" and not any(
-            e.quality == "unavailable" for e in self.evidence
-        ):
-            raise ValueError("source_unavailable entries require unavailable evidence")
-        if any(e.quality == "unavailable" for e in self.evidence) and self.status == "resolved":
-            raise ValueError("An unavailable source cannot substantiate resolution")
+        if not isinstance(self.section, BriefingSection):
+            raise ValueError("section must be a canonical BriefingSection")
+        if self.status not in ("open", "resolved", "needs_review", "source_unavailable"):
+            raise ValueError("Unsupported digest entry status")
+        unavailable = any(e.quality == "unavailable" for e in self.evidence)
+        if unavailable != (self.status == "source_unavailable"):
+            raise ValueError("Unavailable evidence requires source_unavailable status, and vice versa")
+
+    def to_payload(self) -> dict:
+        """JSON-safe evidence-backed entry for the authorized viewer only."""
+        return {
+            "entry_id": self.entry_id,
+            "section": self.section.value,
+            "title": self.title,
+            "status": self.status,
+            "detected_at": self.detected_at.isoformat(),
+            "proposed_action_id": self.proposed_action_id,
+            "evidence": [
+                {
+                    "source_system": e.source_system,
+                    "source_record_id": e.source_record_id,
+                    "fetched_at": e.fetched_at.isoformat(),
+                    "quality": e.quality,
+                    "confidence": e.confidence,
+                }
+                for e in self.evidence
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -111,6 +133,20 @@ class RoleBriefing:
         )
         return cls(company_id=company_id, audience_role=audience_role,
                    created_at=created_at, entries=allowed)
+
+    def to_payload(self) -> dict:
+        """Stable cross-platform JSON shape; data already verified for tenant/role."""
+        return {
+            "contract_version": self.contract_version,
+            "company_id": self.company_id,
+            "audience_role": self.audience_role,
+            "created_at": self.created_at.isoformat(),
+            "sections": {
+                section.value: [entry.to_payload() for entry in self.entries
+                                if entry.section == section]
+                for section in SECTION_ORDER
+            },
+        }
 
     def sections(self) -> dict[str, list[DigestEntry]]:
         """Stable six-section structure even when a section has no items."""

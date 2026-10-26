@@ -47,6 +47,15 @@ Required staging-only services: one FastAPI API, web frontend, Redis, a distinct
 
 **Current read-only staging observation:** API, Web, Redis online, but no worker or beat service was listed. API container entrypoint starts Uvicorn, not Celery. Never claim scheduled briefings run until the two services are deployed and observed. All staging external sends/writes remain disabled; staging rollout requires explicit authorization.
 
+## Dashboard data-integrity and side-effect boundary (Chat 1)
+
+- \`compute_dashboard_payload\` uses the single \`total_qty\` supplied by Chat 2's merged inventory adapter; QB and warehouse quantities are two representations of the same stock and must not be summed. A missing or invalid authoritative quantity fails closed. Snapshot records distinguish successful top-level reads from unverified upstream source provenance.
+- Dashboard API GET \`/summary\` returns \`snapshot_freshness\`, \`snapshot_age_seconds\`, \`snapshot_stale\`, \`source_read_status\`, and \`source_quality\`. Stale snapshots may be shown only with a clear timestamp/warning. Unknown timestamps or implausible future timestamps are not considered fresh.
+- POST \`/refresh\` **only enqueues** \`tasks.dashboard_refresh.refresh_dashboard_snapshot\`: read-only company-scoped data fetch + snapshot persistence. It never enqueues \`tasks.morning_briefing.send_morning_briefing_all\`, which may involve an email delivery under separately authorized settings. Broker or persistence failure must return an error, not a false success.
+- \`store_snapshot\` now raises \`SnapshotPersistenceUnavailable\` instead of swallowing write errors; owner-facing refresh may not claim completed storage if Supabase failed.
+- **Chat 5 UI acceptance:** do not treat \`source_quality=partial\` as source-verified; show explicit stale/unknown warnings; never conflate \`refresh_queued\` with \`refreshed\`. Treat \`pending_actions=null\` and \`unread_emails=null\` as unavailable, not zero.
+- **Chat 2 data acceptance:** prove adapter \`total_qty\` semantics, warehouse/QB non-additivity, location/ownership logic, weekly velocity presence/freshness, and fail-closed source unavailability before upgrading source-quality to verified.
+
 ## Immediate cross-team compatibility requests
 
 - **Chat 2:** freeze provider adapter method signatures; reject missing source as empty success; add source lineage and amount/units normalization fixtures.

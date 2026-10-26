@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,23 @@ def _invoice_amount(row) -> float:
     return float(value)
 
 
+def _invoice_date(row) -> date:
+    """Require an actual source date; unknown is not 'customer never ordered'."""
+    value = _row_value(row, "date")
+    if value is None:
+        value = _row_value(row, "order_date")
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError as exc:
+            raise ValueError("Invoice has invalid date") from exc
+    raise ValueError("Invoice missing transaction date")
+
+
 async def compute_dashboard_payload(adapter) -> dict:
     """
     Pull data from QB/warehouse, score accounts and evaluate inventory.
@@ -71,7 +88,7 @@ async def compute_dashboard_payload(adapter) -> dict:
             if not cid:
                 raise ValueError("Invoice missing customer_id")
             by_customer.setdefault(cid, []).append({
-                "date": _row_value(inv, "date") or _row_value(inv, "order_date"),
+                "date": _invoice_date(inv),
                 "total": _invoice_amount(inv),
             })
 
@@ -82,12 +99,6 @@ async def compute_dashboard_payload(adapter) -> dict:
             orders = by_customer.get(cid, [])
             dates = [o["date"] for o in orders if o["date"]]
             last_order = max(dates, default=None)
-            if isinstance(last_order, str):
-                try:
-                    from datetime import date as _date
-                    last_order = _date.fromisoformat(str(last_order)[:10])
-                except ValueError:
-                    last_order = None
 
             health = score_account(
                 account_id=cid,

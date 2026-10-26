@@ -358,32 +358,18 @@ class SendReplyRequest(BaseModel):
 async def send_email_reply(
     body: SendReplyRequest,
     user: dict = Depends(require_permission("trigger_actions")),
-    adapter=Depends(get_adapter),
-    db=Depends(get_db),
 ):
-    """Send a reply email. The user has already reviewed and approved the draft."""
-    company_id = user["company_id"]
-    try:
-        result = await adapter.send_email_reply(
-            to=body.to, subject=body.subject, body=body.body
-        )
-        # Audit log
-        try:
-            db.table("action_log").insert({
-                "company_id":    company_id,
-                "actor":         user["sub"],
-                "action_type":   "email_reply_sent",
-                "autonomy_level": "DRAFT_AND_WAIT",
-                "description":   f"Email reply sent to {body.to}: {body.subject}",
-                "data_involved": {"email_id": body.email_id, "to": body.to},
-                "status":        "completed",
-            }).execute()
-        except Exception:
-            pass
-        return {"status": "sent", "message_id": result.get("message_id")}
-    except Exception as exc:
-        log.error("Send email reply failed: %s", exc)
-        raise HTTPException(status_code=503, detail=f"Failed to send email: {exc}")
+    """Disabled: this legacy endpoint bypasses durable policy and audit approval.
+
+    No provider call may occur here. Use the authorized drafts and durable
+    execution gateway once those are proven end-to-end. A user manually
+    confirming a browser button does NOT establish a company-scoped policy
+    decision, immutable approval, idempotency, or durable execution receipt.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail="Direct email sending is disabled; use the approved draft workflow",
+    )
 
 
 # ── /emails/{id}/mark-read ─────────────────────────────────────────────────────

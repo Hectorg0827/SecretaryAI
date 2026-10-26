@@ -77,3 +77,44 @@ def test_unavailable_source_must_be_labeled_and_has_zero_confidence():
 def test_naive_datetimes_are_rejected():
     with pytest.raises(ValueError, match="timezone"):
         EvidenceRef("qb", "1", datetime(2026, 10, 26), "verified", 90)
+
+
+def test_payload_is_json_serializable_with_all_sections_and_no_role_leakage():
+    import json
+    entries = [
+        _entry(),
+        _entry(roles=frozenset({"logistics"}),
+               section=BriefingSection.PRIORITIES),
+    ]
+    briefing = RoleBriefing.project(
+        company_id="co-a", audience_role="finance", created_at=NOW,
+        entries=entries,
+    )
+    payload = briefing.to_payload()
+    assert payload["contract_version"] == BRIEFING_CONTRACT_VERSION
+    assert payload["audience_role"] == "finance"
+    assert len(payload["sections"]["red_alerts"]) == 1
+    assert payload["sections"]["todays_priorities"] == []
+    assert len(payload["sections"]) == 6
+    assert json.loads(json.dumps(payload)) == payload
+    assert payload["sections"]["red_alerts"][0]["evidence"][0]["quality"] == "verified"
+
+
+def test_unavailable_evidence_cannot_masquerade_as_open_or_resolved():
+    unavailable = _evidence("unavailable", 0)
+    for status in ("open", "resolved", "needs_review"):
+        with pytest.raises(ValueError, match="Unavailable evidence"):
+            DigestEntry(
+                company_id="co-a", entry_id="error-source",
+                section=BriefingSection.YELLOW_ALERTS,
+                title="Accounting source unavailable",
+                role_scope=frozenset({"owner"}),
+                evidence=(unavailable,), detected_at=NOW, status=status,
+            )
+
+
+def test_unsupported_section_or_status_fails_closed():
+    with pytest.raises(ValueError, match="canonical BriefingSection"):
+        _entry(section="red-alerts")
+    with pytest.raises(ValueError, match="Unsupported digest"):
+        _entry(status="executed")

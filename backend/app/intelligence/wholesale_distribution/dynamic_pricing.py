@@ -36,6 +36,7 @@ Supplier price increase pass-through strategy
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 from enum import Enum
@@ -129,6 +130,7 @@ class PricingRecommendation:
             "pass_through_strategy": self.pass_through_strategy.value if self.pass_through_strategy else None,
             "staged_timeline_days": self.staged_timeline_days,
             "competitive_position": self.competitive_position,
+            "requires_human_approval": True,
         }
 
 
@@ -167,6 +169,8 @@ class DynamicPricingEngine:
     """
 
     def __init__(self, company_id: str, target_gross_margin_pct: float = 30.0):
+        if not math.isfinite(target_gross_margin_pct) or not 0 <= target_gross_margin_pct < 100:
+            raise ValueError("Target gross margin must be finite and in [0, 100)")
         self.company_id = company_id
         self.target_margin = target_gross_margin_pct
 
@@ -191,11 +195,15 @@ class DynamicPricingEngine:
             q1 = event.get("units_before", 0)
             q2 = event.get("units_after", 0)
 
-            if p1 <= 0 or p2 <= 0 or q1 <= 0:
+            if not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (p1, p2, q1, q2)):
+                continue
+            if p1 <= 0 or p2 <= 0 or q1 <= 0 or q2 < 0:
                 continue
 
             # Normalise quantities to same period length
-            period = max(event.get("period_days", 30), 1)
+            period = event.get("period_days", 30)
+            if not isinstance(period, (int, float)) or not math.isfinite(period) or period <= 0:
+                continue
             q1_daily = q1 / period
             q2_daily = q2 / period
 
@@ -248,8 +256,28 @@ class DynamicPricingEngine:
         Recommend optimal price for a SKU × segment combination.
         Balances margin target with volume retention based on elasticity.
         """
+        self._validate_inputs(current_price, unit_cost, annual_units)
+        if not math.isfinite(elasticity.ped) or not 0 <= elasticity.confidence <= 1:
+            raise ValueError("Invalid elasticity estimate")
         current_margin = self._margin_pct(current_price, unit_cost)
-        market_price = statistics.mean(competitive_prices) if competitive_prices else None
+        market_price = None
+        if competitive_prices:
+            if any(not isinstance(p, (int, float)) or not math.isfinite(p) or p <= 0
+                   for p in competitive_prices):
+                raise ValueError("Competitive prices must be positive and finite")
+            market_price = statistics.mean(competitive_prices)
+
+        # A default PED or thin observational sample is not actionable evidence.
+        # Keep a draft hold recommendation until verified observations arrive.
+        if elasticity.sample_size < 3 or elasticity.confidence < 0.5:
+            return PricingRecommendation(
+                sku=sku, segment=segment, pricing_tier=pricing_tier,
+                current_price=current_price, recommended_price=current_price,
+                price_change_pct=0.0, current_margin_pct=current_margin,
+                projected_margin_pct=current_margin, revenue_impact_estimate=0.0,
+                volume_impact_estimate_pct=0.0, confidence=elasticity.confidence,
+                rationale="Insufficient observed price-change evidence; hold price for human review.",
+            )
 
         notes: list[str] = []
         recommended_price = current_price
@@ -313,7 +341,7 @@ class DynamicPricingEngine:
 
         # ── Volume and revenue impact ─────────────────────────────────────────
         price_change_pct = (recommended_price - current_price) / current_price * 100
-        volume_impact_pct = elasticity.ped * price_change_pct  # % change in demand
+        volume_impact_pct = max(-100.0, elasticity.ped * price_change_pct)
         revenue_delta = annual_units * (
             recommended_price * (1 + volume_impact_pct / 100) - current_price
         )
@@ -354,42 +382,58 @@ class DynamicPricingEngine:
         """
         Build a per-segment strategy for responding to a supplier cost increase.
         """
+        self._validate_inputs(current_price, unit_cost_before, 0)
+        self._validate_inputs(current_price, unit_cost_after, 0)
+        if unit_cost_before <= 0 or unit_cost_after < unit_cost_before:
+            raise ValueError("This scenario requires a positive starting cost and a non-decreasing cost")
         increase_pct = (unit_cost_after - unit_cost_before) / unit_cost_before * 100
         recommendations: list[PricingRecommendation] = []
         weighted_pass_through = 0.0
-        total_units = sum(s.get("annual_units", 0) for s in segment_data)
+        total_units = 0.0
+        for segment in segment_data:
+            units = segment.get("annual_units", 0)
+            if not isinstance(units, (int, float)) or not math.isfinite(units) or units < 0:
+                raise ValueError("Segment annual units must be nonnegative and finite")
+            total_units += units
 
         for seg in segment_data:
             seg_name = seg.get("segment", "unknown")
             tier = PricingTier(seg.get("pricing_tier", "tier_2"))
             annual_units = seg.get("annual_units", 0)
-            ped = seg.get("elasticity_ped", -1.0)
+            ped = seg.get("elasticity_ped")
             comp_prices = seg.get("competitive_prices")
-
-            elasticity = ElasticityEstimate(
-                segment=seg_name, sku_category="", ped=ped, confidence=0.5, sample_size=0
-            )
+            if ped is not None and (not isinstance(ped, (int, float)) or not math.isfinite(ped)):
+                raise ValueError("Segment elasticity must be finite")
 
             # Determine pass-through strategy for this segment
             strategy, pass_through_pct, staged_days = self._choose_pass_through(
-                ped=ped, tier=tier, increase_pct=increase_pct
+                ped=ped if ped is not None else -1.0, tier=tier, increase_pct=increase_pct
             )
 
-            # New price = absorb (1 - pass_through_pct) of the increase
-            new_unit_cost = unit_cost_after
-            absorbed_increase = (unit_cost_after - unit_cost_before) * (1 - pass_through_pct / 100)
-            effective_cost_for_pricing = unit_cost_after - absorbed_increase
-            new_price = max(current_price, effective_cost_for_pricing / (1 - self.target_margin / 100))
-
-            rec = self.recommend_price(
-                sku=sku,
-                segment=seg_name,
-                pricing_tier=tier,
-                current_price=current_price,
-                unit_cost=effective_cost_for_pricing,
-                annual_units=annual_units,
-                elasticity=elasticity,
-                competitive_prices=comp_prices,
+            # Pass through a percentage of the *incremental cost dollars*.
+            # Compute margin against actual new costs, never a fictitious
+            # "effective cost" that would overstate profitability.
+            proposed_price = current_price + (unit_cost_after - unit_cost_before) * pass_through_pct / 100
+            change_pct = (proposed_price - current_price) / current_price * 100
+            volume_pct = max(-100.0, (ped if ped is not None else -1.0) * change_pct)
+            position = "unknown"
+            if comp_prices:
+                if any(not isinstance(p, (int, float)) or not math.isfinite(p) or p <= 0
+                       for p in comp_prices):
+                    raise ValueError("Competitive prices must be positive and finite")
+                comparison = (proposed_price / statistics.mean(comp_prices) - 1) * 100
+                position = "above_market" if comparison > 5 else "below_market" if comparison < -5 else "at_market"
+            rec = PricingRecommendation(
+                sku=sku, segment=seg_name, pricing_tier=tier,
+                current_price=current_price, recommended_price=proposed_price,
+                price_change_pct=change_pct,
+                current_margin_pct=self._margin_pct(current_price, unit_cost_before),
+                projected_margin_pct=self._margin_pct(proposed_price, unit_cost_after),
+                revenue_impact_estimate=annual_units * (proposed_price * (1 + volume_pct / 100) - current_price),
+                volume_impact_estimate_pct=volume_pct,
+                confidence=0.0,
+                rationale="Unverified supplier/segment scenario only; validate cost, sales, price-posting and approve before action.",
+                competitive_position=position,
             )
             rec.pass_through_strategy = strategy
             rec.staged_timeline_days = staged_days
@@ -400,7 +444,7 @@ class DynamicPricingEngine:
 
         # Margin impact scenarios
         full_absorption_margin = self._margin_pct(current_price, unit_cost_after)
-        full_pass_through_price = current_price * (unit_cost_after / unit_cost_before)
+        full_pass_through_price = current_price + (unit_cost_after - unit_cost_before)
         full_pass_margin = self._margin_pct(full_pass_through_price, unit_cost_after)
         current_margin = self._margin_pct(current_price, unit_cost_before)
 
@@ -418,11 +462,18 @@ class DynamicPricingEngine:
             recommendations=recommendations,
             blended_pass_through_pct=weighted_pass_through,
             margin_impact_at_zero_pass_through=full_absorption_margin - current_margin,
-            margin_impact_at_full_pass_through=0.0,
+            margin_impact_at_full_pass_through=full_pass_margin - current_margin,
             recommended_action_summary=summary,
         )
 
     # ── Private helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_inputs(price: float, cost: float, units: float) -> None:
+        if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in (price, cost, units)):
+            raise ValueError("Pricing inputs must be finite numbers")
+        if price <= 0 or cost < 0 or units < 0:
+            raise ValueError("Price must be positive; cost and units cannot be negative")
 
     @staticmethod
     def _margin_pct(price: float, cost: float) -> float:

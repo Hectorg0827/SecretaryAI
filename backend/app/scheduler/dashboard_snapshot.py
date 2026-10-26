@@ -102,12 +102,29 @@ async def compute_dashboard_payload(adapter) -> dict:
     try:
         inventory = await adapter.get_inventory_merged()
         for item in inventory:
+            if not isinstance(item, dict):
+                raise ValueError("Merged inventory item must be a normalized mapping")
+            # Chat 2's adapter resolves the authoritative quantity: QB and
+            # warehouse counts are usually two views of the same stock.
+            # Summing them would make a shortage disappear from the dashboard.
+            authoritative_qty = item.get("total_qty")
+            if authoritative_qty is None:
+                raise ValueError("Inventory missing authoritative total_qty")
+            qty = Decimal(str(authoritative_qty))
+            rate_value = item.get("weekly_sell_rate")
+            if rate_value is None:
+                raise ValueError("Inventory missing weekly sell rate")
+            rate = Decimal(str(rate_value))
+            if not qty.is_finite() or qty < 0 or qty != qty.to_integral_value():
+                raise ValueError("Inventory must have finite nonnegative whole-unit quantity")
+            if not rate.is_finite() or rate < 0:
+                raise ValueError("Weekly sell rate must be finite and nonnegative")
             status = evaluate_inventory(
                 item_id=item.get("qb_id", ""),
                 product_name=item.get("product_name", ""),
-                warehouse_1_qty=int(item.get("warehouse_qty", 0)),
-                warehouse_2_qty=int(item.get("qb_qty", 0)),
-                weekly_sell_rate=Decimal(str(item.get("weekly_sell_rate", 0))),
+                warehouse_1_qty=int(qty),
+                warehouse_2_qty=0,
+                weekly_sell_rate=rate,
             )
             if status.status in ("critical", "low", "out_of_stock"):
                 inventory_alerts.append({

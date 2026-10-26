@@ -182,6 +182,45 @@ def store_snapshot(db, company_id: str, report_type: str, payload: dict, generat
         log.error("Failed to store %s snapshot for company %s: %s", report_type, company_id, exc)
 
 
+def snapshot_freshness(
+    generated_at: str | datetime | None,
+    *,
+    now: datetime | None = None,
+    max_age_seconds: int = 86400,
+) -> dict:
+    """Explicit age of a cached business snapshot; invalid timestamps are unknown.
+
+    An old snapshot can still be displayed as historical data, but must never
+    be confused with current source-backed operational intelligence.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    if max_age_seconds <= 0:
+        raise ValueError("max_age_seconds must be positive")
+    if generated_at is None:
+        return {"status": "unknown", "age_seconds": None, "stale": True}
+    try:
+        generated = (
+            datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+            if isinstance(generated_at, str) else generated_at
+        )
+        if not isinstance(generated, datetime) or generated.tzinfo is None or generated.utcoffset() is None:
+            raise ValueError("Invalid generated_at timezone")
+        seconds = (current - generated).total_seconds()
+        if seconds < -300:
+            raise ValueError("Snapshot timestamp is implausibly in the future")
+        age_seconds = round(max(0.0, seconds), 1)
+        stale = age_seconds > max_age_seconds
+        return {
+            "status": "stale" if stale else "fresh",
+            "age_seconds": age_seconds,
+            "stale": stale,
+        }
+    except (TypeError, ValueError, OverflowError):
+        return {"status": "unknown", "age_seconds": None, "stale": True}
+
+
 def read_snapshot(db, company_id: str, report_type: str) -> dict | None:
     """Return the latest snapshot payload for (company, report_type), or None."""
     try:

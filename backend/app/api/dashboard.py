@@ -136,12 +136,24 @@ async def trigger_dashboard_refresh(
     user: dict = Depends(require_permission("run_reports")),
 ):
     """
-    Enqueue an immediate dashboard snapshot refresh for this company.
+    Enqueue an internal-only dashboard snapshot refresh for this company.
     Only roles with 'run_reports' permission (back_office, manager, owner) may call this.
     """
-    from tasks.morning_briefing import send_morning_briefing_all
-    send_morning_briefing_all.apply_async(kwargs={"company_id": user["company_id"]})
-    return {"status": "refresh_queued", "company_id": user["company_id"]}
+    from tasks.dashboard_refresh import refresh_dashboard_snapshot
+    try:
+        result = refresh_dashboard_snapshot.apply_async(
+            kwargs={"company_id": user["company_id"]}
+        )
+    except Exception as exc:
+        log.error("Dashboard refresh could not be queued for %s", user["company_id"])
+        raise HTTPException(
+            status_code=503, detail="Dashboard refresh service unavailable"
+        ) from exc
+    return {
+        "status": "refresh_queued",
+        "company_id": user["company_id"],
+        "task_id": result.id,
+    }
 
 
 # ── Email helpers ──────────────────────────────────────────────────────────────

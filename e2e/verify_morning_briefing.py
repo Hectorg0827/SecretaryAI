@@ -73,6 +73,18 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner",
         "/api/inventory/alerts": {"alerts": []},
         "/api/inbox": {"items": [], "unread_count": 0, "total_count": 0},
         "/api/agent/status": {"connected": False, "last_seen": None},
+        "/api/connectors/status": {"connectors": []},
+        "/api/settings/integrations": {
+            "quickbooks_online": {"connected": False},
+            "quickbooks_desktop": {"connected": False},
+            "gmail": {"connected": False},
+            "google_sheets": {"connected": False},
+        },
+        "/api/billing/subscription": {
+            "subscription": {"status": "active", "current_period_end": "2026-12-31T00:00:00Z",
+                             "cancel_at_period_end": False},
+            "plan": {"name": "Synthetic QA Plan"},
+        },
         "/auth/me": {"name": "Synthetic Tester", "role": role},
     }
     if path not in fixtures:
@@ -188,6 +200,45 @@ def main() -> None:
                     assert page.get_by_text("All caught up").count() == 0
                 finally:
                     inbox_context.close()
+
+                # Setup and billing are read-only, source-aware and scoped to owners.
+                billing_paths: list[str] = []
+                setup_context = _context(browser, "owner", 390, requests_seen=billing_paths)
+                try:
+                    page = setup_context.new_page()
+                    page.goto(PREVIEW + "/settings?qbo=connected", wait_until="domcontentloaded")
+                    page.get_by_text("Not connected", exact=True).first.wait_for()
+                    assert page.get_by_text("QuickBooks Online connected!", exact=False).count() == 0
+                    assert page.get_by_role("button", name="Save Changes").count() == 0
+                    page.get_by_role("button", name="Billing").click()
+                    page.get_by_text("Synthetic QA Plan").wait_for()
+                    page.get_by_text("Read-only account billing", exact=False).wait_for()
+                    assert page.get_by_role("button", name="Checkout").count() == 0
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+                    assert all(path not in billing_paths for path in ("/api/billing/checkout", "/api/billing/portal"))
+                finally:
+                    setup_context.close()
+
+                manager_context = _context(browser, "manager", 390)
+                try:
+                    page = manager_context.new_page()
+                    page.goto(PREVIEW + "/settings", wait_until="domcontentloaded")
+                    assert page.get_by_role("button", name="Billing").count() == 0
+                    page.goto(PREVIEW + "/connectors", wait_until="domcontentloaded")
+                    page.get_by_text("No connectors registered yet.").wait_for()
+                    assert page.get_by_role("button", name="Rotate Install Secret").count() == 0
+                finally:
+                    manager_context.close()
+
+                connector_context = _context(browser, "owner", 390)
+                try:
+                    page = connector_context.new_page()
+                    connector_context.route("**/api/connectors/status", lambda route: route.fulfill(status=503, body='{"detail":"outage"}', content_type="application/json"))
+                    page.goto(PREVIEW + "/connectors", wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Connector status is unavailable", exact=False).wait_for()
+                    assert page.get_by_text("No connectors registered yet.").count() == 0
+                finally:
+                    connector_context.close()
             finally:
                 browser.close()
     finally:
@@ -196,7 +247,7 @@ def main() -> None:
             server.wait(timeout=5)
         except subprocess.TimeoutExpired:
             server.kill()
-    print("PASS: synthetic-only briefing, rep restriction, no-direct-send and source outage browser checks")
+    print("PASS: synthetic-only briefing, rep restriction, inbox/setup outages, billing read-only and consent UX")
 
 
 if __name__ == "__main__":

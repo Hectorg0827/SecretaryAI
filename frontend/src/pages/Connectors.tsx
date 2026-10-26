@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Wifi, WifiOff, AlertTriangle, RefreshCw, Copy, Check, ChevronDown, ChevronRight,
-  Terminal, Clock, Zap, Server, Activity,
+  Clock, Zap, Server, Activity,
 } from 'lucide-react';
 import { api, ConnectorRegistration, ConnectorSyncLog } from '../lib/api';
 import toast from 'react-hot-toast';
+import { useAuth } from '../hooks/useAuth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -145,50 +146,35 @@ function ConnectorRow({ reg }: { reg: ConnectorRegistration }) {
 function InstallGuide({ secret }: { secret: string }) {
   const [copied, setCopied] = useState(false);
 
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(secret);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      toast.success('Install secret copied. Keep it private.');
+    } catch {
+      toast.error('Clipboard unavailable. Use a secure method to capture the one-time secret.');
+    }
   };
 
-  const envBlock = `SECRETARY_CLOUD_URL=https://app.secretaryai.com
-SECRETARY_INSTALL_SECRET=${secret}
-SECRETARY_COMPANY_ID=<your-company-id>
-CONDUCTOR_API_KEY=<your-conductor-key>
-CONDUCTOR_END_USER_ID=<your-end-user-id>`;
-
   return (
-    <div className="bg-slate-900 rounded-xl p-5 space-y-4">
-      <div className="flex items-center gap-2 text-slate-300 text-sm font-medium">
-        <Terminal size={14} />
-        Installation Steps
+    <div className="bg-slate-900 text-slate-100 rounded-xl p-5 space-y-4">
+      <h3 className="text-sm font-semibold">One-time connector installation secret</h3>
+      <p className="text-xs text-slate-300">
+        This secret is shown only for this setup session. Copy it to an approved secure location.
+        Do not share it in support tickets, screenshots, chat, or email.
+      </p>
+      <div className="flex flex-wrap gap-3 items-center">
+        <input aria-label="Hidden one-time install secret" type="password" value={secret} readOnly
+          className="min-w-0 flex-1 px-3 py-2 rounded border border-slate-600 bg-slate-800 font-mono text-sm" />
+        <button type="button" onClick={copy}
+          className="inline-flex gap-2 items-center rounded bg-blue-600 px-3 py-2 text-xs font-medium hover:bg-blue-500">
+          {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy secret'}
+        </button>
       </div>
-
-      <div className="space-y-3 text-sm">
-        {[
-          { step: '1', label: 'Download the connector', cmd: 'pip install secretaryai-connector' },
-          { step: '2', label: 'Create a .env file in the connector directory', cmd: envBlock },
-          { step: '3', label: 'Run the connector', cmd: 'python -m connector.main' },
-        ].map(({ step, label, cmd }) => (
-          <div key={step} className="space-y-1.5">
-            <div className="text-slate-400 text-xs">
-              <span className="text-blue-400 font-medium">Step {step}:</span> {label}
-            </div>
-            <div className="relative group">
-              <pre className="bg-black/40 rounded-lg px-4 py-2.5 text-slate-300 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                {cmd}
-              </pre>
-              <button
-                onClick={() => copy(cmd)}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded bg-slate-700 hover:bg-slate-600 transition-all"
-              >
-                {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} className="text-slate-300" />}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      <p className="text-xs text-amber-200" role="status">
+        Connector package distribution and signed installer instructions are not yet verified.
+        Do not install an unverified package or start a production sync from this screen.
+      </p>
     </div>
   );
 }
@@ -198,16 +184,20 @@ CONDUCTOR_END_USER_ID=<your-end-user-id>`;
 export function Connectors() {
   const [connectors, setConnectors] = useState<ConnectorRegistration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const { role } = useAuth();
 
   const load = useCallback(async () => {
     try {
       const data = await api.connectors.status();
       setConnectors(data.connectors ?? []);
+      setLoadError(false);
     } catch {
-      toast.error('Failed to load connector status');
+      setLoadError(true);
+      setConnectors([]);
     } finally {
       setLoading(false);
     }
@@ -222,6 +212,8 @@ export function Connectors() {
   const generateSecret = async () => {
     if (!confirm('This will rotate the install secret. Any un-installed connectors using the old secret will fail. Continue?')) return;
     setGenerating(true);
+    setSecret(null);
+    setShowGuide(false);
     try {
       const res = await api.connectors.generateSecret();
       setSecret(res.install_secret);
@@ -258,19 +250,26 @@ export function Connectors() {
               <RefreshCw size={13} />
               Refresh
             </button>
-            <button
-              onClick={generateSecret}
-              disabled={generating}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              <Zap size={13} />
-              {generating ? 'Generating…' : 'New Install Secret'}
-            </button>
+            {role === 'owner' && (
+              <button
+                onClick={generateSecret}
+                disabled={generating}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                <Zap size={13} />
+                {generating ? 'Generating…' : 'Rotate Install Secret'}
+              </button>
+            )}
           </div>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
+        {loadError && (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Connector status is unavailable. No connection count or install readiness can be verified. Retry when the service returns.
+          </div>
+        )}
+        {!loading && !loadError && <div className="grid grid-cols-3 gap-4">
           {[
             { label: 'Connected',     value: connected, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-100' },
             { label: 'Stale',         value: stale,     color: 'text-amber-600',   bg: 'bg-amber-50 border-amber-100'   },
@@ -281,7 +280,7 @@ export function Connectors() {
               <div className="text-xs text-slate-500 mt-0.5">{label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         {/* Install guide (shown after secret generation) */}
         {showGuide && secret && (
@@ -289,7 +288,7 @@ export function Connectors() {
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-700">Installation Guide</h2>
               <button
-                onClick={() => setShowGuide(false)}
+                onClick={() => { setShowGuide(false); setSecret(null); }}
                 className="text-xs text-slate-400 hover:text-slate-600"
               >
                 Dismiss
@@ -302,7 +301,7 @@ export function Connectors() {
         {/* Connector list */}
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-slate-700">
-            {connectors.length === 0 ? 'No connectors registered' : `${connectors.length} connector${connectors.length !== 1 ? 's' : ''}`}
+            {loadError ? 'Connector status unknown' : connectors.length === 0 ? 'No connectors registered' : `${connectors.length} connector${connectors.length !== 1 ? 's' : ''}`}
           </h2>
 
           {loading ? (
@@ -310,13 +309,12 @@ export function Connectors() {
               <RefreshCw size={14} className="animate-spin" />
               Loading…
             </div>
-          ) : connectors.length === 0 ? (
+          ) : loadError ? null : connectors.length === 0 ? (
             <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white px-8 py-12 text-center space-y-3">
               <WifiOff size={32} className="mx-auto text-slate-300" />
               <div className="text-slate-500 text-sm">No connectors registered yet.</div>
               <div className="text-slate-400 text-xs max-w-xs mx-auto">
-                Generate an install secret above, then follow the instructions to install the
-                QB Desktop connector on your Windows machine.
+                Wait for the verified signed installer and setup instructions before connecting a Windows machine.
               </div>
             </div>
           ) : (

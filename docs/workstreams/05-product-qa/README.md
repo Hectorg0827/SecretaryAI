@@ -22,6 +22,12 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 | Partial inbox reads silently fail | `backend/app/api/inbox.py:78-220` catches per-source DB errors, then returns an ordinary empty success at lines 229-233 | Chat 1/2: fail closed or include per-source `available`, `as_of`, `error_code` and partial status. UI can display transport failures but cannot detect server-suppressed gaps |
 | Work queue inventory mismatch | `backend/app/api/inventory.py:78` compares the entire `status` query string with one status, whereas prior web UI sent `critical,out_of_stock` | Chat 3: align canonical `GET /inventory/alerts` schema, tenant and freshness; Chat 5 now uses that existing endpoint and filters `needs_po` client-side |
 | Draft PO permissions | `backend/app/api/actions.py:331-359` allows any authenticated user to create a PO draft without an explicit action permission | Chat 1/3: require correct tenant/role policy server-side, durable idempotency, approved vendor/line-item schema. Chat 5 hides the PO-draft control for roles lacking draft rights, but client gating alone is insufficient |
+| False settings persistence | Prior `frontend/src/pages/Settings.tsx` showed editable notification, inventory and desktop-agent values and a “Settings saved” toast with no persistence call | Chat 1/4: define tenant/role-scoped read/write settings contract, validation and audit before reactivating these controls; Chat 5 withheld the nonfunctional controls |
+| OAuth callback status | Prior settings page treated `?qbo=connected` or `?gmail=connected` query parameters as connection proof; `backend/app/api/auth.py` returns OAuth links to exact Intuit/Google consent hosts | Chat 1/2: verify source-of-truth connection status (and read freshness), authorize connect/disconnect operations server-side. Chat 5 no longer claims connection based on URL params; validates HTTPS consent host |
+| QuickBooks Desktop connection | `backend/app/api/setup.py:83-229` starts a Conductor session and polls connection status, while `backend/app/api/settings.py:99` treats mere stored `conductor_end_user_id` as connected | Chat 2: distinguish `registered`, `authorized`, `first_sync_verified`, `stale` and `failed`, including provider receipt and source timestamp. Chat 5 marks Conductor authorization only, not successful sync |
+| Connector install and status | `backend/app/api/connectors.py:629-662` rotates owner-only install secret; UI formerly printed an unverified pip package command and showed zeros on status failures | Chat 1/2: freeze verified signed installer distribution, rotation/revocation, source health/freshness, and one-time secret handling. Chat 5 masks the one-time value, removes unverified installer instructions and marks outages unknown |
+| MFA status | Backend has `POST /auth/2fa/setup`, `/verify`, `DELETE /disable` but no authenticated read for current MFA enrollment | Chat 1: provide real MFA enrollment/session policy status so Settings can show an authoritative enabled/disabled state across devices |
+| Stripe mock URLs | `backend/app/api/billing.py:160-163,220-221` can return mock checkout/portal URLs and subscription GET is DB-record-only | Chat 1/2: fail closed when Stripe unavailable, freeze entitlements, test-mode contract, cancellation states and webhook evidence. Chat 5 added only read-only owner billing status; no checkout or portal action |
 
 ## First isolated UI increment
 
@@ -38,6 +44,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Browser fixture coverage exercises drafts without outbound HTTP sends, per-source failures, inbox transport failure, mobile-width dashboard and route restrictions. It does **not** prove live mail/provider or server authorization behavior.
 - Local verification: `frontend npm test -- --reporter=dot`: **21 passing** (five suites); web and mobile `npm run typecheck` passed; web `npm run lint` has **0 errors / 21 warnings**; web `npm run build` and `npm run test:css` passed; synthetic Chromium `e2e/verify_morning_briefing.py` passed at phone and desktop widths. Native device, actual email and staging acceptance remain **NOT TESTED**.
 
+## Third isolated onboarding and billing increment
+
+- Owner-only Billing Settings panel reads `/api/billing/subscription`; displays the backend record and unknown/unavailable states clearly. Checkout, portal, cancellation and payment changes are deliberately unavailable until provider-backed acceptance.
+- Connector page now shows an error instead of fabricated zero connected devices on a failed API read. Only the owner sees install-secret rotation; the one-time secret is masked and copyable in the session, with no unverified install/package commands.
+- Settings stopped claiming OAuth success from query parameters, checks exact HTTPS consent origins, and hides unsaved preference switches. QuickBooks Desktop setup uses an explicit user-initiated authorization link and stops polling on repeated errors. Authorization is not represented as proof of data sync.
+- Browser and unit tests remain synthetic. This increment does not constitute QuickBooks, Stripe, MFA, signing, or live deliverability acceptance.
+- Local verification after increment: **23 web Vitest tests** across six suites, TypeScript PASS, lint 0 errors / 21 warnings, build and CSS check PASS; synthetic Chromium briefing, source outages, role restrictions, owner-only billing and connector permissions, and no billing writes PASS. Previous GitHub Chat 5 revision (`7299dbd0e2f680951ffeece24706ce71ab2bf526`) CI and CodeQL PASS; new revision CI pending until pushed.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -45,12 +59,12 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 21 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 23 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 21 warnings including pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and existing unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 4 passed |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
-| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting checks |
+| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting, billing and onboarding checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |
 | Six digest sections source correctness | NOT TESTED | Provider-backed payload, freshness and per-role scope |
 | Approval-then-action idempotency | NOT TESTED | Test-only provider receipt and durable audit state |
@@ -61,6 +75,9 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Logistics shipment/cost device parity | FAIL | Missing read API contracts |
 | Mobile/desktop accessibility | NOT TESTED | Device screen reader, keyboard, layout evidence |
 | Stripe sandbox checkout/cancel/webhooks | NOT TESTED | Human-approved provider test session |
+| Billing subscription record view | PASS | Synthetic UI verifies read-only owner billing and no checkout/portal calls; real Stripe remains NOT TESTED |
+| Onboarding preference persistence | FAIL | No frozen settings write/read contract; nonfunctional controls withheld |
+| Connector signed installer/source freshness | FAIL | Verifiable installer and first-sync record not yet available |
 | Monitoring, outage, recovery, rollback | NOT TESTED | Exact staged SHAs, injected outages, restore drill |
 | Signed packages and email deliverability | NOT TESTED | Signing identities, test-only allowlist and receipts |
 | Owner launch signoff | NOT TESTED | Explicit signoff after all blockers pass |

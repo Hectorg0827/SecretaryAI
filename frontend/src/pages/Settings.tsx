@@ -1,21 +1,32 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
-  Settings as SettingsIcon, Database, Mail, Package, Zap, ShieldCheck,
+  Settings as SettingsIcon, Database, ShieldCheck, CreditCard,
   Check, AlertTriangle, Loader2, X, ExternalLink, Copy,
 } from 'lucide-react';
 import { api, IntegrationsResponse } from '../lib/api';
+import { BillingStatus } from '../components/BillingStatus';
+import { useAuth } from '../hooks/useAuth';
 import toast from 'react-hot-toast';
 
 interface Section { id: string; label: string; icon: React.ElementType; }
 
 const SECTIONS: Section[] = [
   { id: 'integrations', label: 'Integrations',    icon: Database     },
-  { id: 'email',        label: 'Email Settings',   icon: Mail         },
-  { id: 'inventory',    label: 'Inventory Alerts', icon: Package      },
-  { id: 'agent',        label: 'Desktop Agent',    icon: Zap          },
   { id: 'security',     label: 'Security',         icon: ShieldCheck  },
+  { id: 'billing',      label: 'Billing',          icon: CreditCard   },
 ];
+
+/** Browser redirects must be to the exact consent hosts frozen by the OAuth backend. */
+export function isTrustedConsentUrl(rawUrl: string, expectedHost: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === 'https:' && parsed.hostname === expectedHost
+      && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
 
 // ─── Two-Factor Authentication section ────────────────────────────────────────
 
@@ -194,23 +205,6 @@ function TwoFASection() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!value)}
-      className={clsx(
-        'relative w-10 h-5 rounded-full transition-colors flex-shrink-0',
-        value ? 'bg-blue-600' : 'bg-slate-200',
-      )}
-    >
-      <span className={clsx(
-        'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-        value && 'translate-x-5',
-      )} />
-    </button>
-  );
-}
-
 function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-4 py-4 border-b border-slate-100 last:border-0">
@@ -232,7 +226,9 @@ function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnec
   const [starting, setStarting]   = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg]   = useState('');
+  const [authorizationUrl, setAuthorizationUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const failuresRef = useRef(0);
 
   // Clean up polling when modal unmounts
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
@@ -241,10 +237,13 @@ function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnec
     setStarting(true);
     try {
       const data = await api.setup.qbdStart();
-      // Open Conductor's hosted auth flow in a new tab
-      window.open(data.auth_flow_url, '_blank', 'noopener,noreferrer');
+      const url = new URL(data.auth_flow_url);
+      if (url.protocol !== 'https:' || url.username || url.password) {
+        throw new Error('Untrusted QuickBooks authorization URL');
+      }
+      setAuthorizationUrl(url.toString());
       setStep('waiting');
-      setStatusMsg('Waiting for QuickBooks authorization…');
+      setStatusMsg('Open the authorization link below, then follow the QuickBooks prompts.');
       beginPolling();
     } catch (e: any) {
       setErrorMsg(e.message ?? 'Could not start setup. Check that Conductor is configured.');
@@ -255,17 +254,31 @@ function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnec
   };
 
   const beginPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    failuresRef.current = 0;
     pollRef.current = setInterval(async () => {
       try {
         const status = await api.setup.qbdStatus();
+        failuresRef.current = 0;
         setStatusMsg(status.message);
+        if (status.status === 'error') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setErrorMsg(status.message);
+          setStep('error');
+          return;
+        }
         if (status.connected) {
-          clearInterval(pollRef.current!);
+          if (pollRef.current) clearInterval(pollRef.current);
           setStep('done');
           onConnected();
         }
       } catch {
-        // Ignore transient errors — keep polling
+        failuresRef.current += 1;
+        if (failuresRef.current >= 3) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setErrorMsg('QuickBooks connection status could not be verified after repeated attempts.');
+          setStep('error');
+        }
       }
     }, 5000);
   };
@@ -325,9 +338,12 @@ function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnec
             <p className="text-xs text-slate-400 text-center mb-4">
               Complete the steps in the browser window, then authorize in QuickBooks when prompted.
             </p>
-            <button onClick={startSetup} className="w-full px-4 py-2 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center gap-1.5">
-              <ExternalLink size={13} /> Re-open setup page
-            </button>
+            {authorizationUrl && (
+              <a href={authorizationUrl} target="_blank" rel="noopener noreferrer"
+                className="w-full px-4 py-2 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center gap-1.5">
+                <ExternalLink size={13} /> Open QuickBooks authorization
+              </a>
+            )}
           </>
         )}
 
@@ -336,8 +352,8 @@ function QBDSetupModal({ onClose, onConnected }: { onClose: () => void; onConnec
             <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
               <Check size={24} className="text-emerald-600" />
             </div>
-            <p className="text-sm font-bold text-slate-800">QuickBooks is connected!</p>
-            <p className="text-xs text-slate-400">SecretaryAI will now sync your data automatically.</p>
+            <p className="text-sm font-bold text-slate-800">QuickBooks authorization is active</p>
+            <p className="text-xs text-slate-500">The provider reports an active connection. First successful data sync and freshness still require verification.</p>
             <button onClick={onClose} className="mt-2 px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
               Done
             </button>
@@ -372,13 +388,14 @@ interface IntegrationRowProps {
   onConnect: () => void;
   onDisconnect: () => void;
   connectLabel?: string;
+  canManage: boolean;
 }
 
 function IntegrationRow({
-  label, description, connected, loading, onConnect, onDisconnect, connectLabel = 'Connect',
+  label, description, connected, loading, onConnect, onDisconnect, connectLabel = 'Connect', canManage,
 }: IntegrationRowProps) {
   return (
-    <div className="flex items-center gap-4 py-4 border-b border-slate-100 last:border-0">
+    <div className="flex flex-wrap items-center gap-4 py-4 border-b border-slate-100 last:border-0">
       <div className="flex-1">
         <div className="text-sm font-medium text-slate-800">{label}</div>
         <div className="text-xs text-slate-400 mt-0.5">{description}</div>
@@ -391,10 +408,12 @@ function IntegrationRow({
         {loading
           ? <Loader2 size={11} className="animate-spin" />
           : connected ? <Check size={11} /> : <AlertTriangle size={11} />}
-        {connected ? 'Connected' : 'Not connected'}
+        {loading ? 'Checking…' : connected ? 'Connected' : 'Not connected'}
       </div>
 
-      {loading ? null : connected ? (
+      {loading ? null : !canManage ? (
+        <span className="text-xs text-slate-500">Owner permission required</span>
+      ) : connected ? (
         <button
           onClick={onDisconnect}
           className="text-xs text-red-500 hover:text-red-600 font-medium border border-red-100 rounded-lg px-2.5 py-1.5 bg-red-50 hover:bg-red-100 transition-colors flex-shrink-0"
@@ -416,22 +435,16 @@ function IntegrationRow({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function Settings() {
+  const { role } = useAuth();
+  const sections = role === 'owner' ? SECTIONS : SECTIONS.filter((section) => section.id !== 'billing');
   const [active, setActive] = useState('integrations');
 
   // Integration state
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
   const [integLoading, setIntegLoading]   = useState(true);
+  const [integError, setIntegError] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [showQBDModal, setShowQBDModal] = useState(false);
-
-  // Email / inventory / agent toggles
-  const [emailSummarize, setEmailSummarize]       = useState(true);
-  const [emailNotify,    setEmailNotify]           = useState(true);
-  const [invLow,         setInvLow]               = useState(true);
-  const [invCritical,    setInvCritical]           = useState(true);
-  const [invOutOfStock,  setInvOutOfStock]         = useState(true);
-  const [lowThreshold,   setLowThreshold]          = useState('8');
-  const [criticalThreshold, setCriticalThreshold]  = useState('4');
 
   // ── Load integration statuses on mount ────────────────────────────────────
   const loadIntegrations = useCallback(async () => {
@@ -439,8 +452,10 @@ export function Settings() {
     try {
       const data = await api.settings.integrations();
       setIntegrations(data);
+      setIntegError(false);
     } catch {
-      toast.error('Could not load integration status');
+      setIntegrations(null);
+      setIntegError(true);
     } finally {
       setIntegLoading(false);
     }
@@ -453,20 +468,18 @@ export function Settings() {
     const params = new URLSearchParams(window.location.search);
     const qbo   = params.get('qbo');
     const gmail = params.get('gmail');
-    const reason = params.get('reason');
-
     if (qbo === 'connected') {
-      toast.success('QuickBooks Online connected!');
+      toast('Returned from QuickBooks authorization. Verify the status below.');
       loadIntegrations();
     } else if (qbo === 'error') {
-      toast.error(`QuickBooks connection failed${reason ? `: ${reason}` : ''}`);
+      toast.error('QuickBooks authorization was not completed.');
     }
 
     if (gmail === 'connected') {
-      toast.success('Gmail & Google Sheets connected!');
+      toast('Returned from Google authorization. Verify the status below.');
       loadIntegrations();
     } else if (gmail === 'error') {
-      toast.error(`Google connection failed${reason ? `: ${reason}` : ''}`);
+      toast.error('Google authorization was not completed.');
     }
 
     // Clean up URL params without triggering a reload
@@ -487,6 +500,7 @@ export function Settings() {
     setLoading('qbo', true);
     try {
       const { url } = await api.settings.qboConnectUrl();
+      if (!isTrustedConsentUrl(url, 'appcenter.intuit.com')) throw new Error('Untrusted consent URL');
       window.location.href = url;
     } catch {
       toast.error('Could not start QuickBooks connection');
@@ -508,7 +522,7 @@ export function Settings() {
   };
 
   const onQBDConnected = async () => {
-    toast.success('QuickBooks Desktop connected!');
+    toast('QuickBooks Desktop authorization active. First sync and data freshness still need verification.');
     await loadIntegrations();
   };
 
@@ -529,6 +543,7 @@ export function Settings() {
     setLoading('gmail', true);
     try {
       const { url } = await api.settings.gmailConnectUrl();
+      if (!isTrustedConsentUrl(url, 'accounts.google.com')) throw new Error('Untrusted consent URL');
       window.location.href = url;
     } catch {
       toast.error('Could not start Google connection');
@@ -550,28 +565,28 @@ export function Settings() {
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const activeSection = SECTIONS.find((s) => s.id === active)!;
+  const activeSection = sections.find((s) => s.id === active) ?? sections[0];
   const ActiveIcon = activeSection.icon;
 
   return (
-    <div className="flex h-full bg-slate-50">
+    <div className="flex h-full flex-col md:flex-row bg-slate-50">
       {/* Sidebar */}
-      <div className="w-52 flex-shrink-0 bg-white border-r border-slate-100 pt-6">
+      <div className="md:w-52 flex-shrink-0 bg-white border-r border-slate-100 pt-3 md:pt-6">
         <div className="px-4 mb-4">
           <div className="flex items-center gap-2 text-slate-800">
             <SettingsIcon size={16} />
             <span className="text-sm font-bold">Settings</span>
           </div>
         </div>
-        <nav className="px-2 space-y-0.5">
-          {SECTIONS.map((s) => {
+        <nav className="px-2 flex gap-1 overflow-x-auto md:block md:space-y-0.5" aria-label="Settings sections">
+          {sections.map((s) => {
             const Icon = s.icon;
             return (
               <button
                 key={s.id}
                 onClick={() => setActive(s.id)}
                 className={clsx(
-                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left',
+                  'shrink-0 md:w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left',
                   active === s.id
                     ? 'bg-slate-800 text-white'
                     : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800',
@@ -586,7 +601,7 @@ export function Settings() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 min-w-0 overflow-auto p-4 md:p-8">
         <div className="max-w-2xl">
           <div className="flex items-center gap-2.5 mb-6">
             <ActiveIcon size={18} className="text-slate-600" />
@@ -596,6 +611,12 @@ export function Settings() {
           <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5">
             {active === 'integrations' && (
               <>
+                {integError ? (
+                  <p role="alert" className="my-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    Integration status unavailable. Connection states are unknown; retry before taking any action.
+                  </p>
+                ) : (
+                <>
                 {/* QB Online */}
                 <IntegrationRow
                   label="QuickBooks Online"
@@ -605,6 +626,7 @@ export function Settings() {
                   onConnect={connectQBO}
                   onDisconnect={disconnectQBO}
                   connectLabel="Connect with Intuit"
+                  canManage={role === 'owner'}
                 />
 
                 {/* QB Desktop */}
@@ -616,6 +638,7 @@ export function Settings() {
                   onConnect={() => setShowQBDModal(true)}
                   onDisconnect={disconnectQBD}
                   connectLabel="Set up"
+                  canManage={role === 'owner'}
                 />
 
                 {/* Gmail */}
@@ -627,6 +650,7 @@ export function Settings() {
                   onConnect={connectGmail}
                   onDisconnect={disconnectGmail}
                   connectLabel="Connect with Google"
+                  canManage={role === 'owner'}
                 />
 
                 {/* Google Sheets — shares Gmail token */}
@@ -638,96 +662,29 @@ export function Settings() {
                   onConnect={connectGmail}
                   onDisconnect={disconnectGmail}
                   connectLabel="Connect with Google"
+                  canManage={role === 'owner'}
                 />
+                </>
+                )}
 
                 <p className="text-xs text-slate-400 py-3">
                   AI model, database, and email delivery credentials are managed by SecretaryAI — you never need to enter them.
                 </p>
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded p-3 mb-3">
+                  Notification preferences, inventory thresholds and desktop-agent settings are not available yet.
+                  Their previous on-screen switches did not persist any configuration, so they are withheld pending a verified settings API.
+                </p>
               </>
             )}
 
-            {active === 'email' && (
-              <>
-                <SettingRow label="AI Email Summarization" description="Automatically summarize incoming emails with priority and action needed">
-                  <Toggle value={emailSummarize} onChange={setEmailSummarize} />
-                </SettingRow>
-                <SettingRow label="Email Notifications" description="Send desktop notifications for high-priority emails">
-                  <Toggle value={emailNotify} onChange={setEmailNotify} />
-                </SettingRow>
-                <SettingRow label="Smart Reply Model" description="AI model used for drafting replies">
-                  <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white">
-                    <option>claude-sonnet-4-6</option>
-                    <option>claude-haiku-4-5</option>
-                  </select>
-                </SettingRow>
-              </>
-            )}
-
-            {active === 'inventory' && (
-              <>
-                <SettingRow label="Low Stock Alert" description="Alert when stock drops below threshold weeks of supply">
-                  <div className="flex items-center gap-2">
-                    <Toggle value={invLow} onChange={setInvLow} />
-                    <input
-                      type="number"
-                      value={lowThreshold}
-                      onChange={(e) => setLowThreshold(e.target.value)}
-                      className="w-16 text-sm border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 text-center"
-                    />
-                    <span className="text-xs text-slate-400">wks</span>
-                  </div>
-                </SettingRow>
-                <SettingRow label="Critical Stock Alert" description="Alert when stock drops to critical level">
-                  <div className="flex items-center gap-2">
-                    <Toggle value={invCritical} onChange={setInvCritical} />
-                    <input
-                      type="number"
-                      value={criticalThreshold}
-                      onChange={(e) => setCriticalThreshold(e.target.value)}
-                      className="w-16 text-sm border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 text-center"
-                    />
-                    <span className="text-xs text-slate-400">wks</span>
-                  </div>
-                </SettingRow>
-                <SettingRow label="Out-of-Stock Alert" description="Alert immediately when any item reaches zero">
-                  <Toggle value={invOutOfStock} onChange={setInvOutOfStock} />
-                </SettingRow>
-              </>
-            )}
-
-            {active === 'agent' && (
-              <>
-                <SettingRow label="Auto-start on Login" description="Launch desktop agent when you log into your computer">
-                  <Toggle value={true} onChange={() => {}} />
-                </SettingRow>
-                <SettingRow label="Watched Folders" description="Folders scanned every 30 minutes for CSV/Excel reports">
-                  <button className="text-xs text-blue-600 hover:text-blue-700 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors">
-                    Manage folders
-                  </button>
-                </SettingRow>
-                <SettingRow label="Heartbeat Interval" description="How often the agent checks in with the server">
-                  <select className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white">
-                    <option>5 minutes</option>
-                    <option>10 minutes</option>
-                    <option>15 minutes</option>
-                  </select>
-                </SettingRow>
-              </>
-            )}
           </div>
 
           {active === 'security' && (
             <TwoFASection />
           )}
-
-          {active !== 'integrations' && active !== 'security' && (
-            <div className="mt-5 flex justify-end">
-              <button
-                onClick={() => toast.success('Settings saved')}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                Save Changes
-              </button>
+          {active === 'billing' && role === 'owner' && (
+            <div className="rounded-xl border border-slate-200 bg-white px-5">
+              <BillingStatus />
             </div>
           )}
         </div>

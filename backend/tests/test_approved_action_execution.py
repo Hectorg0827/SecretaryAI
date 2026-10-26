@@ -38,7 +38,9 @@ async def test_unsupported_action_never_claims_execution():
 
 
 @pytest.mark.asyncio
-async def test_approval_reports_execution_failure_without_resuming_workflow():
+async def test_legacy_approval_cannot_send_without_durable_gateway():
+    from fastapi import HTTPException
+
     db = MagicMock()
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
         {"id": "d1", "status": "pending", "action_type": "email_reply",
@@ -46,20 +48,24 @@ async def test_approval_reports_execution_failure_without_resuming_workflow():
          "content": {"to": "a@example.com", "body": "Hello"}}
     ]
     adapter = MagicMock()
-    adapter.send_email_reply = AsyncMock(side_effect=OSError("offline"))
-    with patch.object(actions, "_execution_policy_effect", new_callable=AsyncMock,
+    adapter.send_email_reply = AsyncMock()
+    with patch.dict("os.environ", {"SECRETARYAI_DURABLE_APPROVAL_ENABLED": "0"}), \
+         patch.object(actions, "_execution_policy_effect", new_callable=AsyncMock,
                       return_value="allow"), \
+         patch.object(actions.ApprovalQueue, "approve", new_callable=AsyncMock) as approve, \
          patch.object(actions, "write_audit_event") as audit, \
          patch("app.workflows.engine.WorkflowEngine") as workflow:
-        result = await actions.approve_draft(
-            "d1", actions.ApprovalRequest(),
-            user={"company_id": "co1", "sub": "owner1"},
-            db=db, adapter=adapter,
-        )
-    assert result["status"] == "approved"
-    assert result["execution_status"] == "needs_reconciliation"
+        with pytest.raises(HTTPException) as error:
+            await actions.approve_draft(
+                "d1", actions.ApprovalRequest(),
+                user={"company_id": "co1", "sub": "owner1"},
+                db=db, adapter=adapter,
+            )
+    assert error.value.status_code == 409
+    approve.assert_not_awaited()
+    adapter.send_email_reply.assert_not_awaited()
+    audit.assert_not_called()
     workflow.return_value.resume_after_approval.assert_not_called()
-    assert audit.call_args.kwargs["metadata"]["execution_status"] == "needs_reconciliation"
 
 
 @pytest.mark.asyncio

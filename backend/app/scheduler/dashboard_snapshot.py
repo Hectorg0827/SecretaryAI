@@ -27,6 +27,21 @@ class SnapshotSourceUnavailable(RuntimeError):
         super().__init__(f"Required dashboard source unavailable: {source}")
 
 
+def _row_value(row, field: str, default=None):
+    """Read canonical dicts or QB adapter dataclasses; preserve valid zero values."""
+    if isinstance(row, dict):
+        return row.get(field, default)
+    return getattr(row, field, default)
+
+
+def _invoice_amount(row) -> float:
+    value = _row_value(row, "total")
+    if value is None:
+        value = _row_value(row, "total_amount")
+    if value is None:
+        raise ValueError("Invoice missing total")
+    return float(value)
+
 
 async def compute_dashboard_payload(adapter) -> dict:
     """
@@ -48,14 +63,18 @@ async def compute_dashboard_payload(adapter) -> dict:
 
         by_customer: dict[str, list] = {}
         for inv in invoices_yr:
-            cid = getattr(inv, "customer_id", None) or inv.get("customer_id", "")
+            cid = _row_value(inv, "customer_id")
+            if not cid:
+                raise ValueError("Invoice missing customer_id")
             by_customer.setdefault(cid, []).append({
-                "date": getattr(inv, "date", None) or inv.get("order_date"),
-                "total": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
+                "date": _row_value(inv, "date") or _row_value(inv, "order_date"),
+                "total": _invoice_amount(inv),
             })
 
         for customer in customers:
-            cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
+            cid = _row_value(customer, "qb_id") or _row_value(customer, "external_id")
+            if not cid:
+                raise ValueError("Customer missing external identifier")
             orders = by_customer.get(cid, [])
             dates = [o["date"] for o in orders if o["date"]]
             last_order = max(dates, default=None)
@@ -68,11 +87,11 @@ async def compute_dashboard_payload(adapter) -> dict:
 
             health = score_account(
                 account_id=cid,
-                account_name=getattr(customer, "name", ""),
+                account_name=_row_value(customer, "name", ""),
                 last_order_date=last_order,
                 avg_order_cycle_days=None,
                 order_history=orders,
-                current_balance=float(getattr(customer, "balance", 0)),
+                current_balance=Decimal(str(_row_value(customer, "balance", 0))),
             )
             health_counts[health.status] += 1
     except Exception as exc:
@@ -107,7 +126,7 @@ async def compute_dashboard_payload(adapter) -> dict:
     try:
         invoices_30 = await adapter.get_orders_last_n_days(30)
         sales_30d = sum(
-            float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
+            _invoice_amount(inv)
             for inv in invoices_30
         )
     except Exception as exc:

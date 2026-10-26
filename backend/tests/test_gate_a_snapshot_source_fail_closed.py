@@ -121,3 +121,45 @@ async def test_malformed_invoice_missing_amount_cannot_be_treated_as_zero():
     with pytest.raises(SnapshotSourceUnavailable) as info:
         await compute_dashboard_payload(adapter)
     assert info.value.source == "account_health"
+
+
+
+@pytest.mark.asyncio
+async def test_inventory_uses_authoritative_quantity_not_qb_plus_warehouse():
+    adapter = CompleteReader()
+    # Two systems describe the same five physical units, not 105 units.
+    # At ten units/week the item is critical (0.5 weeks available).
+    adapter.inventory = [{
+        "qb_id": "SKU-1", "product_name": "Critical SKU",
+        "qb_qty": 5, "warehouse_qty": 100, "total_qty": 5,
+        "weekly_sell_rate": 10, "quantity_source": "quickbooks",
+    }]
+    result = await compute_dashboard_payload(adapter)
+    assert result["inventory_alerts"][0]["stock_status"] == "critical"
+    assert result["inventory_alerts"][0]["total_qty"] == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_qty", [None, -5, "nan", "inf", "1.5"])
+async def test_inventory_without_valid_authoritative_qty_is_not_false_all_clear(bad_qty):
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-BAD", "product_name": "Untrusted stock",
+        "qb_qty": 100, "warehouse_qty": 100,
+        "total_qty": bad_qty, "weekly_sell_rate": 10,
+    }]
+    with pytest.raises(SnapshotSourceUnavailable) as info:
+        await compute_dashboard_payload(adapter)
+    assert info.value.source == "inventory"
+
+
+@pytest.mark.asyncio
+async def test_inventory_missing_demand_history_is_not_silently_assumed_zero():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-NO-RATE", "product_name": "Unknown velocity",
+        "qb_qty": 7, "total_qty": 7,
+    }]
+    with pytest.raises(SnapshotSourceUnavailable) as info:
+        await compute_dashboard_payload(adapter)
+    assert info.value.source == "inventory"

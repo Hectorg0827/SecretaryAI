@@ -111,3 +111,39 @@ async def test_initial_dashboard_snapshot_persistence_failure_returns_503():
                 adapter=adapter, db=db,
             )
     assert info.value.status_code == 503
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,can_see_company_totals", [
+    ("owner", True), ("manager", True), ("back_office", True),
+    ("sales_rep", False), ("viewer", False), ("unknown", False),
+])
+async def test_company_wide_account_aggregates_respect_server_side_rbac(
+    role, can_see_company_totals
+):
+    db = MagicMock()
+    adapter = AsyncMock()
+    adapter.get_emails.return_value = []
+    snap = {
+        "payload": {
+            "accounts": {
+                "healthy": 5, "slowing": 1, "at_risk": 2,
+                "dormant": 3, "total": 11,
+            },
+            "inventory_alerts": [{"item_id": "fixture", "stock_status": "critical"}],
+            "sales_30d": 2000,
+            "source_quality": "partial", "source_read_status": "completed",
+        },
+        "generated_at": "2026-10-26T12:00:00Z",
+    }
+    with patch("app.api.dashboard.read_snapshot", return_value=snap):
+        result = await get_dashboard_summary(
+            user={"company_id": "tenant-fixture", "sub": "fixture", "role": role},
+            adapter=adapter, db=db,
+        )
+    if can_see_company_totals:
+        assert result["accounts"]["total"] == 11
+    else:
+        assert result["accounts"] is None
+    assert result["sales_30d"] == (2000 if role in ("owner", "manager") else None)

@@ -55,3 +55,42 @@ describe('api client 401 → refresh flow', () => {
     expect(localStorage.getItem('secretary_token')).toBeNull();
   });
 });
+
+describe('hosted API errors and session boundaries', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('uses same-origin URLs and displays failed login without refreshing or losing the form', async () => {
+    localStorage.setItem('secretary_token', 'stale-token');
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'Invalid credentials' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.auth.login('pilot@example.test', 'incorrect')).rejects.toThrow('Invalid credentials');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/auth/login');
+  });
+
+  it('shows field-validation messages instead of object strings', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(422, {
+      detail: [{ msg: 'Password must contain at least one number' }],
+    })));
+    await expect(api.post('/auth/register', {})).rejects.toThrow('Password must contain at least one number');
+  });
+
+  it.each([402, 403, 503])('keeps the refreshed session when the retry returns %s', async (status) => {
+    localStorage.setItem('secretary_token', 'old-token');
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(401, { detail: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: 'new-token' }))
+      .mockResolvedValueOnce(jsonResponse(status, { detail: 'Operation unavailable' })));
+    await expect(api.get('/api/dashboard/summary')).rejects.toThrow('Operation unavailable');
+    expect(localStorage.getItem('secretary_token')).toBe('new-token');
+  });
+
+  it('accepts a successful response without a JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 204, ok: true }));
+    await expect(api.delete('/auth/qbo/disconnect')).resolves.toBeUndefined();
+  });
+});

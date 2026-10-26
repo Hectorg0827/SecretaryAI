@@ -76,6 +76,14 @@ jobs:
         run: npm run test:css
         working-directory: frontend
 
+  frontend-container:
+    name: Web container routing and auth proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test_web_container.sh
+
   frontend-browser:
     name: Web browser responsive acceptance (3 engines)
     needs: frontend

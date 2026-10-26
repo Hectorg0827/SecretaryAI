@@ -19,7 +19,10 @@ RUN npm run build && npm run test:css
 FROM nginx:1.27-alpine AS runner
 
 # nginx config with API proxy
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV PORT=80 API_UPSTREAM=http://api:8000
+# Official nginx entrypoint expands only these deployment variables.
+ENV NGINX_ENVSUBST_FILTER="^(PORT|API_UPSTREAM)$"
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 # Built static files
 COPY --from=builder /app/dist /usr/share/nginx/html

@@ -138,7 +138,7 @@ async def approve_draft(
     db=Depends(get_db),
     adapter=Depends(get_adapter),
 ):
-    """Approve a pending draft action and execute it."""
+    """Atomically authorize and queue an approved email; never send inline."""
     queue = ApprovalQueue(db)
 
     # Fetch the draft — SCOPED TO THE CALLER'S COMPANY. A draft belonging to
@@ -167,6 +167,16 @@ async def approve_draft(
     content_for_policy = body.edited_content or draft.get("content", {}) or {}
     if await _execution_policy_effect(db, user["company_id"], user["sub"], draft, content_for_policy) == "deny":
         raise HTTPException(status_code=403, detail="This action is blocked by your company's action policy")
+
+    # No legacy inline email send or PO dispatch after review: those effects
+    # cannot atomically bind approval, idempotency, claim and provider receipt.
+    # Enabling the durable approval gateway queues immutable approved email
+    # actions only. It does NOT itself grant delivery/worker authorization.
+    if os.getenv("SECRETARYAI_DURABLE_APPROVAL_ENABLED") != "1":
+        raise HTTPException(
+            status_code=409,
+            detail="Durable approval is required; no external action was executed",
+        )
 
     # Dark-launch durable mode. One PostgreSQL transaction must approve and
     # enqueue together; never approve via PostgREST and enqueue afterward.
@@ -214,54 +224,6 @@ async def approve_draft(
             "already_processed": durable.get("already_processed", False),
         }
 
-    if body.edited_content:
-        result = await queue.edit_and_approve(
-            draft_id=draft_id,
-            edited_content=body.edited_content,
-            reviewed_by=user["sub"],
-            company_id=user["company_id"],
-        )
-        draft["content"] = body.edited_content
-    else:
-        result = await queue.approve(
-            draft_id=draft_id, reviewed_by=user["sub"], company_id=user["company_id"]
-        )
-
-    # Another approver may have won the pending -> approved race while
-    # this request was evaluating policy. Never repeat the external action.
-    if result.get("already_processed"):
-        return result
-
-    # Record the execution stage separately from human authorization.
-    execution_status = await _execute_approved_draft(draft, adapter)
-    result["execution_status"] = execution_status
-
-    # Write audit event
-    write_audit_event(
-        db,
-        company_id=user["company_id"],
-        event_type="draft_approved",
-        actor_id=user["sub"],
-        approved_by=user["sub"],
-        action_class=draft.get("action_type"),
-        metadata={"draft_id": draft_id, "action_type": draft.get("action_type"),
-                  "execution_status": execution_status},
-    )
-
-    # Resume linked workflow run if present
-    workflow_run_id = draft.get("workflow_run_id")
-    if workflow_run_id and execution_status in ("sent", "dispatched"):
-        try:
-            from app.workflows.engine import WorkflowEngine
-            wf_engine = WorkflowEngine(db, user["company_id"])
-            wf_engine.resume_after_approval(
-                workflow_run_id, approved=True, approved_by=user["sub"]
-            )
-            log.info("Resumed workflow run %s after draft %s approved", workflow_run_id, draft_id)
-        except Exception as exc:
-            log.warning("Failed to resume workflow %s after approval: %s", workflow_run_id, exc)
-
-    return result
 
 
 @router.post("/reject/{draft_id}")

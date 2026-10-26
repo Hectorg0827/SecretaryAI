@@ -132,7 +132,7 @@ async def test_inventory_uses_authoritative_quantity_not_qb_plus_warehouse():
     adapter.inventory = [{
         "qb_id": "SKU-1", "product_name": "Critical SKU",
         "qb_qty": 5, "warehouse_qty": 100, "total_qty": 5,
-        "weekly_sell_rate": 10, "quantity_source": "quickbooks",
+        "weekly_sell_rate": 10, "weekly_sell_rate_observed": True, "quantity_source": "quickbooks",
     }]
     result = await compute_dashboard_payload(adapter)
     assert result["inventory_alerts"][0]["stock_status"] == "critical"
@@ -147,6 +147,7 @@ async def test_inventory_without_valid_authoritative_qty_is_not_false_all_clear(
         "qb_id": "SKU-BAD", "product_name": "Untrusted stock",
         "qb_qty": 100, "warehouse_qty": 100,
         "total_qty": bad_qty, "weekly_sell_rate": 10,
+        "weekly_sell_rate_observed": True,
     }]
     with pytest.raises(SnapshotSourceUnavailable) as info:
         await compute_dashboard_payload(adapter)
@@ -223,9 +224,55 @@ async def test_fractional_inventory_is_not_truncated_and_payload_is_json_safe():
         "qb_id": "SKU-WEIGHT", "product_name": "Bulk item",
         "warehouse_qty": 10.5, "qb_qty": 10.5,
         "total_qty": 10.5, "weekly_sell_rate": 7.0,
+        "weekly_sell_rate_observed": True,
     }]
     result = await compute_dashboard_payload(adapter)
     alert = result["inventory_alerts"][0]
     assert alert["total_qty"] == 10.5
     assert alert["weeks_remaining"] == pytest.approx(1.5)
     json.dumps(result)  # Supabase JSON persistence must not see Decimal values
+
+
+
+@pytest.mark.asyncio
+async def test_unobserved_zero_sell_rate_is_not_an_actual_zero_demand_measurement():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-NO-SYNC", "product_name": "Unmeasured",
+        "qb_qty": 100, "total_qty": 100,
+        "weekly_sell_rate": 0.0,
+        "weekly_sell_rate_observed": False,
+        "weekly_sell_rate_source_status": "missing",
+    }]
+    with pytest.raises(SnapshotSourceUnavailable) as error:
+        await compute_dashboard_payload(adapter)
+    assert error.value.source == "inventory"
+
+
+@pytest.mark.asyncio
+async def test_genuine_measured_zero_sell_rate_is_distinct_from_unknown():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-VERIFIED-ZERO", "product_name": "No recent sales",
+        "qb_qty": 100, "total_qty": 100,
+        "weekly_sell_rate": 0.0,
+        "weekly_sell_rate_observed": True,
+        "weekly_sell_rate_source_status": "observed",
+    }]
+    payload = await compute_dashboard_payload(adapter)
+    assert payload["source_read_status"] == "completed"
+    assert payload["inventory_alerts"] == []
+    assert payload["source_quality"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_missing_observation_metadata_does_not_count_as_verified_demand():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-LEGACY", "product_name": "Legacy item",
+        "qb_qty": 100, "total_qty": 100,
+        "weekly_sell_rate": 0.0,
+    }]
+    with pytest.raises(SnapshotSourceUnavailable) as error:
+        await compute_dashboard_payload(adapter)
+    assert error.value.source == "inventory"

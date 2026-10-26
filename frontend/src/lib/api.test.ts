@@ -72,6 +72,19 @@ describe('hosted API errors and session boundaries', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/auth/login');
   });
 
+  it('submits a scoped second-factor session without re-sending the password', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
+      access_token: 'synthetic-session', company_id: 'synthetic-tenant', role: 'owner', token_type: 'bearer',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.auth.verify2fa('synthetic-pending', '123456');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/auth/login');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      pre_auth_token: 'synthetic-pending', totp_code: '123456',
+    });
+  });
+
   it('shows field-validation messages instead of object strings', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(422, {
       detail: [{ msg: 'Password must contain at least one number' }],

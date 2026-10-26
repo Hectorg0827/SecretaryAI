@@ -6,42 +6,50 @@ import { api } from '../lib/api';
 export function Login() {
   const navigate  = useNavigate();
   const location  = useLocation();
-  const from      = (location.state as any)?.from?.pathname ?? '/';
+  const requestedFrom = (location.state as { from?: { pathname?: unknown } } | null)?.from?.pathname;
+  const from = typeof requestedFrom === 'string' && requestedFrom.startsWith('/') && !requestedFrom.startsWith('//')
+    ? requestedFrom : '/';
 
   const [email,      setEmail]      = useState('');
   const [password,   setPassword]   = useState('');
   const [totpCode,   setTotpCode]   = useState('');
   const [needs2fa,   setNeeds2fa]   = useState(false);
+  const [preAuthToken, setPreAuthToken] = useState<string | null>(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) return;
+    if (!needs2fa && (!email || !password)) return;
+    if (needs2fa && (!preAuthToken || totpCode.length !== 6)) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const data = await api.auth.login(
-        email.trim().toLowerCase(),
-        password,
-        needs2fa ? totpCode : undefined,
-      );
+      const data = needs2fa && preAuthToken
+        ? await api.auth.verify2fa(preAuthToken, totpCode)
+        : await api.auth.login(email.trim().toLowerCase(), password);
 
       if ('requires_2fa' in data && data.requires_2fa) {
+        if (!data.pre_auth_token) throw new Error('Unable to establish the two-factor session. Please sign in again.');
+        setPreAuthToken(data.pre_auth_token);
+        setPassword('');
         setNeeds2fa(true);
-        setLoading(false);
         return;
       }
 
       const full = data as { access_token: string; company_id: string; role: string };
+      if (!full.access_token || !full.company_id || !full.role) throw new Error('Sign-in response was incomplete.');
+      setPreAuthToken(null);
+      setTotpCode('');
+      setPassword('');
       localStorage.setItem('secretary_token', full.access_token);
       localStorage.setItem('secretary_company_id', full.company_id);
       localStorage.setItem('secretary_role', full.role);
       navigate(from, { replace: true });
-    } catch (err: any) {
-      setError(err.message ?? 'Invalid credentials');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign-in could not be completed.');
     } finally {
       setLoading(false);
     }
@@ -71,7 +79,7 @@ export function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
+              <div role="alert" className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
                 <AlertCircle size={14} className="flex-shrink-0" />
                 {error}
               </div>
@@ -143,7 +151,7 @@ export function Login() {
             {needs2fa && (
               <button
                 type="button"
-                onClick={() => { setNeeds2fa(false); setTotpCode(''); setError(null); }}
+                onClick={() => { setNeeds2fa(false); setPreAuthToken(null); setPassword(''); setTotpCode(''); setError(null); }}
                 className="w-full text-xs text-slate-600 hover:text-slate-600 py-1"
               >
                 ← Back to sign in
@@ -153,7 +161,7 @@ export function Login() {
 
           {!needs2fa && (
             <p className="text-xs text-slate-600 text-center mt-6">
-              Forgot your password? Contact your account owner.
+              Self-service password recovery is not yet available here. Contact your account administrator or approved support channel.
             </p>
           )}
           {!needs2fa && (

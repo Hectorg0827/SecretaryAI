@@ -40,9 +40,29 @@ function TwoFASection() {
   const [enabled,  setEnabled]  = useState(false);
   const [disCode,  setDisCode]  = useState('');
   const [disOpen,  setDisOpen]  = useState(false);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState(false);
+
+  const refreshEnrollment = useCallback(async () => {
+    setStatusLoading(true);
+    try {
+      const result = await api.get<{ totp_enabled: boolean }>('/auth/me');
+      if (typeof result.totp_enabled !== 'boolean') throw new Error('Missing enrollment state');
+      setEnabled(result.totp_enabled);
+      setStatusError(false);
+      setStep(result.totp_enabled ? 'enabled' : 'idle');
+    } catch {
+      setStatusError(true);
+    } finally {
+      setStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refreshEnrollment(); }, [refreshEnrollment]);
 
   // Start 2FA setup — request a new TOTP secret from the backend
   const startSetup = async () => {
+    if (statusLoading || statusError || enabled) return;
     setLoading(true);
     try {
       const res = await api.post<{ secret: string; otpauth_url: string }>('/auth/2fa/setup', {});
@@ -62,6 +82,7 @@ function TwoFASection() {
     try {
       await api.post('/auth/2fa/verify', { totp_code: code });
       setEnabled(true);
+      setStatusError(false);
       setStep('enabled');
       setSecret('');
       setCode('');
@@ -80,6 +101,7 @@ function TwoFASection() {
     try {
       await api.deleteWithBody('/auth/2fa/disable', { totp_code: disCode });
       setEnabled(false);
+      setStatusError(false);
       setStep('idle');
       setDisCode('');
       setDisOpen(false);
@@ -99,7 +121,13 @@ function TwoFASection() {
   return (
     <div className="space-y-0">
       <SettingRow label="Two-Factor Authentication" description="Require a time-based one-time code in addition to your password.">
-        {step === 'idle' && !enabled && (
+        {statusLoading ? (
+          <span role="status" className="text-xs text-slate-500">Checking MFA status…</span>
+        ) : statusError ? (
+          <button onClick={refreshEnrollment} type="button" className="text-xs text-amber-700 underline">
+            MFA status unavailable — retry
+          </button>
+        ) : step === 'idle' && !enabled && (
           <button
             onClick={startSetup}
             disabled={loading}
@@ -109,7 +137,7 @@ function TwoFASection() {
             Enable
           </button>
         )}
-        {enabled && (
+        {!statusLoading && !statusError && enabled && (
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
               <Check size={12} /> Active

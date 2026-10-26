@@ -30,10 +30,30 @@ def _fake_role_token(role: str) -> str:
 
 def _respond(route, *, summary_error: bool = False, role: str = "owner",
              email_fixture: bool = False, work_error: bool = False,
-             requests_seen: list[str] | None = None) -> None:
+             requests_seen: list[str] | None = None,
+             auth_fields_seen: list[tuple[str, ...]] | None = None) -> None:
     path = urlparse(route.request.url).path
     if requests_seen is not None:
         requests_seen.append(path)
+    if path in ("/auth/login", "/auth/register"):
+        body = route.request.post_data_json
+        if auth_fields_seen is not None:
+            auth_fields_seen.append(tuple(sorted(body.keys())))
+        if path == "/auth/register":
+            result = {"access_token": _fake_role_token("owner"), "company_id": "synthetic-tenant", "role": "owner"}
+            route.fulfill(status=201, content_type="application/json", body=json.dumps(result))
+            return
+        if "pre_auth_token" in body:
+            if body["pre_auth_token"] == "synthetic-pending" and body.get("totp_code") == "123456":
+                result = {"access_token": _fake_role_token("owner"), "company_id": "synthetic-tenant", "role": "owner"}
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(result))
+            else:
+                route.fulfill(status=401, content_type="application/json", body=json.dumps({"detail": "Invalid synthetic 2FA code"}))
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "requires_2fa": True, "pre_auth_token": "synthetic-pending",
+        }))
+        return
     if summary_error and path == "/api/dashboard/summary":
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic outage"}))
         return
@@ -85,7 +105,7 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner",
                              "cancel_at_period_end": False},
             "plan": {"name": "Synthetic QA Plan"},
         },
-        "/auth/me": {"name": "Synthetic Tester", "role": role},
+        "/auth/me": {"name": "Synthetic Tester", "role": role, "totp_enabled": False},
     }
     if path not in fixtures:
         # Fail closed: never respond with plausible empty business data to an
@@ -97,15 +117,18 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner",
 
 def _context(browser, role: str, width: int, *, summary_error: bool = False,
              email_fixture: bool = False, work_error: bool = False,
-             requests_seen: list[str] | None = None):
+             requests_seen: list[str] | None = None,
+             authenticated: bool = True,
+             auth_fields_seen: list[tuple[str, ...]] | None = None):
     context = browser.new_context(viewport={"width": width, "height": 844 if width < 768 else 900})
-    context.add_init_script(f"localStorage.setItem('secretary_token', {json.dumps(_fake_role_token(role))});")
+    if authenticated:
+        context.add_init_script(f"localStorage.setItem('secretary_token', {json.dumps(_fake_role_token(role))});")
     def mock_route(route):
         _respond(route, summary_error=summary_error, role=role,
                  email_fixture=email_fixture, work_error=work_error,
-                 requests_seen=requests_seen)
+                 requests_seen=requests_seen, auth_fields_seen=auth_fields_seen)
     context.route("**/api/**", mock_route)
-    context.route("**/auth/me", mock_route)
+    context.route("**/auth/**", mock_route)
     return context
 
 
@@ -239,6 +262,71 @@ def main() -> None:
                     assert page.get_by_text("No connectors registered yet.").count() == 0
                 finally:
                     connector_context.close()
+
+                # Synthetic signup and staged MFA: the second request must not resend a password.
+                auth_fields: list[tuple[str, ...]] = []
+                login_context = _context(browser, "owner", 390, authenticated=False, auth_fields_seen=auth_fields)
+                try:
+                    page = login_context.new_page()
+                    page.goto(PREVIEW + "/work", wait_until="domcontentloaded")
+                    page.wait_for_url(PREVIEW + "/login")
+                    page.get_by_label("Email address").fill("mfa@example.invalid")
+                    page.get_by_label("Password", exact=True).fill("SyntheticPassword9")
+                    page.get_by_role("button", name="Sign in").click()
+                    page.get_by_role("heading", name="Two-factor authentication").wait_for()
+                    assert page.evaluate("localStorage.getItem('secretary_token')") is None
+                    page.get_by_label("Authenticator code").fill("000000")
+                    page.get_by_role("button", name="Verify code").click()
+                    page.get_by_role("alert").get_by_text("Invalid synthetic 2FA code").wait_for()
+                    page.get_by_label("Authenticator code").fill("123456")
+                    page.get_by_role("button", name="Verify code").click()
+                    page.wait_for_url(PREVIEW + "/work")
+                    assert ("email", "password") == auth_fields[0]
+                    assert auth_fields[1:] == [("pre_auth_token", "totp_code"), ("pre_auth_token", "totp_code")]
+                finally:
+                    login_context.close()
+
+                registration_fields: list[tuple[str, ...]] = []
+                register_context = _context(browser, "owner", 390, authenticated=False, auth_fields_seen=registration_fields)
+                try:
+                    page = register_context.new_page()
+                    page.goto(PREVIEW + "/register", wait_until="domcontentloaded")
+                    page.get_by_label("Company name").fill("Synthetic QA Tenant")
+                    page.get_by_label("Your full name").fill("Fixture User")
+                    page.get_by_label("Work email").fill("fixture@example.invalid")
+                    page.get_by_label("Password", exact=False).first.fill("weakpass")
+                    page.get_by_label("Confirm password").fill("weakpass")
+                    assert page.get_by_role("button", name="Create account").is_disabled()
+                    assert registration_fields == []
+                    page.get_by_label("Password", exact=False).first.fill("SyntheticPassword9")
+                    page.get_by_label("Confirm password").fill("SyntheticPassword9")
+                    page.get_by_role("button", name="Create account").click()
+                    page.wait_for_url(PREVIEW + "/")
+                    assert registration_fields == [("company_name", "email", "full_name", "password")]
+                finally:
+                    register_context.close()
+
+                mfa_status_context = _context(browser, "owner", 390)
+                try:
+                    page = mfa_status_context.new_page()
+                    mfa_status_context.route("**/auth/me", lambda route: route.fulfill(status=503, body='{"detail":"outage"}', content_type="application/json"))
+                    page.goto(PREVIEW + "/settings", wait_until="domcontentloaded")
+                    page.get_by_role("button", name="Security").click()
+                    page.get_by_role("button", name="MFA status unavailable — retry").wait_for()
+                    assert page.get_by_role("button", name="Enable").count() == 0
+                finally:
+                    mfa_status_context.close()
+
+                mfa_enabled_context = _context(browser, "owner", 390)
+                try:
+                    page = mfa_enabled_context.new_page()
+                    mfa_enabled_context.route("**/auth/me", lambda route: route.fulfill(status=200, body='{"role":"owner","totp_enabled":true}', content_type="application/json"))
+                    page.goto(PREVIEW + "/settings", wait_until="domcontentloaded")
+                    page.get_by_role("button", name="Security").click()
+                    page.get_by_text("Active", exact=True).wait_for()
+                    assert page.get_by_role("button", name="Enable").count() == 0
+                finally:
+                    mfa_enabled_context.close()
             finally:
                 browser.close()
     finally:
@@ -247,7 +335,7 @@ def main() -> None:
             server.wait(timeout=5)
         except subprocess.TimeoutExpired:
             server.kill()
-    print("PASS: synthetic-only briefing, rep restriction, inbox/setup outages, billing read-only and consent UX")
+    print("PASS: synthetic-only briefing, role restrictions, MFA/signup, inbox/setup outages and billing read-only")
 
 
 if __name__ == "__main__":

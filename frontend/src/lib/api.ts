@@ -362,11 +362,15 @@ export const api = {
   },
 
   auth: {
-    login: (email: string, password: string, totp_code?: string) =>
+    login: (email: string, password: string) =>
       api.post<
         | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
         | { requires_2fa: true; pre_auth_token: string }
-      >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
+      >('/auth/login', { email, password }),
+    verify2fa: (pre_auth_token: string, totp_code: string) =>
+      api.post<{ access_token: string; token_type: string; company_id: string; role: string }>(
+        '/auth/login', { pre_auth_token, totp_code },
+      ),
   },
 
   // ── Compliance types ──────────────────────────────────────────────────────────

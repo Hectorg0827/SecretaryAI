@@ -118,7 +118,8 @@ async def get_dashboard_summary(
 
     return {
         "company_id": company_id,
-        # Company-wide aggregates are not the sales rep\u0027s assigned accounts.\n        "accounts":   accounts if ("view_customers" in perms or has_view_all) else None,
+        # Full-company totals are not scoped to each representative's accounts.
+        "accounts": accounts if ("view_customers" in perms or has_view_all) else None,
         # Only roles with inventory access see alerts
         "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
         # Financial figures visible to owner + manager only

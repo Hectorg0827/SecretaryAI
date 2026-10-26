@@ -126,6 +126,11 @@ async def compute_dashboard_payload(adapter) -> dict:
             if authoritative_qty is None:
                 raise ValueError("Inventory missing authoritative total_qty")
             qty = Decimal(str(authoritative_qty))
+            # UnifiedDataAdapter may supply 0.0 as an API-compatibility
+            # placeholder even if the inventory sync never observed velocity.
+            # A missing measurement is NOT a measured zero.
+            if item.get("weekly_sell_rate_observed") is not True:
+                raise ValueError("Inventory weekly sell rate not observed")
             rate_value = item.get("weekly_sell_rate")
             if rate_value is None:
                 raise ValueError("Inventory missing weekly sell rate")

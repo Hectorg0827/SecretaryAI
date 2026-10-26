@@ -49,28 +49,29 @@ def _redis():
 
 
 def _state_set(state: str, company_id: str) -> None:
+    """Persist OAuth state centrally or refuse to start the consent flow."""
     try:
-        r = _redis()
-        r.setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id)
-    except Exception as exc:
-        log.warning("Redis unavailable for OAuth state; using fallback: %s", exc)
-        _oauth_states_fallback[state] = company_id
+        if not _redis().setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id):
+            raise RuntimeError("Redis rejected OAuth state write")
+    except Exception:
+        # No process-local fallback: callbacks can land on a different worker.
+        # Never log Redis connection details, which may contain credentials.
+        log.error("OAuth state store unavailable; refusing consent flow")
+        raise HTTPException(
+            status_code=503, detail="OAuth temporarily unavailable"
+        ) from None
 
 
 def _state_pop(state: str) -> str | None:
+    """Atomically consume an OAuth state exactly once; fail closed on outage."""
     try:
-        r = _redis()
-        key = f"oauth_state:{state}"
-        company_id = r.get(key)
-        if company_id:
-            r.delete(key)
-        return company_id
+        # GETDEL prevents two concurrent callbacks from reusing one state.
+        return _redis().getdel(f"oauth_state:{state}")
     except Exception:
-        return _oauth_states_fallback.pop(state, None)
-
-
-# Fallback for when Redis is unreachable (single-worker dev only)
-_oauth_states_fallback: dict[str, str] = {}
+        log.error("OAuth state store unavailable; refusing callback")
+        raise HTTPException(
+            status_code=503, detail="OAuth temporarily unavailable"
+        ) from None
 
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────

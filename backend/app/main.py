@@ -152,30 +152,65 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 
 def _docs_key_ok(request: Request) -> bool:
+    """Accept a header or browser HTTP Basic auth, never a URL query key."""
+    import base64
+    import binascii
     import hmac
+
     expected = getattr(settings, "docs_api_key", "") or ""
-    provided = request.headers.get("x-docs-key", "") or request.query_params.get("docs_key", "")
-    # Constant-time compare so the key can't be recovered byte-by-byte via timing.
-    return bool(expected) and hmac.compare_digest(provided, expected)
+    if not expected:
+        return False
+
+    provided = request.headers.get("x-docs-key", "") or ""
+    if not provided:
+        authorization = request.headers.get("authorization", "")
+        if authorization.lower().startswith("basic "):
+            try:
+                raw = base64.b64decode(
+                    authorization.split(" ", 1)[1], validate=True
+                ).decode("utf-8")
+                username, separator, password = raw.partition(":")
+                if separator and username == "docs":
+                    provided = password
+            except (binascii.Error, UnicodeDecodeError, ValueError):
+                pass
+
+    # No docs key is ever accepted from, or copied into, a query string.
+    return hmac.compare_digest(provided, expected)
+
+
+def _docs_unauthorized() -> JSONResponse:
+    return JSONResponse(
+        {"detail": "Not authorized. Supply X-Docs-Key or HTTP Basic auth."},
+        status_code=401,
+        headers={
+            "WWW-Authenticate": 'Basic realm="SecretaryAI Docs"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 if not _EXPOSE_OPENAPI:
     @app.get("/openapi.json", include_in_schema=False)
     async def guarded_openapi(request: Request):
-        """Production OpenAPI schema — only for callers with a valid X-Docs-Key."""
+        """Production OpenAPI schema — gated without URL-based credentials."""
         if not _docs_key_ok(request):
-            return JSONResponse({"detail": "Not authorized."}, status_code=401)
-        return JSONResponse(app.openapi())
+            return _docs_unauthorized()
+        return JSONResponse(app.openapi(), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/docs", include_in_schema=False)
 async def custom_docs(request: Request):
-    """API docs — accessible with X-Docs-Key header (value from DOCS_API_KEY env var)."""
+    """API docs — use X-Docs-Key or browser Basic auth, never a query secret."""
     if not _docs_key_ok(request):
-        return JSONResponse({"detail": "Not authorized. Include X-Docs-Key header."}, status_code=401)
-    # Pass the key through so the browser can fetch the guarded schema.
-    schema_url = "/openapi.json?docs_key=" + (getattr(settings, "docs_api_key", "") or "")
-    return get_swagger_ui_html(openapi_url=schema_url, title="SecretaryAI API")
+        return _docs_unauthorized()
+    # The browser reuses its HTTP Basic credentials for /openapi.json.
+    # Do not place DOCS_API_KEY in HTML, schema URLs, or query strings.
+    response = get_swagger_ui_html(
+        openapi_url="/openapi.json", title="SecretaryAI API"
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ── Middleware ─────────────────────────────────────────────────────────────────

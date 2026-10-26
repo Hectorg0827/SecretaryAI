@@ -14,7 +14,7 @@ live-provider or database-backed acceptance test. No side effects authorized.
 | 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Stage 3.4 fixes multi-line extraction, overlapping cost-label double count, repeated component allocation and non-USD input rejection. The route returns explicitly unverified candidate USD amounts, not independently matched invoices or durable shipment costs. |
 | 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist a provider-verified carrier milestone and source timestamp. The default adapter previously fabricated coordinates, vessel name and `in_transit` status; it now reports unavailable/unknown instead. Live provider acceptance absent. |
 | 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Stage 3.4 validates port-day/date inputs, rejects future arrival and invalid dates, guards negated release and pending duty statements, and labels all API outcomes as candidate/estimate only. No verified booking/arrival, duty evidence, real alerts or durable status transition. |
-| 7. Receiving/stock | Legacy `process_warehouse_receipt` and separate `/orders` + `/receipts` routes | Legacy endpoint explicitly returns `analysis_only`. Durable V6 SQL supports distinct PO submit/approve, receipt stage/independent approval and atomic ledger posting (`supabase/migrations/20261017020000_purchasing_receiving.sql`, `20261017010000_stock_ledger.sql`). No verified integration between generated PO, freight, and durable receipts. SQL contract tests are not proof of deployed provider acceptance. |
+| 7. Receiving/stock | Legacy `process_warehouse_receipt`, separate `/orders` + `/receipts` routes, and new `/warehouse/*` work-order previews | Legacy endpoint explicitly returns `analysis_only`. Durable V6 SQL supports distinct PO submit/approve, receipt stage/independent approval and atomic ledger posting (`supabase/migrations/20261017020000_purchasing_receiving.sql`, `20261017010000_stock_ledger.sql`). Stage 3.5 adds route-mounted, role-gated **preview-only** picking, cycle-count, capacity/slotting and supplier-claim drafts; no verified linkage to a posted receipt, tenant-owned bin or event ledger yet. SQL contract tests are not proof of deployed provider acceptance. |
 | 8. Landed-cost variances | `reconcile_costs` -> `CostReconciliationEngine` | Baseline accepted incomplete/mismatched cost payloads and falsely upserted stage 8 from client text. The route now validates source identity, same SKU, finite nonnegative components and positive cases; result is `analysis_only` with candidate alerts, never a verified invoice or stage transition. Independent invoice/currency/receipt match is still missing. |
 | 9. Learning/report | `build_seasonal_indices`, `monthly_logistics_report`, `LearningEngine` | Seasonal arithmetic exists; `LogisticsModule` is created fresh per request with empty `_lead_time_records`, so supplier performance/lead-time memory is not persisted or recovered from verified receipts. |
 
@@ -80,6 +80,35 @@ Negated releases and unpaid-duty messages cannot become positive milestones.
 These are synthetic HTTP and calculation checks, **not** real vessel, broker,
 forwarder or warehouse integration acceptance.
 
+## Fifth owned regression — warehouse work-order draft boundaries
+
+`app/api/warehouse.py` is mounted from the owned `app/api/logistics.py` router
+under `/api/logistics/warehouse/`; no shared application loader was edited.
+`app/intelligence/wholesale_distribution/warehouse/planning.py` accepts bounded,
+timezone-aware caller snapshots (strict **cases** unit) and generates:
+
+- FEFO-first bin/lot pick drafts, excluding expired observations and tracking
+  local bin availability across multiple order lines, with shortages flagged.
+- Cycle-count variance/recount drafts, with no stock-adjustment pathway.
+- Capacity utilization, reservation overcommit and slotting-move candidates;
+  fewer than 30 observed pick events yield `insufficient_data` confidence.
+- Supplier shortage, over-receipt and damaged-case claim drafts, with no sender,
+  claim filing or financial write.
+
+`tests/test_wholesale_distribution/test_warehouse_previews.py` covers the real
+logistics-router registration, role restrictions, tenant identity sourced from
+the authenticated actor, duplicate/negative/mixed-unit input rejection, stale
+and naive timestamps, FEFO, shortage, no repeated bin allocation, safe empty
+capacity, slotting sample size and claim exceptions. All responses are
+`analysis_only`, with unverified source and required human review.
+
+**Not yet an operational warehouse system:** A caller-supplied bin, order, PO or
+receipt identity is not proof that it belongs to the tenant; none is queried or
+persisted. Pick lists cannot be issued or marked shipped; stock adjustments and
+claims cannot be approved, posted or sent. Shared schema/RLS and durable policy
+contracts belong to Chat 1. Authenticated warehouse and QuickBooks snapshots,
+including bin+lot allocations and source timestamps, belong to Chat 2.
+
 ## Interface requests — owner to forward manually
 
 **Chat 1 — architecture / approval gate:** Define tenant-scoped
@@ -90,6 +119,11 @@ shipments, invoice claims and reviewed cost variances. Synthetic pipeline
 upserts must not advance verified state. Gate sending POs, posting stock,
 adjustments, returns and financial writes independently. Supply migration/RLS
 ownership for needed event tables; Chat 3 will not edit shared migrations.
+For warehouse execution, define tenant-scoped location/bin/lot and count-session
+identity, immutable snapshot hashes, approval actors, pick reservations,
+movement/recount/claim event idempotency and auditable state transitions.
+Approval must be independent of the requesting user and cannot be inferred from
+successful calculation or a caller-supplied boolean.
 
 **Chat 2 — data/connectors:** Supply a read-only authenticated snapshot of
 mapped QB IDs, warehouse stock, allocations, in-transit purchase lines, open
@@ -103,6 +137,9 @@ rate source/date; booking/container/PO association; carrier status source,
 provider timestamp and unknown/outage semantics; broker message identity;
 port arrival/free-time rules, terminal tariff schedule and independent invoice
 review. No caller text may be upgraded to a customs release or duty payment.
+For warehouse reads, specify verified bin location capacity, SKU/lot/unit and
+expiry provenance, allocations, quarantines, open orders, counted balances and
+pick-event history with UTC timestamps, complete pagination and tenant mapping.
 
 ## Acceptance still outstanding
 

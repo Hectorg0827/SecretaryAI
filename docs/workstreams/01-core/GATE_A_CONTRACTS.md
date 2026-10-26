@@ -66,3 +66,13 @@ Required staging-only services: one FastAPI API, web frontend, Redis, a distinct
 ## Gate A acceptance
 
 Contract and compatibility tests must pass on exact feature-branch tip; architecture specification must be reviewed with Chat 2–5, and no shared-interface changes may be merged until the relevant owners adopt v1. This contract freeze does not represent live end-to-end verification, safe autonomous execution, or permission to deploy.
+
+
+## Security release blockers and mitigations (2026-10-26)
+
+- **Quarantined in Chat 1 PR #75:** legacy POST /api/dashboard/emails/send-reply unconditionally returns HTTP 409 without resolving a provider or emitting email. Browser confirmation cannot bypass tenant policy, durable approval or idempotent execution. It stays disabled pending separately verified gateway.
+- **Provider failure truthful:** POST /api/dashboard/emails/{email_id}/mark-read now raises HTTP 503 on provider exceptions. OPEN: Chat 2 must change UnifiedDataAdapter.mark_email_read to reject missing connector rather than silently succeeding.
+- **Current and prior sales failures truthful:** GET /api/dashboard/sales raises HTTP 503 for failed source reads instead of fabricating $0. Dataclass/dict dates and amounts use shared validation accessors. OPEN: Chat 2 must supply independent source-completeness/freshness evidence.
+- **PO draft authorization:** POST /api/actions/draft-po requires explicit server-side draft_purchase_orders permission: owner, manager, back_office only; sales_rep/viewer denied. Positive optional quantities enforced. OPEN: tenant-owned inventory/vendor validation before draft-to-execution promotion.
+- **OPEN:** approve/{draft_id} legacy provider sends and PO dispatches are not certified for unattended external effects. Mandatory future gateway needs durable execution receipt, policy recheck, idempotency and a test-only allowlist.
+- **OPEN:** app.api.inbox partial read and mark-read success semantics require per-source health metadata and fail-closed errors. UI cannot infer swallowed backend exceptions.

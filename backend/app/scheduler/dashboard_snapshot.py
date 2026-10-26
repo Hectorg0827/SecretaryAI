@@ -134,7 +134,8 @@ async def compute_dashboard_payload(adapter) -> dict:
         raise SnapshotSourceUnavailable("sales_30d") from exc
 
     return {
-        "source_quality": "verified",  # required reads completed successfully
+        "source_quality": "partial",  # underlying provider lineage not yet verified
+        "source_read_status": "completed",  # required top-level reads succeeded
         "accounts": {
             "healthy": health_counts.get("healthy", 0),
             "slowing": health_counts.get("slowing", 0),

@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Truck, ClipboardList, FileText, Ship, BarChart3 } from 'lucide-react';
 
 import { ReorderQueue, ReorderItem } from '../components/logistics/ReorderQueue';
-import { PurchaseOrders, PurchaseOrder } from '../components/logistics/PurchaseOrders';
+import { PurchasingRecords } from '../components/logistics/PurchasingRecords';
 import { ShipmentTracker, Shipment } from '../components/logistics/ShipmentTracker';
 import { CostAnalysis, CostVarianceRow } from '../components/logistics/CostAnalysis';
 
@@ -21,7 +21,6 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 // ── Empty initial state (no mock data) ───────────────────────────────────────
 
 const EMPTY_REORDER: ReorderItem[]       = [];
-const EMPTY_POS: PurchaseOrder[]         = [];
 const EMPTY_SHIPMENTS: Shipment[]        = [];
 const EMPTY_COST_ROWS: CostVarianceRow[] = [];
 
@@ -33,9 +32,6 @@ export function Logistics() {
   // Reorder queue state
   const [reorderItems, setReorderItems] = useState<ReorderItem[]>(EMPTY_REORDER);
 
-  // PO state
-  const [purchaseOrders] = useState<PurchaseOrder[]>(EMPTY_POS);
-
   // Shipments state
   const [shipments] = useState<Shipment[]>(EMPTY_SHIPMENTS);
 
@@ -44,7 +40,6 @@ export function Logistics() {
 
   // Count badges
   const reorderCount  = reorderItems.length;
-  const poCount       = purchaseOrders.length;
   const shipmentCount = shipments.length;
   const delayedCount  = shipments.filter((s) => s.is_delayed).length;
 
@@ -71,12 +66,6 @@ export function Logistics() {
                 <div className="text-xs text-slate-600">Pending reorders</div>
               </div>
             )}
-            {poCount > 0 && (
-              <div className="text-center">
-                <div className="text-lg font-bold text-slate-800">{poCount}</div>
-                <div className="text-xs text-slate-600">Open POs</div>
-              </div>
-            )}
             {delayedCount > 0 && (
               <div className="text-center">
                 <div className="text-lg font-bold text-red-600">{delayedCount}</div>
@@ -91,7 +80,6 @@ export function Logistics() {
           {TABS.map(({ id, label, icon: Icon }) => {
             const badge =
               id === 'reorder'   ? reorderCount  :
-              id === 'pos'       ? poCount        :
               id === 'shipments' ? shipmentCount  :
               0;
 
@@ -136,10 +124,7 @@ export function Logistics() {
           )}
 
           {activeTab === 'pos' && (
-            <PurchaseOrders
-              orders={purchaseOrders}
-              loading={false}
-            />
+            <PurchasingRecords />
           )}
 
           {activeTab === 'shipments' && (

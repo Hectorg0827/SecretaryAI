@@ -15,20 +15,6 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 
-def _upsert_cycle(db, company_id: str, po_number: str, stage: int,
-                  stage_name: str, supplier_id: str = "", total_cases: int = 0) -> None:
-    """Persist the current pipeline stage to procurement_cycles. Best-effort."""
-    try:
-        db.table("procurement_cycles").upsert({
-            "company_id":    company_id,
-            "po_number":     po_number,
-            "current_stage": stage,
-            "stage_name":    stage_name,
-            **({"supplier_id":   supplier_id}   if supplier_id   else {}),
-            **({"total_cases":   total_cases}    if total_cases   else {}),
-        }, on_conflict="company_id,po_number").execute()
-    except Exception as exc:
-        log.warning("procurement_cycles upsert failed for %s: %s", po_number, exc)
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, get_db
@@ -200,10 +186,30 @@ class LandedCostRequest(BaseModel):
     drayage_total: Optional[float] = None
 
 
+class LandedCostComparisonInput(BaseModel):
+    """Unverified per-case USD component observations, never invoice evidence."""
+    po_number: str = Field(min_length=1, max_length=100)
+    sku: str = Field(min_length=1, max_length=120)
+    cases: int = Field(gt=0, le=10000000)
+    supplier_id: str = Field(min_length=1, max_length=200)
+    shipment_date: str = ""
+    fob_cost_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    ocean_freight_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    fuel_surcharge_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    origin_charges_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    insurance_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    customs_duty_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    broker_fees_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    port_charges_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    demurrage_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    drayage_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    exam_fees_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+
+
 class CostReconcileRequest(BaseModel):
-    current: dict       # LandedCostBreakdown fields (serialised)
-    previous: dict      # LandedCostBreakdown fields (serialised)
-    selling_price_per_case: float = 0.0
+    current: LandedCostComparisonInput
+    previous: LandedCostComparisonInput
+    selling_price_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
 
 
 class SeasonalIndexRequest(BaseModel):
@@ -1039,54 +1045,20 @@ async def evaluate_reorder_queue(
 async def generate_purchase_orders(
     request: GeneratePORequest,
     user: dict = Depends(require_permission("manage_inventory")),
-    db=Depends(get_db),
 ):
     """
-    Generate purchase orders from a list of approved reorder packages.
-    Groups by supplier; suggests fill additions for containers <90% full.
-    Returns POs with rendered email bodies ready to send.
+    Fail closed until approved reorder proposals can be verified server-side.
+
+    A client-provided `approved` flag is not a durable human approval. The
+    separate /orders flow supports independently approved durable PO drafts;
+    no unverified package may mint an order number or advance pipeline status.
     """
-    lm = _get_logistics_module(user, db)
-
-    # Deserialize packages (from JSON dict to simple namespace for PO generator)
-    from types import SimpleNamespace
-
-    def _dict_to_package(d: dict):
-        ns = SimpleNamespace(**d)
-        # Ensure urgency is the right type
-        from app.intelligence.wholesale_distribution.logistics.pipeline import UrgencyLevel
-        if isinstance(ns.urgency, str):
-            ns.urgency = UrgencyLevel(ns.urgency)
-        return ns
-
-    approved = [_dict_to_package(p) for p in request.approved_packages]
-    results = lm.generate_purchase_orders(approved, request.supplier_configs)
-
-    # Persist stage 2 for each generated PO
-    for r in results:
-        _upsert_cycle(
-            db, user["company_id"],
-            po_number=r["po"].po_number,
-            stage=2, stage_name="po_generated",
-            supplier_id=str(r["po"].supplier_id),
-            total_cases=r["po"].total_cases,
-        )
-
-    return {
-        "po_count": len(results),
-        "purchase_orders": [
-            {
-                "po_number": r["po"].po_number,
-                "supplier_id": r["po"].supplier_id,
-                "total_cases": r["po"].total_cases,
-                "total_value": round(r["po"].total_value, 2),
-                "status": r["po"].status,
-                "line_item_count": len(r["po"].line_items),
-                "email_body": r["email_body"],
-            }
-            for r in results
-        ],
-    }
+    raise HTTPException(
+        status_code=409,
+        detail=("Canonical human approval of a tenant-scoped reorder proposal "
+                "is required before PO generation; use the separately "
+                "approved durable purchasing workflow."),
+    )
 
 
 # ─── Stage 3 — Vendor Response Tracking ──────────────────────────────────────
@@ -1311,29 +1283,16 @@ async def reconcile_costs(
     db=Depends(get_db),
 ):
     """
-    Compare current vs. previous shipment landed costs.
-    Returns any significant variances with per-case and annualized impact.
+    Preview caller-supplied costs; never certify invoices or advance a PO.
     """
+    if request.current.sku != request.previous.sku:
+        raise HTTPException(status_code=422, detail="Cost comparison requires the same SKU")
     lm = _get_logistics_module(user, db)
 
-    def _dict_to_lcd(d: dict) -> LandedCostBreakdown:
+    def _dict_to_lcd(d: LandedCostComparisonInput) -> LandedCostBreakdown:
+        values = d.model_dump()
         return LandedCostBreakdown(
-            po_number=d.get("po_number", ""),
-            sku=d.get("sku", ""),
-            cases=d.get("cases", 0),
-            supplier_id=d.get("supplier_id", ""),
-            fob_cost_per_case=d.get("fob_cost_per_case", 0.0),
-            shipment_date=d.get("shipment_date", ""),
-            ocean_freight_per_case=d.get("ocean_freight_per_case", 0.0),
-            fuel_surcharge_per_case=d.get("fuel_surcharge_per_case", 0.0),
-            origin_charges_per_case=d.get("origin_charges_per_case", 0.0),
-            insurance_per_case=d.get("insurance_per_case", 0.0),
-            customs_duty_per_case=d.get("customs_duty_per_case", 0.0),
-            broker_fees_per_case=d.get("broker_fees_per_case", 0.0),
-            port_charges_per_case=d.get("port_charges_per_case", 0.0),
-            demurrage_per_case=d.get("demurrage_per_case", 0.0),
-            drayage_per_case=d.get("drayage_per_case", 0.0),
-            exam_fees_per_case=d.get("exam_fees_per_case", 0.0),
+            **values,
         )
 
     current = _dict_to_lcd(request.current)
@@ -1341,16 +1300,13 @@ async def reconcile_costs(
 
     result = lm.reconcile_costs(current, previous, request.selling_price_per_case)
 
-    # Persist stage 8 using current shipment's po_number
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.current.get("po_number", ""),
-        stage=8, stage_name="cost_reconciled",
-        supplier_id=str(request.current.get("supplier_id", "")),
-        total_cases=int(request.current.get("cases", 0)),
-    )
-
     return {
+        "status": "analysis_only",
+        "landed_cost_verified": False,
+        "accounting_reconciled": False,
+        "pipeline_status_changed": False,
+        "requires_independent_invoice_review": True,
+        "source": "caller_supplied_unverified_components",
         "variance_count": len(result["variances"]),
         "critical_count": sum(1 for v in result["variances"] if v.severity == "critical"),
         "variances": [
@@ -1366,7 +1322,11 @@ async def reconcile_costs(
             }
             for v, msg in zip(result["variances"], result["formatted"])
         ],
-        "alerts": [_serialize_alert(a) for a in result["alerts"]],
+        "alerts": [],
+        "suggested_alerts": [
+            {**_serialize_alert(a), "requires_human_review": True}
+            for a in result["alerts"]
+        ],
     }
 
 

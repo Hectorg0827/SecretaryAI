@@ -208,6 +208,22 @@ async def approve_draft(
                 status_code=409, detail="Draft could not be durably approved"
             ) from exc
 
+        # A duplicate idempotent approval is not a *new* queue event.
+        # Never claim a new dispatch or write a second "approved" audit row.
+        if durable.get("queued") is not True:
+            if durable.get("already_processed") is True:
+                return {
+                    "draft_id": draft_id,
+                    "status": durable.get("status", "already_processed"),
+                    "execution_status": "already_processed",
+                    "execution_id": durable["execution_id"],
+                    "already_processed": True,
+                }
+            raise HTTPException(
+                status_code=409,
+                detail="Durable approval was not queued; no action executed",
+            )
+
         write_audit_event(
             db, company_id=user["company_id"],
             event_type="draft_approved", actor_id=user["sub"],

@@ -130,14 +130,14 @@ async def compute_dashboard_payload(adapter) -> dict:
             if rate_value is None:
                 raise ValueError("Inventory missing weekly sell rate")
             rate = Decimal(str(rate_value))
-            if not qty.is_finite() or qty < 0 or qty != qty.to_integral_value():
-                raise ValueError("Inventory must have finite nonnegative whole-unit quantity")
+            if not qty.is_finite() or qty < 0:
+                raise ValueError("Inventory quantity must be finite and nonnegative")
             if not rate.is_finite() or rate < 0:
                 raise ValueError("Weekly sell rate must be finite and nonnegative")
             status = evaluate_inventory(
                 item_id=item.get("qb_id", ""),
                 product_name=item.get("product_name", ""),
-                warehouse_1_qty=int(qty),
+                warehouse_1_qty=qty,  # Decimal preserves fractional item/weight units
                 warehouse_2_qty=0,
                 weekly_sell_rate=rate,
             )
@@ -146,7 +146,7 @@ async def compute_dashboard_payload(adapter) -> dict:
                     "item_id":         item.get("qb_id", ""),
                     "product_name":    item.get("product_name", ""),
                     "total_qty":       item.get("total_qty", 0),
-                    "weeks_remaining": status.weeks_remaining,
+                    "weeks_remaining": float(status.weeks_remaining) if status.weeks_remaining is not None else None,
                     "stock_status":    status.status,
                     "needs_po":        True,
                 })

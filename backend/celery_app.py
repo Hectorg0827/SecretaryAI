@@ -18,6 +18,7 @@ app = Celery(
     include=[
         "tasks.overnight",
         "tasks.morning_briefing",
+        "tasks.dashboard_refresh",
         "tasks.weekly_report",
         "tasks.sync_check",
         "tasks.account_health",

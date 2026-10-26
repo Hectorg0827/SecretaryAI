@@ -109,6 +109,40 @@ claims cannot be approved, posted or sent. Shared schema/RLS and durable policy
 contracts belong to Chat 1. Authenticated warehouse and QuickBooks snapshots,
 including bin+lot allocations and source timestamps, belong to Chat 2.
 
+## Sixth owned regression — analytical evidence and comparability
+
+`tests/test_wholesale_distribution/test_evidence_quality_gate.py` first
+reproduced deterministic-stockout inversion, a false zero-risk result for
+constant demand, empty/sparse lead-time substitution, fabricated echelon
+observations, missing-date SCOR delivery successes, unmeasured SCOR benchmark
+scores, ToC bottlenecks without actual queue evidence, and supplier TCO
+comparisons that assumed missing freight/duties meant zero cost. Additional
+tests reproduce invalid ESG rates, missing TCO volume, unequal annual volumes,
+unmatched units (case vs bottle), unspecified units, and mixed/unknown
+currencies. These failures have now been repaired inside the owned engines.
+
+- Stochastic recommendations expose demand and supplier lead-time sample sizes
+  and label the service level as **modeled**, not observed. Empty observations
+  are rejected; sparse histories are explicitly downgraded. Point-estimate
+  echelon lead time is one estimate, not synthetic repeat shipments. Available
+  in-transit inventory is included in the modeled risk, not silently ignored.
+- SCOR only scores verifiable, complete delivery inputs; samples and coverage
+  drive an `insufficient_data` rating rather than an unsupported benchmark.
+  Agility without measured change history and domains without observations
+  are unknown. ToC requires queue evidence to mark a constraint candidate and
+  labels throughput/gain numbers as unmeasured heuristics.
+- ESG reference factors are illustrative configuration values, **not**
+  independently verified industry norms. Supplier TCO comparisons require all
+  named costs, positive identical annual volumes, the same explicit unit of
+  measure, known current supplier, and USD currency pending reviewed FX.
+  Results remain analysis-only candidates for human review, never PO, stock,
+  supplier communication, finance or accounting actions. An explicit field
+  does not prove its value was independently sourced or verified.
+
+The calculations have synthetic regression coverage, **not** measured forecast
+accuracy, verified carrier/customer source data or live/sandbox end-to-end
+proof. Phase labels and formula heuristics are not production certification.
+
 ## Interface requests — owner to forward manually
 
 **Chat 1 — architecture / approval gate:** Define tenant-scoped
@@ -124,6 +158,9 @@ identity, immutable snapshot hashes, approval actors, pick reservations,
 movement/recount/claim event idempotency and auditable state transitions.
 Approval must be independent of the requesting user and cannot be inferred from
 successful calculation or a caller-supplied boolean.
+For supply-chain analytics, define canonical SKU/base unit, case-pack/volume
+conversion, cost currency, reviewed FX source/date, observation provenance and
+required approval status for any forecast-initiated PO or supplier switch.
 
 **Chat 2 — data/connectors:** Supply a read-only authenticated snapshot of
 mapped QB IDs, warehouse stock, allocations, in-transit purchase lines, open
@@ -140,6 +177,12 @@ review. No caller text may be upgraded to a customs release or duty payment.
 For warehouse reads, specify verified bin location capacity, SKU/lot/unit and
 expiry provenance, allocations, quarantines, open orders, counted balances and
 pick-event history with UTC timestamps, complete pagination and tenant mapping.
+For analytical evidence, provide complete timestamped demand observations,
+actual received supplier lead times (not advertised estimates), measured SCOR
+promised vs delivered timestamps and damage counts, process queue/throughput
+time series, unit-normalized supplier quotes/cost breakdowns and attributable
+ESG emission factors with scope/boundary/method. Surface missing-source and
+stale-snapshot reasons instead of zero defaults or calculated confidence.
 
 ## Acceptance still outstanding
 

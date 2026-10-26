@@ -118,3 +118,33 @@ and a consumer-visible data-quality envelope before promoting a warehouse
 measurement to verified; adopt the observed/status fields in consumers and
 ensure any source-unavailable dashboard or stock insight is marked partial.
 No new table or central schema is proposed by this interim compatibility fix.
+
+## Follow-up: proactive-insight source checks (Milestone 3)
+
+`backend/tasks/proactive_insights.py` (Chat 1-owned) sends `Customer` and
+`Invoice` dataclasses plus `get_inventory_merged()` records to
+`app.intelligence.opportunity_detector.detect_opportunities()` (Chat 2-owned).
+Deterministic tests reproduced crashes when an invoice amount was a valid zero
+and when mixed string/date values were compared. Some missing/invalid balances
+were silently interpreted as no AR exposure. These owned detector paths now
+normalize dates and record access, validate overdue balances, and fail closed
+on malformed identity/date/money input rather than fabricate verified zero.
+
+For potential low-stock purchase-order drafts, the detector now evaluates the
+**authoritative** `total_qty` exactly once (never `qb_qty + warehouse_qty`),
+and requires all of:
+
+- Known `quantity_source` (`quickbooks` or verified `warehouse`) whose matching
+  observed quantity equals `total_qty` and is a valid whole unit.
+- `weekly_sell_rate_observed=True`, status `observed`, and finite positive rate.
+- `open_po_qty_observed=True`, status `observed`, and confirmed `open_po_qty=0`.
+- Nonempty source item ID and product identity.
+
+**Chat 1 / Chat 3 dependency:** `get_inventory_merged()` does *not* currently
+populate open-PO quantity or a verified source status for each SKU. Therefore
+these safety checks intentionally suppress speculative purchase-order drafts
+until the order/PO reconciliation owner supplies a read-only open-PO observation
+with SKU/UOM identity, freshness and source provenance. Do not remove this
+gate or infer `open_po_qty=0` from an absent field. The existing action label
+remains draft-only, but human approval and role/tenant enforcement belong in
+the shared actions API. No feed table schema or scheduler code was changed.

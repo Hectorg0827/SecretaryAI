@@ -1468,3 +1468,10 @@ def _serialize_alert(alert) -> Optional[dict]:
         "recipients": alert.recipients,
         "financial_impact_usd": alert.financial_impact_usd,
     }
+
+
+# Owned warehouse preview router. The shared application loader already mounts
+# logistics.router, so no cross-team route-registration edits are necessary.
+from app.api import warehouse as warehouse_preview_routes
+
+router.include_router(warehouse_preview_routes.router, prefix="/warehouse", tags=["warehouse"])

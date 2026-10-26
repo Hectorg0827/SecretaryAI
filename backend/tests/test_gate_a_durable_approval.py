@@ -149,3 +149,38 @@ async def test_unqueued_durable_response_without_prior_processing_is_rejected():
             )
     assert caught.value.status_code == 409
     audit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_unqueued_ambiguous_rpc_result():
+    from app.workflows.execution_gateway import (
+        ExecutionDatabaseUnavailable, PostgresDurableGateway,
+    )
+
+    gateway = PostgresDurableGateway("postgresql://fixture")
+    with patch.object(gateway, "_call", new=AsyncMock(return_value={
+        "execution_id": "execution-x", "queued": False,
+        "already_processed": False,
+    })):
+        with pytest.raises(ExecutionDatabaseUnavailable):
+            await gateway.approve_and_enqueue(
+                "tenant-x", "draft-x", "actor-x",
+                {"body": "fixture"}, "idem-x",
+            )
+
+
+@pytest.mark.asyncio
+async def test_transport_accepts_duplicate_with_existing_execution_identity():
+    from app.workflows.execution_gateway import PostgresDurableGateway
+
+    gateway = PostgresDurableGateway("postgresql://fixture")
+    with patch.object(gateway, "_call", new=AsyncMock(return_value={
+        "execution_id": "existing-x", "queued": False,
+        "already_processed": True, "status": "approved",
+    })):
+        response = await gateway.approve_and_enqueue(
+            "tenant-x", "draft-x", "actor-x",
+            {"body": "fixture"}, "idem-x",
+        )
+    assert response["already_processed"] is True
+    assert response["queued"] is False

@@ -19,6 +19,15 @@ from decimal import Decimal
 log = logging.getLogger(__name__)
 
 
+class SnapshotSourceUnavailable(RuntimeError):
+    """A required source read failed; do not publish fictitious zero metrics."""
+
+    def __init__(self, source: str):
+        self.source = source
+        super().__init__(f"Required dashboard source unavailable: {source}")
+
+
+
 async def compute_dashboard_payload(adapter) -> dict:
     """
     Pull data from QB/warehouse, score accounts and evaluate inventory.
@@ -68,6 +77,7 @@ async def compute_dashboard_payload(adapter) -> dict:
             health_counts[health.status] += 1
     except Exception as exc:
         log.error("Dashboard snapshot: account health failed: %s", exc)
+        raise SnapshotSourceUnavailable("account_health") from exc
 
     # ── Inventory alerts ──────────────────────────────────────────────────
     try:
@@ -91,6 +101,7 @@ async def compute_dashboard_payload(adapter) -> dict:
                 })
     except Exception as exc:
         log.error("Dashboard snapshot: inventory eval failed: %s", exc)
+        raise SnapshotSourceUnavailable("inventory") from exc
 
     # ── 30-day sales ──────────────────────────────────────────────────────
     try:
@@ -101,8 +112,10 @@ async def compute_dashboard_payload(adapter) -> dict:
         )
     except Exception as exc:
         log.error("Dashboard snapshot: sales total failed: %s", exc)
+        raise SnapshotSourceUnavailable("sales_30d") from exc
 
     return {
+        "source_quality": "verified",  # required reads completed successfully
         "accounts": {
             "healthy": health_counts.get("healthy", 0),
             "slowing": health_counts.get("slowing", 0),

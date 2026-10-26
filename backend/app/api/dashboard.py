@@ -23,6 +23,7 @@ from app.scheduler.dashboard_snapshot import (
     store_snapshot,
     read_snapshot,
     SnapshotSourceUnavailable,
+    snapshot_freshness,
 )
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,10 @@ async def get_dashboard_summary(
         generated_at = None
         cached = False
 
+    freshness = snapshot_freshness(generated_at) if cached else {
+        "status": "fresh", "age_seconds": 0.0, "stale": False,
+    }
+
     accounts         = cached_payload.get("accounts", {})
     inventory_alerts = cached_payload.get("inventory_alerts", [])
     sales_30d        = cached_payload.get("sales_30d", 0.0)
@@ -117,6 +122,10 @@ async def get_dashboard_summary(
         "generated_at":     generated_at,
         "cached":           cached,
         "source_quality":   cached_payload.get("source_quality", "unknown"),
+        "source_read_status": cached_payload.get("source_read_status", "unknown"),
+        "snapshot_freshness": freshness["status"],
+        "snapshot_age_seconds": freshness["age_seconds"],
+        "snapshot_stale": freshness["stale"],
     }
 
 

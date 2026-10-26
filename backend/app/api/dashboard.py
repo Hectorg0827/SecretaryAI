@@ -76,7 +76,7 @@ async def get_dashboard_summary(
     sales_30d        = cached_payload.get("sales_30d", 0.0)
 
     # ── Pending approvals — always live (cheap DB query) ───────────────────
-    pending_count = 0
+    pending_count: int | None = None
     try:
         result = (
             db.table("drafts")
@@ -90,7 +90,7 @@ async def get_dashboard_summary(
         log.warning("Dashboard summary: pending count failed: %s", exc)
 
     # ── Unread email count — always live (real-time inbox) ─────────────────
-    unread_count = 0
+    unread_count: int | None = None
     try:
         emails = await adapter.get_emails(query="is:unread", max_results=50)
         unread_count = len(emails)
@@ -116,6 +116,7 @@ async def get_dashboard_summary(
         # Cache metadata — frontend uses this to show "Data as of X"
         "generated_at":     generated_at,
         "cached":           cached,
+        "source_quality":   cached_payload.get("source_quality", "unknown"),
     }
 
 

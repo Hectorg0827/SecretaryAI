@@ -16,6 +16,37 @@ records are included in this public repository.
 | People/HR #15 | `hr/onboarding.py` | Opaque staff onboarding/training/license renewal statuses and scoped briefing; no employment decisions |
 | Dynamic pricing #23 | `wholesale_distribution/dynamic_pricing.py` | Observational confidence guard, modeled pass-through using real costs and human price-approval flags |
 
+## Chat 5 opportunity classification and drilldowns
+
+The owned `growth/opportunity_taxonomy.py` is a pure projection helper for
+Chat 5's requested department views. It supports a **closed vocabulary** of
+signal codes, rather than trusting free-form model-generated event types.
+
+| Department | Example signals | Briefing section / next-action category |
+|---|---|---|
+| Compliance | `compliance_renewal_due`, `compliance_source_stale` | Red/yellow alerts; review dated evidence |
+| Brand | `brand_decline`, `supplier_service_decline`, `brand_growth` | Yellow alert or scoreboard; inspect source-backed scorecard |
+| Product development | `concept_cannibalization_risk`, `launch_underperformance` | Yellow alerts; validate concept and observed launch cohorts |
+| Portfolio | `portfolio_stock_at_risk`, `portfolio_contribution_gap` | Yellow/opportunity; dependency-safe SKU review |
+| Pricing | `margin_breach`, `promotion_roi_negative` | Red/yellow alerts; audit waterfall/baseline |
+| Dynamic pricing | `price_exception`, `insufficient_elasticity` | Yellow alerts; human price approval or observation review |
+| HR | `hr_training_due` | Restricted red alert; private HR task review only |
+
+`GrowthSignal` carries tenant, opaque entity ref, exact signal code, metric,
+source quality, record ID, revision and time. `PolicyScope` is a *server-validated
+handoff requirement*, **not** an authentication credential. The classifier
+rejects wrong tenant, disallowed role, missing entity grant or missing policy
+decision ID. It removes metric values when evidence is stale, partial or
+unavailable, retaining red-alert urgency instead of fabricating a healthy zero.
+All outputs have `approval_required=True` and `execution_claimed=False`.
+The `actions_taken` briefing section is intentionally never generated here:
+that requires verified external receipts under Chat 1's authority.
+
+The current platform RBAC has no dedicated HR role. Accordingly `hr_admin`
+is only a proposed technical role label and must remain inaccessible until
+Chat 1 authorizes its server-side policy mapping. General owners/managers do
+not receive HR detail implicitly.
+
 ## Internal interface rule
 
 Each engine accepts an immutable snapshot scoped to `company_id`. The caller

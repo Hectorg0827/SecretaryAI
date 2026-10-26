@@ -86,3 +86,13 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - `PolicyEngine.evaluate` now fails closed for COMMIT/DESTRUCTIVE when either authoritative `policy_rules` or tenant `company_features` cannot be loaded. READ/DRAFT may continue with conservative defaults. The API converts a policy-source failure to deny rather than allowing a default approval threshold.
 - Synthetic tests exercise the disabled path, policy-store outages, queue-only behavior, PO refusal, duplicate approval, ambiguous ledger response and protected transport. No external email or PO was sent.
 - **Remaining release blockers:** independent verification of the SQL RPC and immutable receipt schema; comprehensive provider callback/reconciliation tests; no automatic retry of unknown outcomes; approved worker/beat deployment in staging after separate authorization; per-company scopes and app data-source completeness.
+
+
+## Gate A read-only executive briefing API (initial partial integration)
+
+- New `GET /api/briefing/today` is registered under the paid API guard and requires an authenticated `owner` or `manager` with `view_financials` permission. Other roles receive HTTP 403; company_id is from the trusted JWT, not the request body.
+- Source: the existing `report_snapshots` tenant-filtered `dashboard_summary` cache only. The endpoint **never connects to Gmail, QuickBooks or a provider and never creates or executes an action**.
+- The response uses `RoleBriefing.to_payload()` v1.0 with six canonical sections and evidence references. `source_coverage=dashboard_snapshot_only`, `complete_digest=false` and `source_quality=partial` disclose the intentionally incomplete scope. Opportunities and actions_taken remain empty until verified evidence, not because the company necessarily had none.
+- Missing/invalid/stale snapshots, unverified read status, invalid figures and aggregate inconsistencies return HTTP 503 rather than misrepresenting an operational all-clear. Currently supports company totals and critical/low inventory counts, not record-level account data.
+- Chat 5 may consume this endpoint as an additional executive prototype but must prominently display the partial-coverage disclaimer and 503 unavailable state. Do NOT substitute it as the validated full morning briefing until real provider evidence, account-level RBAC, worker execution receipts and proof of source coverage are integrated.
+- Before enabling sales-rep or logistics views, Chat 1/2/3 must agree on record-level ownership, territory, permission checks and per-source reliability. Client role hiding is not authorization.

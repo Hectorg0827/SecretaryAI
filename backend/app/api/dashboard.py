@@ -23,6 +23,7 @@ from app.scheduler.dashboard_snapshot import (
     store_snapshot,
     read_snapshot,
     SnapshotSourceUnavailable,
+    SnapshotPersistenceUnavailable,
     snapshot_freshness,
 )
 
@@ -68,7 +69,12 @@ async def get_dashboard_summary(
                 status_code=503,
                 detail="Business data temporarily unavailable; dashboard refresh not completed",
             ) from exc
-        store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
+        try:
+            store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
+        except SnapshotPersistenceUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Dashboard data could not be saved"
+            ) from exc
         generated_at = None
         cached = False
 

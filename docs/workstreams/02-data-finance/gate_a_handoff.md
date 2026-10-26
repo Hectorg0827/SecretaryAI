@@ -89,3 +89,32 @@ never fill missing series with invented numbers or present bounds as facts.
 
 No migration, deployed SHA verification, production action or vendor-backed
 acceptance occurred in Chat 2's first audit.
+
+## Follow-up: source-independence test fixture results
+
+The default `AccessRouter.route("inventory")` API path uses the same
+QuickBooks provider as `get_inventory_qb()`
+(`backend/app/router/access_router.py:247–275`). It is **not** a second
+warehouse source. Otherwise its QB item `sku` can match but its native
+`quantity_on_hand` field can be mistaken for a missing `quantity` field and
+interpreted as warehouse zero. This was reproduced with deterministic
+fixtures and corrected in Chat 2's adapter without changing router ownership.
+
+Interim additive `get_inventory_merged()` entry keys:
+
+- `source_quality=partial` until provider lineage and completeness are proven.
+- `warehouse_source_status=observed|missing|stale|unavailable|not_independent`
+  and `warehouse_qty_observed` disambiguate a verified zero from absent data.
+- `warehouse_source_path` and `warehouse_fetched_at` retain route provenance.
+- `weekly_sell_rate_observed` and `weekly_sell_rate_source_status` identify
+  unobserved sales velocity. Legacy numeric zeros remain for compatibility
+  and **must not** be displayed as verified zero without the observed flag.
+- `warehouse_authoritative` fails closed on missing, stale, invalid, or
+  non-independent warehouse data. QB-authoritative stock remains QB-only,
+  without adding warehouse quantities to duplicate physical inventory.
+
+**Chat 1 / Chat 3 request:** provide an independently scoped warehouse route
+and a consumer-visible data-quality envelope before promoting a warehouse
+measurement to verified; adopt the observed/status fields in consumers and
+ensure any source-unavailable dashboard or stock insight is marked partial.
+No new table or central schema is proposed by this interim compatibility fix.

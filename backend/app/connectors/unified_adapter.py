@@ -241,17 +241,55 @@ class UnifiedDataAdapter:
         """
         qb_items = await self.get_inventory_qb()
 
+        policy = self._config.get("inventory_quantity_policy", "qb_authoritative")
+        if policy not in ("qb_authoritative", "warehouse_authoritative"):
+            raise ValueError("Unknown inventory quantity authority policy")
+
         router = self._get_router()
         warehouse_data: list[dict] = []
+        warehouse_source_status = "unavailable"
+        warehouse_source_path = None
+        warehouse_fetched_at = None
         try:
             result = await router.route("inventory", {})
-            # Router returns raw items; we need only the warehouse quantities
-            warehouse_data = result.data.get("rows", result.data.get("items", []))
+            if getattr(result, "is_ok", True) is False:
+                raise RuntimeError("Warehouse read returned a source error")
+            source = getattr(result, "source", None)
+            warehouse_source_path = getattr(source, "value", None)
+            fetched_at = getattr(result, "fetched_at", None)
+            warehouse_fetched_at = fetched_at.isoformat() if fetched_at else None
+            # AccessRouter's default inventory API path queries QuickBooks
+            # again. It is NOT an independent warehouse observation.
+            if warehouse_source_path == "api":
+                warehouse_source_status = "not_independent"
+            else:
+                payload = result.data
+                if isinstance(payload, list):
+                    warehouse_data = payload
+                elif isinstance(payload, dict):
+                    warehouse_data = payload.get("rows", payload.get("items", []))
+                else:
+                    raise ValueError("Warehouse response lacks item data")
+                if not isinstance(warehouse_data, list):
+                    raise ValueError("Warehouse response is not a list of items")
+                file_is_outdated = (
+                    warehouse_source_path == "file"
+                    and getattr(result, "confidence", 100) <= 45
+                )
+                if getattr(result, "is_stale", False) or file_is_outdated:
+                    warehouse_source_status = "stale"
+                else:
+                    warehouse_source_status = "available" if warehouse_data else "missing"
         except Exception:
-            pass  # QB data stands alone if no warehouse source available
+            warehouse_source_status = "unavailable"
+        if policy == "warehouse_authoritative" and warehouse_source_status in (
+            "unavailable", "not_independent", "missing", "stale"
+        ):
+            raise RuntimeError("Required independent warehouse source unavailable or stale")
 
         # Load weekly_sell_rate from Supabase inventory table (populated by Celery sync)
         sell_rate_by_qb_id: dict[str, float] = {}
+        sell_rate_source_status = "missing"
         if self._db:
             try:
                 company_id = self._config.get("id")
@@ -260,9 +298,11 @@ class UnifiedDataAdapter:
                 ).execute()
                 for row in (result.data or []):
                     if row.get("qb_id") and row.get("weekly_sell_rate") is not None:
-                        sell_rate_by_qb_id[row["qb_id"]] = float(row["weekly_sell_rate"])
+                        value = float(row["weekly_sell_rate"])
+                        if 0 <= value < float("inf"):
+                            sell_rate_by_qb_id[row["qb_id"]] = value
             except Exception:
-                pass
+                sell_rate_source_status = "unavailable"
 
         merged: list[dict] = []
         for item in qb_items:
@@ -277,6 +317,17 @@ class UnifiedDataAdapter:
                 "unit_price": float(item.unit_price),
                 "purchase_cost": float(item.purchase_cost),
                 "weekly_sell_rate": sell_rate_by_qb_id.get(item.qb_id, 0.0),
+                # Legacy numeric fields remain compatible, but are not proof of
+                # a real zero unless the corresponding observed flag is true.
+                "weekly_sell_rate_observed": item.qb_id in sell_rate_by_qb_id,
+                "weekly_sell_rate_source_status": (
+                    "observed" if item.qb_id in sell_rate_by_qb_id else sell_rate_source_status
+                ),
+                "warehouse_qty_observed": False,
+                "warehouse_source_status": warehouse_source_status,
+                "warehouse_source_path": warehouse_source_path,
+                "warehouse_fetched_at": warehouse_fetched_at,
+                "source_quality": "partial",
                 "source": "qb",
             }
 
@@ -285,9 +336,6 @@ class UnifiedDataAdapter:
             # supported until locations and lot ownership are reconciled.
             entry["quantity_source"] = "quickbooks"
             entry["reconciliation_required"] = False
-            policy = self._config.get("inventory_quantity_policy", "qb_authoritative")
-            if policy not in ("qb_authoritative", "warehouse_authoritative"):
-                policy = "qb_authoritative"
             entry["inventory_quantity_policy"] = policy
             for w in warehouse_data:
                 if not isinstance(w, dict):
@@ -307,6 +355,10 @@ class UnifiedDataAdapter:
                     if not 0 <= qty < float("inf"):
                         continue
                     entry["warehouse_qty"] = qty
+                    entry["warehouse_qty_observed"] = True
+                    entry["warehouse_source_status"] = (
+                        "stale" if warehouse_source_status == "stale" else "observed"
+                    )
                     entry["source"] = "qb+warehouse"
                     entry["reconciliation_required"] = qty != entry["qb_qty"]
                     if policy == "warehouse_authoritative":
@@ -315,6 +367,11 @@ class UnifiedDataAdapter:
                     # Default: QB stays authoritative until the business
                     # explicitly selects an authoritative warehouse source.
                     break
+
+            if not entry["warehouse_qty_observed"] and warehouse_source_status == "available":
+                entry["warehouse_source_status"] = "missing"
+            if policy == "warehouse_authoritative" and not entry["warehouse_qty_observed"]:
+                raise RuntimeError("Required warehouse quantity missing or invalid")
 
             merged.append(entry)
 

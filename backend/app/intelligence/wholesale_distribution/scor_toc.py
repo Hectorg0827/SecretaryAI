@@ -32,6 +32,7 @@ ToC 5 Focusing Steps (automated)
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 from enum import Enum
@@ -76,7 +77,7 @@ class SCORMetrics:
     supplier_lead_time_days: float = 0.0            # avg supplier lead time
 
     # Agility
-    upside_flexibility_days: int = 0                # days to achieve 20% demand increase
+    upside_flexibility_days: Optional[int] = None   # cannot infer from supplier sample size
 
     # Cost
     supply_chain_cost_pct_revenue: float = 0.0      # total SC cost as % of revenue
@@ -88,6 +89,11 @@ class SCORMetrics:
     days_sales_outstanding: float = 0.0             # DSO
     days_payable_outstanding: float = 0.0           # DPO
     return_on_working_capital_pct: float = 0.0
+    order_count: int = 0
+    verified_delivery_orders: int = 0
+    verified_line_orders: int = 0
+    supplier_lead_time_observations: int = 0
+    financial_ratios_supported: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -112,6 +118,15 @@ class SCORMetrics:
                 "days_sales_outstanding": round(self.days_sales_outstanding, 1),
                 "days_payable_outstanding": round(self.days_payable_outstanding, 1),
                 "return_on_working_capital_pct": round(self.return_on_working_capital_pct, 1),
+            },
+            "evidence": {
+                "order_count": self.order_count,
+                "verified_delivery_orders": self.verified_delivery_orders,
+                "verified_line_orders": self.verified_line_orders,
+                "supplier_lead_time_observations": self.supplier_lead_time_observations,
+                "financial_ratios_supported": self.financial_ratios_supported,
+                "data_source_verified": False,
+                "requires_human_review": True,
             },
         }
 
@@ -141,16 +156,33 @@ class SCORMetrics:
                 return "fair"
             return "poor"
 
-        ratings["perfect_order_fulfillment"] = rate(
-            self.perfect_order_fulfillment_pct, 97, 92, 85
+        # Benchmarks need enough dated, complete observations; default zero is
+        # not evidence of either outstanding or poor performance.
+        delivery_ready = self.verified_delivery_orders >= 10 and (
+            self.verified_delivery_orders / max(1, self.order_count) >= 0.8
         )
-        ratings["order_fill_rate"] = rate(self.order_fill_rate_pct, 98, 95, 90)
-        ratings["order_cycle_time"] = rate_low(
-            self.order_fulfillment_cycle_time_days, 2, 5, 10
+        line_ready = self.verified_line_orders >= 10 and (
+            self.verified_line_orders / max(1, self.order_count) >= 0.8
         )
-        ratings["cash_to_cash"] = rate_low(self.cash_to_cash_cycle_days, 30, 45, 60)
-        ratings["supply_chain_cost"] = rate_low(
-            self.supply_chain_cost_pct_revenue, 8, 12, 18
+        ratings["perfect_order_fulfillment"] = (
+            rate(self.perfect_order_fulfillment_pct, 97, 92, 85)
+            if delivery_ready else "insufficient_data"
+        )
+        ratings["order_fill_rate"] = (
+            rate(self.order_fill_rate_pct, 98, 95, 90)
+            if line_ready else "insufficient_data"
+        )
+        ratings["order_cycle_time"] = (
+            rate_low(self.order_fulfillment_cycle_time_days, 2, 5, 10)
+            if delivery_ready else "insufficient_data"
+        )
+        ratings["cash_to_cash"] = (
+            rate_low(self.cash_to_cash_cycle_days, 30, 45, 60)
+            if self.financial_ratios_supported else "insufficient_data"
+        )
+        ratings["supply_chain_cost"] = (
+            rate_low(self.supply_chain_cost_pct_revenue, 8, 12, 18)
+            if self.financial_ratios_supported else "insufficient_data"
         )
         return ratings
 
@@ -203,6 +235,10 @@ class Constraint:
             "subordinate_actions": self.subordinate_actions,
             "elevate_actions": self.elevate_actions,
             "estimated_throughput_gain_pct": round(self.estimated_throughput_gain_pct, 1),
+            "gain_is_measured": False,
+            "throughput_loss_is_measured": False,
+            "confidence": "low_unverified_heuristic",
+            "requires_human_review": True,
         }
 
 
@@ -214,16 +250,26 @@ class SCORToCReport:
     constraints: list[Constraint]           # ordered by severity
     primary_constraint: Optional[Constraint]
     improvement_priority: list[str]         # ordered list of recommended focus areas
-    scor_domain_scores: dict[str, float]    # 0–100 per domain
+    scor_domain_scores: dict[str, Optional[float]]    # 0–100 or unknown per domain
+    process_node_observations: int = 0
 
     def to_dict(self) -> dict:
         return {
+            "status": "analysis_only",
+            "data_source_verified": False,
+            "requires_human_review": True,
             "scor_metrics": self.metrics.to_dict(),
             "benchmarks": self.benchmarks,
-            "scor_domain_scores": {k: round(v, 1) for k, v in self.scor_domain_scores.items()},
+            "scor_domain_scores": {k: round(v, 1) if v is not None else None
+                                   for k, v in self.scor_domain_scores.items()},
             "primary_constraint": self.primary_constraint.to_dict() if self.primary_constraint else None,
             "all_constraints": [c.to_dict() for c in self.constraints],
             "improvement_priority": self.improvement_priority,
+            "constraint_evidence": {
+                "process_node_observations": self.process_node_observations,
+                "queue_observations_verified": False,
+                "cross_node_throughput_units_verified": False,
+            },
         }
 
 
@@ -254,24 +300,40 @@ class SCORToCEngine:
     ) -> SCORMetrics:
         """Compute all Level-1 SCOR metrics from raw business data."""
         m = SCORMetrics()
+        financial_values = (
+            inventory_value, cogs, revenue, ar_balance, ap_balance, supply_chain_costs
+        )
+        if any(not math.isfinite(value) or value < 0 for value in financial_values):
+            raise ValueError("Financial observations must be finite and nonnegative")
+        if any(not math.isfinite(v) or v <= 0 for v in supplier_lead_times):
+            raise ValueError("Supplier lead-time observations must be finite and positive")
+        m.order_count = len(orders)
+        m.supplier_lead_time_observations = len(supplier_lead_times)
+        m.financial_ratios_supported = revenue > 0 and cogs > 0
 
         if orders:
             # Perfect order fulfillment: on time + complete + undamaged
             perfect = sum(
                 1 for o in orders
                 if self._is_on_time(o)
-                and o.get("lines_filled", 0) >= o.get("lines_ordered", 1)
-                and not o.get("damaged", False)
+                and self._valid_order_lines(o)
+                and o["lines_filled"] >= o["lines_ordered"]
+                and o.get("damaged") is False
             )
             m.perfect_order_fulfillment_pct = (perfect / len(orders)) * 100
 
             # Fill rate
-            total_lines = sum(o.get("lines_ordered", 1) for o in orders)
-            filled_lines = sum(o.get("lines_filled", 0) for o in orders)
-            m.order_fill_rate_pct = (filled_lines / max(total_lines, 1)) * 100
+            valid_lines = [o for o in orders if self._valid_order_lines(o)]
+            m.verified_line_orders = len(valid_lines)
+            total_lines = sum(o["lines_ordered"] for o in valid_lines)
+            filled_lines = sum(o["lines_filled"] for o in valid_lines)
+            if total_lines:
+                m.order_fill_rate_pct = (filled_lines / total_lines) * 100
 
             # Cycle time
-            cycle_times = [self._cycle_days(o) for o in orders if self._cycle_days(o) is not None]
+            cycle_times = [days for o in orders if self._is_on_time_evaluable(o)
+                           if (days := self._cycle_days(o)) is not None]
+            m.verified_delivery_orders = len(cycle_times)
             if cycle_times:
                 m.order_fulfillment_cycle_time_days = statistics.mean(cycle_times)
 
@@ -298,11 +360,12 @@ class SCORToCEngine:
 
         # ROWC = (Revenue - COGS - SC costs) / Working Capital
         gross_profit = revenue - cogs - supply_chain_costs
-        working_capital = max(inventory_value + ar_balance - ap_balance, 1)
-        m.return_on_working_capital_pct = (gross_profit / working_capital) * 100
+        working_capital = inventory_value + ar_balance - ap_balance
+        if working_capital > 0 and m.financial_ratios_supported:
+            m.return_on_working_capital_pct = (gross_profit / working_capital) * 100
 
-        # Agility: rough estimate — 1 month if solid supplier network, 3+ if single-source
-        m.upside_flexibility_days = 30 if len(supplier_lead_times) > 2 else 90
+        # Agility needs tested surge capacity; lead-time sample count is not a proxy.
+        m.upside_flexibility_days = None
 
         return m
 
@@ -318,7 +381,18 @@ class SCORToCEngine:
         constraints: list[Constraint] = []
 
         for node in process_nodes:
-            if node.utilization_pct < 80:
+            observations = (
+                node.throughput_per_day, node.queue_depth,
+                node.utilization_pct, node.avg_cycle_time_hours,
+            )
+            if any(not math.isfinite(value) for value in observations):
+                raise ValueError("Process measurements must be finite")
+            if not 0 <= node.utilization_pct <= 100 or node.queue_depth < 0:
+                raise ValueError("Utilization and backlog must be within valid bounds")
+            if node.throughput_per_day <= 0 or node.avg_cycle_time_hours < 0:
+                raise ValueError("Process throughput must be positive and cycle time nonnegative")
+
+            if node.utilization_pct < 80 or node.queue_depth == 0:
                 continue  # Not a constraint
 
             severity = self._severity(node.utilization_pct)
@@ -375,17 +449,37 @@ class SCORToCEngine:
             primary_constraint=primary,
             improvement_priority=priority,
             scor_domain_scores=domain_scores,
+            process_node_observations=len(process_nodes),
         )
 
     # ── Private helpers ──────────────────────────────────────────────────────
 
     @staticmethod
+    def _valid_order_lines(order: dict) -> bool:
+        ordered = order.get("lines_ordered")
+        filled = order.get("lines_filled")
+        return (
+            type(ordered) is int and type(filled) is int
+            and ordered > 0 and 0 <= filled <= ordered
+        )
+
+    @staticmethod
+    def _is_on_time_evaluable(order: dict) -> bool:
+        """A missing, impossible or future-dated observation is not a delivered order."""
+        try:
+            from datetime import date
+            ordered = date.fromisoformat(order["ordered_at"][:10])
+            promised = date.fromisoformat(order["promised_at"][:10])
+            delivered = date.fromisoformat(order["delivered_at"][:10])
+            return ordered <= delivered and ordered <= promised
+        except (KeyError, ValueError, TypeError):
+            return False
+
+    @staticmethod
     def _is_on_time(order: dict) -> bool:
-        promised = order.get("promised_at")
-        delivered = order.get("delivered_at")
-        if not promised or not delivered:
-            return True  # unknown — assume OK
-        return delivered <= promised
+        if not SCORToCEngine._is_on_time_evaluable(order):
+            return False
+        return order["delivered_at"][:10] <= order["promised_at"][:10]
 
     @staticmethod
     def _cycle_days(order: dict) -> Optional[float]:
@@ -538,23 +632,23 @@ class SCORToCEngine:
     @staticmethod
     def _compute_domain_scores(
         metrics: SCORMetrics, benchmarks: dict[str, str]
-    ) -> dict[str, float]:
+    ) -> dict[str, Optional[float]]:
         rating_to_score = {"excellent": 95, "good": 75, "fair": 55, "poor": 30}
 
-        plan_score = rating_to_score.get(benchmarks.get("order_fill_rate", "fair"), 55)
-        source_score = rating_to_score.get(benchmarks.get("order_cycle_time", "fair"), 55)
-        deliver_score = rating_to_score.get(benchmarks.get("perfect_order_fulfillment", "fair"), 55)
-        return_score = rating_to_score.get(benchmarks.get("return_rate", "fair"), 70.0)
-        enable_score = rating_to_score.get(benchmarks.get("cash_to_cash", "fair"), 55)
-        cost_score = rating_to_score.get(benchmarks.get("supply_chain_cost", "fair"), 55)
+        plan_score = rating_to_score.get(benchmarks.get("order_fill_rate"))
+        source_score = rating_to_score.get(benchmarks.get("order_cycle_time"))
+        deliver_score = rating_to_score.get(benchmarks.get("perfect_order_fulfillment"))
+        enable_score = rating_to_score.get(benchmarks.get("cash_to_cash"))
+        cost_score = rating_to_score.get(benchmarks.get("supply_chain_cost"))
+        valid_enable = [s for s in (enable_score, cost_score) if s is not None]
 
         return {
             "plan": plan_score,
             "source": source_score,
-            "make": 70.0,       # not applicable for pure distributors
+            "make": None,       # not measured for pure distributors
             "deliver": deliver_score,
-            "return": return_score,
-            "enable": (enable_score + cost_score) / 2,
+            "return": None,     # no verified return-rate observation supplied
+            "enable": statistics.mean(valid_enable) if valid_enable else None,
         }
 
     @staticmethod
@@ -580,4 +674,10 @@ class SCORToCEngine:
                 readable = key.replace("_", " ").title()
                 priority.append(f"[METRIC] Improve {readable} (currently: {rating})")
 
-        return priority or ["All SCOR metrics within acceptable range. Maintain current performance."]
+        incomplete = [k for k, v in benchmarks.items() if v == "insufficient_data"]
+        if incomplete:
+            priority.append(
+                "[EVIDENCE] Collect verified order, financial and supplier observations for "
+                + ", ".join(incomplete[:3])
+            )
+        return priority or ["Observed SCOR metrics within current benchmark bands; continue validating."]

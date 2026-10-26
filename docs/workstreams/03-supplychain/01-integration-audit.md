@@ -10,7 +10,7 @@ live-provider or database-backed acceptance test. No side effects authorized.
 | --- | --- | --- |
 | 1. Demand/reorder | `app/api/logistics.py:evaluate_reorder_queue` -> `LogisticsModule.evaluate_reorder_queue` -> `ReorderEngine.build_reorder_queue` | Broken API-to-engine field contract and missing `supplier_name`; fixed in workstream 03 with an HTTP regression. API still accepts caller-supplied stock/history, not a source-verified company snapshot. |
 | 2. Draft PO | `app/api/logistics.py:generate_purchase_orders` -> `POGenerator.generate_pos` | Returns a synthetic draft/email body and best-effort `procurement_cycles` status. `SimpleNamespace(**dict)` is not a `ReorderDecisionPackage` with `sku_profile`; this route is not the independently approved durable PO workflow. In-memory PO counter is not a durable identity. |
-| 3. Supplier response | `parse_vendor_response` -> `VendorResponseParser.parse` | Current route constructs an incomplete `PurchaseOrder` and reads properties not in `ParsedVendorResponse`. No authenticated inbound message association or immutable response event. Stage status update is best-effort and can overstate progress. |
+| 3. Supplier response | `parse_vendor_response` -> `VendorResponseParser.parse` | Baseline route constructed an incomplete `PurchaseOrder`, read nonexistent response fields and best-effort advanced the pipeline. Now repaired as a pure unverified analysis preview: no DB write, supplier alert or status promotion. Authenticated inbound message association, authoritative PO lines and durable response event are still missing. |
 | 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Parses caller-supplied invoice text on a new booking object; does not retrieve verified invoice bytes or durably attach line items to a shipment. |
 | 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist carrier/vessel milestone and source timestamp. Live provider acceptance absent. |
 | 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Computes events/alerts on a fresh per-request module; not linked to a durable booking, port clock or signed customs evidence. |
@@ -33,6 +33,18 @@ engine ignored and serialized a nonexistent package `.sku` attribute.
 
 This does not prove QuickBooks/warehouse source coverage, actual vendor lead
 times, or approval to issue a purchase order.
+
+## Second owned regression — supplier-response safety preview
+
+`tests/test_wholesale_distribution/test_logistics/test_vendor_response_api_contract.py`
+first reproduced the HTTP `PurchaseOrder` construction failure with caller-
+provided text. The repaired endpoint uses the real parser shape and returns
+`analysis_only` candidate classification with permanent `message_verified=false`,
+`po_link_verified=false`, `requires_human_review=true` and
+`supplier_action_permitted=false` until a verified message/PO contract exists.
+It performs no company lookup, cycle upsert, supplier alert, email send or
+inventory action. A parsed response is **not** evidence that the named supplier
+confirmed or rejected a durable purchase order.
 
 ## Interface requests — owner to forward manually
 

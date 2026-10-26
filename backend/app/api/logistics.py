@@ -10,6 +10,8 @@ Base path: /api/logistics
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date
 from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -135,27 +137,27 @@ class VendorResponseRequest(BaseModel):
 
 
 class FreightInvoiceRequest(BaseModel):
-    booking_id: str
-    invoice_text: str
-    total_cases: int
+    booking_id: str = Field(min_length=1, max_length=150)
+    invoice_text: str = Field(min_length=1, max_length=50000)
+    total_cases: int = Field(gt=0, le=10000000)
 
 
 class CustomsHoldRequest(BaseModel):
-    booking_id: str
-    hold_reason: str
-    days_at_port: int
+    booking_id: str = Field(min_length=1, max_length=150)
+    hold_reason: str = Field(min_length=1, max_length=1000)
+    days_at_port: int = Field(ge=0, le=3650)
 
 
 class DemurrageRiskRequest(BaseModel):
-    booking_id: str
-    arrival_date: str               # ISO date string
-    today: Optional[str] = None
+    booking_id: str = Field(min_length=1, max_length=150)
+    arrival_date: date
+    today: Optional[date] = None
 
 
 class BrokerEmailRequest(BaseModel):
-    booking_id: str
-    subject: str
-    body: str
+    booking_id: str = Field(min_length=1, max_length=150)
+    subject: str = Field(max_length=500)
+    body: str = Field(min_length=1, max_length=25000)
 
 
 class WarehouseReceiptRequest(BaseModel):
@@ -1127,9 +1129,14 @@ async def parse_freight_invoice(
     db=Depends(get_db),
 ):
     """
-    Parse a forwarder invoice and extract cost components.
-    Returns the extracted components and total cost.
+    Parse caller-provided freight text into an unverified cost candidate.
+    No invoice, booking or currency has been independently checked.
     """
+    if re.search(r"[€£]|\b(?:EUR|GBP)\b", request.invoice_text, flags=re.IGNORECASE):
+        raise HTTPException(
+            status_code=422,
+            detail="Non-USD invoice currency requires a reviewed FX conversion contract",
+        )
     lm = _get_logistics_module(user, db)
 
     booking = FreightBooking(booking_ref=request.booking_id)
@@ -1138,6 +1145,13 @@ async def parse_freight_invoice(
 
     return {
         "booking_id": request.booking_id,
+        "status": "analysis_only",
+        "invoice_verified": False,
+        "booking_verified": False,
+        "currency_verified": False,
+        "accounting_posted": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
         "total_cost": summary["total_cost"],
         "components": summary["by_component"],
         "missing_components": summary["missing_components"],
@@ -1155,7 +1169,8 @@ async def log_customs_hold(
     db=Depends(get_db),
 ):
     """
-    Log a customs hold for a container. Fires a high-priority alert.
+    Calculate a candidate customs hold from unverified caller observations.
+    This does not confirm a hold, persist a milestone or fire an alert.
     """
     lm = _get_logistics_module(user, db)
     result = lm.log_customs_hold(
@@ -1166,11 +1181,17 @@ async def log_customs_hold(
 
     return {
         "booking_id": request.booking_id,
-        "milestone": result["event"].milestone,
+        "status": "analysis_only",
+        "candidate_milestone": result["event"].milestone,
         "hold_reason": result["event"].hold_reason,
-        "demurrage_accruing": result["event"].demurrage_accruing,
-        "demurrage_total": result["event"].demurrage_total,
-        "alert": _serialize_alert(result["alert"]),
+        "estimated_demurrage_accruing": result["event"].demurrage_accruing,
+        "estimated_demurrage_total": result["event"].demurrage_total,
+        "candidate_severity": result["alert"].severity,
+        "customs_event_verified": False,
+        "port_arrival_verified": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
+        "alert": None,
     }
 
 
@@ -1181,18 +1202,28 @@ async def check_demurrage_risk(
     db=Depends(get_db),
 ):
     """
-    Compute current demurrage exposure for a container at port.
+    Estimate demurrage from caller dates, not carrier-confirmed port events.
     """
+    evaluation_date = request.today or date.today()
+    if request.arrival_date > evaluation_date:
+        raise HTTPException(status_code=422, detail="Port arrival date cannot follow evaluation date")
+
     lm = _get_logistics_module(user, db)
     result = lm.check_demurrage_risk(
         booking_id=request.booking_id,
-        arrival_date_str=request.arrival_date,
-        today_str=request.today,
+        arrival_date_str=request.arrival_date.isoformat(),
+        today_str=evaluation_date.isoformat(),
     )
 
     return {
         **result["risk"],
-        "alert": _serialize_alert(result["alert"]),
+        "status": "analysis_only",
+        "port_arrival_verified": False,
+        "invoiced_demurrage_verified": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
+        "candidate_severity": result["risk"]["severity"],
+        "alert": None,
     }
 
 
@@ -1203,20 +1234,26 @@ async def parse_broker_email(
     db=Depends(get_db),
 ):
     """
-    Parse a customs broker email for clearance milestones.
-    Returns detected milestone (entry_filed, duties_paid, released, hold_placed, etc.)
+    Classify caller-provided broker text as a candidate milestone only.
+    Sender identity, booking association and customs status are unverified.
     """
     lm = _get_logistics_module(user, db)
     result = lm.parse_broker_email(request.booking_id, request.subject, request.body)
 
     return {
         "booking_id": request.booking_id,
-        "milestone_detected": result["milestone"],
-        "event": {
+        "status": "analysis_only",
+        "candidate_milestone": result["milestone"],
+        "candidate_event": {
             "milestone": result["event"].milestone,
             "hold_reason": result["event"].hold_reason,
-            "demurrage_accruing": result["event"].demurrage_accruing,
+            "estimated_demurrage_accruing": result["event"].demurrage_accruing,
         } if result["event"] else None,
+        "message_verified": False,
+        "booking_verified": False,
+        "customs_event_verified": False,
+        "requires_human_review": True,
+        "pipeline_status_changed": False,
     }
 
 

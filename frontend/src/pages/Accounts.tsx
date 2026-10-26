@@ -84,7 +84,7 @@ export function Accounts() {
   }), {} as Record<string, number>);
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <div className="flex h-full bg-slate-50 overflow-hidden">
     <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 px-6 py-4">

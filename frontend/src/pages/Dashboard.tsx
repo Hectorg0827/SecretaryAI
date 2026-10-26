@@ -66,7 +66,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
   const hasLeftColumn = showEmailInbox || showSalesChart;
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
+    <div className="flex flex-col h-full overflow-hidden bg-slate-50">
       {/* Top bar */}
       <TopBar />
 
@@ -105,11 +105,11 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
       ) : null}
 
       {/* Main grid */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 pt-4">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6 pt-4">
         {hasLeftColumn ? (
-          <div className="grid grid-cols-3 gap-4 min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
             {/* Column 1: Email + Sales */}
-            <div className="col-span-2 space-y-4">
+            <div className="lg:col-span-2 space-y-4">
               {showEmailInbox && <EmailInbox />}
               {showSalesChart && <SalesChart />}
             </div>

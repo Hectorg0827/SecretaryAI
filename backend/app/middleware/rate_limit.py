@@ -2,8 +2,7 @@
 Per-tenant rate limiting middleware using Redis sorted sets (sliding-window algorithm).
 
 Limits are keyed by (company_id, endpoint-group) so each tenant has independent
-buckets.  If Redis is unavailable the middleware is transparent — requests pass
-through unthrottled rather than causing a hard outage.
+buckets. Production fails closed (503) and alerts if Redis is unavailable.
 
 Rate limit table (requests per minute, burst allowance):
   /api/chat      → 20 rpm + 5  burst
@@ -12,11 +11,21 @@ Rate limit table (requests per minute, burst allowance):
   default        → 120 rpm + 30 burst
 """
 import time
+import logging
 import redis as redis_lib
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 from app.config import get_settings
+
+log = logging.getLogger(__name__)
+
+
+def _redis_unavailable(exc: Exception) -> JSONResponse:
+    from app.auth.jwt import _revocation_alarm
+    _revocation_alarm('rate_limit_middleware', exc)
+    return JSONResponse({'detail': 'Rate limiter temporarily unavailable'}, status_code=503)
+
 
 RATE_LIMITS: dict[str, tuple[int, int]] = {
     # endpoint_prefix: (requests_per_minute, burst)
@@ -45,8 +54,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         r = self._get_redis()
         if r is None:
-            # Redis unavailable — fail open so the app stays reachable
-            return await call_next(request)
+            if not get_settings().debug:
+                return _redis_unavailable(ConnectionError("Redis rate limiter unavailable"))
+            return await call_next(request)  # debug-only fallback
 
         company_id = getattr(request.state, "company_id", None) or "anonymous"
         path = request.url.path
@@ -86,10 +96,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     },
                 )
 
-            response = await call_next(request)
-            response.headers["X-RateLimit-Limit"] = str(limit_per_min)
-            response.headers["X-RateLimit-Remaining"] = str(max(0, limit_per_min - count))
-            return response
-        except Exception:
-            # Any Redis error — fail open
-            return await call_next(request)
+        except Exception as exc:
+            if not get_settings().debug:
+                return _redis_unavailable(exc)
+            return await call_next(request)  # debug-only fallback
+
+        # Outside the Redis try block: never invoke call_next twice if the
+        # application raises. Redis errors and application errors are distinct.
+        response = await call_next(request)
+        response.headers["X-RateLimit-Limit"] = str(limit_per_min)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, limit_per_min - count))
+        return response

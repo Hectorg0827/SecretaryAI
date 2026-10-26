@@ -20,6 +20,19 @@ jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
+    # Authentication now correctly rejects an unavailable revocation store.
+    # Run an actual Redis service for tests that authenticate normally; outage
+    # regression tests deliberately replace the client with a failing one.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +47,8 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: python -m pytest -q
+      - name: Mutation-test Phase 4 security guards
+        run: python scripts/mutation_phase4.py
 
   frontend:
     name: Web frontend (lint / typecheck / build)
@@ -42,9 +57,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Match the vetted frontend lockfile npm resolver
+        run: npm install --global npm@11.19.1
       - run: npm ci
         working-directory: frontend
       - run: npm run lint
@@ -55,6 +72,77 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - name: Verify compiled Tailwind utilities and design tokens
+        run: npm run test:css
+        working-directory: frontend
+
+  frontend-container:
+    name: Web container routing and auth proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test_web_container.sh
+
+  frontend-browser:
+    name: Web browser responsive acceptance (3 engines)
+    needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Match tested npm resolver
+        run: npm install --global npm@11.19.1
+      - name: Build the actual web artifact
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npm run test:css
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install isolated Chromium test runner
+        run: |
+          python -m pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium firefox webkit
+      - name: Install pinned axe-core in isolated audit directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/secretaryai-axe
+          npm --prefix /tmp/secretaryai-axe install --no-save --ignore-scripts --no-audit --no-fund axe-core@4.10.3
+          test -f /tmp/secretaryai-axe/node_modules/axe-core/axe.min.js
+      - name: Run Chromium Firefox WebKit mobile and desktop smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd frontend
+          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/secretaryai-preview.log 2>&1 &
+          cd ..
+          python backend/scripts/verify_frontend_browser.py --screenshots frontend/browser-artifacts
+      - name: Block WCAG 2.2 A/AA violations in core screens
+        shell: bash
+        run: |
+          set -euo pipefail
+          python backend/scripts/verify_frontend_accessibility.py \
+            --axe-script /tmp/secretaryai-axe/node_modules/axe-core/axe.min.js \
+            --reports frontend/browser-artifacts/accessibility
+      - name: Preserve non-sensitive screenshots for visual inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secretaryai-frontend-browser-evidence
+          path: |
+            frontend/browser-artifacts/*.png
+            frontend/browser-artifacts/accessibility/*.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   mobile:
     name: Mobile (typecheck)
@@ -78,9 +166,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - name: Match the vetted desktop lockfile npm resolver
+        run: npm install --global npm@11.19.1
       - run: npm ci
         working-directory: desktop
       - run: npm run lint
@@ -106,6 +196,25 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # `tauri::generate_context!()` reads `frontendDist` ("../dist") at COMPILE
+      # time and panics if the directory is absent, so clippy and test cannot
+      # build the crate at all without it. `dist/` is a build output (gitignored)
+      # so CI must produce it. Build in development mode on purpose: the
+      # fail-closed guard in desktop/vite.config.ts refuses a production build
+      # without a real VITE_API_URL, and this job ships nothing — it only checks
+      # Rust. The shippable build is release-desktop.yml, which sets a real URL.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Match the vetted desktop lockfile npm resolver
+        run: npm install --global npm@11.19.1
+      - name: Build desktop UI (dist/ must exist to compile the Rust crate)
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build -- --mode development
       - name: rustfmt
         working-directory: desktop/src-tauri
         run: cargo fmt --all --check
@@ -118,6 +227,36 @@ jobs:
       - name: test
         working-directory: desktop/src-tauri
         run: cargo test
+
+  connector:
+    name: QB Desktop connector (package + selfcheck)
+    runs-on: ubuntu-latest
+    # The connector is NOT bundled into installers. Keep its packaging and
+    # regression tests maintained in case the product strategy changes.
+    #
+    # It matters more than it looks: the Conductor adapter lives in the backend
+    # and is loaded by a dynamic import, so PyInstaller cannot see it without
+    # the hidden imports in connector/connector.spec. Get that wrong and the
+    # executable builds perfectly and then fails every QuickBooks task at
+    # runtime with "No module named 'app'" — which is exactly the state this
+    # repository was in. --selfcheck loads the adapter from inside the frozen
+    # bundle, so that cannot regress unnoticed.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pytest -r connector/requirements.txt
+      - name: Connector unit tests
+        run: python -m pytest connector/tests -q
+      - name: Package the connector
+        run: pyinstaller --clean --noconfirm connector/connector.spec
+      - name: Selfcheck the packaged executable
+        run: ./dist/SecretaryAIConnector --selfcheck
 
   versions:
     name: Version consistency
@@ -132,7 +271,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15
+        # Match isolated SecretaryAI-Staging's PostgreSQL major version.
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: sai
@@ -154,6 +294,29 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
+      - name: Export disposable schema for read-only staging comparison
+        run: |
+          psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > schema-manifest.json
+          python3 -c 'import json; d=json.load(open("schema-manifest.json")); print("Schema manifest objects:", len(d["objects"]))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: disposable-schema-manifest
+          path: schema-manifest.json
+          retention-days: 14
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned PostgreSQL integration driver
+        run: python -m pip install asyncpg==0.29.0
+      - name: Run V13 disposable PostgreSQL execution integration
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          SECRETARYAI_EMAIL_WORKER_MODE: simulate
+          SECRETARYAI_EXECUTION_DATABASE_URL: postgresql://secretary_executor:ci-execution-only@localhost:5432/sai
+          PYTHONPATH: backend
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_executor LOGIN PASSWORD 'ci-execution-only'"
+          python scripts/test_execution_integration.py
 
   secret-scan:
     name: Secret scan (gitleaks)
@@ -169,25 +332,53 @@ jobs:
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
-    # Report-mode until the current advisory backlog is triaged, then flip to a
-    # hard gate (tracked in docs/PRODUCTION_READINESS.md). Never merge a NEW
-    # critical/high advisory once enforcement is on.
+    # PR development remains report-only until the existing advisory backlog
+    # is fixed or each exceptional finding is independently risk-reviewed.
+    # Production RELEASE and IMAGE PUBLISH gates fail closed regardless.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: npm audit (frontend)
+      - name: Audit runtime frontend dependencies separately
+        id: frontend_runtime
         working-directory: frontend
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit full frontend dependencies
+        id: frontend_all
+        working-directory: frontend
+        continue-on-error: true
         run: npm audit --audit-level=high
-      - name: npm audit (desktop)
+      - name: Audit desktop dependencies
+        id: desktop_all
         working-directory: desktop
+        continue-on-error: true
         run: npm audit --audit-level=high
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: pip-audit (backend)
+      - name: Audit backend requirements
+        id: backend_all
+        continue-on-error: true
         run: |
           python -m pip install pip-audit
-          pip-audit -r backend/requirements.txt
+          python -m pip_audit -r backend/requirements.txt
+      - name: Keep the audit job visibly red if any scan failed
+        if: always()
+        env:
+          FRONTEND_RUNTIME: ${{ steps.frontend_runtime.outcome }}
+          FRONTEND_ALL: ${{ steps.frontend_all.outcome }}
+          DESKTOP_ALL: ${{ steps.desktop_all.outcome }}
+          BACKEND_ALL: ${{ steps.backend_all.outcome }}
+        run: |
+          set -euo pipefail
+          printf 'frontend runtime: %s\nfrontend all: %s\ndesktop: %s\nbackend: %s\n' \
+            "$FRONTEND_RUNTIME" "$FRONTEND_ALL" "$DESKTOP_ALL" "$BACKEND_ALL"
+          for status in "$FRONTEND_RUNTIME" "$FRONTEND_ALL" "$DESKTOP_ALL" "$BACKEND_ALL"; do
+            if [ "$status" != success ]; then
+              echo "::error::Security advisory audit is not clean; release remains blocked."
+              exit 1
+            fi
+          done

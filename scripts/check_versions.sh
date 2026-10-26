@@ -23,6 +23,10 @@ check "desktop/src-tauri/tauri.conf.json" "$(grep_ver desktop/src-tauri/tauri.co
 check "desktop/src-tauri/Cargo.toml" "$(grep -m1 '^version' desktop/src-tauri/Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 check "desktop/package.json" "$(grep_ver desktop/package.json '"version"')"
 check "frontend/package.json" "$(grep_ver frontend/package.json '"version"')"
+# The connector is now a shipped artifact (packaged by release-connector.yml and
+# bundled into the desktop installer), so its reported version must not drift —
+# it had silently stayed at 1.0.0 while everything else moved to 1.0.6.
+check "connector __version__" "$(grep -m1 '__version__' connector/__init__.py | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 
 if [ "$fail" -ne 0 ]; then
   echo ""

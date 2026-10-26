@@ -58,7 +58,7 @@ function PORow({ order }: { order: PurchaseOrder }) {
       >
         <td className="px-5 py-3.5">
           <div className="flex items-center gap-2">
-            {expanded ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+            {expanded ? <ChevronDown size={14} className="text-slate-600" /> : <ChevronRight size={14} className="text-slate-600" />}
             <span className="text-sm font-mono font-semibold text-slate-800">{order.po_number}</span>
           </div>
         </td>
@@ -72,7 +72,7 @@ function PORow({ order }: { order: PurchaseOrder }) {
             {STATUS_LABELS[order.status]}
           </span>
         </td>
-        <td className="px-5 py-3.5 text-xs text-slate-400">
+        <td className="px-5 py-3.5 text-xs text-slate-600">
           {new Date(order.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
         </td>
       </tr>
@@ -88,11 +88,11 @@ function PORow({ order }: { order: PurchaseOrder }) {
                   Line Items
                 </h4>
                 {order.line_items.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">No line items</p>
+                  <p className="text-xs text-slate-600 italic">No line items</p>
                 ) : (
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-slate-400">
+                      <tr className="text-slate-600">
                         <th className="text-left py-1 font-medium">SKU</th>
                         <th className="text-right py-1 font-medium">Qty</th>
                         <th className="text-right py-1 font-medium">Unit Cost</th>
@@ -104,7 +104,7 @@ function PORow({ order }: { order: PurchaseOrder }) {
                         <tr key={li.sku_id} className="text-slate-700">
                           <td className="py-1.5">
                             <div className="font-medium">{li.sku_name}</div>
-                            <div className="text-slate-400 font-mono">{li.sku_id}</div>
+                            <div className="text-slate-600 font-mono">{li.sku_id}</div>
                           </td>
                           <td className="text-right py-1.5">{li.qty.toLocaleString()}</td>
                           <td className="text-right py-1.5">${li.unit_cost.toFixed(2)}</td>
@@ -149,13 +149,13 @@ export function PurchaseOrders({ orders, loading }: PurchaseOrdersProps) {
 
   if (orders.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+      <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-3">
         <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center">
           <FileText className="w-6 h-6 text-slate-300" />
         </div>
         <div className="text-center">
           <p className="text-sm font-medium text-slate-500">No purchase orders</p>
-          <p className="text-xs mt-1 text-slate-400">Approve items in the Reorder Queue and generate POs to see them here</p>
+          <p className="text-xs mt-1 text-slate-600">Approve items in the Reorder Queue and generate POs to see them here</p>
         </div>
       </div>
     );
@@ -167,7 +167,7 @@ export function PurchaseOrders({ orders, loading }: PurchaseOrdersProps) {
         <thead className="bg-white border-b border-slate-100">
           <tr>
             {['PO Number', 'Supplier', 'Cases', 'Total Value', 'Status', 'Created'].map((h) => (
-              <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+              <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
                 {h}
               </th>
             ))}

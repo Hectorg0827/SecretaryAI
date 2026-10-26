@@ -52,7 +52,17 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
     jti = payload.get("jti")
-    if jti and is_token_revoked(jti):
+    try:
+        revoked = bool(jti and is_token_revoked(jti))
+        # Legacy user JWTs without a JTI cannot be safely checked.
+        if not jti:
+            revoked = True
+    except Exception as exc:
+        from app.auth.jwt import RevocationStoreUnavailable
+        if not isinstance(exc, RevocationStoreUnavailable):
+            raise
+        raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
+    if revoked:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",

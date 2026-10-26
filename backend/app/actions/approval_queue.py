@@ -68,11 +68,18 @@ class ApprovalQueue:
         across tenants even if a caller forgets to pre-check ownership.
         """
         if hasattr(self._db, "table"):
-            self._db.table("drafts").update({
+            changed = self._db.table("drafts").update({
                 "status": "approved",
                 "reviewed_by": reviewed_by,
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", draft_id).eq("company_id", company_id).execute()
+            }).eq("id", draft_id).eq("company_id", company_id).eq(
+                "status", "pending"
+            ).execute()
+            # PostgREST updates only matching rows. A losing concurrent request
+            # must not be allowed to execute the approved side effect again.
+            if not changed.data:
+                return {"draft_id": draft_id, "status": "already_processed",
+                        "already_processed": True}
         return {"draft_id": draft_id, "status": "approved"}
 
     async def reject(self, draft_id: str, reviewed_by: str, company_id: str,
@@ -94,12 +101,17 @@ class ApprovalQueue:
                                company_id: str) -> dict:
         """Apply edits to a draft, then approve it (scoped to company_id)."""
         if hasattr(self._db, "table"):
-            self._db.table("drafts").update({
+            changed = self._db.table("drafts").update({
                 "content": edited_content,
                 "status": "edited_and_approved",
                 "reviewed_by": reviewed_by,
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", draft_id).eq("company_id", company_id).execute()
+            }).eq("id", draft_id).eq("company_id", company_id).eq(
+                "status", "pending"
+            ).execute()
+            if not changed.data:
+                return {"draft_id": draft_id, "status": "already_processed",
+                        "already_processed": True}
         return {"draft_id": draft_id, "status": "edited_and_approved", "content": edited_content}
 
     def expire_old_drafts(self, company_id: str) -> int:

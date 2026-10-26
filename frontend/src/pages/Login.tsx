@@ -63,7 +63,7 @@ export function Login() {
           <h1 className="text-xl font-bold text-slate-900 mb-1">
             {needs2fa ? 'Two-factor authentication' : 'Welcome back'}
           </h1>
-          <p className="text-sm text-slate-400 mb-6">
+          <p className="text-sm text-slate-600 mb-6">
             {needs2fa
               ? 'Enter the 6-digit code from your authenticator app.'
               : 'Sign in to your account'}
@@ -91,7 +91,7 @@ export function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@company.com"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
                   />
                 </div>
                 <div>
@@ -106,7 +106,7 @@ export function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white"
+                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
                   />
                 </div>
               </>
@@ -125,7 +125,7 @@ export function Login() {
                   value={totpCode}
                   onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000"
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white tracking-widest text-center text-lg font-mono"
+                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white tracking-widest text-center text-lg font-mono"
                   autoFocus
                 />
               </div>
@@ -144,7 +144,7 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => { setNeeds2fa(false); setTotpCode(''); setError(null); }}
-                className="w-full text-xs text-slate-400 hover:text-slate-600 py-1"
+                className="w-full text-xs text-slate-600 hover:text-slate-600 py-1"
               >
                 ← Back to sign in
               </button>
@@ -152,12 +152,12 @@ export function Login() {
           </form>
 
           {!needs2fa && (
-            <p className="text-xs text-slate-400 text-center mt-6">
+            <p className="text-xs text-slate-600 text-center mt-6">
               Forgot your password? Contact your account owner.
             </p>
           )}
           {!needs2fa && (
-            <p className="text-xs text-slate-400 text-center mt-3">
+            <p className="text-xs text-slate-600 text-center mt-3">
               New to SecretaryAI?{' '}
               <Link to="/register" className="text-blue-600 hover:underline font-medium">
                 Create an account
@@ -166,7 +166,7 @@ export function Login() {
           )}
         </div>
 
-        <p className="text-xs text-slate-600 text-center mt-6">
+        <p className="text-xs text-slate-300 text-center mt-6">
           SecretaryAI · AI Operations Manager
         </p>
       </div>

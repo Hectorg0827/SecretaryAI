@@ -38,7 +38,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from jose import jwt as jose_jwt
+import jwt as jose_jwt
 
 from app.config import get_settings
 from app.main import app
@@ -198,16 +198,23 @@ class TestDispatchTaskGate:
         assert exc.value.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_every_protocol_task_type_is_accepted_for_owner(self):
+    async def test_protocol_reads_allowed_and_unapproved_writes_blocked_for_owner(self):
+        """Ownership is not a substitute for a durable PolicyEngine approval."""
         from app.api.connectors import dispatch_task, DispatchTaskRequest
         from app.domain.connector_protocol import TaskType
+        write_types = {"create_invoice", "create_po", "update_item"}
         for t in TaskType:
-            out = await dispatch_task(
-                body=DispatchTaskRequest(task_type=t.value),
-                user={"sub": "u1", "role": "owner", "company_id": "c1"},
-                db=self._db_with_connector(),
-            )
-            assert out["status"] == "pending"
+            db = self._db_with_connector()
+            request = DispatchTaskRequest(task_type=t.value)
+            user = {"sub": "u1", "role": "owner", "company_id": "c1"}
+            if t.value in write_types:
+                with pytest.raises(HTTPException) as err:
+                    await dispatch_task(body=request, user=user, db=db)
+                assert err.value.status_code == 403
+                db.table.assert_not_called()  # No queued unauthorized write.
+            else:
+                out = await dispatch_task(body=request, user=user, db=db)
+                assert out["status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_manager_can_dispatch(self):

@@ -12,7 +12,14 @@ router = APIRouter()
 
 
 def _unauthorized() -> JSONResponse:
-    return JSONResponse({"detail": "Not authorized. Include X-Docs-Key header."}, status_code=401)
+    return JSONResponse(
+        {"detail": "Not authorized. Supply X-Docs-Key or HTTP Basic auth."},
+        status_code=401,
+        headers={
+            "WWW-Authenticate": 'Basic realm="SecretaryAI Docs"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 def _docs_allowed(request: Request) -> bool:

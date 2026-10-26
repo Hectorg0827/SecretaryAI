@@ -1,10 +1,24 @@
 # SecretaryAI — Deployment & Operations Guide
 
+> **If you are the owner doing the deploy, use
+> [`docs/DEPLOY_CHECKLIST.md`](docs/DEPLOY_CHECKLIST.md) instead.** It is the
+> same deployment written as numbered clicks, with the exact environment
+> variables, the order the database files must be applied in, and a script
+> that proves the result is actually working. This file is the architectural
+> overview.
+
 This guide is tailored to your infrastructure choices: **Railway** for hosting, **QuickBooks Online** integration focus, and an **Internal Tool** deployment strategy for the Mobile App.
 
 ## 1. Hosting the Backend on Railway
 
-Railway is an excellent choice for deploying Dockerized monorepos. SecretaryAI requires four services to run: a Postgres Database, a Redis instance, the FastAPI server, and the Celery Background Workers.
+Railway is an excellent choice for deploying Dockerized monorepos. SecretaryAI requires **five** services to run: a Postgres Database, a Redis instance, the FastAPI server, the Celery **worker**, and the Celery **beat scheduler**.
+
+> The beat scheduler is not optional and was missing from an earlier version of
+> this guide. The worker only executes work that something enqueues; beat is
+> what enqueues it on a schedule. Without beat, nothing in
+> `celery_app.py`'s `beat_schedule` ever fires — no 7 AM morning briefing, no
+> 2 AM overnight scan, no 4-hourly sync check. The deployment looks healthy
+> and silently does nothing, which defeats GA exit criterion 7.
 
 ### Setup Steps in Railway:
 1. **Create the Databases**:
@@ -22,6 +36,21 @@ Railway is an excellent choice for deploying Dockerized monorepos. SecretaryAI r
    - Go to **Settings -> Deploy -> Custom Start Command** and set it to: 
      `celery -A celery_app worker --loglevel=info --concurrency=2`
    - Copy the same environment variables from the API service over to this one.
+4. **Deploy the Celery Beat Scheduler**:
+   - Click **New -> GitHub Repo** and select `SecretaryAI` a third time.
+   - Set the **Root Directory** to `/backend`.
+   - **Settings -> Deploy -> Custom Start Command**:
+     `celery -A celery_app beat --loglevel=info`
+   - Copy the same environment variables again. Do not generate a domain.
+   - Run exactly **one** beat instance. Two schedulers mean every briefing is
+     sent twice.
+
+### A note on the port
+
+The API container binds to `$PORT` when the platform provides one and falls
+back to 8000 otherwise, so Railway's assigned port is honoured automatically.
+Nothing needs configuring. (It used to hardcode 8000, which is unroutable on
+Railway and fails the health check with no obvious cause.)
 
 ## 2. QuickBooks Online Integration (Production)
 Since your focus is **QuickBooks Online**, you will bypass the Conductor setup entirely.

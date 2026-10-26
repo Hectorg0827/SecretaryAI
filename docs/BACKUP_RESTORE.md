@@ -12,10 +12,12 @@ Recovery objectives, backup scope, and a restore drill for SecretaryAI.
 | Supabase/Postgres (all app data, auth, tokens, audit) | Supabase automated backups + Point-In-Time Recovery | continuous/daily |
 | Object storage (uploads/ingested files, if used) | provider bucket versioning | continuous |
 | Secrets / config | secret manager (out of band; NOT in git) | on change |
-| Redis (cache, revocation, OAuth state) | **not** backed up — ephemeral by design | n/a |
+| Redis (cache, revocation, OAuth state) | **Revocation entries require durable persistence (AOF or equivalent)**; non-security cache entries can expire | Verify durable writes and restore policy |
 
 Encryption at rest is provided by the managed providers; integration tokens are
 additionally app-encrypted before storage.
+
+**Security prerequisite:** fail-closed JWT checks prevent access while Redis is down, but a Redis restart with an empty blacklist can resurrect a previously revoked unexpired token. Before GA, verify your production Redis vendor has durable AOF/persistence and test that a revoked token stays revoked after a Redis restart. If this cannot be guaranteed, move the revocation ledger to durable database storage instead. This has not been verified and defect #54 remains open pending that proof.
 
 ## Enabling backups (owner action)
 1. Supabase → Database → **Backups**: confirm daily backups; enable **PITR** on

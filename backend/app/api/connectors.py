@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -29,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user
+from app.middleware.subscription_guard import require_active_subscription
 from app.auth.jwt import create_access_token
 from app.config import get_settings
 from app.domain.connector_protocol import (
@@ -75,6 +77,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 _bearer = HTTPBearer(auto_error=False)
 
 
+# NOTE on the paywall: the endpoints below that a *person* calls
+# (/register, /status, /status/{id}, /generate-install-secret,
+# /dispatch-task) each carry require_active_subscription individually.
+# The ones a *connector* calls (/heartbeat, /tasks, /task-result,
+# /sync-status, /error) authenticate with a connector token through the
+# helper below and are intentionally NOT gated: they hold no user JWT, so a
+# subscription check would reject the agent with a 401 it cannot act on.
+# Gating /dispatch-task is what stops new work being queued for an unpaid
+# account. (Scheduled Celery tasks enqueue connector work without passing
+# through this router; that path is not subscription-checked yet.)
 def get_connector_identity(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db=Depends(get_db),
@@ -138,6 +150,7 @@ def _mark_stale_connectors(db, company_id: str) -> None:
 async def register_connector(
     req: RegisterRequest,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -167,8 +180,11 @@ async def register_connector(
         raise HTTPException(status_code=404, detail="Company not found")
 
     stored_secret = (company.data[0] or {}).get("connector_install_secret")
-    if not stored_secret or not secrets.compare_digest(
-        req.install_secret.encode(), stored_secret.encode()
+    # Only sha256 digests are accepted; database migration must run before
+    # deploying this version. Legacy plaintext rows are deliberately refused.
+    supplied_digest = "sha256:" + hashlib.sha256(req.install_secret.encode()).hexdigest()
+    if not stored_secret or not stored_secret.startswith("sha256:") or not secrets.compare_digest(
+        supplied_digest, stored_secret
     ):
         raise HTTPException(status_code=403, detail="Invalid install secret")
 
@@ -320,6 +336,17 @@ async def fetch_connector_tasks(
         for row in rows:
             if len(tasks_out) >= max_tasks:
                 break
+            # Defense in depth: quarantine legacy write tasks already in the
+            # queue before this policy gate was deployed. Never hand them to
+            # an agent without recorded PolicyEngine approval.
+            if row["task_type"] in ("create_invoice", "create_po", "update_item"):
+                db.table("connector_tasks").update({
+                    "status": "cancelled",
+                    "error_message": "Write requires PolicyEngine approval",
+                }).eq("id", row["id"]).eq("company_id", connector["company_id"]).execute()
+                log.warning("Blocked unapproved legacy connector write %s", row["id"])
+                continue
+
             # Skip recently-dispatched tasks (still within redelivery window)
             if (
                 row["status"] == "dispatched"
@@ -483,6 +510,7 @@ def _remediation_hint(error_type: str) -> str | None:
 @router.get("/status")
 async def get_connector_status(
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -556,6 +584,7 @@ async def get_connector_status(
 async def get_single_connector_status(
     registration_id: str,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """Single connector detail with recent sync logs."""
@@ -600,6 +629,7 @@ async def get_single_connector_status(
 @router.post("/generate-install-secret")
 async def generate_install_secret(
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -614,7 +644,7 @@ async def generate_install_secret(
     raw_secret = secrets.token_urlsafe(32)
     try:
         db.table("companies").update({
-            "connector_install_secret": raw_secret,
+            "connector_install_secret": "sha256:" + hashlib.sha256(raw_secret.encode()).hexdigest(),
         }).eq("id", user["company_id"]).execute()
     except Exception as exc:
         log.error("Failed to store install secret: %s", exc)
@@ -641,6 +671,7 @@ class DispatchTaskRequest(BaseModel):
 async def dispatch_task(
     body: DispatchTaskRequest,
     user: dict = Depends(get_current_user),
+    _sub=Depends(require_active_subscription()),
     db=Depends(get_db),
 ):
     """
@@ -664,6 +695,17 @@ async def dispatch_task(
     valid_types = {t.value for t in TaskType}
     if body.task_type not in valid_types:
         raise HTTPException(status_code=422, detail=f"Unknown task_type '{body.task_type}'")
+
+    # The local connector does not implement write tasks. In particular, an
+    # owner role is NOT equivalent to a PolicyEngine-approved action. Block
+    # all three writes until a durable approval-queue consumer, explicit policy
+    # evaluation and an executable connector implementation exist. Do not
+    # enqueue anything that a connector can execute without those gates.
+    if body.task_type in ("create_invoice", "create_po", "update_item"):
+        raise HTTPException(
+            status_code=403,
+            detail="Connector writes require PolicyEngine approval; this path is disabled",
+        )
 
     company_id = user["company_id"]
 

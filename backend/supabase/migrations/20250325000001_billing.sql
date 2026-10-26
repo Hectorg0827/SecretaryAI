@@ -47,3 +47,13 @@ values
   ('growth',     'Growth',     249, 2490, 10,  2000, '["QB sync","AI chat","inventory alerts","email digest","logistics pipeline","proactive intelligence","workflow automation"]'),
   ('enterprise', 'Enterprise', 599, 5990, 50,  10000,'["QB sync","AI chat","inventory alerts","email digest","logistics pipeline","proactive intelligence","workflow automation","multi-location","API access","dedicated support"]')
 on conflict (id) do nothing;
+
+-- Billing ledgers and payment-provider metadata are backend-only.
+-- No anon/authenticated policy is created; RLS therefore fails closed.
+ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.company_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.billing_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.subscription_plans, public.company_subscriptions,
+  public.billing_events FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.subscription_plans,
+  public.company_subscriptions, public.billing_events TO service_role;

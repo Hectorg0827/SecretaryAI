@@ -4,7 +4,8 @@
  * All requests are authenticated via JWT Bearer token.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+// Both Vite dev and the deployed web server proxy these same-origin routes.
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 function getToken(): string | null {
   return localStorage.getItem('secretary_token');
@@ -33,6 +34,18 @@ async function _tryRefresh(): Promise<string | null> {
   return null;
 }
 
+async function responseError(response: Response): Promise<Error> {
+  const payload = await response.json().catch(() => null);
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return new Error(detail);
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item: { msg?: unknown }) => item.msg)
+      .filter((message: unknown): message is string => typeof message === 'string');
+    if (messages.length) return new Error(messages.join('; '));
+  }
+  return new Error(`Request failed (HTTP ${response.status}). Please try again.`);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   const response = await fetch(`${API_BASE}${path}`, {
@@ -44,7 +57,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && path !== '/auth/login' && path !== '/auth/register') {
     // Attempt a silent token refresh once
     if (!_refreshing) {
       _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
@@ -57,20 +70,23 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` },
         body: body ? JSON.stringify(body) : undefined,
       });
-      if (retry.ok) return retry.json();
+      if (retry.ok) return retry.status === 204 ? undefined as T : retry.json();
+      // A valid refreshed session can still lack permissions or a subscription.
+      if (retry.status !== 401) throw await responseError(retry);
     }
     // Refresh failed — redirect to login
     localStorage.removeItem('secretary_token');
+    localStorage.removeItem('secretary_company_id');
+    localStorage.removeItem('secretary_role');
     window.location.href = '/login';
     throw new Error('Session expired');
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail ?? `HTTP ${response.status}`);
+    throw await responseError(response);
   }
 
-  return response.json();
+  return response.status === 204 ? undefined as T : response.json();
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ After approval, actions are executed immediately for email_reply type
 and dispatched as Celery tasks for heavier operations.
 """
 import logging
+import os
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -17,6 +18,9 @@ from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine
 from app.utils.audit import write_audit_event
+from app.workflows.execution_gateway import (
+    ExecutionDatabaseUnavailable, PostgresDurableGateway,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -40,10 +44,8 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
     Evaluate the tenant PolicyEngine for a COMMIT action about to execute.
     Returns the effect ('allow' | 'require_approval' | 'deny').
 
-    On an evaluation error we fail OPEN ('allow') and log loudly: the action has
-    ALREADY been through human approval and the static autonomy rules, so a
-    policy-infra hiccup should not block a legitimately-approved action — but an
-    explicit 'deny' (e.g. amount over a hard ceiling) is always honored.
+    On policy evaluation failure, fail CLOSED ('deny'). Human approval cannot
+    override an unavailable policy system or a company hard limit.
     """
     try:
         proposal = ActionProposal(
@@ -57,38 +59,55 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
         decision = await PolicyEngine(company_id, db).evaluate(proposal)
         return decision.effect
     except Exception as exc:
-        log.error("Policy evaluation errored for draft %s (failing open): %s",
+        log.error("Policy evaluation errored for draft %s (failing closed): %s",
                   draft.get("id"), exc)
-        return "allow"
+        return "deny"
 
 
-async def _execute_approved_draft(draft: dict, adapter) -> None:
-    """Execute a draft action after it has been approved."""
+async def _execute_approved_draft(draft: dict, adapter) -> str:
+    """Attempt an approved action; report its actual execution stage.
+
+    A human approval is not proof that an external side effect succeeded.
+    Never automatically retry an uncertain email send or PO dispatch here.
+    """
     action_type = draft.get("action_type", "")
-    content = draft.get("content", {})
+    content = draft.get("content", {}) or {}
 
     if action_type == "email_reply":
         to = content.get("to", "")
-        subject = content.get("subject", "")
         body = content.get("body", "")
-        if to and body:
-            try:
-                await adapter.send_email_reply(to=to, subject=subject, body=body)
-                log.info("Executed approved email_reply draft %s to %s", draft.get("id"), to)
-            except Exception as exc:
-                log.error("Failed to execute email_reply draft %s: %s", draft.get("id"), exc)
+        if not to or not body:
+            log.error("Approved email draft %s is missing recipient or body", draft.get("id"))
+            return "failed"
+        try:
+            receipt = await adapter.send_email_reply(
+                to=to, subject=content.get("subject", ""), body=body
+            )
+            if not isinstance(receipt, dict) or receipt.get("status") != "sent":
+                log.error("Approved email draft %s has uncertain provider acknowledgment",
+                          draft.get("id"))
+                return "needs_reconciliation"
+            log.info("Provider accepted approved email draft %s", draft.get("id"))
+            return "sent"
+        except Exception:
+            log.exception("Approved email draft %s send outcome uncertain", draft.get("id"))
+            return "needs_reconciliation"
 
-    elif action_type == "purchase_order":
-        # Dispatch to Celery for async processing (vendor integration required)
+    if action_type == "purchase_order":
         try:
             from celery_app import celery_app
             celery_app.send_task(
                 "tasks.actions.process_approved_po",
                 kwargs={"draft_id": draft.get("id"), "content": content},
             )
-            log.info("Dispatched approved PO draft %s to Celery", draft.get("id"))
-        except Exception as exc:
-            log.warning("Could not dispatch PO task (non-fatal): %s", exc)
+            log.info("Dispatched approved PO draft %s", draft.get("id"))
+            return "dispatched"
+        except Exception:
+            log.exception("Approved PO draft %s dispatch outcome uncertain", draft.get("id"))
+            return "needs_reconciliation"
+
+    log.warning("No executor for approved action type %s", action_type)
+    return "unsupported"
 
 
 @router.get("/pending")
@@ -149,6 +168,52 @@ async def approve_draft(
     if await _execution_policy_effect(db, user["company_id"], user["sub"], draft, content_for_policy) == "deny":
         raise HTTPException(status_code=403, detail="This action is blocked by your company's action policy")
 
+    # Dark-launch durable mode. One PostgreSQL transaction must approve and
+    # enqueue together; never approve via PostgREST and enqueue afterward.
+    # This mode queues approved email only. No live send or worker dispatch.
+    if os.getenv("SECRETARYAI_DURABLE_APPROVAL_ENABLED") == "1":
+        if draft.get("action_type") != "email_reply":
+            raise HTTPException(
+                status_code=409,
+                detail="Durable approval is not enabled for this action type",
+            )
+        try:
+            gateway = PostgresDurableGateway.from_environment()
+            durable = await gateway.approve_and_enqueue(
+                company_id=user["company_id"],
+                draft_id=draft_id,
+                actor_id=user["sub"],
+                expected_content=draft.get("content", {}) or {},
+                idempotency_key=f"approved-draft:{draft_id}",
+                edited_content=body.edited_content,
+            )
+        except ExecutionDatabaseUnavailable as exc:
+            log.error("Durable approval unavailable for draft %s", draft_id)
+            raise HTTPException(
+                status_code=503, detail="Durable approval unavailable; action not sent"
+            ) from exc
+        except Exception as exc:
+            log.exception("Durable approval rejected for draft %s", draft_id)
+            raise HTTPException(
+                status_code=409, detail="Draft could not be durably approved"
+            ) from exc
+
+        write_audit_event(
+            db, company_id=user["company_id"],
+            event_type="draft_approved", actor_id=user["sub"],
+            approved_by=user["sub"], action_class=draft.get("action_type"),
+            metadata={"draft_id": draft_id, "action_type": "email_reply",
+                      "execution_status": "queued",
+                      "execution_id": durable["execution_id"]},
+        )
+        return {
+            "draft_id": draft_id,
+            "status": durable.get("status", "approved"),
+            "execution_status": "queued",
+            "execution_id": durable["execution_id"],
+            "already_processed": durable.get("already_processed", False),
+        }
+
     if body.edited_content:
         result = await queue.edit_and_approve(
             draft_id=draft_id,
@@ -162,9 +227,14 @@ async def approve_draft(
             draft_id=draft_id, reviewed_by=user["sub"], company_id=user["company_id"]
         )
 
-    # Execute the approved action
-    if draft:
-        await _execute_approved_draft(draft, adapter)
+    # Another approver may have won the pending -> approved race while
+    # this request was evaluating policy. Never repeat the external action.
+    if result.get("already_processed"):
+        return result
+
+    # Record the execution stage separately from human authorization.
+    execution_status = await _execute_approved_draft(draft, adapter)
+    result["execution_status"] = execution_status
 
     # Write audit event
     write_audit_event(
@@ -174,12 +244,13 @@ async def approve_draft(
         actor_id=user["sub"],
         approved_by=user["sub"],
         action_class=draft.get("action_type"),
-        metadata={"draft_id": draft_id, "action_type": draft.get("action_type")},
+        metadata={"draft_id": draft_id, "action_type": draft.get("action_type"),
+                  "execution_status": execution_status},
     )
 
     # Resume linked workflow run if present
     workflow_run_id = draft.get("workflow_run_id")
-    if workflow_run_id:
+    if workflow_run_id and execution_status in ("sent", "dispatched"):
         try:
             from app.workflows.engine import WorkflowEngine
             wf_engine = WorkflowEngine(db, user["company_id"])

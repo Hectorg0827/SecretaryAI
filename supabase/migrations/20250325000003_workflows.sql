@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 CREATE INDEX IF NOT EXISTS workflow_runs_company_idx ON workflow_runs (company_id, status);
 CREATE INDEX IF NOT EXISTS workflow_runs_awaiting_idx ON workflow_runs (awaiting_entity_id) WHERE status = 'awaiting_approval';
 
+-- System definitions have a NULL company_id and are backend-only.
+ALTER TABLE workflow_definitions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "workflow_definitions_company_read" ON workflow_definitions
+  FOR SELECT TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 CREATE POLICY "workflow_runs_company_isolation" ON workflow_runs
-    FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));
+  FOR SELECT TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+
+REVOKE ALL ON TABLE workflow_definitions, workflow_runs FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE workflow_definitions, workflow_runs TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE workflow_definitions, workflow_runs TO service_role;

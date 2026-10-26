@@ -25,7 +25,10 @@ from app.auth.oauth import (
     build_authorization_url, exchange_code_for_tokens, revoke_token,
     build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
 )
-from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password, revoke_token
+from app.auth.jwt import (
+    create_access_token, decode_access_token, decode_refresh_candidate,
+    verify_password, hash_password, revoke_token,
+)
 from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
@@ -46,28 +49,29 @@ def _redis():
 
 
 def _state_set(state: str, company_id: str) -> None:
+    """Persist OAuth state centrally or refuse to start the consent flow."""
     try:
-        r = _redis()
-        r.setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id)
-    except Exception as exc:
-        log.warning("Redis unavailable for OAuth state; using fallback: %s", exc)
-        _oauth_states_fallback[state] = company_id
+        if not _redis().setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id):
+            raise RuntimeError("Redis rejected OAuth state write")
+    except Exception:
+        # No process-local fallback: callbacks can land on a different worker.
+        # Never log Redis connection details, which may contain credentials.
+        log.error("OAuth state store unavailable; refusing consent flow")
+        raise HTTPException(
+            status_code=503, detail="OAuth temporarily unavailable"
+        ) from None
 
 
 def _state_pop(state: str) -> str | None:
+    """Atomically consume an OAuth state exactly once; fail closed on outage."""
     try:
-        r = _redis()
-        key = f"oauth_state:{state}"
-        company_id = r.get(key)
-        if company_id:
-            r.delete(key)
-        return company_id
+        # GETDEL prevents two concurrent callbacks from reusing one state.
+        return _redis().getdel(f"oauth_state:{state}")
     except Exception:
-        return _oauth_states_fallback.pop(state, None)
-
-
-# Fallback for when Redis is unreachable (single-worker dev only)
-_oauth_states_fallback: dict[str, str] = {}
+        log.error("OAuth state store unavailable; refusing callback")
+        raise HTTPException(
+            status_code=503, detail="OAuth temporarily unavailable"
+        ) from None
 
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
@@ -298,14 +302,8 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
 
     # ── Second-step: pre_auth_token + totp_code (mobile 2FA) ─────────────────
     if body.pre_auth_token and body.totp_code:
-        from jose import jwt as jose_jwt, JWTError
-        try:
-            payload = jose_jwt.decode(
-                body.pre_auth_token,
-                settings.secret_key,
-                algorithms=["HS256"],
-            )
-        except JWTError:
+        payload = decode_access_token(body.pre_auth_token)
+        if not payload:
             raise HTTPException(status_code=401, detail="Invalid or expired 2FA session")
 
         if payload.get("scope") != "2fa_pending":
@@ -451,19 +449,12 @@ async def refresh_token(body: RefreshRequest):
       token is issued, so a captured token can't be replayed for a second refresh
       (reuse detection).
     """
-    from jose import jwt as jose_jwt, JWTError
     from app.auth.jwt import is_token_revoked, blacklist_jti
 
-    try:
-        # Decode WITHOUT verifying expiry so a just-expired token can still be
-        # exchanged — bounded explicitly below.
-        payload = jose_jwt.decode(
-            body.access_token,
-            settings.secret_key,
-            algorithms=["HS256"],
-            options={"verify_exp": False},
-        )
-    except JWTError:
+    # Authenticate the HMAC and validate the expiry claim's type without
+    # enforcing elapsed time yet. Bounded renewal is enforced below.
+    payload = decode_refresh_candidate(body.access_token)
+    if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     user_id = payload.get("sub")
@@ -475,16 +466,24 @@ async def refresh_token(body: RefreshRequest):
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     # Enforce revocation (logout / prior rotation): a blacklisted token is dead.
-    if jti and is_token_revoked(jti):
+    try:
+        revoked = bool(jti and is_token_revoked(jti))
+    except Exception as exc:
+        from app.auth.jwt import RevocationStoreUnavailable
+        if not isinstance(exc, RevocationStoreUnavailable):
+            raise
+        raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
+    if not jti or revoked:
         raise HTTPException(status_code=401, detail="Token revoked; please log in again")
 
     # Bound the renewal window. A token expired for longer than the refresh
     # window cannot be renewed — this caps the lifetime of a leaked token.
     refresh_window_seconds = settings.refresh_token_expire_days * 86400
-    if exp is not None:
-        expired_for = datetime.now(timezone.utc).timestamp() - float(exp)
-        if expired_for > refresh_window_seconds:
-            raise HTTPException(status_code=401, detail="Session expired; please log in again")
+    # Unlike the legacy path, a missing/invalid expiry can never be renewed.
+    # decode_refresh_candidate already validates integer exp and signed HMAC.
+    expired_for = datetime.now(timezone.utc).timestamp() - exp
+    if expired_for > refresh_window_seconds:
+        raise HTTPException(status_code=401, detail="Session expired; please log in again")
 
     # Only a user-session token can be refreshed into a user-session token.
     if payload.get("scope", "access") != "access":
@@ -517,7 +516,13 @@ async def refresh_token(body: RefreshRequest):
 
     # Single-use rotation: invalidate the presented token so it can't be reused.
     if jti:
-        blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+        try:
+            blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+        except Exception as exc:
+            from app.auth.jwt import RevocationStoreUnavailable
+            if not isinstance(exc, RevocationStoreUnavailable):
+                raise
+            raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
 
     return {"access_token": new_token, "token_type": "bearer"}
 
@@ -531,7 +536,13 @@ async def logout(
     Revoke the current JWT by adding its JTI to the Redis blacklist.
     The token becomes invalid immediately, even before its natural expiry.
     """
-    revoke_token(token)
+    try:
+        revoke_token(token)
+    except Exception as exc:
+        from app.auth.jwt import RevocationStoreUnavailable
+        if not isinstance(exc, RevocationStoreUnavailable):
+            raise
+        raise HTTPException(status_code=503, detail="Logout could not be confirmed") from exc
     return {"status": "logged_out"}
 
 
@@ -576,6 +587,8 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72 or "\x00" in v:
+            raise ValueError("Password must be at most 72 UTF-8 bytes and contain no null characters")
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters")
         if not re.search(r'[A-Za-z]', v):
@@ -609,6 +622,13 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     if existing.data:
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    # Hash before any insert: a hashing failure must not orphan a company.
+    try:
+        password_hash = hash_password(body.password)
+    except Exception:
+        log.error("Registration password hashing unavailable")
+        raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
+
     # Create company
     try:
         company_result = (
@@ -629,7 +649,7 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     # Create user
     user_payload: dict = {
         "email": body.email,
-        "password_hash": hash_password(body.password),
+        "password_hash": password_hash,
         "role": "owner",
         "company_id": company_id,
         "is_active": True,

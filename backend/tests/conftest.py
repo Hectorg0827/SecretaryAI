@@ -28,6 +28,87 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+# A test run is a development environment, not production. Without this the
+# suite inherits DEBUG=false (the safe default) and the production billing
+# guard in app/config.py correctly refuses to construct Settings, since no
+# Stripe keys are configured here. The guard's own behaviour is covered
+# explicitly in tests/test_paywall.py, which builds Settings with a cleared
+# environment so both branches are exercised.
+os.environ.setdefault("DEBUG", "true")
+
+
+# ─── Paywall ──────────────────────────────────────────────────────────────────
+#
+# The paid routers in app/main.py are gated behind require_active_subscription.
+# That is correct in production and irrelevant to almost every test here: a test
+# about RBAC, tenant isolation or idempotency should not also have to stand up a
+# believable Stripe subscription, and if it does not, the gate answers 402
+# before the behaviour under test ever runs.
+#
+# So every test gets a subscription that is active, unless it asks otherwise.
+# The paywall's own behaviour — who is refused, the trial and grace-period
+# cases, which routers are gated, and the production startup guard — is covered
+# explicitly and without this override in tests/test_paywall.py, including
+# mutation checks proving those assertions fail when the gate is removed.
+
+
+def _subscription_dependencies():
+    """
+    Every distinct require_active_subscription callable mounted on the app.
+
+    The factory returns a fresh closure per call site, so there is no single
+    function object to override: the router-level ones and the per-endpoint ones
+    in app/api/connectors.py are all different objects. Walk the dependency tree
+    and collect them.
+    """
+    from app.main import app
+    from fastapi.routing import iter_route_contexts
+
+    found = {}
+
+    def collect(call):
+        if callable(call) and "require_active_subscription" in getattr(
+            call, "__qualname__", ""
+        ):
+            found[call] = True
+
+    def walk(dependant):
+        if dependant is None:
+            return
+        collect(getattr(dependant, "call", None))
+        for sub in getattr(dependant, "dependencies", []) or []:
+            walk(sub)
+
+    # FastAPI >=0.137 preserves router trees instead of flattening app.routes.
+    # The effective context contains router-level dependencies (including
+    # the subscription gate) that were not attached to the original leaf.
+    for context in iter_route_contexts(app.routes):
+        walk(getattr(context, "dependant", None))
+        for dep in getattr(context, "dependencies", ()) or ():
+            collect(getattr(dep, "dependency", None) or getattr(dep, "call", None))
+    return list(found)
+
+
+@pytest.fixture(autouse=True)
+def active_subscription():
+    """Treat the tenant as a paying customer for the duration of each test."""
+    try:
+        from app.main import app
+    except Exception:  # pragma: no cover - app not importable in this test module
+        yield
+        return
+
+    deps = _subscription_dependencies()
+    added = []
+    for dep in deps:
+        if dep not in app.dependency_overrides:
+            app.dependency_overrides[dep] = lambda: {"status": "active"}
+            added.append(dep)
+    try:
+        yield
+    finally:
+        for dep in added:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ─── Data fixtures ────────────────────────────────────────────────────────────

@@ -2,7 +2,8 @@
 SecretaryAI QB Desktop Connector — main entry point.
 
 Usage:
-  python -m connector.main
+  python -m connector.main          (from a source checkout)
+  SecretaryAIConnector.exe         (packaged; see connector/connector.spec)
 
 Environment variables (set in .env or shell):
   SECRETARY_CLOUD_URL      Cloud API base URL
@@ -20,20 +21,55 @@ The connector runs an infinite loop:
 """
 import asyncio
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
 
 import httpx
 
-from connector.config import ConnectorConfig
+from connector import __version__
+from connector.config import ConfigError, ConnectorConfig
 from connector.executor import TaskExecutor, TaskError
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+def _configure_logging() -> "Path | None":
+    """
+    Log to a rotating file as well as the console.
+
+    A packaged connector runs in the background with no console attached, so
+    console-only logging means a customer whose sync is failing has nothing to
+    send to support. The file lives beside the state file in per-user appdata.
+
+    `sys.stdout` is None in a PyInstaller windowed build, and handing None to
+    StreamHandler raises at import time, so the console handler is conditional.
+    """
+    from logging.handlers import RotatingFileHandler
+    from connector.config import default_state_dir
+
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    if sys.stdout is not None:
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+
+    log_path = None
+    try:
+        d = default_state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        log_path = d / "connector.log"
+        fh = RotatingFileHandler(log_path, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+    except OSError:
+        # An unwritable appdata directory must not stop the connector running.
+        log_path = None
+    return log_path
+
+
+_LOG_PATH = _configure_logging()
 log = logging.getLogger("connector")
 
 # Intervals (seconds)
@@ -270,17 +306,87 @@ def _user_auth_header(cfg: ConnectorConfig) -> dict:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-import os  # noqa: E402 (after module-level code for clarity)
+
+def selfcheck() -> int:
+    """
+    Verify a packaged connector is intact, without needing cloud credentials.
+
+    This exists because a PyInstaller build can succeed and still produce an
+    executable that fails every QuickBooks task at runtime: the Conductor
+    adapter is reached through a dynamic import, so if the spec's hidden
+    imports are wrong the analyser silently omits it and the breakage only
+    appears when a customer's first sync fails. CI runs this against the built
+    executable so that can never ship again, and support can ask a customer to
+    run it to tell a broken install apart from a configuration problem.
+
+    Returns 0 if everything needed is present.
+    """
+    print(f"SecretaryAI Connector {__version__}")
+    print(f"frozen bundle: {bool(getattr(sys, 'frozen', False))}")
+    ok = True
+
+    try:
+        from connector.qb_adapter import load_qb_desktop_adapter
+
+        adapter = load_qb_desktop_adapter()
+        print(f"  [ok]   QuickBooks Desktop adapter: {adapter.__module__}.{adapter.__name__}")
+    except Exception as exc:
+        print(f"  [FAIL] QuickBooks Desktop adapter could not be loaded: {exc}")
+        ok = False
+
+    try:
+        import httpx  # noqa: F401
+
+        print("  [ok]   httpx available")
+    except Exception as exc:
+        print(f"  [FAIL] httpx missing: {exc}")
+        ok = False
+
+    try:
+        from connector.config import default_state_dir
+
+        d = default_state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        probe = d / ".write-probe"
+        probe.write_text("ok")
+        probe.unlink()
+        print(f"  [ok]   state directory writable: {d}")
+    except Exception as exc:
+        print(f"  [FAIL] state directory not writable: {exc}")
+        ok = False
+
+    print("selfcheck: PASS" if ok else "selfcheck: FAIL")
+    return 0 if ok else 1
 
 
-def main() -> None:
-    cfg = ConnectorConfig()
+def main() -> int:
+    """
+    Start the connector. Returns a process exit code.
+
+    Missing configuration exits 2 with the message the user needs, rather than
+    a KeyError traceback. A packaged connector is often launched with no console
+    attached, so the message is also written to the log file the desktop app
+    reads when it reports connector status.
+    """
+    if "--selfcheck" in sys.argv[1:]:
+        return selfcheck()
+
+    try:
+        cfg = ConnectorConfig()
+    except ConfigError as exc:
+        log.error("%s", exc)
+        return 2
+
     connector = Connector(cfg)
+    log.info("State file: %s", cfg.state_file)
+    if _LOG_PATH:
+        log.info("Log file:   %s", _LOG_PATH)
     try:
         asyncio.run(connector.run())
     except KeyboardInterrupt:
         log.info("Connector stopped by user.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

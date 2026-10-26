@@ -40,6 +40,32 @@ class CheckoutRequest(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _subscription_period(subscription: dict) -> tuple[str, str]:
+    """Read Acacia periods or Basil-and-later single-item periods.
+
+    SecretaryAI sells one plan per subscription. Do not invent one entitlement
+    period from mixed-interval items; retry for operator review instead.
+    """
+    period = subscription
+    if period.get("current_period_start") is None or period.get("current_period_end") is None:
+        items = (subscription.get("items") or {}).get("data") or []
+        if len(items) != 1:
+            raise ValueError("Expected one subscription item with a billing period")
+        period = items[0]
+    return tuple(
+        datetime.fromtimestamp(period[key], tz=timezone.utc).isoformat()
+        for key in ("current_period_start", "current_period_end")
+    )
+
+
+def _invoice_subscription_id(invoice: dict) -> Optional[str]:
+    subscription = invoice.get("subscription")
+    if not subscription:
+        parent = invoice.get("parent") or {}
+        if parent.get("type") == "subscription_details":
+            subscription = (parent.get("subscription_details") or {}).get("subscription")
+    return subscription.get("id") if isinstance(subscription, dict) else subscription
+
 def _get_or_create_stripe_customer(company_id: str, company_email: str, db) -> Optional[str]:
     """Return existing stripe_customer_id or create a new Stripe customer."""
     if not _stripe_available:
@@ -270,6 +296,9 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
     event_data = event["data"]["object"]
     stripe_event_id = event["id"]
 
+    if settings.secretaryai_deployment_env.strip().lower() == "staging" and event.get("livemode") is not False:
+        raise HTTPException(status_code=400, detail="Staging accepts only test-mode Stripe events")
+
     log.info("Stripe webhook received: %s (id=%s)", event_type, stripe_event_id)
 
     try:
@@ -293,8 +322,8 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
 
     except Exception as exc:
         log.error("Stripe webhook handler error for %s: %s", event_type, exc, exc_info=True)
-        # Return 200 to Stripe so it does not retry; log internally
-        return {"received": True, "warning": "handler error — logged internally"}
+        # Acknowledge only successful handling so Stripe retries transient errors.
+        raise HTTPException(status_code=500, detail="Webhook processing failed") from exc
 
     return {"received": True}
 
@@ -317,12 +346,8 @@ async def _handle_checkout_completed(session: dict, stripe_event_id: str, db) ->
     period_start = None
     period_end = None
     if stripe_subscription_id and _stripe_available:
-        try:
-            stripe_sub = _stripe.Subscription.retrieve(stripe_subscription_id)
-            period_start = datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc).isoformat()
-            period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc).isoformat()
-        except Exception as exc:
-            log.warning("Could not retrieve Stripe subscription %s: %s", stripe_subscription_id, exc)
+        stripe_sub = _stripe.Subscription.retrieve(stripe_subscription_id)
+        period_start, period_end = _subscription_period(stripe_sub)
 
     now = datetime.now(tz=timezone.utc).isoformat()
 
@@ -364,7 +389,7 @@ async def _handle_checkout_completed(session: dict, stripe_event_id: str, db) ->
 async def _handle_invoice_paid(invoice: dict, stripe_event_id: str, db) -> None:
     """Record a successful payment and refresh subscription period."""
     stripe_customer_id = invoice.get("customer")
-    stripe_subscription_id = invoice.get("subscription")
+    stripe_subscription_id = _invoice_subscription_id(invoice)
     amount_paid = (invoice.get("amount_paid") or 0) / 100  # cents → dollars
 
     company_id = _company_id_from_customer(stripe_customer_id, db)
@@ -448,8 +473,7 @@ async def _handle_subscription_updated(stripe_sub: dict, stripe_event_id: str, d
         "paused": "past_due",
     }
     new_status = status_map.get(stripe_sub.get("status", ""), "past_due")
-    period_start = datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc).isoformat()
-    period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc).isoformat()
+    period_start, period_end = _subscription_period(stripe_sub)
     trial_end = None
     if stripe_sub.get("trial_end"):
         trial_end = datetime.fromtimestamp(stripe_sub["trial_end"], tz=timezone.utc).isoformat()
@@ -558,5 +582,7 @@ def _record_billing_event(
         }
         db.table("billing_events").insert(row).execute()
     except Exception as exc:
-        # Duplicate stripe_event_id triggers a unique constraint — safe to ignore
-        log.debug("billing_events insert skipped (likely duplicate): %s", exc)
+        if getattr(exc, "code", None) == "23505":
+            log.debug("billing_events insert skipped (duplicate Stripe event)")
+            return
+        raise

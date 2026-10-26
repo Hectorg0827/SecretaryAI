@@ -53,16 +53,6 @@ class TestJWT:
         assert decoded["sub"] == "user-999"
 
 
-def _bcrypt_available():
-    """Check if bcrypt is functional in this environment."""
-    try:
-        hash_password("probe")
-        return True
-    except Exception:
-        return False
-
-
-@pytest.mark.skipif(not _bcrypt_available(), reason="bcrypt not functional in this environment")
 class TestPasswordHashing:
     def test_hash_password_not_plaintext(self):
         hashed = hash_password("mysecretpassword")
@@ -81,6 +71,27 @@ class TestPasswordHashing:
         h2 = hash_password("password1")
         # bcrypt uses random salt, so hashes differ
         assert h1 != h2
+
+    def test_bcrypt_utf8_byte_limit_is_explicit(self):
+        password = "é" * 36
+        assert verify_password(password, hash_password(password)) is True
+        with pytest.raises(ValueError):
+            hash_password(password + "a")
+        assert verify_password(password + "a", hash_password(password)) is False
+
+    def test_malformed_hash_and_null_password_fail_closed(self):
+        assert verify_password("valid-password", "not-a-password-hash") is False
+        assert verify_password("a\x00b", hash_password("ab")) is False
+        with pytest.raises(ValueError):
+            hash_password("a\x00b")
+
+    def test_existing_bcrypt_prefixes_still_verify(self):
+        import bcrypt
+        # Existing Passlib rows use standard bcrypt 2b; older 2a rows also work.
+        for prefix in (b"2a", b"2b"):
+            hashed = bcrypt.hashpw(b"Legacy-password1!", bcrypt.gensalt(prefix=prefix)).decode()
+            assert verify_password("Legacy-password1!", hashed) is True
+            assert verify_password("Wrong-password1!", hashed) is False
 
 
 # ─── RBAC Tests ────────────────────────────────────────────────────────────────

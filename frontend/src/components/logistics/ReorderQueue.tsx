@@ -69,13 +69,13 @@ export function ReorderQueue({ items, loading, onItemsChange }: ReorderQueueProp
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+      <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-3">
         <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center">
           <ClipboardList className="w-6 h-6 text-slate-300" />
         </div>
         <div className="text-center">
           <p className="text-sm font-medium text-slate-500">No reorder decisions</p>
-          <p className="text-xs mt-1 text-slate-400">Run the reorder evaluation to populate this queue</p>
+          <p className="text-xs mt-1 text-slate-600">Run the reorder evaluation to populate this queue</p>
         </div>
       </div>
     );
@@ -100,7 +100,7 @@ export function ReorderQueue({ items, loading, onItemsChange }: ReorderQueueProp
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
             approvedItems.length > 0
               ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed',
+              : 'bg-slate-100 text-slate-600 cursor-not-allowed',
           )}
         >
           <ShoppingCart size={14} />
@@ -114,7 +114,7 @@ export function ReorderQueue({ items, loading, onItemsChange }: ReorderQueueProp
           <thead className="bg-white border-b border-slate-100">
             <tr>
               {['SKU', 'Urgency', 'Days of Supply', 'Rec. Qty', 'Container Fill', 'Lead Time (p80)', 'Action'].map((h) => (
-                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
                   {h}
                 </th>
               ))}
@@ -134,7 +134,7 @@ export function ReorderQueue({ items, loading, onItemsChange }: ReorderQueueProp
               >
                 <td className="px-5 py-3.5">
                   <div className="text-sm font-semibold text-slate-800">{item.sku_name}</div>
-                  <div className="text-xs text-slate-400 font-mono">{item.sku_id}</div>
+                  <div className="text-xs text-slate-600 font-mono">{item.sku_id}</div>
                 </td>
                 <td className="px-5 py-3.5">
                   <UrgencyBadge level={item.urgency} />

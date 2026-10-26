@@ -28,10 +28,17 @@ def _fake_role_token(role: str) -> str:
     return "unsigned." + payload + ".synthetic-only"
 
 
-def _respond(route, *, summary_error: bool = False, role: str = "owner") -> None:
+def _respond(route, *, summary_error: bool = False, role: str = "owner",
+             email_fixture: bool = False, work_error: bool = False,
+             requests_seen: list[str] | None = None) -> None:
     path = urlparse(route.request.url).path
+    if requests_seen is not None:
+        requests_seen.append(path)
     if summary_error and path == "/api/dashboard/summary":
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic outage"}))
+        return
+    if work_error and path in ("/api/actions/pending", "/api/dashboard/notes", "/api/inventory/alerts"):
+        route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic source outage"}))
         return
     fixtures = {
         "/api/dashboard/summary": {
@@ -55,7 +62,16 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner") -> None
         "/api/admin/audit-log": {"events": [{"id": "synthetic-audit", "event_type": "draft_approved",
                                                 "created_at": SYNTHETIC_TIME, "metadata": {"execution_status": "queued"}}],
                                   "total": 1, "page": 1, "page_size": 25, "pages": 1},
-        "/api/dashboard/emails": {"emails": []},
+        "/api/dashboard/emails": {"emails": ([{
+            "id": "synthetic-email", "thread_id": "synthetic-thread", "from": "Synthetic contact",
+            "from_email": "synthetic@example.invalid", "subject": "Synthetic question",
+            "snippet": "Fixture", "ai_summary": "Fixture only", "ai_priority": "high",
+            "ai_action_needed": "Review", "received_at": SYNTHETIC_TIME,
+            "is_read": False, "labels": [],
+        }] if email_fixture else [])},
+        "/api/dashboard/emails/draft-reply": {"draft": "Synthetic draft — never send", "subject": "Synthetic reply"},
+        "/api/inventory/alerts": {"alerts": []},
+        "/api/inbox": {"items": [], "unread_count": 0, "total_count": 0},
         "/api/agent/status": {"connected": False, "last_seen": None},
         "/auth/me": {"name": "Synthetic Tester", "role": role},
     }
@@ -67,11 +83,17 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner") -> None
     route.fulfill(status=200, content_type="application/json", body=json.dumps(fixtures[path]))
 
 
-def _context(browser, role: str, width: int, *, summary_error: bool = False):
+def _context(browser, role: str, width: int, *, summary_error: bool = False,
+             email_fixture: bool = False, work_error: bool = False,
+             requests_seen: list[str] | None = None):
     context = browser.new_context(viewport={"width": width, "height": 844 if width < 768 else 900})
     context.add_init_script(f"localStorage.setItem('secretary_token', {json.dumps(_fake_role_token(role))});")
-    context.route("**/api/**", lambda route: _respond(route, summary_error=summary_error, role=role))
-    context.route("**/auth/me", lambda route: _respond(route, summary_error=summary_error, role=role))
+    def mock_route(route):
+        _respond(route, summary_error=summary_error, role=role,
+                 email_fixture=email_fixture, work_error=work_error,
+                 requests_seen=requests_seen)
+    context.route("**/api/**", mock_route)
+    context.route("**/auth/me", mock_route)
     return context
 
 
@@ -133,6 +155,39 @@ def main() -> None:
                     assert page.get_by_text("0 at-risk accounts").count() == 0
                 finally:
                     outage.close()
+
+                # Direct email sending cannot be reachable from dashboard draft UX.
+                email_paths: list[str] = []
+                email_context = _context(browser, "owner", 390, email_fixture=True, requests_seen=email_paths)
+                try:
+                    page = email_context.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    page.get_by_role("button", name="Draft reply", exact=True).click()
+                    page.get_by_role("button", name="Copy draft (do not send)").wait_for()
+                    assert page.get_by_role("button", name="Send Reply").count() == 0
+                    page.get_by_role("button", name="Copy draft (do not send)").click()
+                    assert "/api/dashboard/emails/send-reply" not in email_paths
+                finally:
+                    email_context.close()
+
+                work_context = _context(browser, "owner", 390, work_error=True)
+                try:
+                    page = work_context.new_page()
+                    page.goto(PREVIEW + "/work", wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Work data is incomplete", exact=False).wait_for()
+                    assert page.get_by_text("All clear", exact=True).count() == 0
+                finally:
+                    work_context.close()
+
+                inbox_context = _context(browser, "owner", 390)
+                try:
+                    page = inbox_context.new_page()
+                    inbox_context.route("**/api/inbox", lambda route: route.fulfill(status=503, body='{"detail":"outage"}', content_type="application/json"))
+                    page.goto(PREVIEW + "/inbox", wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Inbox data could not be loaded", exact=False).wait_for()
+                    assert page.get_by_text("All caught up").count() == 0
+                finally:
+                    inbox_context.close()
             finally:
                 browser.close()
     finally:
@@ -141,7 +196,7 @@ def main() -> None:
             server.wait(timeout=5)
         except subprocess.TimeoutExpired:
             server.kill()
-    print("PASS: synthetic-only briefing, rep restriction and summary outage browser checks")
+    print("PASS: synthetic-only briefing, rep restriction, no-direct-send and source outage browser checks")
 
 
 if __name__ == "__main__":

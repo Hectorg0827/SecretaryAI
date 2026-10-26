@@ -76,18 +76,6 @@ export async function draftEmailReply(
   });
 }
 
-export async function sendEmailReply(params: {
-  email_id: string;
-  body: string;
-  subject: string;
-  to: string;
-}): Promise<void> {
-  await apiFetch('/api/dashboard/emails/send-reply', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-}
-
 export async function getNotes(): Promise<{ notes: FollowUpNote[] }> {
   return apiFetch<{ notes: FollowUpNote[] }>('/api/dashboard/notes');
 }

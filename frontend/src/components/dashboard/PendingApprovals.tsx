@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { CheckCircle, XCircle, Mail, ShoppingCart, FileText, Loader2, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, Draft } from '../../lib/api';
+import { approvalNotice } from '../../lib/approvalStatus';
 import { Card, CardHeader } from '../ui/Card';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -40,16 +41,13 @@ function DraftCard({ draft, onRemove, canApprove }: { draft: Draft; onRemove: (i
   const Icon = meta.icon;
 
   const approve = async () => {
+    if (!window.confirm('Approve this draft? Approval may queue an external action. Delivery must be verified separately.')) return;
     setBusy('approve');
     try {
       const result = await api.actions.approve(draft.id);
-      if (result.execution_status === 'sent') {
-        toast.success('Approved; provider confirmed delivery');
-      } else if (result.execution_status === 'failed' || result.execution_status === 'needs_reconciliation') {
-        toast.error('Approved, but execution was not confirmed. Check the audit trail.');
-      } else {
-        toast.success('Approval recorded. Execution is not yet confirmed.');
-      }
+      const notice = approvalNotice(result);
+      if (notice.severity === 'success') toast.success(notice.message);
+      else toast(notice.message);
       onRemove(draft.id);
     } catch { toast.error('Could not approve'); }
     finally   { setBusy(null); }
@@ -101,12 +99,13 @@ function DraftCard({ draft, onRemove, canApprove }: { draft: Draft; onRemove: (i
 export function PendingApprovals() {
   const [drafts,  setDrafts]  = useState<Draft[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const { canApprove } = useAuth();
 
   const fetch = () => {
     api.actions.pending()
-      .then((r) => setDrafts(r.drafts ?? []))
-      .catch(() => setDrafts([]))
+      .then((r) => { setDrafts(r.drafts ?? []); setError(false); })
+      .catch(() => { setDrafts([]); setError(true); })
       .finally(() => setLoading(false));
   };
 
@@ -125,6 +124,10 @@ export function PendingApprovals() {
         <div className="flex items-center gap-2 px-5 py-4 text-xs text-slate-400">
           <Loader2 size={13} className="animate-spin" /> Loading…
         </div>
+      ) : error ? (
+        <p className="px-5 py-4 text-sm text-amber-800 bg-amber-50" role="alert">
+          Approvals source unavailable. Pending status is unknown.
+        </p>
       ) : drafts.length === 0 ? (
         <div className="flex items-center gap-2 px-5 py-4 text-sm text-slate-400">
           <ClipboardList size={15} className="opacity-50" />

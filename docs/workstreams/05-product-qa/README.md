@@ -17,6 +17,11 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 | Approval completion | `backend/app/api/actions.py` response distinguishes queued, sent, failed, uncertain | Chat 1: status lookup, durable idempotency and execution evidence; Chat 5 shows real stage, not 'approved & sent' |
 | Opportunities | Feed has free-form `event_type`/`action_type` but no frozen opportunity taxonomy | Chat 2/4: classification, source evidence, permission-checked drilldowns and clear next-action schema |
 | Billing | Existing `/api/billing/plans`, `/subscription`, `/checkout`, `/portal`, `/invoices` | Chat 1/2: frozen Stripe sandbox checkout, entitlements, cancellation and webhook semantics before customer UX acceptance |
+| Ungated direct email send | `backend/app/api/dashboard.py:321-350` executes `adapter.send_email_reply` based only on `trigger_actions`, while an audit insert failure is swallowed | **Chat 1 security release blocker:** require approved immutable draft, policy tier, tenant/recipient validation, idempotency and durable audit before any provider call; disable or quarantine this endpoint until then. Chat 5 removed direct-send UI/API helpers; copying a draft is local-only |
+| Read acknowledgment falsely succeeds | `backend/app/api/dashboard.py:355-366` swallows Gmail mark-read errors and returns success; `backend/app/api/inbox.py:238-267` does likewise for database failures | Chat 1/2: surface real failure, persist durable read/ack state and return truthful `ok`/status. Web now updates local read state only after a successful HTTP response, but a false HTTP 200 remains an unresolved server defect |
+| Partial inbox reads silently fail | `backend/app/api/inbox.py:78-220` catches per-source DB errors, then returns an ordinary empty success at lines 229-233 | Chat 1/2: fail closed or include per-source `available`, `as_of`, `error_code` and partial status. UI can display transport failures but cannot detect server-suppressed gaps |
+| Work queue inventory mismatch | `backend/app/api/inventory.py:78` compares the entire `status` query string with one status, whereas prior web UI sent `critical,out_of_stock` | Chat 3: align canonical `GET /inventory/alerts` schema, tenant and freshness; Chat 5 now uses that existing endpoint and filters `needs_po` client-side |
+| Draft PO permissions | `backend/app/api/actions.py:331-359` allows any authenticated user to create a PO draft without an explicit action permission | Chat 1/3: require correct tenant/role policy server-side, durable idempotency, approved vendor/line-item schema. Chat 5 hides the PO-draft control for roles lacking draft rights, but client gating alone is insufficient |
 
 ## First isolated UI increment
 
@@ -25,6 +30,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - MFA: removed external QR rendering that transmitted an authenticator enrollment URI to a third-party host; manual setup key remains available pending a local QR renderer.
 - Approvals: distinguish authorization from provider-confirmed execution. No new outbound action is introduced.
 
+## Second isolated UX and QA increment (synthetic only)
+
+- Dashboard and unified Inbox email drafts are **copy-only** pending a verified approval/audit send contract. No web or mobile API helper calls the direct-send endpoint. Existing backend endpoint remains a security blocker for Chat 1.
+- Dashboard inbox and approvals plus unified Inbox now show unavailable-source alerts instead of a misleading clean slate after HTTP errors. Backend-suppressed partial failures remain unobservable until Chat 1/2 provide source metadata.
+- The Work Queue shows partial source outages; restricts company-wide follow-up note reads to owner/manager; calls existing `GET /api/inventory/alerts`; requires a deliberate approval confirmation; and separates a queued PO draft from an actually resolved inventory shortage. Sales reps can view inventory but cannot trigger PO drafts in this UI.
+- Browser fixture coverage exercises drafts without outbound HTTP sends, per-source failures, inbox transport failure, mobile-width dashboard and route restrictions. It does **not** prove live mail/provider or server authorization behavior.
+- Local verification: `frontend npm test -- --reporter=dot`: **21 passing** (five suites); web and mobile `npm run typecheck` passed; web `npm run lint` has **0 errors / 21 warnings**; web `npm run build` and `npm run test:css` passed; synthetic Chromium `e2e/verify_morning_briefing.py` passed at phone and desktop widths. Native device, actual email and staging acceptance remain **NOT TESTED**.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -32,16 +45,19 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | `npm test -- --reporter=dot`: 17 passed; `npm run typecheck`: pass (local only) |
-| Web lint | PASS | `npm run lint`: 0 errors, 25 warnings including pre-existing areas |
+| Web unit tests and typecheck | PASS | 21 passed; `npm run typecheck`: pass (local only) |
+| Web lint | PASS | `npm run lint`: 0 errors, 21 warnings including pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and existing unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 4 passed |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
-| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage and role-denial checks |
+| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |
 | Six digest sections source correctness | NOT TESTED | Provider-backed payload, freshness and per-role scope |
 | Approval-then-action idempotency | NOT TESTED | Test-only provider receipt and durable audit state |
 | Rep record ownership and private notes | FAIL | Backend fail-closed ownership contract |
+| Direct-send endpoint policy gate and audit | FAIL | Backend endpoint lacks confirmed immutable approval/idempotency/audit semantics; UI does not expose it |
+| Inbox partial-read and mark-read truthfulness | FAIL | Backend catches per-source and mutation errors and can return success |
+| PO draft permission/idempotency | FAIL | Server enforces authentication but not an explicit create-PO-draft permission |
 | Logistics shipment/cost device parity | FAIL | Missing read API contracts |
 | Mobile/desktop accessibility | NOT TESTED | Device screen reader, keyboard, layout evidence |
 | Stripe sandbox checkout/cancel/webhooks | NOT TESTED | Human-approved provider test session |

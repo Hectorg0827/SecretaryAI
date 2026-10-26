@@ -15,7 +15,7 @@ import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import {
   ChevronDown, ChevronRight, Loader2, Mail, MailOpen,
-  Sparkles, Send, X, RefreshCw,
+  Sparkles, Copy, X, RefreshCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, PriorityEmail } from '../../lib/api';
@@ -43,9 +43,8 @@ interface EmailRowProps {
 function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
   const [open,        setOpen]        = useState(false);
   const [draft,       setDraft]       = useState<string | null>(null);
-  const [draftSubj,   setDraftSubj]   = useState('');
   const [loadingDraft, setLoadingDraft] = useState(false);
-  const [sending,     setSending]     = useState(false);
+  const [copying,     setCopying]     = useState(false);
   const [showDraft,   setShowDraft]   = useState(false);
 
   const relativeTime = (iso: string) => {
@@ -63,7 +62,6 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
     try {
       const res = await api.emails.draftReply(email.id);
       setDraft(res.draft);
-      setDraftSubj(res.subject);
       setShowDraft(true);
     } catch {
       toast.error('Could not generate draft reply');
@@ -72,24 +70,26 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
     }
   };
 
-  const sendReply = async () => {
+  const copyReply = async () => {
     if (!draft) return;
-    setSending(true);
+    setCopying(true);
     try {
-      await api.emails.sendReply(email.id, draft, draftSubj, email.from_email);
-      toast.success('Reply sent');
-      onMarkRead(email.id);
-      setShowDraft(false);
+      await navigator.clipboard.writeText(draft);
+      toast.success('Draft copied. Nothing was sent.');
     } catch {
-      toast.error('Failed to send reply');
+      toast.error('Copy failed; select the draft manually.');
     } finally {
-      setSending(false);
+      setCopying(false);
     }
   };
 
   const markRead = async () => {
-    await api.emails.markRead(email.id).catch(() => null);
-    onMarkRead(email.id);
+    try {
+      await api.emails.markRead(email.id);
+      onMarkRead(email.id);
+    } catch {
+      toast.error('Mark read failed; status was not changed.');
+    }
   };
 
   return (
@@ -102,39 +102,42 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
       )}
     >
       {/* Collapsed header row */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors"
-      >
-        <div className="mt-0.5 text-slate-300 flex-shrink-0">
-          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant={email.ai_priority} />
-            <span className={clsx('text-sm font-medium text-slate-800 truncate max-w-[160px]', !email.is_read && 'font-semibold')}>
-              {email.from}
-            </span>
-            <span className="text-xs text-slate-400 ml-auto flex-shrink-0">
-              {relativeTime(email.received_at)}
-            </span>
+      <div className="w-full px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors">
+        <button
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-label={`${email.from}: ${email.subject}`}
+          className="flex-1 min-w-0 text-left flex items-start gap-3"
+        >
+          <div className="mt-0.5 text-slate-300 flex-shrink-0">
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </div>
-          <div className="text-sm text-slate-600 truncate mt-0.5">{email.subject}</div>
-          <div className="text-xs text-slate-400 truncate mt-0.5">{email.ai_summary || email.snippet}</div>
-        </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={email.ai_priority} />
+              <span className={clsx('text-sm font-medium text-slate-800 truncate max-w-[160px]', !email.is_read && 'font-semibold')}>
+                {email.from}
+              </span>
+              <span className="text-xs text-slate-400 ml-auto flex-shrink-0">
+                {relativeTime(email.received_at)}
+              </span>
+            </div>
+            <div className="text-sm text-slate-600 truncate mt-0.5">{email.subject}</div>
+            <div className="text-xs text-slate-400 truncate mt-0.5">{email.ai_summary || email.snippet}</div>
+          </div>
+        </button>
 
         {/* Quick draft button — only shown to roles with trigger_actions */}
         {canReply && (
           <button
-            onClick={(e) => { e.stopPropagation(); setOpen(true); loadDraft(); }}
+            onClick={() => { setOpen(true); loadDraft(); }}
             className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1 bg-blue-50 hover:bg-blue-100 transition-colors whitespace-nowrap"
           >
             <Sparkles size={11} />
             Draft reply
           </button>
         )}
-      </button>
+      </div>
 
       {/* Expanded body */}
       {open && (
@@ -171,14 +174,17 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
                 className="w-full text-sm text-slate-700 bg-white border border-blue-200 rounded p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
                 rows={6}
               />
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2 rounded" role="status">
+                Direct sending is disabled until the approved outbound-policy and audit contract is verified. Copying does not send.
+              </p>
               <div className="flex items-center gap-2 mt-2">
                 <button
-                  onClick={sendReply}
-                  disabled={sending}
+                  onClick={copyReply}
+                  disabled={copying || !draft}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
                 >
-                  {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  {sending ? 'Sending…' : 'Send Reply'}
+                  {copying ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
+                  {copying ? 'Copying…' : 'Copy draft (do not send)'}
                 </button>
                 <button
                   onClick={() => setShowDraft(false)}
@@ -227,6 +233,7 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
 export function EmailInbox() {
   const [emails,  setEmails]  = useState<PriorityEmail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [filter,  setFilter]  = useState<'all' | 'unread'>('unread');
   const { canTriggerActions } = useAuth();
 
@@ -234,9 +241,11 @@ export function EmailInbox() {
     try {
       const res = await api.dashboard.emails();
       setEmails(res.emails ?? []);
+      setError(false);
     } catch {
-      // API endpoint may not exist yet — use empty state gracefully
+      // A failed source is not evidence of an empty inbox.
       setEmails([]);
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -260,7 +269,7 @@ export function EmailInbox() {
     <Card>
       <CardHeader
         title="Priority Inbox"
-        count={unreadCount > 0 ? `${unreadCount} unread` : 'All read'}
+        count={error ? 'Unavailable' : unreadCount > 0 ? `${unreadCount} unread` : 'All read'}
         action={
           <div className="flex items-center gap-1">
             <button
@@ -288,7 +297,11 @@ export function EmailInbox() {
         }
       />
 
-      {visible.length === 0 ? (
+      {error ? (
+        <div className="px-5 py-6 text-sm text-amber-800 bg-amber-50" role="alert">
+          Email source unavailable. Inbox status is unknown; retry when the connection is restored.
+        </div>
+      ) : visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-slate-400">
           <Mail size={28} className="mb-2 opacity-40" />
           <p className="text-sm">

@@ -303,8 +303,6 @@ export const api = {
       api.post<{ draft: string; subject: string }>('/api/dashboard/emails/draft-reply', { email_id: emailId }),
     markRead: (emailId: string) =>
       api.post<void>(`/api/dashboard/emails/${emailId}/mark-read`, {}),
-    sendReply: (emailId: string, draft: string, subject: string, to: string) =>
-      api.post<void>('/api/dashboard/emails/send-reply', { email_id: emailId, body: draft, subject, to }),
   },
 
   actions: {

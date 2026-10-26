@@ -19,6 +19,10 @@ from decimal import Decimal
 log = logging.getLogger(__name__)
 
 
+class SnapshotPersistenceUnavailable(RuntimeError):
+    """A computed snapshot could not be stored durably."""
+
+
 class SnapshotSourceUnavailable(RuntimeError):
     """A required source read failed; do not publish fictitious zero metrics."""
 
@@ -179,7 +183,8 @@ def store_snapshot(db, company_id: str, report_type: str, payload: dict, generat
             on_conflict="company_id,report_type",
         ).execute()
     except Exception as exc:
-        log.error("Failed to store %s snapshot for company %s: %s", report_type, company_id, exc)
+        log.error("Failed to store %s snapshot for company %s", report_type, company_id)
+        raise SnapshotPersistenceUnavailable("Dashboard snapshot persistence failed") from exc
 
 
 def snapshot_freshness(

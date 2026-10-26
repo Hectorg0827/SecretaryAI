@@ -190,3 +190,25 @@ def test_future_dated_cache_does_not_claim_freshness():
     result = snapshot_freshness(bad, now=now)
     assert result["status"] == "unknown"
     assert result["stale"] is True
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_date", [None, "unparseable", "2026-13-48"])
+async def test_invalid_transaction_date_cannot_trigger_false_dormancy(bad_date):
+    from decimal import Decimal
+    from app.connectors.base import Customer
+    adapter = CompleteReader()
+    adapter.customers = [
+        Customer(
+            id="customer-1", qb_id="C1", name="Active Account",
+            email=None, phone=None, state="NY", balance=Decimal("0"),
+            total_sales=Decimal("100"),
+        )
+    ]
+    adapter.invoices = [{
+        "customer_id": "C1", "date": bad_date, "total": 100,
+    }]
+    with pytest.raises(SnapshotSourceUnavailable) as info:
+        await compute_dashboard_payload(adapter)
+    assert info.value.source == "account_health"

@@ -172,8 +172,14 @@ class QBOnlineAdapter(QuickBooksAdapter):
         )
 
     def _normalize_invoice(self, raw: dict) -> Invoice:
+        # Missing financial source fields cannot be interpreted as paid/zero.
+        for required in ("Id", "TxnDate", "TotalAmt", "Balance"):
+            if raw.get(required) is None or raw.get(required) == "":
+                raise ValueError(f"QBO invoice missing {required}")
         line_items = [
             {
+                "item_id": li.get("SalesItemLineDetail", {}).get("ItemRef", {}).get("value"),
+                "name": li.get("SalesItemLineDetail", {}).get("ItemRef", {}).get("name", ""),
                 "description": li.get("Description", ""),
                 "quantity": li.get("SalesItemLineDetail", {}).get("Qty", 0),
                 "unit_price": li.get("SalesItemLineDetail", {}).get("UnitPrice", 0),
@@ -187,11 +193,11 @@ class QBOnlineAdapter(QuickBooksAdapter):
             qb_id=raw["Id"],
             customer_id=raw.get("CustomerRef", {}).get("value", ""),
             customer_name=raw.get("CustomerRef", {}).get("name", ""),
-            date=date.fromisoformat(raw["TxnDate"]) if raw.get("TxnDate") else date.today(),
+            date=date.fromisoformat(raw["TxnDate"]),
             due_date=date.fromisoformat(raw["DueDate"]) if raw.get("DueDate") else None,
-            total=Decimal(str(raw.get("TotalAmt", 0))),
-            balance=Decimal(str(raw.get("Balance", 0))),
-            status="open" if Decimal(str(raw.get("Balance", 0))) > 0 else "paid",
+            total=Decimal(str(raw["TotalAmt"])),
+            balance=Decimal(str(raw["Balance"])),
+            status="open" if Decimal(str(raw["Balance"])) > 0 else "paid",
             line_items=line_items,
         )
 

@@ -73,9 +73,13 @@ class OutlookConnector:
                 if "refresh_token" in tokens:
                     self._refresh_token = tokens["refresh_token"]
                 if self._on_token_refresh:
-                    self._on_token_refresh(self._access_token, self._refresh_token)
+                    import inspect
+                    persisted = self._on_token_refresh(self._access_token, self._refresh_token)
+                    if inspect.isawaitable(persisted):
+                        await persisted
         except Exception as exc:
             log.error("Outlook token refresh failed: %s", exc)
+            raise
 
         return self._access_token
 
@@ -87,7 +91,7 @@ class OutlookConnector:
             # Build $filter from query
             params: dict = {
                 "$top": min(max_results, 50),
-                "$select": "id,subject,from,bodyPreview,receivedDateTime,isRead",
+                "$select": "id,conversationId,internetMessageId,subject,from,bodyPreview,receivedDateTime,isRead",
                 "$orderby": "receivedDateTime desc",
             }
             if "is:unread" in query:
@@ -107,6 +111,7 @@ class OutlookConnector:
                 {
                     "id": m["id"],
                     "thread_id": m.get("conversationId", m["id"]),
+                    "message_id": m.get("internetMessageId"),
                     "from": m.get("from", {}).get("emailAddress", {}).get("name", ""),
                     "from_email": m.get("from", {}).get("emailAddress", {}).get("address", ""),
                     "subject": m.get("subject", "(no subject)"),
@@ -118,7 +123,20 @@ class OutlookConnector:
             ]
         except Exception as exc:
             log.error("Outlook get_emails failed: %s", exc)
-            return []
+            raise
+
+    async def test_connection(self) -> bool:
+        """Verify an actual Graph identity request; configuration is not health."""
+        import httpx
+        try:
+            headers = await self._get_headers()
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(f"{GRAPH_BASE}/me", headers=headers)
+                response.raise_for_status()
+            return True
+        except Exception as exc:
+            log.warning("Outlook connectivity check failed: %s", exc)
+            return False
 
     async def send_email_reply(self, to: str, subject: str, body: str, reply_to_id: Optional[str] = None) -> dict:
         """Send an email reply via Graph API."""

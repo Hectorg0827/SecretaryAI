@@ -114,14 +114,14 @@ class UnifiedDataAdapter:
     async def _persist_qbo_tokens(
         self, access_token: str, refresh_token: str, expires_in: int = 3600
     ) -> None:
-        """Encrypt and save refreshed QBO tokens back to Supabase."""
+        """Durably persist rotating tokens or fail the refresh as incomplete."""
         import logging
         from datetime import datetime, timezone
         log = logging.getLogger(__name__)
 
         company_id = self._config.get("id")
         if not company_id:
-            return
+            raise RuntimeError("Cannot persist QBO token refresh without a company identifier")
 
         try:
             from supabase import create_client
@@ -130,14 +130,17 @@ class UnifiedDataAdapter:
 
             settings = get_settings()
             db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             db.table("companies").update({
                 "qbo_access_token": encrypt(access_token, settings.secret_key),
                 "qbo_refresh_token": encrypt(refresh_token, settings.secret_key),
                 "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+                "qbo_token_expires_at": expires_at.isoformat(),
             }).eq("id", company_id).execute()
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
-            log.error("Failed to persist refreshed QBO tokens for %s: %s", company_id, exc)
+            log.error("Failed to persist refreshed QBO tokens for company %s", company_id)
+            raise RuntimeError("QBO token refresh could not be persisted") from exc
 
     def set_db(self, db) -> None:
         """Attach a DB client so the AccessRouter can log path decisions."""
@@ -349,7 +352,7 @@ class UnifiedDataAdapter:
             return await self._gmail.get_recent_emails(query=query, max_results=max_results)
         if self._outlook:
             return await self._outlook.get_emails(query=query, max_results=max_results)
-        return []
+        raise RuntimeError("No email connector configured")
 
     async def send_email_reply(self, to: str, subject: str, body: str) -> dict:
         """Send an email reply — routes to Gmail or Outlook."""
@@ -400,22 +403,31 @@ class UnifiedDataAdapter:
             results["quickbooks"] = await self._qb.test_connection()
         if self._gmail:
             try:
-                async with __import__("httpx").AsyncClient(timeout=5) as client:
-                    r = await client.get(
-                        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-                        headers={"Authorization": f"Bearer {self._gmail._token}"},
-                    )
-                    results["gmail"] = r.status_code == 200
+                credentials = getattr(self._gmail, "_creds_dict", None)
+                token = credentials.get("token") if isinstance(credentials, dict) else getattr(self._gmail, "_token", None)
+                if not isinstance(token, str) or not token:
+                    results["gmail"] = False
+                else:
+                    async with __import__("httpx").AsyncClient(timeout=5) as client:
+                        r = await client.get(
+                            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        results["gmail"] = r.status_code == 200
             except Exception:
                 results["gmail"] = False
         if self._outlook:
-            results["outlook"] = True
+            health_check = getattr(self._outlook, "test_connection", None)
+            try:
+                results["outlook"] = bool(await health_check()) if callable(health_check) else False
+            except Exception:
+                results["outlook"] = False
         if self._sheets:
-            results["google_sheets"] = True
+            results["google_sheets"] = False  # no probe implemented; unverified is not healthy
         if self._shopify:
-            results["shopify"] = True
+            results["shopify"] = False  # no probe implemented; unverified is not healthy
         if self._shiptrack:
-            results["shiptrack"] = True
+            results["shiptrack"] = False  # carrier configuration does not establish connectivity
         return results
 
 

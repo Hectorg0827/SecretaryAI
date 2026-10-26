@@ -13,6 +13,19 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _field(record, name: str, default=None):
+    """Read a connector dataclass or a normalized mapping without falsey fallbacks."""
+    if isinstance(record, dict):
+        return record.get(name, default)
+    return getattr(record, name, default)
+
+
+def _owned_by_sales_rep(customer, user: dict) -> bool:
+    """An absent or unverified assignment grants no sales-rep access."""
+    assigned_rep = _field(customer, "assigned_rep_id")
+    return bool(assigned_rep and assigned_rep == user.get("sub"))
+
+
 def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -> dict:
     """
     Normalise a QB Customer object + order history into the shape expected
@@ -27,8 +40,8 @@ def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -
         except ValueError:
             pass
 
-    cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
-    name = getattr(customer, "name", "") or customer.get("name", "")
+    cid = _field(customer, "qb_id", "")
+    name = _field(customer, "name", "")
 
     health = score_account(
         account_id=cid,
@@ -36,7 +49,7 @@ def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -
         last_order_date=last_order,
         avg_order_cycle_days=None,
         order_history=orders,
-        current_balance=float(getattr(customer, "balance", 0)),
+        current_balance=float(_field(customer, "balance", 0)),
     )
 
     total_revenue = sum(o.get("total", 0) for o in orders)
@@ -45,13 +58,13 @@ def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -
     return {
         "id":              cid,           # frontend uses `id`, not `qb_id`
         "name":            name,
-        "email":           getattr(customer, "email", None) or "",
-        "phone":           getattr(customer, "phone", None) or "",
-        "state":           getattr(customer, "state", None) or "",
+        "email":           _field(customer, "email") or "",
+        "phone":           _field(customer, "phone") or "",
+        "state":           _field(customer, "state") or "",
         "health_status":   health.status,
         "health_score":    health.score,
         "last_order_date": last_order_str,
-        "current_balance": float(getattr(customer, "balance", 0)),  # was `balance`
+        "current_balance": float(_field(customer, "balance", 0)),  # was `balance`
         "avg_order_value": avg_order_value,
         "assigned_rep":    None,           # not available from QB yet
     }
@@ -77,30 +90,21 @@ async def list_accounts(
         raise HTTPException(status_code=403, detail="Insufficient permissions to view accounts")
 
     customers = await adapter.get_all_customers()
+    if role == "sales_rep":
+        customers = [customer for customer in customers if _owned_by_sales_rep(customer, user)]
     invoices = await adapter.get_orders_last_n_days(365)
 
     by_customer: dict[str, list] = {}
     for inv in invoices:
-        cid = getattr(inv, "customer_id", None) or inv.get("customer_id", "")
+        cid = _field(inv, "customer_id", "")
         by_customer.setdefault(cid, []).append({
-            "date":  str(getattr(inv, "date", None) or inv.get("order_date", "")),
-            "total": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
+            "date":  str(_field(inv, "date") or _field(inv, "order_date", "")),
+            "total": float(_field(inv, "total", _field(inv, "total_amount", 0))),
         })
 
     results = []
     for customer in customers[:limit]:
-        cid = getattr(customer, "qb_id", "") or customer.get("qb_id", "")
-
-        # sales_rep: filter to their assigned accounts only
-        # NOTE: assigned_rep_id is not yet synced from QB — once available this
-        # will automatically restrict the list.
-        if role == "sales_rep":
-            assigned = (
-                getattr(customer, "assigned_rep_id", None)
-                or customer.get("assigned_rep_id")
-            )
-            if assigned and assigned != user["sub"]:
-                continue
+        cid = _field(customer, "qb_id", "")
 
         orders = by_customer.get(cid, [])
         dates = [o["date"] for o in orders if o["date"]]
@@ -124,25 +128,27 @@ async def get_account(
 
     customers = await adapter.get_all_customers()
     customer = next(
-        (c for c in customers if getattr(c, "qb_id", "") == account_id),
+        (c for c in customers if _field(c, "qb_id", "") == account_id),
         None,
     )
     if not customer:
         raise HTTPException(status_code=404, detail="Account not found")
+    if role == "sales_rep" and not _owned_by_sales_rep(customer, user):
+        raise HTTPException(status_code=403, detail="Account is not assigned to this sales representative")
 
     invoices = await adapter.get_orders_last_n_days(365)
     account_invoices = [
         inv for inv in invoices
-        if (getattr(inv, "customer_id", None) or inv.get("customer_id", "")) == account_id
+        if _field(inv, "customer_id", "") == account_id
     ]
 
     invoice_dicts = [
         {
-            "order_date":   str(getattr(inv, "date", "") or inv.get("order_date", "")),
-            "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
-            "total":        float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
-            "status":       getattr(inv, "status", ""),
-            "items":        getattr(inv, "line_items", []) or inv.get("line_items", []),
+            "order_date":   str(_field(inv, "date") or _field(inv, "order_date", "")),
+            "total_amount": float(_field(inv, "total", _field(inv, "total_amount", 0))),
+            "total":        float(_field(inv, "total", _field(inv, "total_amount", 0))),
+            "status":       _field(inv, "status", ""),
+            "items":        _field(inv, "line_items") or [],
         }
         for inv in account_invoices
     ]

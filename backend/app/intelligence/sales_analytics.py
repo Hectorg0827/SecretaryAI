@@ -39,7 +39,11 @@ def compute_period_sales(
     account_totals: dict[str, dict] = {}
 
     for inv in in_period:
-        amount = Decimal(str(inv.get("total_amount", 0)))
+        if inv.get("total_amount") is None:
+            raise ValueError("Sales row has missing total_amount")
+        amount = Decimal(str(inv["total_amount"]))
+        if not amount.is_finite():
+            raise ValueError("Sales row has non-finite total_amount")
         total_revenue += amount
 
         acct = inv.get("customer_name", "Unknown")
@@ -86,11 +90,13 @@ def compute_trend_comparison(
     today: Optional[date] = None,
 ) -> dict:
     """Compare current period vs same prior period."""
+    if days <= 0:
+        raise ValueError("days must be positive")
     today = today or date.today()
     current_end = today
-    current_start = today - timedelta(days=days)
+    current_start = today - timedelta(days=days - 1)
     prior_end = current_start - timedelta(days=1)
-    prior_start = prior_end - timedelta(days=days)
+    prior_start = prior_end - timedelta(days=days - 1)
 
     current = compute_period_sales(invoices, current_start, current_end)
     prior = compute_period_sales(invoices, prior_start, prior_end)
@@ -127,9 +133,8 @@ def compute_account_velocity(account_invoices: list[dict]) -> dict:
     if not account_invoices:
         return {"avg_days_between_orders": None, "recent_trend": "no_data"}
 
-    sorted_dates = sorted(
-        [_parse_date(inv.get("order_date", "")) for inv in account_invoices]
-    )
+    chronological = sorted(account_invoices, key=lambda inv: _parse_date(inv.get("order_date", "")))
+    sorted_dates = [_parse_date(inv.get("order_date", "")) for inv in chronological]
     if len(sorted_dates) < 2:
         return {"avg_days_between_orders": None, "recent_trend": "insufficient_data"}
 
@@ -140,8 +145,8 @@ def compute_account_velocity(account_invoices: list[dict]) -> dict:
     avg_gap = sum(gaps) / len(gaps)
 
     # Recent trend: compare last 2 orders vs previous 2
-    recent_amounts = [float(inv.get("total_amount", 0)) for inv in account_invoices[-2:]]
-    prior_amounts = [float(inv.get("total_amount", 0)) for inv in account_invoices[-4:-2]]
+    recent_amounts = [float(inv.get("total_amount", 0)) for inv in chronological[-2:]]
+    prior_amounts = [float(inv.get("total_amount", 0)) for inv in chronological[-4:-2]]
 
     recent_avg = sum(recent_amounts) / len(recent_amounts) if recent_amounts else 0
     prior_avg = sum(prior_amounts) / len(prior_amounts) if prior_amounts else recent_avg
@@ -166,5 +171,5 @@ def _parse_date(value) -> date:
         return value
     try:
         return date.fromisoformat(str(value))
-    except (ValueError, TypeError):
-        return date(2000, 1, 1)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Sales row has missing or invalid order_date") from exc

@@ -64,6 +64,8 @@ class GmailConnector:
 
                 emails.append({
                     "id": msg["id"],
+                    "thread_id": msg.get("threadId"),
+                    "message_id": headers.get("message-id"),
                     "from": headers.get("from", ""),
                     "to": headers.get("to", ""),
                     "subject": headers.get("subject", ""),
@@ -74,6 +76,9 @@ class GmailConnector:
                 })
             except Exception as e:
                 log.warning("Failed to fetch email %s: %s", ref["id"], e)
+                # Dropping a failed message would make the result appear
+                # complete and may cause retention analysis to miss activity.
+                raise
 
         return emails
 

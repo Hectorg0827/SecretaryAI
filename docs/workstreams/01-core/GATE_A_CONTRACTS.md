@@ -76,3 +76,13 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - **PO draft authorization:** POST /api/actions/draft-po requires explicit server-side draft_purchase_orders permission: owner, manager, back_office only; sales_rep/viewer denied. Positive optional quantities enforced. OPEN: tenant-owned inventory/vendor validation before draft-to-execution promotion.
 - **OPEN:** approve/{draft_id} legacy provider sends and PO dispatches are not certified for unattended external effects. Mandatory future gateway needs durable execution receipt, policy recheck, idempotency and a test-only allowlist.
 - **OPEN:** app.api.inbox partial read and mark-read success semantics require per-source health metadata and fail-closed errors. UI cannot infer swallowed backend exceptions.
+
+
+## Gate A durable approval convergence (Chat 1)
+
+- `POST /api/actions/approve/{draft_id}` no longer has an active fallback from human approval into inline email delivery or PO dispatch. When `SECRETARYAI_DURABLE_APPROVAL_ENABLED` is not `1`, the endpoint denies with HTTP 409 *before mutation*. A healthy durable transport remains a prerequisite for even queueing a reviewed email.
+- The enabled branch supports **email draft approval + atomic durable enqueue only** via `PostgresDurableGateway`. Purchase-order dispatch stays blocked until a separately reviewed durable execution claim, vendor/line-item validation and provider receipt exist.
+- The private execution RPC must return a valid `execution_id` plus `queued=true`; `queued=false` is accepted only with `already_processed=true`. API responses distinguish `execution_status=queued` from `already_processed` and suppress second approval-audit attempts. Neither outcome proves actual provider delivery.
+- `PolicyEngine.evaluate` now fails closed for COMMIT/DESTRUCTIVE when either authoritative `policy_rules` or tenant `company_features` cannot be loaded. READ/DRAFT may continue with conservative defaults. The API converts a policy-source failure to deny rather than allowing a default approval threshold.
+- Synthetic tests exercise the disabled path, policy-store outages, queue-only behavior, PO refusal, duplicate approval, ambiguous ledger response and protected transport. No external email or PO was sent.
+- **Remaining release blockers:** independent verification of the SQL RPC and immutable receipt schema; comprehensive provider callback/reconciliation tests; no automatic retry of unknown outcomes; approved worker/beat deployment in staging after separate authorization; per-company scopes and app data-source completeness.

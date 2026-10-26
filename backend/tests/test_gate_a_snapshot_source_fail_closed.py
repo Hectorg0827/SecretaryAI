@@ -163,3 +163,30 @@ async def test_inventory_missing_demand_history_is_not_silently_assumed_zero():
     with pytest.raises(SnapshotSourceUnavailable) as info:
         await compute_dashboard_payload(adapter)
     assert info.value.source == "inventory"
+
+
+
+def test_cached_dashboard_freshness_is_explicit_and_timezone_aware():
+    from datetime import datetime, timedelta, timezone
+    from app.scheduler.dashboard_snapshot import snapshot_freshness
+
+    now = datetime(2026, 10, 26, 12, tzinfo=timezone.utc)
+    recent = (now - timedelta(hours=3)).isoformat()
+    old = (now - timedelta(hours=49)).isoformat()
+    assert snapshot_freshness(recent, now=now)["status"] == "fresh"
+    assert snapshot_freshness(old, now=now)["status"] == "stale"
+    assert snapshot_freshness(old, now=now)["stale"] is True
+    assert snapshot_freshness(None, now=now)["status"] == "unknown"
+    assert snapshot_freshness("2026-10-26T09:00:00", now=now)["status"] == "unknown"
+    assert snapshot_freshness("bogus", now=now)["stale"] is True
+
+
+def test_future_dated_cache_does_not_claim_freshness():
+    from datetime import datetime, timedelta, timezone
+    from app.scheduler.dashboard_snapshot import snapshot_freshness
+
+    now = datetime(2026, 10, 26, 12, tzinfo=timezone.utc)
+    bad = (now + timedelta(hours=2)).isoformat()
+    result = snapshot_freshness(bad, now=now)
+    assert result["status"] == "unknown"
+    assert result["stale"] is True

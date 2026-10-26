@@ -22,6 +22,7 @@ from app.scheduler.dashboard_snapshot import (
     compute_dashboard_payload,
     store_snapshot,
     read_snapshot,
+    SnapshotSourceUnavailable,
 )
 
 log = logging.getLogger(__name__)
@@ -58,7 +59,14 @@ async def get_dashboard_summary(
     else:
         # No snapshot yet — compute fresh and store for everyone else today
         log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
-        cached_payload = await compute_dashboard_payload(adapter)
+        try:
+            cached_payload = await compute_dashboard_payload(adapter)
+        except SnapshotSourceUnavailable as exc:
+            log.warning("Dashboard summary source unavailable for %s: %s", company_id, exc.source)
+            raise HTTPException(
+                status_code=503,
+                detail="Business data temporarily unavailable; dashboard refresh not completed",
+            ) from exc
         store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
         generated_at = None
         cached = False

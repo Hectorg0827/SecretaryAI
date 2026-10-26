@@ -4,7 +4,7 @@ name: CodeQL
 on:
   pull_request:
   push:
-    branches: [claude/secretaryai-tech-spec-lqBZj, main]
+    branches: [claude/secretaryai-tech-spec-lqBZj, main, codex/secretaryai-security-hardening-20261025]
   schedule:
     - cron: "27 3 * * 1"  # weekly, Mondays
 

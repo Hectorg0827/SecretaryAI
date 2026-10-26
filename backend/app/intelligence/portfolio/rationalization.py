@@ -83,15 +83,23 @@ def assess_portfolio(
             gaps.append("missing_net_sales")
         if weeks is None:
             gaps.append("missing_velocity")
+        # A zero-stock SKU with observed demand needs a supply/availability
+        # review, not a "healthy" portfolio score or a discontinuation prompt.
+        stockout_with_demand = (item.stock_on_hand_cases == ZERO and
+                                item.weekly_case_velocity > ZERO)
         if contribution_pct is not None and contribution_pct < policy.min_contribution_margin_pct:
             risk_reasons.append("low_contribution_margin")
         if weeks is not None and weeks > policy.max_weeks_of_supply:
             risk_reasons.append("excess_weeks_of_supply")
-        if item.stock_age_days > policy.max_stock_age_days:
+        if item.stock_on_hand_cases > ZERO and item.stock_age_days > policy.max_stock_age_days:
             risk_reasons.append("aged_inventory")
+        if stockout_with_demand:
+            risk_reasons.append("stockout_with_observed_demand")
 
         if gaps:
             status = "data_review_required"
+        elif stockout_with_demand:
+            status = "supply_review_required"
         elif risk_reasons and item.required_by_skus:
             status = "dependency_review_required"
             risk_reasons.append("dependent_skus_block_rationalization")

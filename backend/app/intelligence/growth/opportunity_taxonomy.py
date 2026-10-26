@@ -32,6 +32,7 @@ SIGNAL_TAXONOMY: dict[str, SignalDefinition] = {
     "concept_cannibalization_risk": SignalDefinition("product_development", "yellow_alerts", "review_concept_assumptions", MANAGEMENT),
     "launch_underperformance": SignalDefinition("product_development", "yellow_alerts", "review_launch_cohort", MANAGEMENT),
     "portfolio_stock_at_risk": SignalDefinition("portfolio", "yellow_alerts", "review_portfolio_dependency", MANAGEMENT),
+    "portfolio_stockout_with_demand": SignalDefinition("portfolio", "red_alerts", "review_supply_availability", MANAGEMENT_OPERATIONS),
     "portfolio_contribution_gap": SignalDefinition("portfolio", "opportunities", "review_portfolio_contribution", MANAGEMENT),
     "margin_breach": SignalDefinition("pricing", "red_alerts", "review_margin_waterfall", MANAGEMENT),
     "promotion_roi_negative": SignalDefinition("pricing", "yellow_alerts", "review_promotion_baseline", MANAGEMENT),

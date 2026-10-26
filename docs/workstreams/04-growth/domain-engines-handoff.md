@@ -11,7 +11,7 @@ records are included in this public repository.
 | Compliance #7 | `compliance/evidence_gate.py`, `compliance/rules_engine.py` | Document statuses, dated rule references, blockers; never shipping authorization |
 | Brand #10 | `brands/scorecards.py` | Case growth, account reach/retention, margin, stock cover, supplier fill/on-time/damage; advisory |
 | New brand #11 | `products/concepts.py` | Demand whitespace, unit economics, cannibalization, payback and observed launch KPIs; scenarios only |
-| Portfolio #12 | `portfolio/rationalization.py` | Contribution, stock coverage, capital tied up and dependency-safe rationalization candidates; never deletes |
+| Portfolio #12 | `portfolio/rationalization.py` | Contribution, stock coverage, stockout-with-demand supply reviews, capital tied up and dependency-safe rationalization candidates; never deletes |
 | Pricing #13 | `pricing/waterfall.py` | Itemized landed cost, net realization, gross/contribution margin, channel price scenario, exception flags and promotion ROI |
 | People/HR #15 | `hr/onboarding.py` | Opaque staff onboarding/training/license renewal statuses and scoped briefing; no employment decisions |
 | Dynamic pricing #23 | `wholesale_distribution/dynamic_pricing.py` | Observational confidence guard, modeled pass-through using real costs and human price-approval flags |
@@ -51,7 +51,7 @@ signal codes, rather than trusting free-form model-generated event types.
 | Compliance | `compliance_renewal_due`, `compliance_source_stale` | Red/yellow alerts; review dated evidence |
 | Brand | `brand_decline`, `supplier_service_decline`, `brand_growth` | Yellow alert or scoreboard; inspect source-backed scorecard |
 | Product development | `concept_cannibalization_risk`, `launch_underperformance` | Yellow alerts; validate concept and observed launch cohorts |
-| Portfolio | `portfolio_stock_at_risk`, `portfolio_contribution_gap` | Yellow/opportunity; dependency-safe SKU review |
+| Portfolio | `portfolio_stock_at_risk`, `portfolio_stockout_with_demand`, `portfolio_contribution_gap` | Yellow/red/opportunity; dependency-safe SKU and supply review |
 | Pricing | `margin_breach`, `promotion_roi_negative` | Red/yellow alerts; audit waterfall/baseline |
 | Dynamic pricing | `price_exception`, `insufficient_elasticity` | Yellow alerts; human price approval or observation review |
 | HR | `hr_training_due` | Restricted red alert; private HR task review only |
@@ -107,6 +107,10 @@ financial posting, outbound message or personnel record is changed.
   comparable periods, promotion/return and stock-out adjustments.
 - **Chat 3:** audited landed-cost components, per-unit allocations,
   supplier PO receipt/fill/on-time/quality evidence, lot inventory aging.
+- **Chat 2 + Chat 3:** independently verify the sales-velocity and available-
+  stock sources for a `stockout_with_observed_demand` signal. A SKU's
+  generic source reference is not proof of both inputs or of inventory
+  completeness; the stockout alert remains advisory pending lineage checks.
 - **Chat 5:** approved response mapping and role-specific UI for dashboards,
   review queues, scenario comparison and controlled approval submission.
 

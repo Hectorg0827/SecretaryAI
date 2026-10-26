@@ -65,3 +65,22 @@ def test_invalid_stock_and_self_dependency_rejected():
                  _sku(required_by_skus=("sku-a",))):
         with pytest.raises(ValueError):
             assess_portfolio("synthetic-tenant", (item,), POLICY)
+
+
+def test_out_of_stock_with_documented_demand_requests_supply_review():
+    item = _sku(stock_on_hand_cases=D("0"), weekly_case_velocity=D("5"),
+                stock_age_days=240)
+    result = assess_portfolio("synthetic-tenant", (item,), POLICY)[0]
+    assert result.status == "supply_review_required"
+    assert "stockout_with_observed_demand" in result.reasons
+    assert "aged_inventory" not in result.reasons
+    assert result.working_capital_tied == D("0")
+    assert result.approval_required
+
+
+def test_unverified_stockout_remains_data_review_not_supply_claim():
+    item = _sku(stock_on_hand_cases=D("0"), weekly_case_velocity=D("5"),
+                source_revision="")
+    result = assess_portfolio("synthetic-tenant", (item,), POLICY)[0]
+    assert result.status == "data_review_required"
+    assert "missing_source_revision" in result.reasons

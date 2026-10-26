@@ -55,6 +55,15 @@ def test_missing_compliance_source_never_downgrades_critical_alert():
     assert result.next_action_code == "verify_source_evidence"
 
 
+def test_verified_portfolio_stockout_is_an_operations_review_not_a_disposal_action():
+    signal = _signal(signal_code="portfolio_stockout_with_demand",
+                     department="portfolio", metric_value=D("0"))
+    result = _classify(signal, _scope(effective_role="back_office"))
+    assert result.section == "red_alerts"
+    assert result.next_action_code == "review_supply_availability"
+    assert result.approval_required and not result.execution_claimed
+
+
 def test_partial_or_stale_data_cannot_be_shown_as_verified_metric():
     for signal in (_signal(source_quality="partial"),
                    _signal(observed_at=NOW - timedelta(minutes=10)),

@@ -22,7 +22,7 @@ Represent individual source reads through existing `app.domain.data_result.DataR
 
 Missing source is a **visible data-quality incident**, not an empty-success report. Missing data must not produce a claim of operational health, an automatic PO, or an email.
 
-**Implemented safety check on Chat 1 branch:** `compute_dashboard_payload` now raises `SnapshotSourceUnavailable` if any required account, inventory, or sales read fails rather than fabricating healthy zero metrics. No incomplete snapshot is written by the morning worker. The initial on-demand dashboard request returns HTTP 503 when required data cannot be read. Chat 5 must display a dedicated unavailable-data state for HTTP 503 rather than rendering zero-valued default tiles. Cached snapshots must always show their `generated_at` age; handling of stale existing snapshots remains a Gate B acceptance item.
+**Implemented safety check on Chat 1 branch:** `compute_dashboard_payload` now raises `SnapshotSourceUnavailable` if any required account, inventory, or sales read fails rather than fabricating healthy zero metrics. No incomplete snapshot is written by the morning worker. Successful reads are labeled `source_read_status=completed` and `source_quality=partial` until Chat 2 proves provider-level lineage, freshness and completeness; a returned adapter payload alone is NOT a verified source. The initial on-demand dashboard request returns HTTP 503 when required data cannot be read. Chat 5 must display a dedicated unavailable-data state for HTTP 503 rather than rendering zero-valued default tiles. Cached snapshots must always show their `generated_at` age; handling of stale existing snapshots remains a Gate B acceptance item.
 
 ## Event v1 and deduplication
 

@@ -140,7 +140,7 @@ async def test_inventory_uses_authoritative_quantity_not_qb_plus_warehouse():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_qty", [None, -5, "nan", "inf", "1.5"])
+@pytest.mark.parametrize("bad_qty", [None, -5, "nan", "inf"])
 async def test_inventory_without_valid_authoritative_qty_is_not_false_all_clear(bad_qty):
     adapter = CompleteReader()
     adapter.inventory = [{
@@ -212,3 +212,20 @@ async def test_invalid_transaction_date_cannot_trigger_false_dormancy(bad_date):
     with pytest.raises(SnapshotSourceUnavailable) as info:
         await compute_dashboard_payload(adapter)
     assert info.value.source == "account_health"
+
+
+
+@pytest.mark.asyncio
+async def test_fractional_inventory_is_not_truncated_and_payload_is_json_safe():
+    import json
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-WEIGHT", "product_name": "Bulk item",
+        "warehouse_qty": 10.5, "qb_qty": 10.5,
+        "total_qty": 10.5, "weekly_sell_rate": 7.0,
+    }]
+    result = await compute_dashboard_payload(adapter)
+    alert = result["inventory_alerts"][0]
+    assert alert["total_qty"] == 10.5
+    assert alert["weeks_remaining"] == pytest.approx(1.5)
+    json.dumps(result)  # Supabase JSON persistence must not see Decimal values

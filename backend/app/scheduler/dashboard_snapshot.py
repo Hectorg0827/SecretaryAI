@@ -69,7 +69,7 @@ async def compute_dashboard_payload(adapter) -> dict:
             except ValueError:
                 # Unscorable (e.g. customer credit balance) does not invalidate
                 # independently scoreable accounts; never count it as healthy.
-                log.warning("Dashboard snapshot: account %s is unscored", cid)
+                log.warning("Dashboard snapshot: unscored account")
                 health_counts["unknown"] += 1
                 continue
             health_counts[health.status] += 1

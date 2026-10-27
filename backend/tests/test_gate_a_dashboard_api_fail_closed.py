@@ -16,10 +16,10 @@ async def test_missing_inbox_and_approval_sources_are_unknown_not_zero():
     adapter.get_emails.side_effect = RuntimeError("fixture email offline")
     healthy_snapshot = {
         "payload": {
-            "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0},
+            "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0, "total": 1},
             "inventory_alerts": [],
             "sales_30d": 300,
-            "source_quality": "partial",
+            "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",
     }
@@ -96,7 +96,8 @@ async def test_initial_dashboard_snapshot_persistence_failure_returns_503():
     db = MagicMock()
     adapter = AsyncMock()
     payload = {
-        "accounts": {"healthy": 1, "total": 1}, "inventory_alerts": [],
+        "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0,
+                     "total": 1}, "inventory_alerts": [],
         "sales_30d": 100, "source_quality": "partial",
         "source_read_status": "completed",
     }

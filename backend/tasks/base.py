@@ -170,6 +170,11 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
     if cfg.get("google_refresh_token"):
         cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+    # Match the request adapter: Outlook's persisted rotated tokens are ciphertext.
+    if cfg.get("ms_access_token"):
+        cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
+    if cfg.get("ms_refresh_token"):
+        cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
 
     # Proactively refresh QBO access token if close to expiry
     if cfg.get("qbo_access_token") and cfg.get("qbo_refresh_token"):

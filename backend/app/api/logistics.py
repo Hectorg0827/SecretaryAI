@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import get_current_user, get_db
 from app.auth.rbac import require_permission
@@ -48,8 +48,16 @@ def _get_logistics_module(user: dict, db) -> LogisticsModule:
     company_id = user["company_id"]
 
     # Load company config
-    result = db.table("companies").select("*").eq("id", company_id).execute()
-    company = result.data[0] if result.data else {}
+    try:
+        result = db.table("companies").select("*").eq("id", company_id).execute()
+        if (not isinstance(result.data, list) or len(result.data) != 1
+                or not isinstance(result.data[0], dict)
+                or str(result.data[0].get("id")) != str(company_id)):
+            raise ValueError("Company configuration absent or ambiguous")
+        company = result.data[0]
+    except Exception as exc:
+        log.warning("Supply-chain tenant config unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Company configuration unavailable") from exc
 
     # Build role→email map from the company settings if available
     role_email_map: dict[str, str] = {}
@@ -58,13 +66,16 @@ def _get_logistics_module(user: dict, db) -> LogisticsModule:
     if company.get("logistics_manager_email"):
         role_email_map["logistics_manager"] = company["logistics_manager_email"]
 
-    config = LogisticsConfig(
-        target_gross_margin_pct=float(company.get("target_gross_margin_pct", 30.0)),
-        shipments_per_year=int(company.get("shipments_per_year", 12)),
-        port_free_time_days=int(company.get("port_free_time_days", 5)),
-        demurrage_rate_per_day=float(company.get("demurrage_rate_per_day", 150.0)),
-        role_email_map=role_email_map,
-    )
+    try:
+        config = LogisticsConfig(
+            target_gross_margin_pct=float(company.get("target_gross_margin_pct", 30.0)),
+            shipments_per_year=int(company.get("shipments_per_year", 12)),
+            port_free_time_days=int(company.get("port_free_time_days", 5)),
+            demurrage_rate_per_day=float(company.get("demurrage_rate_per_day", 150.0)),
+            role_email_map=role_email_map,
+        )
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(status_code=503, detail="Company configuration unavailable") from exc
 
     return LogisticsModule(company_id=company_id, config=config)
 
@@ -80,25 +91,25 @@ class SKUDataItem(BaseModel):
     supplier_name: str = ""
     supply_chain_type: SupplyChainType = SupplyChainType.OVERSEAS
     origin_country: str = ""
-    unit_cost_fob: float = 0.0
-    cases_per_pallet: int = 50
-    cases_per_40hc_container: int = 1000
-    stock_on_hand: int = 0
-    stock_committed: int = 0
-    stock_in_transit: int = 0
-    minimum_order_cases: int = Field(default=0, ge=0)
+    unit_cost_fob: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    cases_per_pallet: int = Field(default=50, strict=True, gt=0)
+    cases_per_40hc_container: int = Field(default=1000, strict=True, gt=0)
+    stock_on_hand: int = Field(default=0, strict=True, ge=0)
+    stock_committed: int = Field(default=0, strict=True, ge=0)
+    stock_in_transit: int = Field(default=0, strict=True, ge=0)
+    minimum_order_cases: int = Field(default=0, strict=True, ge=0)
     # Demand is required: silently returning an empty queue for absent history
     # would incorrectly look like evidence that every SKU is sufficiently stocked.
     daily_sales: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] = Field(min_length=1)
-    # An empty lead-time history invokes the engine's documented fallback.
-    lead_time_days: list[Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(default_factory=list)
+    # A missing lead history cannot safely produce a timing-based proposal.
+    lead_time_days: list[Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(min_length=1)
     seasonal_indices: Optional[list[float] | dict[int, float]] = None
     last_fob_price: Optional[float] = None
     current_fob_price: Optional[float] = None
 
 
 class ReorderQueueRequest(BaseModel):
-    skus: list[SKUDataItem]
+    skus: list[SKUDataItem] = Field(min_length=1, max_length=500)
 
 
 def _weekly_seasonal_indices(
@@ -160,14 +171,51 @@ class BrokerEmailRequest(BaseModel):
     body: str = Field(min_length=1, max_length=25000)
 
 
+class LegacyReceiptLine(BaseModel):
+    """Caller quantity preview; never a booked warehouse receipt line."""
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str = Field(min_length=1, max_length=120)
+    qty_ordered: int = Field(strict=True, gt=0, le=10000000)
+    qty_received: int = Field(strict=True, ge=0, le=10000000)
+    unit: Literal["case"]
+    condition_notes: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def reject_unmatched_quantity(self):
+        if self.qty_received > self.qty_ordered:
+            raise ValueError("Received cases exceed order line; verify units and order")
+        return self
+
+
 class WarehouseReceiptRequest(BaseModel):
-    booking_id: str
-    po_number: str
-    line_items: list[dict]          # [{sku, qty_ordered, qty_received, condition_notes}]
-    received_by: str = "system"
-    notes: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    booking_id: str = Field(min_length=1, max_length=150)
+    po_number: str = Field(min_length=1, max_length=100)
+    line_items: list[LegacyReceiptLine] = Field(min_length=1, max_length=200)
+    received_by: str = Field(default="system", max_length=150)
+    notes: str = Field(default="", max_length=2000)
     po_sent_at: Optional[str] = None
     supplier_ship_date: Optional[str] = None
+
+    @model_validator(mode="after")
+    def reject_ambiguous_duplicate_skus(self):
+        codes = [item.sku for item in self.line_items]
+        if len(codes) != len(set(codes)):
+            raise ValueError("Legacy receipt preview cannot disambiguate repeated SKU lines")
+        for field in ("po_sent_at", "supplier_ship_date"):
+            raw = getattr(self, field)
+            if raw:
+                try:
+                    value = date.fromisoformat(raw)
+                except ValueError as exc:
+                    raise ValueError(f"{field} must be a valid ISO date") from exc
+                if value > date.today():
+                    raise ValueError(f"{field} cannot be in the future")
+        if self.po_sent_at and self.supplier_ship_date and self.po_sent_at > self.supplier_ship_date:
+            raise ValueError("Supplier shipment must not precede PO sent date")
+        return self
 
 
 class LandedCostRequest(BaseModel):
@@ -214,9 +262,37 @@ class CostReconcileRequest(BaseModel):
     selling_price_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
 
 
+class SeasonalObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    date: date
+    units: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+    @field_validator("units", mode="before")
+    @classmethod
+    def actual_numeric_quantity(cls, value):
+        if type(value) not in (int, float):
+            raise ValueError("Sales units require an explicit numeric observation")
+        return value
+
+    @field_validator("date")
+    @classmethod
+    def no_future_observation(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Sales observation cannot be future dated")
+        return value
+
+
 class SeasonalIndexRequest(BaseModel):
-    sku: str
-    daily_sales: list[dict]   # [{date: "2024-01-05", units: 12.5}, ...]
+    model_config = ConfigDict(extra="forbid")
+    sku: str = Field(min_length=1, max_length=120)
+    daily_sales: list[SeasonalObservation] = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode="after")
+    def chronological_unique_observations(self):
+        dates = [item.date for item in self.daily_sales]
+        if dates != sorted(set(dates)):
+            raise ValueError("Sales observations must have unique ascending dates")
+        return self
 
 
 
@@ -242,9 +318,6 @@ class DurablePORequest(BaseModel):
 
 
 from decimal import Decimal, InvalidOperation
-from typing import Literal
-
-
 class PurchasingEvidenceClaimRequest(BaseModel):
     evidence_key: str = Field(min_length=1, max_length=150)
     document_type: Literal[
@@ -1019,6 +1092,12 @@ async def evaluate_reorder_queue(
     results = lm.evaluate_reorder_queue(sku_data)
 
     return {
+        "status": "analysis_only",
+        "source_data_verified": False,
+        "inventory_snapshot_verified": False,
+        "supplier_lead_history_verified": False,
+        "po_creation_authorized": False,
+        "requires_human_review": True,
         "count": len(results),
         "red_count": sum(1 for r in results if r["package"].urgency.value == "red"),
         "yellow_count": sum(1 for r in results if r["package"].urgency.value == "yellow"),
@@ -1276,7 +1355,7 @@ async def process_warehouse_receipt(
     result = lm.process_warehouse_receipt(
         booking=booking,
         po_number=request.po_number,
-        line_items_received=request.line_items,
+        line_items_received=[line.model_dump(exclude={"unit"}) for line in request.line_items],
         received_by=request.received_by,
         notes=request.notes,
         po_sent_at=request.po_sent_at,
@@ -1294,6 +1373,11 @@ async def process_warehouse_receipt(
         "po_number": request.po_number,
         "status": "analysis_only",
         "inventory_posted": False,
+        "receipt_verified": False,
+        "po_verified": False,
+        "booking_verified": False,
+        "received_by_verified": False,
+        "supplier_lead_time_verified": False,
         "accounting_reconciled": False,
         "requires_verified_receipt": True,
         "total_cases_received": receipt.total_cases_received,
@@ -1306,7 +1390,11 @@ async def process_warehouse_receipt(
             "customs_to_warehouse_days": receipt.customs_to_warehouse_days,
             "total_lead_time_days": receipt.total_lead_time_days,
         },
-        "alert": _serialize_alert(result["alert"]),
+        "alert": None,
+        "suggested_alert": (
+            {**_serialize_alert(result["alert"]), "requires_human_review": True}
+            if result["alert"] else None
+        ),
     }
 
 
@@ -1383,12 +1471,15 @@ async def build_seasonal_indices(
     lm = _get_logistics_module(user, db)
 
     # Convert [{date, units}] → [(date_str, float)]
-    daily_sales = [(d["date"], float(d["units"])) for d in request.daily_sales]
+    daily_sales = [(d.date.isoformat(), d.units) for d in request.daily_sales]
     indices = lm.build_seasonal_indices(request.sku, daily_sales)
 
     return {
         "sku": request.sku,
-        "status": indices.get("status"),
+        "status": "analysis_only",
+        "modeled_data_quality": indices.get("status"),
+        "sales_history_verified": False,
+        "historical_learning_persisted": False,
         "data_months": indices.get("data_months"),
         "index_count": len(indices.get("indices", {})),
         "indices": indices.get("indices", {}),
@@ -1406,8 +1497,18 @@ async def get_monthly_logistics_report(
     """
     lm = _get_logistics_module(user, db)
     report = lm.monthly_logistics_report()
-
-    return report
+    # Per-request module has no durable source history: empty is not success.
+    return {
+        **report,
+        "status": "insufficient_verified_history",
+        "source_history_verified": False,
+        "supplier_learning_persisted": False,
+        "accounting_reconciled": False,
+        "recommendation": (
+            "No source-verified supplier lead times, costs or shipment history "
+            "were loaded. Connect and reconcile durable observations before analysis."
+        ),
+    }
 
 
 # ─── Pipeline Status ──────────────────────────────────────────────────────────
@@ -1436,6 +1537,10 @@ async def get_pipeline_status(
     return {
         "po_number": cycle_data.get("po_number"),
         "current_stage": cycle_data.get("current_stage"),
+        "state_source": "legacy_procurement_cycles_unverified",
+        "stage_verified": False,
+        "authoritative_purchasing_state": False,
+        "verified_po_receipt_ledger_link": False,
         "supplier_id": cycle_data.get("supplier_id"),
         "total_cases": cycle_data.get("total_cases"),
         "started_at": cycle_data.get("started_at"),

@@ -7,7 +7,8 @@ from decimal import Decimal as D
 import pytest
 
 from app.intelligence.brands.scorecards import (
-    BrandPeriod, SupplierObservation, brand_vitality, supplier_scorecard,
+    BrandPeriod, SupplierObservation, SupplierScoreWeights,
+    brand_vitality, supplier_scorecard,
 )
 
 
@@ -55,6 +56,18 @@ def test_missing_history_or_zero_velocity_never_generates_fake_growth():
     assert result.weeks_of_supply is None
     assert not result.documented_inputs
     assert "missing_source_revision" in result.gaps
+    assert result.action_status == "source_review_required"
+
+
+def test_brand_undefined_account_and_return_denominators_are_explicit():
+    result = brand_vitality(_period(cases_sold=D("0"), cases_returned=D("0"),
+                                   active_accounts=0, eligible_accounts=0,
+                                   repeat_accounts=0))
+    assert result.account_penetration_pct is None
+    assert result.repeat_account_pct is None
+    assert result.return_rate_pct is None
+    assert {"unavailable_account_penetration", "unavailable_repeat_account_rate",
+            "unavailable_return_rate"}.issubset(result.gaps)
 
 
 def test_cross_tenant_or_wrong_brand_comparison_is_denied():
@@ -86,6 +99,27 @@ def test_supplier_scorecard_uses_weighted_observed_rates():
     assert result.damage_rate_pct == D("2")
     assert result.composite_score == D("87.6")
     assert result.documented_inputs
+
+
+def test_supplier_score_weights_support_explicit_industry_policy():
+    result = supplier_scorecard(_supplier(), SupplierScoreWeights(
+        fill=D("0.5"), on_time=D("0.3"), undamaged=D("0.2"),
+    ))
+    assert result.composite_score == D("88.6")
+    for weights in (SupplierScoreWeights(D("0.5"), D("0.5"), D("0.5")),
+                    SupplierScoreWeights(D("-0.1"), D("0.9"), D("0.2")),
+                    SupplierScoreWeights(D("NaN"), D("0.6"), D("0.4"))):
+        with pytest.raises(ValueError):
+            supplier_scorecard(_supplier(), weights)
+
+
+def test_supplier_without_source_revision_has_no_rankable_composite():
+    result = supplier_scorecard(_supplier(source_revision=""))
+    assert result.composite_score is None
+    assert result.fill_rate_pct == D("90")  # arithmetic scenario, not verified
+    assert result.action_status == "source_review_required"
+    assert "missing_source_revision" in result.gaps
+    assert "missing_supplier_denominator" not in result.gaps
 
 
 def test_supplier_zero_denominators_remain_unknown():

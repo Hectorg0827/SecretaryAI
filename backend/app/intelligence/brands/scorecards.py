@@ -101,6 +101,12 @@ def brand_vitality(current: BrandPeriod, previous: BrandPeriod | None = None) ->
         gaps.append("unavailable_net_sales_margin")
     if current.weekly_case_velocity == ZERO:
         gaps.append("unavailable_weeks_of_supply")
+    if current.eligible_accounts == 0:
+        gaps.append("unavailable_account_penetration")
+    if current.active_accounts == 0:
+        gaps.append("unavailable_repeat_account_rate")
+    if current.cases_sold == ZERO:
+        gaps.append("unavailable_return_rate")
 
     return BrandVitals(
         net_cases=net_cases,
@@ -112,6 +118,7 @@ def brand_vitality(current: BrandPeriod, previous: BrandPeriod | None = None) ->
         weeks_of_supply=current.stock_on_hand_cases / current.weekly_case_velocity if current.weekly_case_velocity else None,
         documented_inputs=bool(documented),
         gaps=tuple(gaps),
+        action_status="draft_requires_review" if documented else "source_review_required",
     )
 
 
@@ -140,9 +147,27 @@ class SupplierScorecard:
     action_status: str = "draft_requires_review"
 
 
-def supplier_scorecard(data: SupplierObservation) -> SupplierScorecard:
+@dataclass(frozen=True)
+class SupplierScoreWeights:
+    """Tenant/industry-provided score weights, not an authorization policy."""
+
+    fill: Decimal = Decimal("0.4")
+    on_time: Decimal = Decimal("0.4")
+    undamaged: Decimal = Decimal("0.2")
+
+
+def supplier_scorecard(
+    data: SupplierObservation,
+    weights: SupplierScoreWeights = SupplierScoreWeights(),
+) -> SupplierScorecard:
     if not data.company_id or not data.supplier_id:
         raise ValueError("Company and supplier ID required")
+    if not isinstance(weights, SupplierScoreWeights):
+        raise ValueError("Supplier weights must use the typed policy contract")
+    for label in ("fill", "on_time", "undamaged"):
+        _nonnegative(getattr(weights, label), f"{label} score weight")
+    if weights.fill + weights.on_time + weights.undamaged != Decimal("1"):
+        raise ValueError("Supplier score weights must sum to exactly one")
     for label in ("units_ordered", "units_filled", "units_delivered", "units_damaged"):
         _nonnegative(getattr(data, label), label)
     _count(data.on_time_shipments, "on_time_shipments")
@@ -154,12 +179,16 @@ def supplier_scorecard(data: SupplierObservation) -> SupplierScorecard:
     fill = HUNDRED * data.units_filled / data.units_ordered if data.units_ordered else None
     on_time = HUNDRED * data.on_time_shipments / data.received_shipments if data.received_shipments else None
     damage = HUNDRED * data.units_damaged / data.units_delivered if data.units_delivered else None
-    score = (fill * Decimal("0.4") + on_time * Decimal("0.4") + (HUNDRED - damage) * Decimal("0.2")
+    score = (fill * weights.fill + on_time * weights.on_time + (HUNDRED - damage) * weights.undamaged
              if fill is not None and on_time is not None and damage is not None else None)
     gaps = []
     documented = bool(data.source_record_id and data.source_revision)
-    if not documented:
-        gaps.append("missing_source_revision")
     if score is None:
         gaps.append("missing_supplier_denominator")
-    return SupplierScorecard(fill, on_time, damage, score, documented, tuple(gaps))
+    if not documented:
+        gaps.append("missing_source_revision")
+        # An undocumented scalar must not be surfaced as a valid supplier
+        # ranking even when all supplied arithmetic denominators exist.
+        score = None
+    return SupplierScorecard(fill, on_time, damage, score, documented, tuple(gaps),
+                             "draft_requires_review" if documented else "source_review_required")

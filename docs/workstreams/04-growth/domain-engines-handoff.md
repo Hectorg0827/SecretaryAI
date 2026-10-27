@@ -9,7 +9,7 @@ records are included in this public repository.
 | Capability | Owned pure engine | Output / decision control |
 |---|---|---|
 | Compliance #7 | `compliance/evidence_gate.py`, `compliance/rules_engine.py` | Document statuses, dated rule references, blockers; never shipping authorization |
-| Brand #10 | `brands/scorecards.py` | Case growth, account reach/retention, margin, stock cover, supplier fill/on-time/damage; advisory |
+| Brand #10 | `brands/scorecards.py` | Case growth, account reach/retention, margin, stock cover, supplier fill/on-time/damage with configurable score weights; advisory |
 | New brand #11 | `products/concepts.py` | Demand whitespace, unit economics, cannibalization, payback and observed launch KPIs; scenarios only |
 | Portfolio #12 | `portfolio/rationalization.py` | Contribution, stock coverage, stockout-with-demand supply reviews, capital tied up and dependency-safe rationalization candidates; never deletes |
 | Pricing #13 | `pricing/waterfall.py` | Itemized landed cost, net realization, gross/contribution margin, channel price scenario, exception flags and promotion ROI |
@@ -24,6 +24,16 @@ or provenance-inconsistent task statuses. Gate A must authenticate the HR role
 and per-employee grant server-side; an `HRTaskAccess` value is never an
 authorization credential by itself. No actual HR records or decisions are
 stored or published by this workstream.
+
+Supplier score composites accept `SupplierScoreWeights` rather than
+hard-coded operational priorities. Chat 1's canonical ten-method industry
+module should eventually provide reviewed weight configuration through
+`get_scoring_config`. The pure engine validates nonnegative weights
+that sum to one, and suppresses the rankable composite if source revision
+metadata is missing. Undefined brand penetration/repeat/return percentages
+remain null with explicit data-gap codes. Chat 3 must reconcile supplier
+ordered/received/damaged units to a consistent PO-receipt cohort before a
+real score is considered verified. No supplier change can be executed here.
 
 The legacy compliance expiration scanner previously removed recorded overdue
 permits, COLAs, licenses, registrations and distributor agreements once their

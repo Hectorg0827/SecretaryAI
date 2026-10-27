@@ -128,3 +128,61 @@ def test_missing_snapshot_returns_503_not_six_empty_success_cards():
     with patch.object(briefing, "read_snapshot", return_value=None):
         response = client.get("/api/briefing/today")
     assert response.status_code == 503
+
+
+
+def test_briefing_wire_response_model_is_published_in_openapi():
+    from app.domain.briefing_wire import BriefingTodayResponseV1
+
+    client = client_for_role("owner")
+    schema = client.get("/openapi.json").json()
+    route = schema["paths"]["/api/briefing/today"]["get"]
+    assert route["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/BriefingTodayResponseV1"
+    }
+    assert "BriefingTodayResponseV1" in schema["components"]["schemas"]
+    assert set(BriefingTodayResponseV1.model_fields) >= {
+        "contract_version", "company_id", "audience_role",
+        "sections", "source_quality", "complete_digest",
+    }
+
+
+def test_briefing_wire_contract_rejects_unverified_promotion_and_extra_fields():
+    from pydantic import ValidationError
+    from app.domain.briefing_wire import BriefingTodayResponseV1
+
+    payload = briefing.build_owner_briefing(
+        company_id="company-a", role="owner", snapshot=snapshot(), now=NOW,
+    )
+    assert BriefingTodayResponseV1.model_validate(payload).complete_digest is False
+
+    for key, invalid_value in [
+        ("complete_digest", True),
+        ("source_quality", "verified"),
+        ("source_coverage", "all_business_systems"),
+        ("audience_role", "sales_rep"),
+    ]:
+        invalid = {**payload, key: invalid_value}
+        with pytest.raises(ValidationError):
+            BriefingTodayResponseV1.model_validate(invalid)
+
+    invalid = {**payload, "unreviewed_provider_data": "never expose"}
+    with pytest.raises(ValidationError):
+        BriefingTodayResponseV1.model_validate(invalid)
+
+
+def test_briefing_api_json_is_serializable_and_contains_only_whitelisted_fields():
+    from app.domain.briefing_wire import BriefingTodayResponseV1
+
+    client = client_for_role("manager")
+    with patch.object(
+        briefing, "read_snapshot", return_value=snapshot(datetime.now(timezone.utc))
+    ):
+        response = client.get("/api/briefing/today")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == set(BriefingTodayResponseV1.model_fields)
+    assert body["complete_digest"] is False
+    assert body["source_quality"] == "partial"
+    assert body["audience_role"] == "manager"
+    assert body["sections"]["actions_taken"] == []

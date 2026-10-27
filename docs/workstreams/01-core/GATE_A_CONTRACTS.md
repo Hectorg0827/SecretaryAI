@@ -104,3 +104,13 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - `compute_dashboard_payload` now REQUIRES `weekly_sell_rate_observed is True` for every reported inventory row. Missing/false observation raises `SnapshotSourceUnavailable('inventory')`; no stale/unknown velocity is silently converted to zero demand. An actually observed zero rate remains accepted as numeric zero but overall source quality is still `partial` until the provider coverage is proven.
 - **Chat 2 handoff:** Preserve `weekly_sell_rate_observed` and its source status, ideally also attach the observation time and window. Do not silently change the flag to true or remove it without a versioned contract migration. If the rate is missing, return unavailable/partial in a future per-SKU diagnostic contract rather than false healthy stock.
 - **Chat 3/5 handoff:** Do not calculate confident reorder health or display 'no stock risk' when weekly demand was never measured. A 503 dashboard refresh is preferable to an inaccurate green status. Account for partially complete inventory at per-item level in Gate B.
+
+
+## Gate A machine-readable partial briefing contract (OpenAPI)
+
+- Canonical endpoint: `GET /api/briefing/today`. The FastAPI decorator now explicitly declares response_model=`app.domain.briefing_wire.BriefingTodayResponseV1`, exposing `#/components/schemas/BriefingTodayResponseV1` through `/openapi.json`.
+- Required JSON response fields: `contract_version`, `company_id`, `audience_role`, `created_at`, `sections`, `source_coverage`, `complete_digest`, `source_quality`, `snapshot_generated_at`, `snapshot_age_seconds`.
+- The schema is deliberately strict: `contract_version` must be `1.0`; `audience_role` is owner or manager; `source_coverage` is dashboard_snapshot_only; `complete_digest` MUST be false; `source_quality` MUST be partial. Unknown fields are prohibited. Each of the six sections must exist as an array of typed evidence-backed entries.
+- This is the **only authorized v1 schema** for Chat 5 to consume; the existing client-side aggregation from disparate live reads is not a server-authorized briefing. Frontend/mobile/desktop UI must show partial/incomplete status and error on HTTP 503, not automatically label empty sections as no activity.
+- Integration tests pin both the published OpenAPI reference and the strict runtime schema, including refusal of promoted verified/all-sources claims and extra output data.
+- Future full-digest v2 requires a new contract version and independent source + execution receipt validation. Do not change this v1 response model to falsely claim complete coverage.

@@ -57,23 +57,14 @@ async def compute_dashboard_payload(adapter) -> dict:
                 except ValueError:
                     last_order = None
 
-            try:
-                health = score_account(
-                    account_id=cid,
-                    account_name=getattr(customer, "name", ""),
-                    last_order_date=last_order,
-                    avg_order_cycle_days=None,
-                    order_history=orders,
-                    # Raw value: score_account rejects missing/invalid/credit
-                    # balances (-> unknown); a missing balance is not $0.
-                    current_balance=getattr(customer, "balance", None),
-                )
-            except ValueError:
-                # Unscorable (e.g. customer credit balance) does not invalidate
-                # independently scoreable accounts; never count it as healthy.
-                log.warning("Dashboard snapshot: unscored account")
-                health_counts["unknown"] += 1
-                continue
+            health = score_account(
+                account_id=cid,
+                account_name=getattr(customer, "name", ""),
+                last_order_date=last_order,
+                avg_order_cycle_days=None,
+                order_history=orders,
+                current_balance=float(getattr(customer, "balance", 0)),
+            )
             health_counts[health.status] += 1
     except Exception as exc:
         log.error("Dashboard snapshot: account health failed: %s", exc)
@@ -117,7 +108,6 @@ async def compute_dashboard_payload(adapter) -> dict:
             "slowing": health_counts.get("slowing", 0),
             "at_risk": health_counts.get("at_risk", 0),
             "dormant": health_counts.get("dormant", 0),
-            "unknown": health_counts.get("unknown", 0),
             "total":   sum(health_counts.values()),
         },
         "inventory_alerts": inventory_alerts,

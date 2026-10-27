@@ -1,11 +1,14 @@
-"""One legitimate customer credit must not abort unrelated account health scoring."""
+"""One legitimate customer credit must not abort unrelated account health scoring.
+
+The dashboard snapshot's per-account boundary lives with Gate A's
+dashboard_snapshot.py (tests/test_gate_a_unscored_accounts.py on that branch).
+"""
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from app.scheduler.account_health_refresh import refresh_all_account_health
-from app.scheduler.dashboard_snapshot import compute_dashboard_payload
 
 
 class CreditBalanceAdapter:
@@ -55,36 +58,6 @@ async def test_nightly_refresh_marks_credit_balance_unknown_and_keeps_scoring():
     assert db.updates[0]["health_score"] is None
     assert db.updates[1]["health_status"] in {"healthy", "slowing", "at_risk", "dormant"}
     assert isinstance(db.updates[1]["health_score"], int)
-
-
-@pytest.mark.asyncio
-async def test_dashboard_counts_credit_balance_as_unknown_without_losing_other_accounts():
-    summary = await compute_dashboard_payload(CreditBalanceAdapter())
-    accounts = summary["accounts"]
-
-    assert accounts["unknown"] == 1
-    assert accounts["total"] == 2
-    assert sum(accounts[status] for status in ("healthy", "slowing", "at_risk", "dormant")) == 1
-
-
-class UnobservedBalanceAdapter(CreditBalanceAdapter):
-    async def get_all_customers(self):
-        return [
-            SimpleNamespace(qb_id="credit-customer", name="Credit", balance=Decimal("-12.50")),
-            SimpleNamespace(qb_id="missing-balance", name="Missing"),
-            SimpleNamespace(qb_id="null-balance", name="Null", balance=None),
-            SimpleNamespace(qb_id="ordinary-customer", name="Ordinary", balance=Decimal("0")),
-        ]
-
-
-@pytest.mark.asyncio
-async def test_dashboard_never_scores_missing_or_null_balance_as_zero():
-    summary = await compute_dashboard_payload(UnobservedBalanceAdapter())
-    accounts = summary["accounts"]
-
-    assert accounts["unknown"] == 3
-    assert accounts["total"] == 4
-    assert sum(accounts[status] for status in ("healthy", "slowing", "at_risk", "dormant")) == 1
 
 
 class DictCustomerAdapter(CreditBalanceAdapter):

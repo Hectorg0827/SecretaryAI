@@ -304,7 +304,13 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
         raise SnapshotDataInvalid("Dashboard account aggregates inconsistent")
 
     revenue = payload.get("sales_30d")
-    if type(revenue) not in (int, float) or not isfinite(float(revenue)):
+    if type(revenue) not in (int, float):
+        raise SnapshotDataInvalid("Dashboard revenue unavailable or invalid")
+    try:
+        finite_revenue = isfinite(float(revenue))
+    except (ValueError, OverflowError, TypeError):
+        finite_revenue = False
+    if not finite_revenue:
         raise SnapshotDataInvalid("Dashboard revenue unavailable or invalid")
 
     alerts = payload.get("inventory_alerts")

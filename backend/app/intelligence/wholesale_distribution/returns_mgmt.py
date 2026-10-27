@@ -211,8 +211,9 @@ class ReturnsManagementEngine:
     # Keywords that map return reasons to categories
     CATEGORY_KEYWORDS: dict[ReturnCategory, list[str]] = {
         ReturnCategory.DEFECTIVE: [
-            "defect", "broken", "malfunction", "fail", "doesn't work", "not working",
-            "DOA", "dead on arrival", "faulty",
+            "defect", "defects", "defective", "broken", "malfunction",
+            "fail", "fails", "failed", "failing", "failure", "doesn't work",
+            "not working", "DOA", "dead on arrival", "faulty",
         ],
         ReturnCategory.WRONG_ITEM: [
             "wrong item", "wrong sku", "incorrect", "not what i ordered", "wrong product",
@@ -226,7 +227,8 @@ class ReturnsManagementEngine:
             "season", "end of season", "seasonal", "no longer needed",
         ],
         ReturnCategory.CUSTOMER_CANCEL: [
-            "cancel", "no longer want", "changed mind", "don't need",
+            "cancel", "canceled", "cancelled", "canceling", "cancelling",
+            "cancellation", "no longer want", "changed mind", "don't need",
         ],
         ReturnCategory.QUALITY_CONCERN: [
             "quality", "concern", "suspect", "looks off", "doesn't look right",

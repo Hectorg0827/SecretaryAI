@@ -86,6 +86,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - A second SPA exported without any API URL now displays a fail-closed configuration screen with **no** sign-in fields or outbound requests. A normal repeated Expo export unexpectedly reused the previous environment's Metro cache and API base URL; `--clear` produced the correct result. The reproducible `mobile npm run export:qa` script includes `--clear`; release engineering must verify the embedded destination and exact artifact hash every time an environment changes.
 - The mobile-web **bundle and synthetic browser** blocker is resolved, but device installs, native screen readers, test-only backend identity and real session revocation remain **NOT TESTED**. No artifact was deployed or signed.
 
+## Seventh isolated accessible session and outage acceptance increment
+
+- Replaced Settings' native-only sign-out alert with a shared React Native confirmation modal that also works in mobile web, exposes explicit accessible cancel/confirm buttons, disables repeat submission, and **keeps the session active** when secure token clearing fails. Cancel never signs the user out.
+- Extended the local, synthetic-only mobile-web Chromium gate: a viewer's MFA sign-in must not request leader-only financial/inbox/follow-up endpoints; cancel must preserve the logged-in view; confirmed sign-out must return to the login screen; a browser reload must not recover a bearer token from persistent browser storage.
+- Added an owner outage scenario in which each permitted dashboard source returns a synthetic `503`. The UI must explicitly identify unavailable summary, sales, inbox, and follow-up sources, mark freshness unverified, and avoid fabricated revenue figures or false empty-state conclusions.
+- Local PASS: mobile TypeScript check, cache-cleared Expo Android/iOS/web bundles, Chromium `signin` and `outage` at 390px/1024px, and the pre-existing unconfigured-bundle gate. All network traffic was intercepted or blocked; **no real server session, authorization or provider operation was tested**.
+- Live cross-tenant authorization, actual session revocation, accessibility screen-reader operation, physical-device sign-out, signed installers, deployment, and external provider acceptance remain **NOT TESTED**. The repository retains its existing backend auth; Auth0 security recommendations were used as general guidance only, without integrating that provider.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.

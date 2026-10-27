@@ -41,6 +41,7 @@ All statuses are **NOT TESTED** until a tester records exact build, device/OS, t
 - Mobile four endpoint-validation assertions and TypeScript: **PASS (local only)**.
 - Android/iOS Expo JavaScript export: **PASS (local only)**; no native package, simulator or physical device execution.
 - Expo mobile-web SPA export and synthetic 390px/1024px Chromium: **PASS (local only)** after dependency installation, SPA output selection and memory-only web token handling. One test-only MFA retry and role navigation completed with all external requests intercepted; provider-backed authentication is **NOT TESTED**.
+- Shared sign-out confirmation, cancel, authenticated-to-unauthenticated navigation and memory-only token clearing after reload: **PASS (local browser fixtures only)**. Browser tests also verify a viewer does not fetch executive endpoints and an owner sees explicit unavailable-source warnings when dashboard APIs return synthetic `503`; real auth revocation and accessibility device support are **NOT TESTED**.
 - Environment-switch reproducibility: **PASS (local only)** only with Expo `--clear` and an explicitly checked artifact. Without cache clearing a second export had reused the previous endpoint; release scripts must not omit this flag.
 
 ## Contract / signoff requests

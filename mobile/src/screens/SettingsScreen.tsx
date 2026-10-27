@@ -9,6 +9,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -256,20 +257,28 @@ function TwoFASection({ totpEnabled }: { totpEnabled: boolean }) {
 
 export default function SettingsScreen() {
   const { user, logout } = useAuthStore();
+  const [showSignOutConfirmation, setShowSignOutConfirmation] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   const handleLogout = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out', style: 'destructive', onPress: async () => {
-          try {
-            await logout();
-          } catch {
-            Alert.alert('Sign out unavailable', 'The device could not clear the stored session. Please try again.');
-          }
-        },
-      },
-    ]);
+    setSignOutError(null);
+    setShowSignOutConfirmation(true);
+  };
+
+  const confirmSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutError(null);
+    try {
+      await logout();
+      setShowSignOutConfirmation(false);
+    } catch {
+      // Keep the session and dialog visible when secure token removal fails.
+      setSignOutError('Could not clear the stored session. Please try again.');
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   return (
@@ -336,6 +345,41 @@ export default function SettingsScreen() {
 
         <Text style={styles.footer}>Secretary AI · Access is controlled by your account permissions</Text>
       </ScrollView>
+
+      <Modal
+        visible={showSignOutConfirmation}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!signingOut) setShowSignOutConfirmation(false); }}
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={styles.dialogCard} accessibilityViewIsModal>
+            <Text style={styles.dialogTitle}>Sign out of SecretaryAI?</Text>
+            <Text style={styles.dialogBody}>You will need to sign in again to access your workspace.</Text>
+            {signOutError ? <Text accessibilityRole="alert" style={styles.dialogError}>{signOutError}</Text> : null}
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Cancel sign out"
+                style={[styles.dialogButton, styles.dialogCancel]}
+                disabled={signingOut}
+                onPress={() => setShowSignOutConfirmation(false)}
+              >
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Confirm sign out"
+                style={[styles.dialogButton, styles.dialogConfirm]}
+                disabled={signingOut}
+                onPress={confirmSignOut}
+              >
+                {signingOut ? <ActivityIndicator color="#fff" /> : <Text style={styles.dialogConfirmText}>Sign out</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -361,6 +405,17 @@ const styles = StyleSheet.create({
   rowValue: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
   divider: { height: 1, backgroundColor: COLORS.border, marginHorizontal: 16 },
   footer: { marginTop: 24, textAlign: 'center', fontSize: 12, color: COLORS.textMuted },
+  dialogBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.6)', justifyContent: 'center', padding: 24 },
+  dialogCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: 20, maxWidth: 420, width: '100%', alignSelf: 'center' },
+  dialogTitle: { fontSize: 19, fontWeight: '700', color: COLORS.text, marginBottom: 8 },
+  dialogBody: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 16 },
+  dialogError: { fontSize: 13, color: COLORS.danger, marginBottom: 12 },
+  dialogActions: { flexDirection: 'row', gap: 10 },
+  dialogButton: { minHeight: 44, flex: 1, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' },
+  dialogCancel: { borderWidth: 1, borderColor: COLORS.border },
+  dialogConfirm: { backgroundColor: COLORS.danger },
+  dialogCancelText: { color: COLORS.text, fontWeight: '600' },
+  dialogConfirmText: { color: '#fff', fontWeight: '700' },
 });
 
 const twoFAStyles = StyleSheet.create({

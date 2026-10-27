@@ -172,3 +172,43 @@ def test_absent_inventory_quantity_is_not_verified_zero(connector, raw):
 ])
 def test_real_provider_zero_inventory_quantity_is_preserved(connector, raw):
     assert connector()._normalize_inventory_item(raw).quantity_on_hand == Decimal(0)
+
+
+@pytest.mark.asyncio
+async def test_qbo_provider_empty_query_response_without_total_count_is_valid():
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={
+        "QueryResponse": {}, "time": "2026-10-27T09:00:00-04:00",
+    })
+    assert await qb._query_all("Invoice") == []
+
+
+@pytest.mark.asyncio
+async def test_qbo_exact_full_page_then_empty_provider_response_completes():
+    qb = _qbo()
+    first = [{"Id": f"item-{i}"} for i in range(1000)]
+    qb._query = AsyncMock(side_effect=[
+        {"QueryResponse": {"Invoice": first}},
+        {"QueryResponse": {}, "time": "2026-10-27T09:00:00-04:00"},
+    ])
+    assert len(await qb._query_all("Invoice")) == 1000
+    assert qb._query.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_qbo_empty_shape_without_provider_evidence_is_not_assumed_valid():
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={"QueryResponse": {}})
+    with pytest.raises(ValueError, match="missing Invoice"):
+        await qb._query_all("Invoice")
+
+
+@pytest.mark.asyncio
+async def test_qbo_fault_overrides_apparent_empty_query_response():
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={
+        "Fault": {"Error": [{"Message": "fixture fault"}]},
+        "QueryResponse": {}, "time": "2026-10-27T09:00:00-04:00",
+    })
+    with pytest.raises(ValueError, match="Fault"):
+        await qb._query_all("Invoice")

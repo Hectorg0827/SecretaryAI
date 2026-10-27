@@ -364,7 +364,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
     try:
         result = (
             db.table("users")
-            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret")
+            .select("id, company_id, role, hashed_password, is_active, totp_enabled, totp_secret")
             .eq("email", body.email.lower().strip())
             .execute()
         )
@@ -373,7 +373,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     users = result.data or []
-    if not users or not verify_password(body.password, users[0]["password_hash"]):
+    if not users or not verify_password(body.password, users[0]["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     user = users[0]
@@ -554,7 +554,7 @@ async def get_me(user: dict = Depends(get_current_user)):
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
-            .select("id, name, email, role, totp_enabled")
+            .select("id, full_name, email, role, totp_enabled")
             .eq("id", user["sub"])
             .execute()
         )
@@ -649,13 +649,13 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     # Create user
     user_payload: dict = {
         "email": body.email,
-        "password_hash": password_hash,
+        "hashed_password": password_hash,
         "role": "owner",
         "company_id": company_id,
         "is_active": True,
     }
     if body.full_name:
-        user_payload["name"] = body.full_name
+        user_payload["full_name"] = body.full_name
 
     try:
         user_result = (

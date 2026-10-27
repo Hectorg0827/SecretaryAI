@@ -127,7 +127,7 @@ class PolicyEngine:
             try:
                 self._db.table("policy_rules").insert(rule).execute()
             except Exception as exc:
-                log.warning("Failed to seed policy rule %s: %s", rule["rule_name"], exc)
+                log.warning("Failed to seed default policy rule")
 
         # Seed company_features with safe defaults
         try:
@@ -136,7 +136,7 @@ class PolicyEngine:
                 on_conflict="company_id",
             ).execute()
         except Exception as exc:
-            log.warning("Failed to seed company_features for %s: %s", self.company_id, exc)
+            log.warning("Failed to seed company_features defaults")
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -154,7 +154,7 @@ class PolicyEngine:
             )
             self._rules = result.data or []
         except Exception as exc:
-            log.warning("Could not load policy rules for %s", self.company_id)
+            log.warning("Could not load policy rules")
             self._rule_load_failed = True
             self._rules = []
         return self._rules
@@ -171,7 +171,7 @@ class PolicyEngine:
             )
             self._features = result.data[0] if result.data else {}
         except Exception as exc:
-            log.warning("Could not load company_features for %s", self.company_id)
+            log.warning("Could not load company_features")
             self._feature_load_failed = True
             self._features = {}
         return self._features

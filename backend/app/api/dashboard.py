@@ -58,7 +58,7 @@ def get_dashboard_adapter(
     except HTTPException:
         raise
     except Exception as exc:
-        log.error("Dashboard connector unavailable for company %s", user.get("company_id"))
+        log.error("Dashboard connector unavailable")
         raise HTTPException(
             status_code=503, detail="Dashboard provider initialization unavailable"
         ) from exc
@@ -106,7 +106,7 @@ async def get_dashboard_summary(
                 status_code=503, detail="Dashboard snapshot is incomplete or invalid"
             ) from exc
         cached = True
-        log.debug("Dashboard summary served from cache for company %s (generated %s)", company_id, generated_at)
+        log.debug("Dashboard summary served from cache")
     else:
         # Loading a read-only dashboard cannot grant every signed-in user the
         # authority to perform connector-wide reporting reads or DB writes.
@@ -120,11 +120,11 @@ async def get_dashboard_summary(
             raise HTTPException(
                 status_code=503, detail="Dashboard provider unavailable"
             )
-        log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
+        log.info("Dashboard summary: no snapshot found; computing fresh")
         try:
             cached_payload = await compute_dashboard_payload(adapter)
         except SnapshotSourceUnavailable as exc:
-            log.warning("Dashboard summary source unavailable for %s: %s", company_id, exc.source)
+            log.warning("Dashboard summary source unavailable")
             raise HTTPException(
                 status_code=503,
                 detail="Business data temporarily unavailable; dashboard refresh not completed",
@@ -165,7 +165,7 @@ async def get_dashboard_summary(
             )
             pending_count = result.count if result.count is not None else None
         except Exception:
-            log.warning("Dashboard summary: pending count unavailable for %s", company_id)
+            log.warning("Dashboard summary: pending count unavailable")
 
     unread_count: int | None = None
     if "trigger_actions" in perms or has_view_all:
@@ -173,7 +173,7 @@ async def get_dashboard_summary(
             emails = await adapter.get_emails(query="is:unread", max_results=50)
             unread_count = len(emails)
         except Exception:
-            log.warning("Dashboard summary: unread inbox unavailable for %s", company_id)
+            log.warning("Dashboard summary: unread inbox unavailable")
 
     return {
         "company_id": company_id,
@@ -214,7 +214,7 @@ async def trigger_dashboard_refresh(
             kwargs={"company_id": user["company_id"]}
         )
     except Exception as exc:
-        log.error("Dashboard refresh could not be queued for %s", user["company_id"])
+        log.error("Dashboard refresh could not be queued")
         raise HTTPException(
             status_code=503, detail="Dashboard refresh service unavailable"
         ) from exc
@@ -300,7 +300,7 @@ async def _ai_analyze_emails(emails: list[dict]) -> list[dict]:
             text = re.split(r"```(?:json)?", text)[1]
         return json.loads(text.strip())
     except Exception as exc:
-        log.warning("Email AI analysis failed (%s) — using heuristics", exc)
+        log.warning("Email AI analysis failed; using heuristics")
         return [_heuristic(e) for e in emails]
 
 
@@ -396,7 +396,7 @@ async def draft_email_reply(
         )
         draft_text = response.content[0].text.strip()
     except Exception as exc:
-        log.error("Draft reply generation failed: %s", exc)
+        log.error("Draft reply generation failed")
         draft_text = (
             "Thank you for your email. I have reviewed your message and will "
             "follow up with you shortly.\n\nBest regards"
@@ -447,7 +447,7 @@ async def mark_email_read(
     try:
         await adapter.mark_email_read(email_id)
     except Exception as exc:
-        log.warning("mark-read failed for %s", email_id)
+        log.warning("Email mark-read failed")
         raise HTTPException(
             status_code=503,
             detail="Email read status could not be confirmed",
@@ -469,7 +469,7 @@ async def get_sales_data(
     try:
         invoices = await adapter.get_orders_last_n_days(days)
     except Exception as exc:
-        log.error("Sales data fetch failed for company %s", user["company_id"])
+        log.error("Sales data fetch failed")
         raise HTTPException(
             status_code=503,
             detail="Sales source unavailable; revenue and order counts not verified",
@@ -500,7 +500,7 @@ async def get_sales_data(
         ):
             raise ValueError("Sales totals are not finite")
     except (ValueError, TypeError, ArithmeticError) as exc:
-        log.error("Malformed current sales data for company %s", user["company_id"])
+        log.error("Malformed current sales data")
         raise HTTPException(
             status_code=503,
             detail="Sales source contains invalid financial data",
@@ -533,7 +533,7 @@ async def get_sales_data(
             if not isfinite(vs_prior_pct):
                 raise ValueError("Sales comparison is not finite")
     except Exception as exc:
-        log.error("Prior-period sales data failed for company %s", user["company_id"])
+        log.error("Prior-period sales data failed")
         raise HTTPException(
             status_code=503,
             detail="Prior-period sales source unavailable; comparison not verified",
@@ -576,7 +576,7 @@ async def list_notes(
         result = query.order("created_at", desc=True).execute()
         return {"notes": result.data or []}
     except Exception as exc:
-        log.error("Notes read failed for company %s", company_id)
+        log.error("Notes read failed")
         raise HTTPException(
             status_code=503, detail="Follow-up notes temporarily unavailable"
         ) from exc
@@ -607,7 +607,7 @@ async def create_note(
     try:
         result = db.table("follow_up_notes").insert(record).execute()
     except Exception as exc:
-        log.error("Note creation failed for company %s", company_id)
+        log.error("Note creation failed")
         raise HTTPException(
             status_code=503, detail="Follow-up note could not be saved"
         ) from exc
@@ -646,7 +646,7 @@ async def update_note(
             query = query.eq("user_id", user["sub"])
         result = query.execute()
     except Exception as exc:
-        log.error("Note update failed for company %s", company_id)
+        log.error("Note update failed")
         raise HTTPException(
             status_code=503, detail="Follow-up note update unavailable"
         ) from exc

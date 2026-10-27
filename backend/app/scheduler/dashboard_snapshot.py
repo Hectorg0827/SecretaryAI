@@ -129,7 +129,7 @@ async def compute_dashboard_payload(adapter) -> dict:
             )
             health_counts[health.status] += 1
     except Exception as exc:
-        log.error("Dashboard snapshot: account health failed: %s", exc)
+        log.error("Dashboard snapshot: account health failed")
         raise SnapshotSourceUnavailable("account_health") from exc
 
     # ── Inventory alerts ──────────────────────────────────────────────────
@@ -175,7 +175,7 @@ async def compute_dashboard_payload(adapter) -> dict:
                     "needs_po":        True,
                 })
     except Exception as exc:
-        log.error("Dashboard snapshot: inventory eval failed: %s", exc)
+        log.error("Dashboard snapshot: inventory eval failed")
         raise SnapshotSourceUnavailable("inventory") from exc
 
     # ── 30-day sales ──────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ async def compute_dashboard_payload(adapter) -> dict:
         if not isfinite(sales_30d):
             raise ValueError("Thirty-day revenue aggregate is not finite")
     except Exception as exc:
-        log.error("Dashboard snapshot: sales total failed: %s", exc)
+        log.error("Dashboard snapshot: sales total failed")
         raise SnapshotSourceUnavailable("sales_30d") from exc
 
     return {
@@ -220,7 +220,7 @@ def store_snapshot(db, company_id: str, report_type: str, payload: dict, generat
             on_conflict="company_id,report_type",
         ).execute()
     except Exception as exc:
-        log.error("Failed to store %s snapshot for company %s", report_type, company_id)
+        log.error("Failed to store dashboard snapshot")
         raise SnapshotPersistenceUnavailable("Dashboard snapshot persistence failed") from exc
 
     # PostgREST's representation response is evidence that a row was accepted.
@@ -340,5 +340,5 @@ def read_snapshot(db, company_id: str, report_type: str) -> dict | None:
         )
         return result.data or None
     except Exception as exc:
-        log.error("Failed to read %s snapshot for company %s", report_type, company_id)
+        log.error("Failed to read dashboard snapshot")
         raise SnapshotReadUnavailable("Dashboard snapshot storage unavailable") from exc

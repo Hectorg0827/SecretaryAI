@@ -54,6 +54,9 @@ async def get_dashboard_summary(
     fallback and is immediately stored for subsequent callers.
     """
     company_id = user["company_id"]
+    role = user.get("role", "viewer")
+    perms = ROLE_PERMISSIONS.get(role, set())
+    has_view_all = "view_all" in perms
 
     # ── Read QB-derived data from the shared snapshot ─────────────────────
     snap = read_snapshot(db, company_id, "dashboard_summary")
@@ -63,7 +66,14 @@ async def get_dashboard_summary(
         cached = True
         log.debug("Dashboard summary served from cache for company %s (generated %s)", company_id, generated_at)
     else:
-        # No snapshot yet — compute fresh and store for everyone else today
+        # Loading a read-only dashboard cannot grant every signed-in user the
+        # authority to perform connector-wide reporting reads or DB writes.
+        # Sales reps and viewers must wait for an authorized scheduled refresh.
+        if "run_reports" not in perms and not has_view_all:
+            raise HTTPException(
+                status_code=503,
+                detail="Dashboard snapshot unavailable; authorized refresh required",
+            )
         log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
         try:
             cached_payload = await compute_dashboard_payload(adapter)
@@ -90,32 +100,29 @@ async def get_dashboard_summary(
     inventory_alerts = cached_payload.get("inventory_alerts", [])
     sales_30d        = cached_payload.get("sales_30d", 0.0)
 
-    # ── Pending approvals — always live (cheap DB query) ───────────────────
+    # Fetch sensitive live sources only when the role can see the result.
+    # Filtering the JSON after a provider read is not an authorization gate.
     pending_count: int | None = None
-    try:
-        result = (
-            db.table("drafts")
-            .select("id", count="exact")
-            .eq("company_id", company_id)
-            .eq("status", "pending")
-            .execute()
-        )
-        pending_count = result.count or 0
-    except Exception as exc:
-        log.warning("Dashboard summary: pending count failed: %s", exc)
+    if "approve_actions" in perms or has_view_all:
+        try:
+            result = (
+                db.table("drafts")
+                .select("id", count="exact")
+                .eq("company_id", company_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            pending_count = result.count if result.count is not None else None
+        except Exception:
+            log.warning("Dashboard summary: pending count unavailable for %s", company_id)
 
-    # ── Unread email count — always live (real-time inbox) ─────────────────
     unread_count: int | None = None
-    try:
-        emails = await adapter.get_emails(query="is:unread", max_results=50)
-        unread_count = len(emails)
-    except Exception as exc:
-        log.warning("Dashboard summary: unread count failed: %s", exc)
-
-    # ── Role-based field filtering ──────────────────────────────────────────
-    role = user.get("role", "viewer")
-    perms = ROLE_PERMISSIONS.get(role, set())
-    has_view_all = "view_all" in perms
+    if "trigger_actions" in perms or has_view_all:
+        try:
+            emails = await adapter.get_emails(query="is:unread", max_results=50)
+            unread_count = len(emails)
+        except Exception:
+            log.warning("Dashboard summary: unread inbox unavailable for %s", company_id)
 
     return {
         "company_id": company_id,

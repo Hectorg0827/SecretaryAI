@@ -27,6 +27,9 @@ def refresh_company_snapshot(company_id: str, *, db, companies, adapter_factory)
         raise ValueError("Company is not eligible for dashboard refresh")
 
     adapter = adapter_factory(company)
+    # Without a DB the adapter cannot read inventory sell rates, so no item
+    # would ever be assessed; request-time adapters attach it the same way.
+    adapter.set_db(db)
     payload = asyncio.run(compute_dashboard_payload(adapter))
     store_snapshot(
         db, company_id, "dashboard_summary", payload,

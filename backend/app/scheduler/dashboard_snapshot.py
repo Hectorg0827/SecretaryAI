@@ -94,6 +94,7 @@ async def compute_dashboard_payload(adapter) -> dict:
 
     health_counts: Counter = Counter()
     inventory_alerts: list[dict] = []
+    inventory_unassessed = 0
     sales_30d = 0.0
 
     # ── Account health ────────────────────────────────────────────────────
@@ -156,17 +157,33 @@ async def compute_dashboard_payload(adapter) -> dict:
             if authoritative_qty is None:
                 raise ValueError("Inventory missing authoritative total_qty")
             qty = Decimal(str(authoritative_qty))
+            if not qty.is_finite() or qty < 0:
+                raise ValueError("Inventory quantity must be finite and nonnegative")
             # UnifiedDataAdapter may supply 0.0 as an API-compatibility
             # placeholder even if the inventory sync never observed velocity.
-            # A missing measurement is NOT a measured zero.
+            # A missing measurement is NOT a measured zero: an outage of the
+            # velocity source fails closed, but one item without a measured
+            # rate (e.g. a new SKU) is unassessed rather than voiding the
+            # whole snapshot. Zero on hand is observed, so it still alerts.
             if item.get("weekly_sell_rate_observed") is not True:
-                raise ValueError("Inventory weekly sell rate not observed")
+                if item.get("weekly_sell_rate_source_status") == "unavailable":
+                    raise ValueError("Inventory weekly sell rate source unavailable")
+                if qty == 0:
+                    inventory_alerts.append({
+                        "item_id":         item.get("qb_id", ""),
+                        "product_name":    item.get("product_name", ""),
+                        "total_qty":       item.get("total_qty", 0),
+                        "weeks_remaining": None,
+                        "stock_status":    "out_of_stock",
+                        "needs_po":        True,
+                    })
+                else:
+                    inventory_unassessed += 1
+                continue
             rate_value = item.get("weekly_sell_rate")
             if rate_value is None:
                 raise ValueError("Inventory missing weekly sell rate")
             rate = Decimal(str(rate_value))
-            if not qty.is_finite() or qty < 0:
-                raise ValueError("Inventory quantity must be finite and nonnegative")
             if not rate.is_finite() or rate < 0:
                 raise ValueError("Weekly sell rate must be finite and nonnegative")
             status = evaluate_inventory(
@@ -214,6 +231,9 @@ async def compute_dashboard_payload(adapter) -> dict:
             "total":   sum(health_counts.values()),
         },
         "inventory_alerts": inventory_alerts,
+        # In-stock items whose sell rate was never measured: not assessed,
+        # so absent from alerts, but never silently treated as healthy.
+        "inventory_unassessed": inventory_unassessed,
         "sales_30d":        round(sales_30d, 2),
     }
 
@@ -337,6 +357,10 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
         for item in alerts
     ):
         raise SnapshotDataInvalid("Dashboard inventory alerts invalid")
+    # Absent from snapshots written before unassessed items were counted.
+    unassessed = payload.get("inventory_unassessed", 0)
+    if type(unassessed) is not int or unassessed < 0:
+        raise SnapshotDataInvalid("Dashboard inventory coverage invalid")
     return payload
 
 

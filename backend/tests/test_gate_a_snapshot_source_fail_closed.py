@@ -161,9 +161,9 @@ async def test_inventory_missing_demand_history_is_not_silently_assumed_zero():
         "qb_id": "SKU-NO-RATE", "product_name": "Unknown velocity",
         "qb_qty": 7, "total_qty": 7,
     }]
-    with pytest.raises(SnapshotSourceUnavailable) as info:
-        await compute_dashboard_payload(adapter)
-    assert info.value.source == "inventory"
+    payload = await compute_dashboard_payload(adapter)
+    assert payload["inventory_alerts"] == []
+    assert payload["inventory_unassessed"] == 1
 
 
 
@@ -244,9 +244,10 @@ async def test_unobserved_zero_sell_rate_is_not_an_actual_zero_demand_measuremen
         "weekly_sell_rate_observed": False,
         "weekly_sell_rate_source_status": "missing",
     }]
-    with pytest.raises(SnapshotSourceUnavailable) as error:
-        await compute_dashboard_payload(adapter)
-    assert error.value.source == "inventory"
+    payload = await compute_dashboard_payload(adapter)
+    # Unassessed, not scored as zero demand and not a silent all-clear.
+    assert payload["inventory_alerts"] == []
+    assert payload["inventory_unassessed"] == 1
 
 
 @pytest.mark.asyncio
@@ -262,6 +263,7 @@ async def test_genuine_measured_zero_sell_rate_is_distinct_from_unknown():
     payload = await compute_dashboard_payload(adapter)
     assert payload["source_read_status"] == "completed"
     assert payload["inventory_alerts"] == []
+    assert payload["inventory_unassessed"] == 0
     assert payload["source_quality"] == "partial"
 
 
@@ -273,6 +275,53 @@ async def test_missing_observation_metadata_does_not_count_as_verified_demand():
         "qb_qty": 100, "total_qty": 100,
         "weekly_sell_rate": 0.0,
     }]
+    payload = await compute_dashboard_payload(adapter)
+    assert payload["inventory_alerts"] == []
+    assert payload["inventory_unassessed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sell_rate_source_outage_still_fails_closed():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-OUTAGE", "product_name": "Velocity read failed",
+        "qb_qty": 100, "total_qty": 100,
+        "weekly_sell_rate": 0.0,
+        "weekly_sell_rate_observed": False,
+        "weekly_sell_rate_source_status": "unavailable",
+    }]
     with pytest.raises(SnapshotSourceUnavailable) as error:
         await compute_dashboard_payload(adapter)
     assert error.value.source == "inventory"
+
+
+@pytest.mark.asyncio
+async def test_unmeasured_item_with_nothing_on_hand_is_still_out_of_stock():
+    adapter = CompleteReader()
+    adapter.inventory = [{
+        "qb_id": "SKU-EMPTY", "product_name": "Sold out, never measured",
+        "qb_qty": 0, "total_qty": 0,
+        "weekly_sell_rate": 0.0,
+        "weekly_sell_rate_observed": False,
+        "weekly_sell_rate_source_status": "missing",
+    }]
+    payload = await compute_dashboard_payload(adapter)
+    assert [a["stock_status"] for a in payload["inventory_alerts"]] == ["out_of_stock"]
+    assert payload["inventory_unassessed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_one_unmeasured_item_does_not_hide_measured_alerts():
+    adapter = CompleteReader()
+    adapter.inventory = [
+        {"qb_id": "SKU-LOW", "product_name": "Measured, one week left",
+         "qb_qty": 8, "total_qty": 8, "weekly_sell_rate": 8.0,
+         "weekly_sell_rate_observed": True, "weekly_sell_rate_source_status": "observed"},
+        {"qb_id": "SKU-NEW", "product_name": "New, never sold",
+         "qb_qty": 50, "total_qty": 50, "weekly_sell_rate": 0.0,
+         "weekly_sell_rate_observed": False, "weekly_sell_rate_source_status": "missing"},
+    ]
+    payload = await compute_dashboard_payload(adapter)
+    assert [a["item_id"] for a in payload["inventory_alerts"]] == ["SKU-LOW"]
+    assert payload["inventory_unassessed"] == 1
+    assert payload["source_read_status"] == "completed"

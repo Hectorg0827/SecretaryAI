@@ -181,6 +181,11 @@ async def get_dashboard_summary(
         "accounts": accounts if ("view_customers" in perms or has_view_all) else None,
         # Only roles with inventory access see alerts
         "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
+        # In-stock items not assessed because their sell rate was never measured
+        "inventory_unassessed": (
+            cached_payload.get("inventory_unassessed", 0)
+            if ("view_inventory" in perms or has_view_all) else None
+        ),
         # Financial figures visible to owner + manager only
         "sales_30d":        round(float(sales_30d), 2) if ("view_financials" in perms or has_view_all) else None,
         # Approval count visible to approvers only

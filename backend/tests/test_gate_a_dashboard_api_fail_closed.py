@@ -221,3 +221,27 @@ async def test_authorized_owner_can_compute_missing_snapshot_and_fetch_live_coun
     assert result["pending_actions"] == 0
     assert result["unread_emails"] == 0
     assert result["accounts"]["total"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,sees_inventory", [
+    ("owner", True), ("manager", True), ("back_office", True),
+    ("sales_rep", True), ("viewer", False), ("unknown", False),
+])
+async def test_unassessed_inventory_count_follows_inventory_rbac(role, sees_inventory):
+    adapter = AsyncMock()
+    adapter.get_emails.return_value = []
+    snap = {
+        "payload": {
+            "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0, "total": 1},
+            "inventory_alerts": [], "inventory_unassessed": 3, "sales_30d": 0,
+            "source_quality": "partial", "source_read_status": "completed",
+        },
+        "generated_at": "2026-10-26T12:00:00Z",
+    }
+    with patch("app.api.dashboard.read_snapshot", return_value=snap):
+        result = await get_dashboard_summary(
+            user={"company_id": "tenant-fixture", "sub": "person", "role": role},
+            adapter=adapter, db=MagicMock(),
+        )
+    assert result["inventory_unassessed"] == (3 if sees_inventory else None)

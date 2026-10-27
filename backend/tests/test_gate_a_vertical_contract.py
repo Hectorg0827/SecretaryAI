@@ -174,8 +174,42 @@ async def test_synthetic_data_reaches_authorized_six_section_briefing_through_ca
 
 
 @pytest.mark.asyncio
-async def test_unknown_velocity_cannot_publish_cache_or_business_briefing():
+async def test_unknown_velocity_is_published_as_unassessed_never_as_healthy_stock():
     adapter = SyntheticUnifiedAdapter(velocity_observed=False)
+    db = TenantSnapshotStore()
+    normalized = await compute_dashboard_payload(adapter)
+    # One unmeasured item must not void accounts and sales, and must not
+    # read as healthy stock: it is counted and named in the briefing.
+    assert normalized["accounts"]["total"] == 2
+    assert normalized["sales_30d"] == 600
+    assert normalized["inventory_alerts"] == []
+    assert normalized["inventory_unassessed"] == 1
+
+    store_snapshot(db, "tenant-A", "dashboard_summary", normalized)
+    snapshot = read_snapshot(db, "tenant-A", "dashboard_summary")
+    response = build_owner_briefing(
+        company_id="tenant-A", role="owner", snapshot=snapshot,
+        now=datetime.now(timezone.utc),
+    )
+    typed = BriefingTodayResponseV1.model_validate(response)
+    assert any(
+        "1 in-stock products not assessed" in entry.title
+        for entry in typed.sections.yellow_alerts
+    )
+
+
+class VelocityOutageAdapter(SyntheticUnifiedAdapter):
+    async def get_inventory_merged(self):
+        items = await super().get_inventory_merged()
+        for item in items:
+            item["weekly_sell_rate_observed"] = False
+            item["weekly_sell_rate_source_status"] = "unavailable"
+        return items
+
+
+@pytest.mark.asyncio
+async def test_velocity_source_outage_cannot_publish_cache_or_business_briefing():
+    adapter = VelocityOutageAdapter()
     db = TenantSnapshotStore()
     with pytest.raises(SnapshotSourceUnavailable) as error:
         normalized = await compute_dashboard_payload(adapter)

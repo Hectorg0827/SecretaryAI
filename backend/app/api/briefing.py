@@ -92,6 +92,10 @@ def build_owner_briefing(
             raise BriefingSourceUnavailable("Invalid inventory alert")
     critical = sum(i["stock_status"] in ("critical", "out_of_stock") for i in inventory)
     low = sum(i["stock_status"] == "low" for i in inventory)
+    # In-stock items with no measured sell rate; older snapshots have none.
+    unassessed = payload.get("inventory_unassessed", 0)
+    if type(unassessed) is not int or unassessed < 0:
+        raise BriefingSourceUnavailable("Invalid inventory coverage")
 
     evidence = (EvidenceRef(
         source_system="dashboard_snapshot",
@@ -115,6 +119,10 @@ def build_owner_briefing(
     if counts["slowing"] or low:
         add("aggregate-watch", BriefingSection.YELLOW_ALERTS,
             f"{counts['slowing']} slowing accounts and {low} low-stock alerts (snapshot only)")
+    if unassessed:
+        # Never let missing sell rates read as an all-clear on stock.
+        add("inventory-unassessed", BriefingSection.YELLOW_ALERTS,
+            f"{unassessed} in-stock products not assessed: no measured sell rate (snapshot only)")
     classified = counts["total"] - counts["unknown"]
     unscored = f" and {counts['unknown']} unscored accounts" if counts["unknown"] else ""
     add("aggregate-scoreboard", BriefingSection.SCOREBOARD,

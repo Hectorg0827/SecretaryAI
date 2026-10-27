@@ -72,3 +72,21 @@ def test_dashboard_only_worker_rejects_failed_provider_read_without_persisting()
                 adapter_factory=lambda _: MagicMock(),
             )
     write.assert_not_called()
+
+
+def test_worker_refresh_attaches_db_so_inventory_sell_rates_are_read():
+    db = MagicMock()
+    reader = MagicMock()
+    payload = {
+        "source_quality": "partial", "source_read_status": "completed",
+        "accounts": {"total": 0}, "inventory_alerts": [], "sales_30d": 0,
+    }
+    with patch(
+        "tasks.dashboard_refresh.compute_dashboard_payload",
+        new=AsyncMock(return_value=payload),
+    ), patch("tasks.dashboard_refresh.store_snapshot"):
+        refresh_company_snapshot(
+            "tenant-a", db=db, companies=[{"id": "tenant-a"}],
+            adapter_factory=lambda row: reader,
+        )
+    reader.set_db.assert_called_once_with(db)

@@ -210,3 +210,26 @@ def test_expired_or_undetermined_returns_are_quarantined_not_destroyed():
         assert data["proposed_disposition"] == "hold_for_inspection"
         assert data["destroy_authorized"] is False
 
+
+@pytest.mark.parametrize("reason,expected", [
+    ("Product defective", ReturnCategory.DEFECTIVE),
+    ("Item failed during use", ReturnCategory.DEFECTIVE),
+    ("Customer cancelled order", ReturnCategory.CUSTOMER_CANCEL),
+    ("Customer canceled order", ReturnCategory.CUSTOMER_CANCEL),
+])
+def test_common_reason_inflections_preserve_whole_word_classification(reason, expected):
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason=reason, category=None)
+    assert engine.classify_return(record) == expected
+
+
+def test_inflected_defective_return_remains_eligible_for_unsent_supplier_claim():
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason="Product defective", category=None)
+    record.category = engine.classify_return(record)
+    claim = engine.generate_supplier_claim(
+        "S-1", "Test Supplier", [record], 100, "2026-10-01", "2026-10-31",
+    )
+    assert claim is not None
+    assert claim.defective_units == 5
+    assert claim.to_dict()["claim_filed"] is False

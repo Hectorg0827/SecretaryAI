@@ -14,6 +14,7 @@ import json
 import logging
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -189,14 +190,28 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                             last_order = date.fromisoformat(max(dates))
                         except ValueError:
                             pass
-                    health = score_account(
-                        account_id=cid,
-                        account_name=getattr(customer, "name", ""),
-                        last_order_date=last_order,
-                        avg_order_cycle_days=None,
-                        order_history=cust_invoices,
-                        current_balance=float(getattr(customer, "balance", 0)),
-                    )
+                    try:
+                        balance = getattr(customer, "balance", None)
+                        if balance is None or isinstance(balance, bool):
+                            raise ValueError("Customer balance not observed")
+                        health = score_account(
+                            account_id=cid,
+                            account_name=getattr(customer, "name", ""),
+                            last_order_date=last_order,
+                            avg_order_cycle_days=None,
+                            order_history=cust_invoices,
+                            current_balance=Decimal(str(balance)),
+                        )
+                    except (ValueError, TypeError, ArithmeticError):
+                        # Credit balances and missing/malformed source values
+                        # are unscorable, not zero or a reason to hide other
+                        # customers from the chat overview.
+                        data["accounts"].append({
+                            "name": getattr(customer, "name", ""),
+                            "health_status": "unknown",
+                            "health_score": None,
+                        })
+                        continue
                     data["accounts"].append({
                         "name": getattr(customer, "name", ""),
                         "health_status": health.status,

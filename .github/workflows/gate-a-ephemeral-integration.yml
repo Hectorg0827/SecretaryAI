@@ -101,7 +101,12 @@ jobs:
       - name: Test merged backend contracts with synthetic sources
         working-directory: backend
         env:
-          SECRETARYAI_DEPLOYMENT_ENV: staging
+          # This runner is not deployed staging and has no staging secrets.
+          # Actual staging validation remains a separate release gate.
+          SECRETARYAI_DEPLOYMENT_ENV: ci
+          INTUIT_ENVIRONMENT: sandbox
+          COMPUTER_USE_ENABLED: 'false'
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
           SECRETARYAI_EMAIL_DELIVERY_MODE: disabled
           SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED: '0'
           SECRETARYAI_DURABLE_APPROVAL_ENABLED: '0'

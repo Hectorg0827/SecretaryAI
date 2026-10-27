@@ -532,10 +532,17 @@ async def create_note(
     }
     try:
         result = db.table("follow_up_notes").insert(record).execute()
-        return result.data[0] if result.data else record
     except Exception as exc:
-        log.error("Note creation failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to create note")
+        log.error("Note creation failed for company %s", company_id)
+        raise HTTPException(
+            status_code=503, detail="Follow-up note could not be saved"
+        ) from exc
+    if not result.data:
+        raise HTTPException(
+            status_code=503,
+            detail="Follow-up note creation was not confirmed",
+        )
+    return result.data[0]
 
 
 class UpdateNoteRequest(BaseModel):

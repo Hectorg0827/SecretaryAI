@@ -75,3 +75,20 @@ def test_claim_of_loaded_briefing_without_quality_warnings_fails():
     assert any("complete_digest" in msg for msg in messages)
     assert any("source_quality" in msg for msg in messages)
     assert any("source_coverage" in msg for msg in messages)
+
+
+def test_exact_backend_type_name_briefing_today_response_v1_is_accepted():
+    typed_web = WEB.replace("BriefingTodayResponse", "BriefingTodayResponseV1")
+    assert gate.check_contract(typed_web, UI, MOBILE) == []
+
+
+def test_named_nullable_alias_and_reversed_union_are_accepted():
+    web_named = WEB.replace(
+        "accounts: { healthy: number; at_risk: number; } | null;",
+        "accounts: AccountHealth | null;",
+    )
+    mobile_reversed = MOBILE.replace(
+        "accounts: { at_risk: number; } | null;",
+        "accounts: null | AccountHealth;",
+    )
+    assert gate.check_contract(web_named, UI, mobile_reversed) == []

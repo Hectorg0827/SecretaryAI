@@ -178,6 +178,42 @@ model inputs, not posted credit or independently accepted terms. Full RMA,
 stateful returns, reverse-logistics execution, lot quarantine and serialized
 audit replay remain **unimplemented** pending canonical Chat 1/Chat 2 contracts.
 
+## Eighth owned regression — multi-stage HTTP and outage containment
+
+`tests/test_wholesale_distribution/test_logistics/test_workflow_evidence_gate.py`
+exercises the actual FastAPI route chain using a synthetic tenant, a spy-only
+database and unverified example observations. It executes the reorder API,
+confirms forged client PO approval is blocked, parses a candidate supplier
+reply, freight invoice and broker status, previews a warehouse receipt, models
+landed-cost variance, queries the learning report, and reads the legacy
+pipeline status. **This is intentionally a cross-route negative acceptance
+test, not a completed nine-stage operational workflow**: no real PO is sent,
+no authenticated shipment milestone is received, and no stock event is posted.
+
+The tests first reproduced an empty portfolio reported as a safe zero-reorder
+result, malformed legacy receipt lines reaching calculation, missing/negative
+sale histories accepted as forecast evidence, no meaningful distinction between
+an empty monthly memory and "operations on track," and a mutable legacy
+pipeline stage looking authoritative. Additional input tests cover missing
+supplier lead observations, nonpositive pack/container capacities, negative
+stock snapshots and explicit case UOM. These now fail before any provider read.
+The report and pipeline read paths expressly identify unverified/transient
+history and nonauthoritative legacy stage provenance. The legacy receiving
+route exposes only candidate alerts and explicitly indicates no verified
+receipt, PO, carrier booking, staff intake, supplier lead history or stock post.
+
+Failure injection includes absent, duplicate and cross-tenant company
+configuration rows and a thrown company-read exception; all return HTTP 503
+without a successful forecast, raw private error content or outbound/write
+operation. Existing owned HTTP/SQL-contract tests independently cover failed
+durable purchasing RPC mapping and actor-sourced approval fields. The mocked
+API chain does **not** establish Postgres transaction isolation, idempotent
+replay, RLS, actual QuickBooks parity, durable audit persistence, provider
+timestamps or a real approved PO-to-receipt handoff. A missing stage-5
+carrier milestone route and missing stage-9 durable feedback ingestion still
+prevent full workflow acceptance. The V6 SQL integration harness must run
+against a dedicated isolated database before any claim of ledger acceptance.
+
 ## Interface requests — owner to forward manually
 
 **Chat 1 — architecture / approval gate:** Define tenant-scoped
@@ -201,6 +237,11 @@ source/order/receipt references, quarantine lots, disposition approvals,
 independent reviewer roles, exactly-once stock adjustment/credit/claim events,
 and replay/concurrency invariants. A return-request preview must never act
 as an authorization to reverse inventory or issue a credit.
+For nine-stage verification, define the canonical durable event envelope
+(tenant, PO, stage, actor, source, source hash, observed_at, idempotency key,
+approval state) and make each successful transition queryable with exact
+replay and rollback semantics. Clarify whether legacy procurement cycles may
+remain display-only or should be retired once V6 order/receipt state is wired.
 
 **Chat 2 — data/connectors:** Supply a read-only authenticated snapshot of
 mapped QB IDs, warehouse stock, allocations, in-transit purchase lines, open
@@ -228,6 +269,12 @@ receipt and sale case-pack units, warehouse physical intake and lot condition,
 dated QA inspection evidence, approved supplier return terms and credit-note
 status with source timestamps. Verify the denominator for supplier defect
 rates, including the same SKU/unit, supplier and bounded accounting period.
+For end-to-end provider acceptance, supply sandbox-only authenticated shipment
+and arrival milestones, verified supplier correspondence with PO references,
+receipt/photo evidence and matching invoices with currency/FX metadata;
+provide complete pagination and source timestamps so an outage is not mistaken
+for a zero-stock or zero-cost observation. A source adapter returning a success
+shape without authoritative evidence must remain unverified.
 
 ## Acceptance still outstanding
 

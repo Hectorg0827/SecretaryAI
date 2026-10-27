@@ -81,6 +81,7 @@ class UnifiedDataAdapter:
                 client_secret=cfg.get("ms_client_secret", ""),
                 access_token=cfg["ms_access_token"],
                 refresh_token=cfg.get("ms_refresh_token", ""),
+                on_token_refresh=self._persist_outlook_tokens,
             )
 
         # Shopify connector
@@ -141,6 +142,32 @@ class UnifiedDataAdapter:
         except Exception as exc:
             log.error("Failed to persist refreshed QBO tokens for company %s", company_id)
             raise RuntimeError("QBO token refresh could not be persisted") from exc
+
+    async def _persist_outlook_tokens(self, access_token: str, refresh_token: str) -> None:
+        """Persist rotating Microsoft credentials before treating refresh as complete."""
+        import logging
+
+        log = logging.getLogger(__name__)
+        company_id = self._config.get("id")
+        if not company_id:
+            raise RuntimeError("Cannot persist Outlook token refresh without a company identifier")
+        try:
+            from supabase import create_client
+            from app.config import get_settings
+            from app.utils.encryption import encrypt
+
+            settings = get_settings()
+            db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+            result = db.table("companies").update({
+                "ms_access_token": encrypt(access_token, settings.secret_key),
+                "ms_refresh_token": encrypt(refresh_token, settings.secret_key),
+            }).eq("id", company_id).execute()
+            if not getattr(result, "data", None):
+                raise RuntimeError("Outlook token persistence matched no company")
+            log.info("Outlook tokens refreshed and persisted for a company")
+        except Exception as exc:
+            log.error("Outlook token refresh could not be persisted")
+            raise RuntimeError("Outlook token refresh could not be persisted") from exc
 
     def set_db(self, db) -> None:
         """Attach a DB client so the AccessRouter can log path decisions."""

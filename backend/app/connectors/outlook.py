@@ -8,6 +8,7 @@ Company config keys:
 from __future__ import annotations
 import logging
 from typing import Optional
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
@@ -40,18 +41,22 @@ class OutlookConnector:
     async def _ensure_valid_token(self) -> str:
         """Refresh the access token if expired."""
         import httpx
-        try:
-            # Try a lightweight call to check token validity
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{GRAPH_BASE}/me",
-                    headers={"Authorization": f"Bearer {self._access_token}"},
-                    timeout=5,
-                )
-                if resp.status_code != 401:
-                    return self._access_token
-        except Exception:
-            pass
+        # Only an observed 401 justifies refresh. Network failures, 403, 5xx,
+        # and provider outages must surface rather than rotate credentials.
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{GRAPH_BASE}/me",
+                headers={"Authorization": f"Bearer {self._access_token}"},
+                timeout=5,
+            )
+            if resp.status_code != 401:
+                resp.raise_for_status()
+                return self._access_token
+
+        if not self._on_token_refresh:
+            raise RuntimeError("Outlook token refresh requires a durable persistence callback")
+        if not self._refresh_token:
+            raise RuntimeError("Outlook token refresh requires a refresh credential")
 
         # Refresh
         try:
@@ -72,13 +77,12 @@ class OutlookConnector:
                 self._access_token = tokens["access_token"]
                 if "refresh_token" in tokens:
                     self._refresh_token = tokens["refresh_token"]
-                if self._on_token_refresh:
-                    import inspect
-                    persisted = self._on_token_refresh(self._access_token, self._refresh_token)
-                    if inspect.isawaitable(persisted):
-                        await persisted
+                import inspect
+                persisted = self._on_token_refresh(self._access_token, self._refresh_token)
+                if inspect.isawaitable(persisted):
+                    await persisted
         except Exception as exc:
-            log.error("Outlook token refresh failed: %s", exc)
+            log.error("Outlook token refresh failed (details withheld)")
             raise
 
         return self._access_token
@@ -86,6 +90,8 @@ class OutlookConnector:
     async def get_emails(self, query: str = "", max_results: int = 20) -> list[dict]:
         """Fetch emails from Outlook inbox. Returns same shape as GmailConnector."""
         import httpx
+        if max_results <= 0:
+            raise ValueError("max_results must be positive")
         try:
             headers = await self._get_headers()
             # Build $filter from query
@@ -97,32 +103,59 @@ class OutlookConnector:
             if "is:unread" in query:
                 params["$filter"] = "isRead eq false"
 
+            messages: list[dict] = []
+            seen_ids: set[str] = set()
+            seen_urls: set[str] = set()
+            url = f"{GRAPH_BASE}/me/messages"
             async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    f"{GRAPH_BASE}/me/messages",
-                    headers=headers,
-                    params=params,
-                    timeout=15,
-                )
-                resp.raise_for_status()
-                messages = resp.json().get("value", [])
+                while len(messages) < max_results:
+                    response = await client.get(url, headers=headers, params=params, timeout=15)
+                    response.raise_for_status()
+                    payload = response.json()
+                    if not isinstance(payload, dict) or not isinstance(payload.get("value"), list):
+                        raise ValueError("Outlook messages response missing valid value list")
+                    page = payload["value"]
+                    for message in page[: max_results - len(messages)]:
+                        message_id = message.get("id") if isinstance(message, dict) else None
+                        if not isinstance(message_id, str) or not message_id:
+                            raise ValueError("Outlook message source missing id")
+                        if message_id in seen_ids:
+                            raise ValueError("Outlook messages pages contain duplicate id")
+                        seen_ids.add(message_id)
+                        messages.append(message)
+                    next_link = payload.get("@odata.nextLink")
+                    if len(messages) >= max_results or not next_link:
+                        break
+                    # This URL comes from an external payload. Never send the
+                    # OAuth bearer token to a different origin or endpoint.
+                    if not isinstance(next_link, str):
+                        raise ValueError("Outlook nextLink is invalid")
+                    target = urlsplit(next_link)
+                    if (target.scheme != "https" or target.hostname != "graph.microsoft.com"
+                            or target.port not in (None, 443) or target.username or target.password
+                            or target.path != "/v1.0/me/messages" or target.fragment
+                            or next_link in seen_urls or not page):
+                        raise ValueError("Outlook nextLink is unsafe or stalled")
+                    seen_urls.add(next_link)
+                    url = next_link
+                    params = None  # nextLink includes the provider's full cursor query
 
             return [
                 {
                     "id": m["id"],
                     "thread_id": m.get("conversationId", m["id"]),
                     "message_id": m.get("internetMessageId"),
-                    "from": m.get("from", {}).get("emailAddress", {}).get("name", ""),
-                    "from_email": m.get("from", {}).get("emailAddress", {}).get("address", ""),
+                    "from": (m.get("from") or {}).get("emailAddress", {}).get("name", ""),
+                    "from_email": (m.get("from") or {}).get("emailAddress", {}).get("address", ""),
                     "subject": m.get("subject", "(no subject)"),
-                    "snippet": m.get("bodyPreview", "")[:200],
+                    "snippet": (m.get("bodyPreview") or "")[:200],
                     "date": m.get("receivedDateTime", ""),
                     "labels": [] if m.get("isRead") else ["UNREAD"],
                 }
                 for m in messages
             ]
         except Exception as exc:
-            log.error("Outlook get_emails failed: %s", exc)
+            log.error("Outlook get_emails failed (details withheld to protect message data)")
             raise
 
     async def test_connection(self) -> bool:

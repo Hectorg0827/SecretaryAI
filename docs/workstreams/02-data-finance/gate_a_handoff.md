@@ -181,3 +181,41 @@ QuickBooks adapter implements read-only payment history/allocation retrieval,
 so a verified customer AR roll-forward (`opening + invoices - credits -
 payments = closing`) is blocked. No payment estimate or 13-week cashflow
 figure should be produced as observed until source history is available.
+
+## Follow-up: mailbox pagination and refresh durability (Milestone 5)
+
+Gmail `users.messages.list` supplies `nextPageToken`, while Microsoft Graph
+lists return `@odata.nextLink` when another page exists. The old connectors
+used only the first page, dropped malformed list bodies as verified empty, and
+did not detect provider message IDs repeated across pages. Both read paths now
+honor requested limits across pages, require explicit valid result shapes,
+reject duplicate IDs and stalled/repeated cursors, and propagate partial
+failures. Graph next links are validated against the expected HTTPS Microsoft
+Graph host and `/v1.0/me/messages` path *before* attaching the OAuth bearer
+header; arbitrary external URLs are rejected. No provider messages were read
+in the synthetic tests.
+
+Outlook refresh was also wired to a company-scoped encrypted token persistence
+callback in the unified adapter. Refresh requires this callback and a refresh
+credential. Only a Graph `401` triggers refresh: network outages and other
+HTTP failures now propagate without rotating tokens. Persistence failure aborts
+the refresh; token values and raw message identifiers are not logged. The
+database writes exercised in this workstream were mocked tests only—no live
+token or database resource was touched.
+
+**Chat 1 integration/policy requests:**
+
+- Provide a canonical source envelope and persisted checkpoint/cursor for
+  mailbox ingestion; page-level deduplication does not solve cross-run thread
+  deduplication or ambiguous tenant/account matching.
+- Review the older OAuth consent flow in `app/auth/oauth.py`: it currently
+  requests Gmail modify, Sheets write and Drive file scopes; `GMAIL_SCOPES`
+  also lists send/compose. Implement read-only-first consent with explicit
+  separate approvals for additional write scopes in the owner workstream.
+- Provide encrypted Google refresh persistence and validated Microsoft scope
+  consent. Chat 2 has not claimed provider-backed token rotation, user consent,
+  historical mailbox completeness or customer/account matching acceptance.
+
+The existing outbound email and financial-action policy is unchanged. Drafting
+and sending are **not** invoked by these connector tests; all outbound actions
+must remain disabled pending the shared approval gate.

@@ -65,11 +65,14 @@ def get_adapter(
     if cfg.get("google_refresh_token"):
         cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
     # Outlook rotation persists encrypted tokens; both must be decrypted before
-    # UnifiedDataAdapter constructs the Graph connector.
+    # UnifiedDataAdapter constructs the Graph connector. The client secret is
+    # stored encrypted too and is sent to Microsoft on every token refresh.
     if cfg.get("ms_access_token"):
         cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
     if cfg.get("ms_refresh_token"):
         cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
+    if cfg.get("ms_client_secret"):
+        cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
 
     # Build the gmail_credentials dict that GmailConnector expects.
     # Refresh the access token proactively if it is expired before building the adapter.

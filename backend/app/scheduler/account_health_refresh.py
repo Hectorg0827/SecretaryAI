@@ -38,7 +38,9 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
             except ValueError:
                 last_order = None
 
-        balance = customer.balance if hasattr(customer, "balance") else 0
+        # A missing balance is unknown, not $0: score_account rejects it and
+        # the account is marked unscored below.
+        balance = customer.get("balance") if isinstance(customer, dict) else getattr(customer, "balance", None)
 
         try:
             health = score_account(

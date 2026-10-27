@@ -65,3 +65,44 @@ async def test_dashboard_counts_credit_balance_as_unknown_without_losing_other_a
     assert accounts["unknown"] == 1
     assert accounts["total"] == 2
     assert sum(accounts[status] for status in ("healthy", "slowing", "at_risk", "dormant")) == 1
+
+
+class UnobservedBalanceAdapter(CreditBalanceAdapter):
+    async def get_all_customers(self):
+        return [
+            SimpleNamespace(qb_id="credit-customer", name="Credit", balance=Decimal("-12.50")),
+            SimpleNamespace(qb_id="missing-balance", name="Missing"),
+            SimpleNamespace(qb_id="null-balance", name="Null", balance=None),
+            SimpleNamespace(qb_id="ordinary-customer", name="Ordinary", balance=Decimal("0")),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_never_scores_missing_or_null_balance_as_zero():
+    summary = await compute_dashboard_payload(UnobservedBalanceAdapter())
+    accounts = summary["accounts"]
+
+    assert accounts["unknown"] == 3
+    assert accounts["total"] == 4
+    assert sum(accounts[status] for status in ("healthy", "slowing", "at_risk", "dormant")) == 1
+
+
+class DictCustomerAdapter(CreditBalanceAdapter):
+    async def get_all_customers(self):
+        return [
+            {"qb_id": "dict-credit", "name": "Dict Credit", "balance": Decimal("-40.00")},
+            {"qb_id": "dict-missing", "name": "Dict Missing"},
+            {"qb_id": "dict-ordinary", "name": "Dict Ordinary", "balance": Decimal("15.00")},
+        ]
+
+
+@pytest.mark.asyncio
+async def test_nightly_refresh_reads_dict_balances_instead_of_assuming_zero():
+    db = RecordingDB()
+    result = await refresh_all_account_health("tenant-fixture", DictCustomerAdapter(), db)
+
+    assert result["unscored"] == 2
+    assert result["updated"] == 1
+    statuses = [update["health_status"] for update in db.updates]
+    assert statuses[:2] == ["unknown", "unknown"]
+    assert statuses[2] in {"healthy", "slowing", "at_risk", "dormant"}

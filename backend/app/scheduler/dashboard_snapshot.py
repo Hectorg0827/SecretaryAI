@@ -64,7 +64,9 @@ async def compute_dashboard_payload(adapter) -> dict:
                     last_order_date=last_order,
                     avg_order_cycle_days=None,
                     order_history=orders,
-                    current_balance=float(getattr(customer, "balance", 0)),
+                    # Raw value: score_account rejects missing/invalid/credit
+                    # balances (-> unknown); a missing balance is not $0.
+                    current_balance=getattr(customer, "balance", None),
                 )
             except ValueError:
                 # Unscorable (e.g. customer credit balance) does not invalidate

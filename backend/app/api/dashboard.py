@@ -50,7 +50,15 @@ def get_dashboard_adapter(
     perms = ROLE_PERMISSIONS.get(user.get("role", "viewer"), set())
     if "run_reports" not in perms and "trigger_actions" not in perms and "view_all" not in perms:
         return None
-    return get_adapter(user=user, db=db)
+    try:
+        return get_adapter(user=user, db=db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("Dashboard connector unavailable for company %s", user.get("company_id"))
+        raise HTTPException(
+            status_code=503, detail="Dashboard provider initialization unavailable"
+        ) from exc
 
 
 # ── /summary ──────────────────────────────────────────────────────────────────

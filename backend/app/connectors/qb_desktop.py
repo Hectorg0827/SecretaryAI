@@ -17,6 +17,13 @@ from app.connectors.base import (
     PurchaseOrder,
     QuickBooksAdapter,
 )
+from app.connectors.invoice_integrity import (
+    decimal_field,
+    invoice_balance,
+    optional_decimal_field,
+    require_invoice_lines,
+    unique_line_id,
+)
 
 
 class QBDesktopAdapter(QuickBooksAdapter):
@@ -125,15 +132,30 @@ class QBDesktopAdapter(QuickBooksAdapter):
         for field in ("id", "transactionDate", "totalAmount", "balanceRemaining"):
             if raw.get(field) is None or raw.get(field) == "":
                 raise ValueError(f"Conductor invoice missing {field}")
-        try:
-            total = Decimal(str(raw["totalAmount"]))
-            balance = Decimal(str(raw["balanceRemaining"]))
-        except Exception as exc:
-            raise ValueError("Conductor invoice has invalid totalAmount or balanceRemaining") from exc
-        if not total.is_finite() or total < 0:
-            raise ValueError("Conductor invoice has invalid totalAmount")
-        if not balance.is_finite() or balance < 0:
-            raise ValueError("Conductor invoice has invalid balanceRemaining")
+        total = decimal_field(raw["totalAmount"], "Conductor totalAmount")
+        balance = decimal_field(raw["balanceRemaining"], "Conductor balanceRemaining")
+        invoice_balance(total, balance, "Conductor balanceRemaining")
+
+        raw_lines = require_invoice_lines(raw.get("lineItems"), total, "Conductor")
+        line_items: list[dict] = []
+        seen_line_ids: set[str] = set()
+        for line in raw_lines:
+            line_id = unique_line_id(line, seen_line_ids, "Conductor", key="id")
+            item_id = line.get("itemId")
+            item = line.get("item")
+            if item_id is None and isinstance(item, dict):
+                item_id = item.get("id")
+            if not isinstance(item_id, str) or not item_id.strip():
+                raise ValueError("Conductor invoice line missing item identity")
+            line_items.append({
+                "line_id": line_id,
+                "item_id": item_id,
+                "name": line.get("name") or (item.get("name") if isinstance(item, dict) else "") or "",
+                "description": line.get("description") or "",
+                "quantity": decimal_field(line.get("quantity"), "Conductor invoice line quantity", signed=True),
+                "unit_price": optional_decimal_field(line.get("unitPrice"), "Conductor invoice line unitPrice"),
+                "amount": decimal_field(line.get("amount"), "Conductor invoice line amount", signed=True),
+            })
         return Invoice(
             id=raw["id"],
             qb_id=raw["id"],
@@ -144,7 +166,7 @@ class QBDesktopAdapter(QuickBooksAdapter):
             total=total,
             balance=balance,
             status="open" if balance > 0 else "paid",
-            line_items=raw.get("lineItems", []),
+            line_items=line_items,
         )
 
     def _normalize_inventory_item(self, raw: dict) -> InventoryItem:

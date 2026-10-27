@@ -310,3 +310,41 @@ gate, use `unknown` when observations are insufficient, and align dashboard
 unknown-account counts and role-limited recommendations with Chat 5. Chat 2
 cannot silently reclassify the existing status API while those consumers and
 schemas are not yet accepted. No outbound retention message was sent.
+
+## Follow-up: invoice-line integrity (Milestone 9)
+
+The QBO adapter's `_normalize_invoice()` previously replaced absent
+`SalesItemLineDetail.Qty`, `UnitPrice` and `Line.Amount` with numeric zero,
+and did not reject NaN/Infinity or a balance larger than the invoice total.
+The Desktop/Conductor adapter previously forwarded `lineItems` unchanged,
+so `itemId`/`quantity`/`amount` could be invisible to consumers that
+require normalized `item_id` and `quantity`. A paid invoice fixture with
+an omitted line collection illustrated the difference between missing source
+evidence and a legitimate zero outstanding balance.
+
+Both **owned read adapters** now require an observed list of lines for each
+invoice, with at least one line when the invoice has a nonzero total. They
+preserve signed line amounts and quantities as finite `Decimal`, and
+validate header total/balance, duplicate line IDs and supported item identity.
+A legitimately absent unit price is returned as `None`, **not** a verified
+zero. QBO tax/discount/subtotal/description lines are not counted as sold SKU
+units, but invalid supplied adjustment amounts fail closed. An unknown QBO
+line type is rejected rather than discarded. The read shape includes optional
+`line_id` and normalized `item_id`, `quantity`, `unit_price` and `amount`
+keys; the shared `Invoice` dataclass and DB schema did not change.
+
+**Chat 1 / Chat 3 source contracts still needed:** source-line identity and
+financial completeness/versioning, currency, credit memos, partial payments,
+discounts, taxes, shipping and GL reconciliation. The sum of product lines
+need not equal the invoice total where taxes/discounts apply; this is not a
+general ledger balance assertion. `scheduler/overnight_scan.py:94–107` and
+`api/inventory.py:157–175` continue to infer sales velocity from
+date-windowed invoices and should not treat an absent historical data window
+as a verified zero sell rate. Those consumer files were not edited.
+
+Conductor's read `lineItems` response and QBO pagination/line fields were
+tested with **invented offline fixtures only**. Real provider semantics,
+optional fields, and mixed tax/credit transactions still require consented
+QBO sandbox and Conductor Desktop agent evidence before E2E acceptance.
+No QuickBooks writes, external messages, live database actions, migrations,
+other branches, merges or deployments were triggered by these tests.

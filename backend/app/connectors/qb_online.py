@@ -16,6 +16,13 @@ from app.connectors.base import (
     PurchaseOrder,
     QuickBooksAdapter,
 )
+from app.connectors.invoice_integrity import (
+    decimal_field,
+    invoice_balance,
+    optional_decimal_field,
+    require_invoice_lines,
+    unique_line_id,
+)
 
 QBO_BASE = "https://quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
@@ -196,18 +203,43 @@ class QBOnlineAdapter(QuickBooksAdapter):
         for required in ("Id", "TxnDate", "TotalAmt", "Balance"):
             if raw.get(required) is None or raw.get(required) == "":
                 raise ValueError(f"QBO invoice missing {required}")
-        line_items = [
-            {
-                "item_id": li.get("SalesItemLineDetail", {}).get("ItemRef", {}).get("value"),
-                "name": li.get("SalesItemLineDetail", {}).get("ItemRef", {}).get("name", ""),
-                "description": li.get("Description", ""),
-                "quantity": li.get("SalesItemLineDetail", {}).get("Qty", 0),
-                "unit_price": li.get("SalesItemLineDetail", {}).get("UnitPrice", 0),
-                "amount": li.get("Amount", 0),
-            }
-            for li in raw.get("Line", [])
-            if li.get("DetailType") == "SalesItemLineDetail"
-        ]
+        total = decimal_field(raw["TotalAmt"], "QBO TotalAmt")
+        balance = decimal_field(raw["Balance"], "QBO Balance")
+        invoice_balance(total, balance, "QBO Balance")
+
+        raw_lines = require_invoice_lines(raw.get("Line"), total, "QBO")
+        line_items: list[dict] = []
+        seen_line_ids: set[str] = set()
+        non_sales_types = {
+            "TaxLineDetail", "DiscountLineDetail", "SubTotalLineDetail",
+            "DescriptionOnly", "GroupLineDetail",
+        }
+        for line in raw_lines:
+            line_id = unique_line_id(line, seen_line_ids, "QBO", key="Id")
+            kind = line.get("DetailType")
+            if kind in non_sales_types:
+                # Invoice total includes tax/discount/subtotal adjustments;
+                # these are not sold inventory units and must not be counted.
+                if "Amount" in line:
+                    decimal_field(line["Amount"], "QBO invoice line adjustment Amount", signed=True)
+                continue
+            if kind != "SalesItemLineDetail":
+                raise ValueError("QBO invoice line has unknown or missing DetailType")
+            detail = line.get("SalesItemLineDetail")
+            if not isinstance(detail, dict):
+                raise ValueError("QBO invoice line missing SalesItemLineDetail")
+            item_ref = detail.get("ItemRef")
+            if not isinstance(item_ref, dict) or not isinstance(item_ref.get("value"), str) or not item_ref["value"].strip():
+                raise ValueError("QBO invoice line missing ItemRef.value")
+            line_items.append({
+                "line_id": line_id,
+                "item_id": item_ref["value"],
+                "name": item_ref.get("name") or "",
+                "description": line.get("Description") or "",
+                "quantity": decimal_field(detail.get("Qty"), "QBO invoice line Qty", signed=True),
+                "unit_price": optional_decimal_field(detail.get("UnitPrice"), "QBO invoice line UnitPrice"),
+                "amount": decimal_field(line.get("Amount"), "QBO invoice line Amount", signed=True),
+            })
         return Invoice(
             id=raw["Id"],
             qb_id=raw["Id"],
@@ -215,9 +247,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
             customer_name=raw.get("CustomerRef", {}).get("name", ""),
             date=date.fromisoformat(raw["TxnDate"]),
             due_date=date.fromisoformat(raw["DueDate"]) if raw.get("DueDate") else None,
-            total=Decimal(str(raw["TotalAmt"])),
-            balance=Decimal(str(raw["Balance"])),
-            status="open" if Decimal(str(raw["Balance"])) > 0 else "paid",
+            total=total,
+            balance=balance,
+            status="open" if balance > 0 else "paid",
             line_items=line_items,
         )
 

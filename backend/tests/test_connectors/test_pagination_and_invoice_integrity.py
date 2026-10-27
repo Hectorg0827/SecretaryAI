@@ -139,6 +139,8 @@ def test_desktop_genuine_zero_invoice_balance_is_preserved():
     invoice = qb._normalize_invoice({
         "id": "invoice-1", "transactionDate": "2026-10-01",
         "totalAmount": "100.00", "balanceRemaining": "0.00",
+        "lineItems": [{"id": "line-1", "itemId": "item-1", "quantity": "2",
+                       "amount": "100.00", "unitPrice": "50.00"}],
     })
     assert invoice.date == date(2026, 10, 1)
     assert invoice.balance == Decimal("0.00")

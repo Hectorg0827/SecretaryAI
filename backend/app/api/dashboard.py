@@ -25,6 +25,9 @@ from app.scheduler.dashboard_snapshot import (
     read_snapshot,
     SnapshotSourceUnavailable,
     SnapshotPersistenceUnavailable,
+    SnapshotReadUnavailable,
+    SnapshotDataInvalid,
+    validate_dashboard_cached_payload,
     snapshot_freshness,
     _invoice_amount,
     _invoice_date,
@@ -85,10 +88,23 @@ async def get_dashboard_summary(
     has_view_all = "view_all" in perms
 
     # ── Read QB-derived data from the shared snapshot ─────────────────────
-    snap = read_snapshot(db, company_id, "dashboard_summary")
+    try:
+        snap = read_snapshot(db, company_id, "dashboard_summary")
+    except SnapshotReadUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Dashboard cache temporarily unavailable"
+        ) from exc
     if snap:
-        cached_payload = snap["payload"]
-        generated_at = snap["generated_at"]
+        try:
+            cached_payload = validate_dashboard_cached_payload(snap["payload"])
+            generated_at = snap["generated_at"]
+            freshness = snapshot_freshness(generated_at)
+            if freshness["status"] == "unknown":
+                raise SnapshotDataInvalid("Invalid dashboard cache timestamp")
+        except (KeyError, TypeError, SnapshotDataInvalid) as exc:
+            raise HTTPException(
+                status_code=503, detail="Dashboard snapshot is incomplete or invalid"
+            ) from exc
         cached = True
         log.debug("Dashboard summary served from cache for company %s (generated %s)", company_id, generated_at)
     else:
@@ -114,6 +130,12 @@ async def get_dashboard_summary(
                 detail="Business data temporarily unavailable; dashboard refresh not completed",
             ) from exc
         try:
+            validate_dashboard_cached_payload(cached_payload)
+        except SnapshotDataInvalid as exc:
+            raise HTTPException(
+                status_code=503, detail="Business source produced incomplete metrics"
+            ) from exc
+        try:
             store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
         except SnapshotPersistenceUnavailable as exc:
             raise HTTPException(
@@ -122,9 +144,8 @@ async def get_dashboard_summary(
         generated_at = None
         cached = False
 
-    freshness = snapshot_freshness(generated_at) if cached else {
-        "status": "fresh", "age_seconds": 0.0, "stale": False,
-    }
+    if not cached:
+        freshness = {"status": "fresh", "age_seconds": 0.0, "stale": False}
 
     accounts         = cached_payload.get("accounts", {})
     inventory_alerts = cached_payload.get("inventory_alerts", [])

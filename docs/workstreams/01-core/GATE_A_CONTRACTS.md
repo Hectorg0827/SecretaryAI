@@ -124,3 +124,11 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - `GET /api/dashboard/notes` now responds HTTP 503 on unavailable storage rather than disguising an outage as an empty follow-up list.
 - Chat 5: display 403/404/503 as authorization/not-found/unavailable, never success or 'zero notes'. Do not mix personal-rep notes and company-wide executive notes in the same unscoped UI.
 - These are API-level guardrails only; future customer/territory-specific note sharing requires a separately authorized assignment model and persisted row-level policy.
+
+
+## Gate A legacy inline executor retirement
+
+- `app.api.actions._execute_approved_draft` is now a **fail-closed compatibility tombstone**: it always raises `RuntimeError` and contains no provider or Celery send calls. This removes the otherwise callable orphan bypass while retaining the symbol for backward-compatible imports/test patching.
+- The retired tests that previously expected direct provider `sent` or `needs_reconciliation` behavior have been replaced with parameterized negative tests asserting zero provider invocations for email, purchase_order and unknown action types.
+- New approved actions must use the durable gateway with policy, immutable snapshot, unique claim, verified provider receipt and explicit reconciliation on unknown outcomes. The old direct executor must not be reenabled behind a feature flag.
+- This change is not evidence that a worker or real provider has executed successfully. Approval/delivery E2E remains out of scope until staging authorization and safe test allowlists.

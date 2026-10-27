@@ -8,13 +8,15 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from app.api.dashboard import UpdateNoteRequest, list_notes, update_note
+from app.api.dashboard import (
+    CreateNoteRequest, UpdateNoteRequest, create_note, list_notes, update_note,
+)
 
 
 def fake_db(rows):
     db = MagicMock()
     query = MagicMock()
-    for method in ("select", "eq", "order", "update"):
+    for method in ("select", "eq", "order", "update", "insert"):
         getattr(query, method).return_value = query
     query.execute.return_value.data = rows
     db.table.return_value = query
@@ -106,3 +108,33 @@ async def test_notes_update_provider_error_returns_503():
             db=db,
         )
     assert caught.value.status_code == 503
+
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_new_note_is_not_reported_as_saved():
+    db, query = fake_db([])
+    with pytest.raises(HTTPException) as caught:
+        await create_note(
+            CreateNoteRequest(text="Synthetic follow-up"),
+            user={"company_id": "company-1", "sub": "rep-1", "role": "sales_rep"},
+            db=db,
+        )
+    assert caught.value.status_code == 503
+    assert query.insert.call_args.args[0]["user_id"] == "rep-1"
+    assert query.insert.call_args.args[0]["company_id"] == "company-1"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_note_creation_uses_tenant_and_actor():
+    db, query = fake_db([{
+        "id": "new-note", "company_id": "company-1", "user_id": "rep-1",
+        "text": "Synthetic follow-up",
+    }])
+    result = await create_note(
+        CreateNoteRequest(text="Synthetic follow-up"),
+        user={"company_id": "company-1", "sub": "rep-1", "role": "sales_rep"},
+        db=db,
+    )
+    assert result["id"] == "new-note"
+    assert query.insert.call_args.args[0]["user_id"] == "rep-1"

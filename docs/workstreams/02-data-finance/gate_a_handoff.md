@@ -274,3 +274,39 @@ balance snapshots or general-ledger validation. Chat 1 owns the accepted
 canonical `SourceSnapshot`, `Invoice`, `Payment`, `ARBucket` and RLS-bound
 caller contract; connect this calculation only after Gate A acceptance and
 source-backed tests. No financial writes or source calls occur in the module.
+
+## Follow-up: retention evidence safety (Milestone 8)
+
+`backend/app/intelligence/churn_predictor.py` had no actual production callers
+at audit time. Its old rule equated **no provided history** with a hard-coded
+0.9 high-churn score, discarded invalid dates, permitted future-dated orders,
+and could inflate order frequency with duplicate identities. A non-exhaustive
+365-day query or source outage therefore looked like a customer loss signal.
+The owned pure scorer now defaults to `unknown`/`score=None` unless the caller
+attests a fresh, complete order history; one order or only one distinct order
+date also produces unknown. A genuinely complete record with **no orders** is
+`not_applicable`, not churn. Bad/future dates or missing/duplicate order IDs
+raise. Every numeric risk is expressly `rule_based_hypothesis`, with confidence
+`not_calibrated`; none is a scientifically identified churn probability.
+
+The active `score_account()` function is called from
+`app/api/accounts.py`, `app/api/chat.py`, `app/actions/engine.py` and Chat 1's
+`app/scheduler/{overnight_scan,account_health_refresh,dashboard_snapshot}.py`.
+In the owned function we preserved its existing result shape and categories,
+but normalized string/date order history, recovered a last-order date from
+observed rows, rejected malformed/future dates and non-finite/negative amounts,
+detected contradictory last-order chronology, and labeled an unobserved 30-day
+order-cycle default as **heuristic/unverified**. These are deterministic,
+offline validation improvements; they do not establish historical coverage.
+
+**Chat 1 / Chat 5 follow-up, not changed by Chat 2:** `accounts.py:94–104`,
+`scheduler/account_health_refresh.py:23–33` and
+`scheduler/dashboard_snapshot.py:44–62` use approximately 365 days of invoice
+history without an exhaustive-history proof. The legacy health scorer can
+still produce `dormant` when that window is empty, even if an older order or
+incomplete source exists. Do not persist/alert on health statuses from a
+non-complete source. Gate A must add a caller-visible completeness/freshness
+gate, use `unknown` when observations are insufficient, and align dashboard
+unknown-account counts and role-limited recommendations with Chat 5. Chat 2
+cannot silently reclassify the existing status API while those consumers and
+schemas are not yet accepted. No outbound retention message was sent.

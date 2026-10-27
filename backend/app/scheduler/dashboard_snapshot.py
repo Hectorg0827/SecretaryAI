@@ -119,14 +119,25 @@ async def compute_dashboard_payload(adapter) -> dict:
             dates = [o["date"] for o in orders if o["date"]]
             last_order = max(dates, default=None)
 
-            health = score_account(
-                account_id=cid,
-                account_name=_row_value(customer, "name", ""),
-                last_order_date=last_order,
-                avg_order_cycle_days=None,
-                order_history=orders,
-                current_balance=Decimal(str(_row_value(customer, "balance", 0))),
-            )
+            try:
+                balance = _row_value(customer, "balance")
+                if balance is None or isinstance(balance, bool):
+                    raise ValueError("Customer balance was not observed")
+                health = score_account(
+                    account_id=cid,
+                    account_name=_row_value(customer, "name", ""),
+                    last_order_date=last_order,
+                    avg_order_cycle_days=None,
+                    order_history=orders,
+                    current_balance=Decimal(str(balance)),
+                )
+            except (ValueError, ArithmeticError):
+                # One unscorable account (unobserved, malformed or credit
+                # balance) must not void the others; a missing balance is
+                # not $0, so never count it as healthy.
+                log.warning("Dashboard snapshot: unscored account")
+                health_counts["unknown"] += 1
+                continue
             health_counts[health.status] += 1
     except Exception as exc:
         log.error("Dashboard snapshot: account health failed")
@@ -199,6 +210,7 @@ async def compute_dashboard_payload(adapter) -> dict:
             "slowing": health_counts.get("slowing", 0),
             "at_risk": health_counts.get("at_risk", 0),
             "dormant": health_counts.get("dormant", 0),
+            "unknown": health_counts.get("unknown", 0),
             "total":   sum(health_counts.values()),
         },
         "inventory_alerts": inventory_alerts,
@@ -300,7 +312,12 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
     keys = ("healthy", "slowing", "at_risk", "dormant", "total")
     if any(type(accounts.get(k)) is not int or accounts[k] < 0 for k in keys):
         raise SnapshotDataInvalid("Dashboard account aggregates invalid")
-    if sum(accounts[k] for k in keys[:-1]) != accounts["total"]:
+    # Unscored accounts are part of the total; snapshots written before the
+    # unknown bucket existed never produced any.
+    unknown = accounts.get("unknown", 0)
+    if type(unknown) is not int or unknown < 0:
+        raise SnapshotDataInvalid("Dashboard account aggregates invalid")
+    if sum(accounts[k] for k in keys[:-1]) + unknown != accounts["total"]:
         raise SnapshotDataInvalid("Dashboard account aggregates inconsistent")
 
     revenue = payload.get("sales_30d")

@@ -73,7 +73,9 @@ def build_owner_briefing(
         raise BriefingSourceUnavailable("Snapshot fields are incomplete")
     counts = {key: _count(accounts, key) for key in
               ("healthy", "slowing", "at_risk", "dormant", "total")}
-    if sum(counts[x] for x in ("healthy", "slowing", "at_risk", "dormant")) != counts["total"]:
+    # Unscored accounts are part of the total; older snapshots have none.
+    counts["unknown"] = _count(accounts, "unknown") if "unknown" in accounts else 0
+    if sum(counts[x] for x in ("healthy", "slowing", "at_risk", "dormant", "unknown")) != counts["total"]:
         raise BriefingSourceUnavailable("Account aggregate mismatch")
     if type(sales) not in (int, float):
         raise BriefingSourceUnavailable("Invalid sales figure")
@@ -113,9 +115,11 @@ def build_owner_briefing(
     if counts["slowing"] or low:
         add("aggregate-watch", BriefingSection.YELLOW_ALERTS,
             f"{counts['slowing']} slowing accounts and {low} low-stock alerts (snapshot only)")
+    classified = counts["total"] - counts["unknown"]
+    unscored = f" and {counts['unknown']} unscored accounts" if counts["unknown"] else ""
     add("aggregate-scoreboard", BriefingSection.SCOREBOARD,
         f"Last 30-day sales in snapshot: {float(sales):.2f} "
-        f"across {counts['total']} classified accounts (source not independently verified)")
+        f"across {classified} classified accounts{unscored} (source not independently verified)")
 
     briefing = RoleBriefing.project(
         company_id=company_id, audience_role=role, created_at=current,

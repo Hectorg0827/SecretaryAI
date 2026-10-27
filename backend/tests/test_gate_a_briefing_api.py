@@ -72,6 +72,8 @@ def test_role_cannot_derive_aggregate_briefing(role):
 @pytest.mark.parametrize("mutation", [
     lambda s: s["payload"].update(source_read_status="failed"),
     lambda s: s["payload"].update(source_quality="unknown"),
+    lambda s: s["payload"].update(source_quality="verified"),
+    lambda s: s["payload"].update(sales_30d=10 ** 400),
     lambda s: s["payload"]["accounts"].update(total=999),
     lambda s: s["payload"]["accounts"].update(at_risk=-1),
     lambda s: s["payload"].update(sales_30d=float("nan")),

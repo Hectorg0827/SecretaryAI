@@ -65,49 +65,16 @@ async def _execution_policy_effect(db, company_id: str, requested_by: str,
 
 
 async def _execute_approved_draft(draft: dict, adapter) -> str:
-    """Attempt an approved action; report its actual execution stage.
+    """Permanent compatibility tombstone for the retired inline executor.
 
-    A human approval is not proof that an external side effect succeeded.
-    Never automatically retry an uncertain email send or PO dispatch here.
+    This function intentionally NEVER invokes a provider or queue. Legacy
+    callers cannot bypass the tenant-scoped PostgreSQL approval + claim +
+    receipt gateway by importing a private helper. Remove only after all
+    downstream imports/tests have migrated.
     """
-    action_type = draft.get("action_type", "")
-    content = draft.get("content", {}) or {}
-
-    if action_type == "email_reply":
-        to = content.get("to", "")
-        body = content.get("body", "")
-        if not to or not body:
-            log.error("Approved email draft %s is missing recipient or body", draft.get("id"))
-            return "failed"
-        try:
-            receipt = await adapter.send_email_reply(
-                to=to, subject=content.get("subject", ""), body=body
-            )
-            if not isinstance(receipt, dict) or receipt.get("status") != "sent":
-                log.error("Approved email draft %s has uncertain provider acknowledgment",
-                          draft.get("id"))
-                return "needs_reconciliation"
-            log.info("Provider accepted approved email draft %s", draft.get("id"))
-            return "sent"
-        except Exception:
-            log.exception("Approved email draft %s send outcome uncertain", draft.get("id"))
-            return "needs_reconciliation"
-
-    if action_type == "purchase_order":
-        try:
-            from celery_app import celery_app
-            celery_app.send_task(
-                "tasks.actions.process_approved_po",
-                kwargs={"draft_id": draft.get("id"), "content": content},
-            )
-            log.info("Dispatched approved PO draft %s", draft.get("id"))
-            return "dispatched"
-        except Exception:
-            log.exception("Approved PO draft %s dispatch outcome uncertain", draft.get("id"))
-            return "needs_reconciliation"
-
-    log.warning("No executor for approved action type %s", action_type)
-    return "unsupported"
+    raise RuntimeError(
+        "Legacy inline action execution is disabled; use the durable gateway"
+    )
 
 
 @router.get("/pending")

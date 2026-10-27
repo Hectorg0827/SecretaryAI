@@ -3,9 +3,9 @@
  *
  * Step flow:
  *  1. Check — detect whether QuickBooks Desktop is installed
- *  2. Connect — open Conductor's authFlowUrl in a webview
- *  3. Authorize — wait for the user to approve in QB, with AI visual guidance
- *  4. Done — confirm connection and navigate to main app
+ *  2. Consent — owner explicitly starts the provider authorization session
+ *  3. Authorize — open the HTTPS provider page in the system browser
+ *  4. Done — report connection activation; first data sync still needs proof
  */
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,7 +27,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Step = "checking" | "not_found" | "connect" | "authorize" | "done" | "error";
+type Step = "checking" | "not_found" | "connect" | "starting" | "open" | "authorize" | "done" | "error";
 
 interface StatusResp {
   connected: boolean;
@@ -81,23 +81,30 @@ export default function Setup({ onComplete }: SetupProps = {}) {
     try {
       const installed: boolean = await invoke("check_qb_installed");
       if (installed) {
-        await startSetup();
+        // Detection is read-only. Provisioning a Conductor EndUser must wait for
+        // an explicit click from the authorized owner.
+        setStep("connect");
       } else {
         setStep("not_found");
       }
-    } catch (e) {
-      // If the Tauri command itself fails (e.g. Linux dev), assume installed and proceed
-      console.warn("QB detection failed, assuming installed:", e);
-      await startSetup();
+    } catch {
+      setError("Could not verify QuickBooks Desktop installation on this computer.");
+      setStep("error");
     }
   }
 
   // ── Step 2: Create Conductor EndUser + get authFlowUrl ────────────────────
   async function startSetup() {
+    setStep("starting");
+    setError("");
     try {
       const data = await apiFetch("/api/setup/qb-desktop/start", { method: "POST" });
-      setAuthFlowUrl(data.auth_flow_url);
-      setStep("connect");
+      const url = new URL(data.auth_flow_url);
+      if (url.protocol !== "https:" || url.username || url.password) {
+        throw new Error("The provider returned an unsafe setup link. Contact support.");
+      }
+      setAuthFlowUrl(url.toString());
+      setStep("open");
     } catch (e: any) {
       setError(e.message ?? "Could not start QuickBooks setup.");
       setStep("error");
@@ -107,27 +114,46 @@ export default function Setup({ onComplete }: SetupProps = {}) {
   // ── Step 3: User clicked "Open setup" — launch Conductor auth flow ─────────
   async function openAuthFlow() {
     if (!authFlowUrl) return;
-    // Open in system browser so the .QWC file download works natively
-    await open(authFlowUrl);
-    setStep("authorize");
-    startPolling();
-    startGuidancePolling();
+    try {
+      // Open in the system browser, never inside a privileged Tauri webview.
+      await open(authFlowUrl);
+      setStep("authorize");
+      startPolling();
+      startGuidancePolling();
+    } catch {
+      setError("Unable to open the provider setup page. Please retry.");
+      setStep("error");
+    }
   }
 
   // ── Poll backend every 5 s for connection confirmation ────────────────────
   function startPolling() {
+    let failures = 0;
     pollRef.current = setInterval(async () => {
       try {
         const status: StatusResp = await apiFetch("/api/setup/qb-desktop/status");
+        failures = 0;
         setStatusMessage(status.message);
+        if (status.status === "error") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          stopGuidance();
+          setError(status.message || "The provider connection is unavailable.");
+          setStep("error");
+          return;
+        }
         if (status.connected) {
           if (pollRef.current) clearInterval(pollRef.current);
-          if (guidanceRef.current) clearInterval(guidanceRef.current);
+          stopGuidance();
           setStep("done");
-          onComplete?.();
         }
       } catch {
-        // Silently ignore transient errors during polling
+        failures += 1;
+        if (failures >= 3) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          stopGuidance();
+          setError("Connection verification is unavailable after repeated attempts. Please retry.");
+          setStep("error");
+        }
       }
     }, 5000);
   }
@@ -198,8 +224,24 @@ export default function Setup({ onComplete }: SetupProps = {}) {
         {step === "connect" && (
           <WizardStep
             icon="🔗"
-            heading="Ready to connect"
-            body="We'll open a secure setup page in your browser. It will guide you through downloading a small configuration file and adding it to QuickBooks — no technical knowledge needed."
+            heading="Authorize a QuickBooks connection"
+            body="Starting setup creates or reuses a Conductor connection identity for your company and requests an authorization session. Nothing will be created until you choose to start."
+          >
+            <button style={styles.btnPrimary} onClick={startSetup}>
+              Start authorization
+            </button>
+          </WizardStep>
+        )}
+
+        {step === "starting" && (
+          <WizardStep icon="⏳" heading="Preparing authorization…" body="Waiting for the provider to create the setup session." showSpinner />
+        )}
+
+        {step === "open" && (
+          <WizardStep
+            icon="🔗"
+            heading="Ready to authorize"
+            body="A secure setup page will open in your system browser. Follow the provider's instructions to authorize access in QuickBooks."
           >
             <div style={styles.steps}>
               <StepBadge n={1} text="A browser window will open" />
@@ -238,11 +280,11 @@ export default function Setup({ onComplete }: SetupProps = {}) {
         {step === "done" && (
           <WizardStep
             icon="✅"
-            heading="QuickBooks is connected!"
-            body="SecretaryAI will now sync your QuickBooks data automatically in the background. You're all set."
+            heading="Provider connection active"
+            body="Conductor reports an active QuickBooks Desktop connection. A completed first data sync, record freshness, and financial correctness have not yet been verified."
           >
             <button style={styles.btnPrimary} onClick={() => onComplete ? onComplete() : window.location.replace("/")}>
-              Go to Dashboard →
+              Continue to Dashboard →
             </button>
           </WizardStep>
         )}

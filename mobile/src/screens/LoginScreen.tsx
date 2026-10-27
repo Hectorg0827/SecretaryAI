@@ -29,6 +29,7 @@ export default function LoginScreen() {
     }
     try {
       await login(email.trim(), password);
+      setPassword('');
     } catch {
       // error shown via store.error
     }
@@ -92,6 +93,7 @@ export default function LoginScreen() {
                 onSubmitEditing={handleTotp}
                 editable={!isLoading}
                 autoFocus
+                accessibilityLabel="Six-digit authenticator code"
               />
             </View>
 
@@ -108,7 +110,7 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.cancelBtn} onPress={cancel2fa}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTotpCode(''); cancel2fa(); }}>
               <Text style={styles.cancelText}>← Back to sign in</Text>
             </TouchableOpacity>
           </View>
@@ -148,6 +150,7 @@ export default function LoginScreen() {
               autoCorrect={false}
               returnKeyType="next"
               editable={!isLoading}
+              accessibilityLabel="Sign-in email address"
             />
           </View>
 
@@ -163,6 +166,7 @@ export default function LoginScreen() {
               returnKeyType="done"
               onSubmitEditing={handleLogin}
               editable={!isLoading}
+              accessibilityLabel="Sign-in password"
             />
           </View>
 

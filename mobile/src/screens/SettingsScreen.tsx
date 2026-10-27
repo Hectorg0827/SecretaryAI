@@ -7,14 +7,13 @@ import {
   TextInput,
   Alert,
   ScrollView,
-  Switch,
   ActivityIndicator,
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../stores/authStore';
-import { setApiBase, API_BASE } from '../api/client';
+import { API_BASE } from '../api/client';
 import { setup2fa, verify2fa, disable2fa } from '../api/auth';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 
@@ -257,27 +256,20 @@ function TwoFASection({ totpEnabled }: { totpEnabled: boolean }) {
 
 export default function SettingsScreen() {
   const { user, logout } = useAuthStore();
-  const [apiUrl, setApiUrl] = useState(API_BASE);
-  const [editingUrl, setEditingUrl] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   const handleLogout = () => {
     Alert.alert('Sign out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => logout() },
+      {
+        text: 'Sign out', style: 'destructive', onPress: async () => {
+          try {
+            await logout();
+          } catch {
+            Alert.alert('Sign out unavailable', 'The device could not clear the stored session. Please try again.');
+          }
+        },
+      },
     ]);
-  };
-
-  const handleSaveApiUrl = () => {
-    const cleaned = apiUrl.trim().replace(/\/$/, '');
-    if (!cleaned.startsWith('http')) {
-      Alert.alert('Invalid URL', 'API URL must start with http:// or https://');
-      return;
-    }
-    setApiBase(cleaned);
-    setApiUrl(cleaned);
-    setEditingUrl(false);
-    Alert.alert('Saved', 'API URL updated. Restart the app if needed.');
   };
 
   return (
@@ -308,52 +300,18 @@ export default function SettingsScreen() {
           <SettingRow
             icon="notifications"
             label="Push notifications"
-            right={
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={setNotificationsEnabled}
-                trackColor={{ false: COLORS.border, true: COLORS.primary }}
-                thumbColor="#fff"
-              />
-            }
+            value="Managed in your device's notification settings; no in-app preference is saved."
           />
         </View>
 
         {/* Connection */}
         <Text style={styles.sectionLabel}>Connection</Text>
         <View style={styles.card}>
-          {editingUrl ? (
-            <View style={styles.urlEditSection}>
-              <TextInput
-                style={styles.urlInput}
-                value={apiUrl}
-                onChangeText={setApiUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="https://api.secretaryai.com"
-                placeholderTextColor={COLORS.textMuted}
-                keyboardType="url"
-              />
-              <View style={styles.urlBtnRow}>
-                <TouchableOpacity
-                  style={[styles.urlBtn, styles.urlCancelBtn]}
-                  onPress={() => { setEditingUrl(false); setApiUrl(API_BASE); }}
-                >
-                  <Text style={styles.urlCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.urlBtn, styles.urlSaveBtn]} onPress={handleSaveApiUrl}>
-                  <Text style={styles.urlSaveText}>Save</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <SettingRow
-              icon="server"
-              label="API Server"
-              value={apiUrl}
-              onPress={() => setEditingUrl(true)}
-            />
-          )}
+          <SettingRow
+            icon="server"
+            label="API Server"
+            value={`${API_BASE} (configured by app build)`}
+          />
         </View>
 
         {/* About */}
@@ -376,7 +334,7 @@ export default function SettingsScreen() {
           <SettingRow icon="log-out" label="Sign out" onPress={handleLogout} danger />
         </View>
 
-        <Text style={styles.footer}>Secretary AI · All data is private to your company</Text>
+        <Text style={styles.footer}>Secretary AI · Access is controlled by your account permissions</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -402,14 +360,6 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 15, color: COLORS.text },
   rowValue: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
   divider: { height: 1, backgroundColor: COLORS.border, marginHorizontal: 16 },
-  urlEditSection: { padding: 16 },
-  urlInput: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, padding: 10, fontSize: 14, color: COLORS.text, marginBottom: 10 },
-  urlBtnRow: { flexDirection: 'row', gap: 8 },
-  urlBtn: { flex: 1, borderRadius: RADIUS.md, paddingVertical: 9, alignItems: 'center' },
-  urlCancelBtn: { borderWidth: 1, borderColor: COLORS.border },
-  urlCancelText: { color: COLORS.textSecondary, fontWeight: '600' },
-  urlSaveBtn: { backgroundColor: COLORS.primary },
-  urlSaveText: { color: '#fff', fontWeight: '700' },
   footer: { marginTop: 24, textAlign: 'center', fontSize: 12, color: COLORS.textMuted },
 });
 

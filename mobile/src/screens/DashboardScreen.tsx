@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import {
   getDashboardSummary,
   getSalesData,
@@ -23,12 +24,14 @@ import {
   updateNote,
 } from '../api/dashboard';
 import { useAuthStore } from '../stores/authStore';
+import type { RootStackParamList } from '../navigation/types';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 import StatStrip from '../components/dashboard/StatStrip';
 import EmailList from '../components/dashboard/EmailList';
 import NotesList from '../components/dashboard/NotesList';
 
 export default function DashboardScreen() {
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { user } = useAuthStore();
   const isLeader = user?.role === 'owner' || user?.role === 'manager';
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -117,9 +120,14 @@ export default function DashboardScreen() {
             <Text style={styles.greeting}>{greeting()}, {user?.name?.split(' ')[0] ?? 'there'}</Text>
             <Text style={styles.date}>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</Text>
           </View>
-          <View style={styles.avatarBox}>
+          <TouchableOpacity
+            style={styles.avatarBox}
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityRole="button"
+            accessibilityLabel="Account and security settings"
+          >
             <Text style={styles.avatarLetter}>{(user?.name ?? 'U')[0].toUpperCase()}</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {error ? (

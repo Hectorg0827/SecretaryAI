@@ -1,11 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
+import { validatedApiBase } from './connectionConfig';
 
 const TOKEN_KEY = 'secretary_access_token';
 
-export let API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+// No unverified destination is allowed to receive an access token.
+export let API_BASE = '';
 
 export function setApiBase(url: string) {
-  API_BASE = url.replace(/\/$/, '');
+  API_BASE = validatedApiBase(url, __DEV__);
 }
 
 export async function getToken(): Promise<string | null> {

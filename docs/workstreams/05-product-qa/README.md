@@ -30,6 +30,13 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 | Registration policy | `backend/app/api/auth.py:573-602` requires minimum eight characters, a letter, a digit and 72-byte UTF-8 maximum | Chat 5 now mirrors server validation visibly; Chat 1 to freeze invitation/verification, duplicate signup, tenant bootstrap, mandatory MFA and rate-limit acceptance |
 | Password recovery | No account password-reset request/complete route is present in inspected `backend/app/api/auth.py`; prior login offered only “Contact your account owner” | Chat 1: authenticated/self-service test-only password reset contract with expiry, single-use token, rate limiting, session revocation and deliverability proof. Chat 5 labels the gap explicitly; does not fabricate a recovery flow |
 | Stripe mock URLs | `backend/app/api/billing.py:160-163,220-221` can return mock checkout/portal URLs and subscription GET is DB-record-only | Chat 1/2: fail closed when Stripe unavailable, freeze entitlements, test-mode contract, cancellation states and webhook evidence. Chat 5 added only read-only owner billing status; no checkout or portal action |
+| Desktop credential vault | `desktop/src/auth.ts` formerly cached a new JWT even if OS credential persistence failed and silently ignored sign-out vault deletion failures | Chat 5 now fails sign-in/sign-out closed on vault errors; Chat 1: server-side cross-device token revocation and durable sign-out audit remain a separate acceptance gate |
+| Desktop 2FA | `desktop/src/auth.ts` sent `email` and `password` again alongside `pre_auth_token + totp_code` | Chat 5 sends the second-step token/code only; Chat 1 still owns backend replay protection, MFA policy and throttling |
+| Desktop QB consent | `desktop/src/pages/Setup.tsx` invoked a POST creating/reusing a Conductor identity immediately after local QB detection | Chat 5 now requires explicit Start authorization, opens only an HTTPS provider link, and labels Conductor activation short of first data sync. Chat 2: freeze exact allowed provider host(s), first verified sync / source as-of contract; never equate account registration with financial data correctness |
+| Mobile release entry | `mobile/package.json` used `expo-router/entry` despite no router `app/` tree and a fully implemented custom `App.tsx` | Chat 5 aligned the release entry with Expo AppEntry and removed invalid `expo-speech` config plugin; Android and iOS JS export now build locally; no installed-device acceptance yet |
+| Mobile endpoint selection | `mobile/src/screens/SettingsScreen.tsx` allowed any runtime API host to receive the stored bearer token; push preference switched locally with no persistence | Chat 5 removed endpoint editing and false push preference, validates a build-configured HTTPS API (dev-only loopback HTTP), and shows a fail-closed configuration screen. Chat 1/4: freeze audited notification preference storage/consent contract before reintroducing toggle |
+| Mobile settings reachability | `mobile/src/navigation/AccountsStack.tsx` made Settings reachable only to roles allowed into Accounts | Chat 5 adds authenticated root Settings route via accessible Dashboard avatar so viewer and sales_rep can sign out and manage MFA |
+| Mobile approvals false clear state | `mobile/src/screens/ApprovalsScreen.tsx` kept stale drafts on fetch error and showed “All caught up!” for an unreadable queue | Chat 5 invalidates stale draft controls on errors, displays unknown status and says approval authorizes queue processing, not provider-confirmed execution |
 
 ## First isolated UI increment
 
@@ -62,6 +69,15 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Browser acceptance uses test-only tokens and synthetic inputs for signup, protected-route redirect, invalid MFA retry, successful MFA and lost MFA-status service. No actual identity provider, Redis/session revocation or real tenant data is tested.
 - Local validation: 24 web Vitest tests (six suites) PASS, web typecheck/build/CSS PASS, lint 0 errors / 21 warnings, and synthetic Chromium browser PASS across signup, MFA, owner/manager scope, unreadable sources and read-only billing. Provider-backed identity, mail delivery and revoked-session acceptance remain NOT TESTED.
 
+## Fifth isolated cross-device entry, consent and release-build increment
+
+- Desktop login sends only `pre_auth_token + totp_code` in the second step, clears password UI state and exposes labelled code/back controls. The native session does not become authenticated if credential-vault persistence fails, and sign-out does not falsely succeed if deleting the vault credential fails.
+- Desktop QB setup checks installation read-only, then waits for an explicit owner Start authorization click before `POST /api/setup/qb-desktop/start`. The separate Open Setup click launches only an HTTPS link in the system browser; repeated polling failures surface as errors. Provider activation is **not** presented as verified first financial sync.
+- Mobile package entry now points to the actual `App.tsx` tree (not unimplemented Expo Router pages); invalid `expo-speech` config plugin removed. Production mobile rejects missing, insecure, placeholder or mutable API destinations and does not render sign-in on misconfiguration. Settings are accessible to every authenticated role via the Dashboard avatar.
+- Mobile Settings no longer pretends push preferences were saved, nor exposes a writable bearer-token destination. Mobile sign-in clears the password after a successful first factor and surfaces incomplete-session credential cleanup failures; mobile approvals no longer claim zero pending drafts after source failures.
+- Local tests: **12** desktop Vitest tests across two suites (including mocked native vault failure and explicit QB consent), desktop typecheck/lint (**0 errors, 1 pre-existing warning**)/build PASS; mobile typecheck PASS; **4** pure native URL validation tests PASS. Android JS bundle (`expo export --platform android`) and iOS JS bundle (`expo export --platform ios`) PASS with synthetic HTTPS configuration. **Actual devices, installed binaries, screen readers, Conductor, and provider-backed MFA remain NOT TESTED**. Mobile-web Expo export is blocked by missing `react-native-web`/`react-dom` dependencies; main web frontend is separate and not a substitute for that test.
+- The Auth0 MFA security guidance was used only as general fail-closed design review; this repository retains its existing backend auth, and **no Auth0 provider or SDK was introduced**.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -69,10 +85,13 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 23 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 24 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 21 warnings including pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
-| Desktop typecheck and existing unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 4 passed |
+| Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |
+| Android/iOS JS release bundles | PASS | Local Expo exports compile with synthetic HTTPS URL; no emulator/device, App Store or signed package proof |
+| Native Expo mobile-web export | FAIL | Required `react-native-web` and `react-dom` dependencies missing; separate existing web frontend does not validate this surface |
+| Mobile secure API destination | PASS | Four local fixture tests reject release HTTP/localhost, missing/placeholder and userinfo/query/fragment; real device requests NOT TESTED |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
 | Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting, billing and onboarding checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |

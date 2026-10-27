@@ -1,0 +1,129 @@
+name: Gate A ephemeral five-workstream integration
+
+# This job tests a disposable combination of five independently reviewed
+# branches. It NEVER pushes, merges a PR, deploys, emails, or accesses secrets
+# beyond a short-lived read-only checkout token used only during fetch.
+on:
+  push:
+    branches:
+      - workstream/01-core-20261026
+    paths:
+      - .github/workflows/gate-a-ephemeral-integration.yml
+      - backend/**
+      - frontend/**
+      - mobile/**
+      - scripts/**
+      - supabase/**
+      - desktop/**
+      - connector/**
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-a-ephemeral-integration
+  cancel-in-progress: true
+
+jobs:
+  combined-contracts:
+    name: Combined backend and client contracts (no persistent merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
+    steps:
+      - name: Checkout Chat 1 only, without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Compose branch heads in disposable local git history
+        shell: bash
+        env:
+          READ_ONLY_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'SecretaryAI Ephemeral CI'
+          git config user.email 'secretaryai-ci@users.noreply.github.com'
+          auth="$(printf 'x-access-token:%s' "$READ_ONLY_GITHUB_TOKEN" | base64 -w0)"
+          branches=(
+            program/secretaryai-integration-20261026
+            workstream/01-core-20261026
+            workstream/02-data-finance-20261026
+            workstream/03-supplychain-20261026
+            workstream/04-growth-20261026
+            workstream/05-product-qa-20261026
+          )
+          refs=()
+          for branch in "${branches[@]}"; do
+            refs+=("+refs/heads/$branch:refs/remotes/origin/$branch")
+          done
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags origin "${refs[@]}"
+          git switch --detach refs/remotes/origin/program/secretaryai-integration-20261026
+          git switch -c ci/ephemeral-five-workstreams
+          for branch in "${branches[@]:1}"; do
+            sha="$(git rev-parse "refs/remotes/origin/$branch")"
+            echo "Combining for TEST ONLY: $branch @ $sha"
+            git merge --no-ff --no-edit "$sha" || {
+              echo "::error::Ephemeral integration merge failed at $branch; no remote branch was modified"
+              git status --short
+              exit 1
+            }
+          done
+          git diff --check
+          git status --porcelain
+          echo "All five heads combined locally; this local history is discarded with the runner."
+          # Do not run tests with the GitHub token still in the environment.
+      - name: Install Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install combined backend test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+      - name: Test merged backend contracts with synthetic sources
+        working-directory: backend
+        env:
+          SECRETARYAI_DEPLOYMENT_ENV: staging
+          SECRETARYAI_EMAIL_DELIVERY_MODE: disabled
+          SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED: '0'
+          SECRETARYAI_DURABLE_APPROVAL_ENABLED: '0'
+        run: |
+          python -m compileall -q app tasks
+          python -m pytest -q
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Match lockfile npm resolver
+        run: npm install --global npm@11.19.1
+      - name: Verify combined web application without deployment
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+      - name: Verify combined mobile types
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run typecheck

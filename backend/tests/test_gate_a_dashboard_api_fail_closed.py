@@ -147,3 +147,76 @@ async def test_company_wide_account_aggregates_respect_server_side_rbac(
     else:
         assert result["accounts"] is None
     assert result["sales_30d"] == (2000 if role in ("owner", "manager") else None)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["sales_rep", "viewer", "unknown"])
+async def test_unprivileged_missing_snapshot_does_not_trigger_provider_reads_or_cache_write(role):
+    db = MagicMock()
+    adapter = AsyncMock()
+    with patch("app.api.dashboard.read_snapshot", return_value=None), \
+         patch("app.api.dashboard.compute_dashboard_payload", new=AsyncMock()) as compute, \
+         patch("app.api.dashboard.store_snapshot") as save:
+        with pytest.raises(HTTPException) as error:
+            await get_dashboard_summary(
+                user={"company_id": "tenant-fixture", "sub": "person", "role": role},
+                adapter=adapter, db=db,
+            )
+    assert error.value.status_code == 503
+    compute.assert_not_awaited()
+    save.assert_not_called()
+    adapter.get_emails.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["sales_rep", "viewer", "back_office", "unknown"])
+async def test_dashboard_does_not_fetch_inbox_or_approvals_for_unauthorized_roles(role):
+    db = MagicMock()
+    adapter = AsyncMock()
+    snap = {
+        "payload": {
+            "accounts": {"healthy": 0, "slowing": 0, "at_risk": 0,
+                         "dormant": 0, "total": 0},
+            "inventory_alerts": [], "sales_30d": 0,
+            "source_quality": "partial", "source_read_status": "completed",
+        },
+        "generated_at": "2026-10-26T12:00:00Z",
+    }
+    with patch("app.api.dashboard.read_snapshot", return_value=snap):
+        result = await get_dashboard_summary(
+            user={"company_id": "tenant-fixture", "sub": "person", "role": role},
+            adapter=adapter, db=db,
+        )
+    assert result["pending_actions"] is None
+    assert result["unread_emails"] is None
+    adapter.get_emails.assert_not_awaited()
+    db.table.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_authorized_owner_can_compute_missing_snapshot_and_fetch_live_counts():
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.count = 0
+    adapter = AsyncMock()
+    adapter.get_emails.return_value = []
+    payload = {
+        "accounts": {"healthy": 0, "slowing": 0, "at_risk": 0,
+                     "dormant": 0, "total": 0},
+        "inventory_alerts": [], "sales_30d": 0,
+        "source_quality": "partial", "source_read_status": "completed",
+    }
+    with patch("app.api.dashboard.read_snapshot", return_value=None), \
+         patch("app.api.dashboard.compute_dashboard_payload",
+               new=AsyncMock(return_value=payload)) as compute, \
+         patch("app.api.dashboard.store_snapshot") as save:
+        result = await get_dashboard_summary(
+            user={"company_id": "tenant-fixture", "sub": "owner", "role": "owner"},
+            adapter=adapter, db=db,
+        )
+    compute.assert_awaited_once_with(adapter)
+    save.assert_called_once()
+    adapter.get_emails.assert_awaited_once()
+    assert result["pending_actions"] == 0
+    assert result["unread_emails"] == 0
+    assert result["accounts"]["total"] == 0

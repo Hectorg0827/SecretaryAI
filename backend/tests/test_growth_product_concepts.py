@@ -62,7 +62,7 @@ def _launch(**kwargs):
     value = LaunchObservation(
         "synthetic-tenant", "new-sku-concept", D("200"), D("120"),
         D("2400"), D("600"), 20, 8,
-        source_record_id="synthetic-actual", source_revision="v2",
+        source_record_id="synthetic-actual", source_revision="v2", source_quality="verified",
     )
     return replace(value, **kwargs)
 
@@ -78,8 +78,42 @@ def test_launch_tracking_uses_observed_metrics():
 def test_launch_missing_plan_and_revision_remains_unknown():
     result = track_launch(_launch(planned_cases_to_date=D("0"), source_revision=""))
     assert result.volume_attainment_pct is None
+    assert result.realized_contribution_margin_pct is None
+    assert result.repeat_account_rate_pct is None
     assert not result.documented_inputs
     assert "missing_launch_plan" in result.gaps
+
+
+@pytest.mark.parametrize("quality", ["partial", "unavailable"])
+def test_unverified_launch_actuals_never_display_performance_percentages(quality):
+    result = track_launch(_launch(source_quality=quality))
+    assert not result.documented_inputs
+    assert result.volume_attainment_pct is None
+    assert result.realized_contribution_margin_pct is None
+    assert result.repeat_account_rate_pct is None
+    assert "launch_source_unverified" in result.gaps
+    assert result.action_status == "draft_requires_review"
+
+
+def test_launch_default_source_quality_does_not_claim_verification():
+    result = track_launch(LaunchObservation(
+        "synthetic-tenant", "new-sku-concept", D("200"), D("120"),
+        D("2400"), D("600"), 20, 8,
+        source_record_id="synthetic-actual", source_revision="v2",
+    ))
+    assert result.volume_attainment_pct is None
+    assert not result.documented_inputs
+
+
+def test_launch_without_active_accounts_reports_missing_denominator():
+    result = track_launch(_launch(active_accounts=0, repeat_accounts=0))
+    assert result.repeat_account_rate_pct is None
+    assert "missing_active_accounts" in result.gaps
+
+
+def test_unknown_source_quality_rejected_before_calculation():
+    with pytest.raises(ValueError, match="source-quality"):
+        track_launch(_launch(source_quality="trusted_because_client_said_so"))
 
 
 def test_launch_account_count_is_validated():

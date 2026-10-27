@@ -35,6 +35,16 @@ remain null with explicit data-gap codes. Chat 3 must reconcile supplier
 ordered/received/damaged units to a consistent PO-receipt cohort before a
 real score is considered verified. No supplier change can be executed here.
 
+New-brand launch tracking now requires a caller-established `verified`
+source-quality value **and** a source record ID/revision before displaying
+realized volume, contribution margin or repeat-account percentages. Partial,
+unavailable or missing-revision observations withhold these percentages and
+report source gaps; no active accounts produces an explicit denominator gap.
+The quality value is only a trusted adapter's claim and still requires Chat 1
+and Chat 2 source-lineage/freshness validation before the metrics may appear
+in a user-facing briefing. Portfolio inventory-age inputs reject Boolean
+values that Python otherwise accepts as integers.
+
 The legacy compliance expiration scanner previously removed recorded overdue
 permits, COLAs, licenses, registrations and distributor agreements once their
 date passed. It now retains those records as critical daily review alerts and

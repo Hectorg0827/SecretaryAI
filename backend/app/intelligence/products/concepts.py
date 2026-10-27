@@ -102,6 +102,9 @@ class LaunchObservation:
     repeat_accounts: int
     source_record_id: str = ""
     source_revision: str = ""
+    # The calling, authenticated source adapter must establish this quality;
+    # a record ID and revision alone do not prove the observations are valid.
+    source_quality: str = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,11 @@ class LaunchTracking:
 
 
 def track_launch(data: LaunchObservation) -> LaunchTracking:
+    """Calculate read-only launch KPIs without presenting unverified actuals.
+
+    The adapter must authenticate tenant/source lineage and derive
+    ``source_quality``; this pure function cannot certify external evidence.
+    """
     if not data.company_id or not data.concept_id:
         raise ValueError("Tenant and concept required")
     for label in ("planned_cases_to_date", "observed_net_cases_to_date", "net_revenue_to_date"):
@@ -125,18 +133,27 @@ def track_launch(data: LaunchObservation) -> LaunchTracking:
         raise ValueError("Account counts must be nonnegative integers")
     if data.repeat_accounts > data.active_accounts:
         raise ValueError("Repeat accounts exceed active accounts")
-    documented = bool(data.source_record_id and data.source_revision)
+    if data.source_quality not in {"verified", "partial", "unavailable"}:
+        raise ValueError("Unknown launch source-quality status")
+    documented = bool(
+        data.source_record_id and data.source_revision
+        and data.source_quality == "verified"
+    )
     gaps = []
-    if not documented:
+    if not data.source_record_id or not data.source_revision:
         gaps.append("missing_observed_source_revision")
+    if data.source_quality != "verified":
+        gaps.append("launch_source_unverified")
     if data.planned_cases_to_date == ZERO:
         gaps.append("missing_launch_plan")
     if data.net_revenue_to_date == ZERO:
         gaps.append("missing_revenue")
+    if data.active_accounts == 0:
+        gaps.append("missing_active_accounts")
     return LaunchTracking(
-        volume_attainment_pct=HUNDRED * data.observed_net_cases_to_date / data.planned_cases_to_date if data.planned_cases_to_date else None,
-        realized_contribution_margin_pct=HUNDRED * data.contribution_to_date / data.net_revenue_to_date if data.net_revenue_to_date else None,
-        repeat_account_rate_pct=HUNDRED * data.repeat_accounts / data.active_accounts if data.active_accounts else None,
+        volume_attainment_pct=HUNDRED * data.observed_net_cases_to_date / data.planned_cases_to_date if documented and data.planned_cases_to_date else None,
+        realized_contribution_margin_pct=HUNDRED * data.contribution_to_date / data.net_revenue_to_date if documented and data.net_revenue_to_date else None,
+        repeat_account_rate_pct=HUNDRED * data.repeat_accounts / data.active_accounts if documented and data.active_accounts else None,
         documented_inputs=documented,
         gaps=tuple(gaps),
     )

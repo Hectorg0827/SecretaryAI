@@ -57,7 +57,11 @@ def assess_portfolio(
         raise ValueError("Tenant required")
     _numeric(policy.min_contribution_margin_pct, "min margin", allow_negative=True)
     _numeric(policy.max_weeks_of_supply, "weeks threshold")
-    if not isinstance(policy.max_stock_age_days, int) or policy.max_stock_age_days < 0:
+    if (
+        isinstance(policy.max_stock_age_days, bool)
+        or not isinstance(policy.max_stock_age_days, int)
+        or policy.max_stock_age_days < 0
+    ):
         raise ValueError("Invalid stock age threshold")
     seen: set[str] = set()
     results: list[PortfolioAssessment] = []
@@ -68,7 +72,11 @@ def assess_portfolio(
         for key in ("net_sales", "stock_on_hand_cases", "weekly_case_velocity", "landed_cost_per_case"):
             _numeric(getattr(item, key), key)
         _numeric(item.total_contribution, "contribution", allow_negative=True)
-        if not isinstance(item.stock_age_days, int) or item.stock_age_days < 0:
+        if (
+            isinstance(item.stock_age_days, bool)
+            or not isinstance(item.stock_age_days, int)
+            or item.stock_age_days < 0
+        ):
             raise ValueError("Stock age must be nonnegative integer")
         if item.sku in item.required_by_skus:
             raise ValueError("SKU cannot depend on itself")

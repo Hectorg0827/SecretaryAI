@@ -62,9 +62,14 @@ def test_cross_tenant_and_duplicates_rejected():
 
 def test_invalid_stock_and_self_dependency_rejected():
     for item in (_sku(stock_on_hand_cases=D("NaN")), _sku(stock_age_days=-1),
-                 _sku(required_by_skus=("sku-a",))):
+                 _sku(stock_age_days=True), _sku(required_by_skus=("sku-a",))):
         with pytest.raises(ValueError):
             assess_portfolio("synthetic-tenant", (item,), POLICY)
+
+
+def test_bool_stock_age_policy_cannot_masquerade_as_day_threshold():
+    with pytest.raises(ValueError, match="Invalid stock age threshold"):
+        assess_portfolio("synthetic-tenant", (_sku(),), replace(POLICY, max_stock_age_days=True))
 
 
 def test_out_of_stock_with_documented_demand_requests_supply_review():

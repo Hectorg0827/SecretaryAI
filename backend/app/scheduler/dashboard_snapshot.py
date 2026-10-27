@@ -15,6 +15,7 @@ import logging
 from collections import Counter
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from math import isfinite
 
 log = logging.getLogger(__name__)
 
@@ -176,6 +177,8 @@ async def compute_dashboard_payload(adapter) -> dict:
             _invoice_amount(inv)
             for inv in invoices_30
         )
+        if not isfinite(sales_30d):
+            raise ValueError("Thirty-day revenue aggregate is not finite")
     except Exception as exc:
         log.error("Dashboard snapshot: sales total failed: %s", exc)
         raise SnapshotSourceUnavailable("sales_30d") from exc

@@ -19,6 +19,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [state, setState] = useState<State>('loading');
   const [summary, setSummary] = useState<Record<string, any> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   async function load() {
     setState('loading');
@@ -39,8 +40,13 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   }, []);
 
   async function signOut() {
-    await clearToken();
-    onSignOut();
+    setSignOutError(null);
+    try {
+      await clearToken();
+      onSignOut();
+    } catch (e) {
+      setSignOutError(e instanceof Error ? e.message : 'Could not securely remove this session.');
+    }
   }
 
   // Render any scalar top-level metrics the summary exposes, defensively.
@@ -62,6 +68,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       </header>
 
       <main style={s.main}>
+        {signOutError && <div style={s.errorBox} role="alert">{signOutError}</div>}
         {state === 'loading' && <div style={s.muted}>Loading your dashboard…</div>}
 
         {state === 'error' && (
@@ -85,7 +92,7 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               </div>
             ) : (
               <div style={s.muted}>
-                Connected. Open the full app for accounts, inventory, inbox, and chat.
+                This summary returned no usable metrics; source completeness is not verified. Open the full app to inspect individual data sources.
               </div>
             )}
           </>

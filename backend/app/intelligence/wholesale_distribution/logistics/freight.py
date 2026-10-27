@@ -63,7 +63,11 @@ class FreightCostParser:
     Uses regex pattern matching on common invoice formats.
     """
 
-    _AMOUNT_PATTERN = re.compile(r"\$?\s*([\d,]+\.?\d{0,2})")
+    # Do not interpret unlabeled integer quantities / invoice IDs as money.
+    # Monetary candidates require a currency symbol or decimal cents.
+    _AMOUNT_PATTERN = re.compile(
+        r"\$\s*([\d,]+(?:\.\d{1,2})?)|(?<![\w.])([\d,]+\.\d{2})(?!\d)"
+    )
     _COMPONENT_KEYWORDS: dict[str, list[str]] = {
         "ocean_freight": ["ocean freight", "sea freight", "flete marítimo", "flete oceánico"],
         "fuel_surcharge": ["fuel surcharge", "baf", "bunker", "combustible", "recargo combustible"],
@@ -79,34 +83,40 @@ class FreightCostParser:
 
     def parse_invoice_text(self, text: str, total_cases: int) -> list[FreightCostComponent]:
         """
-        Extract cost components from invoice text.
-        Allocates per-container costs across cases.
+        Extract *candidate* cost components from each labeled invoice line.
+
+        Choose the most specific matched label per line to avoid double-counting
+        overlapping aliases such as ``THC`` and ``Destination THC``. The caller
+        must independently verify invoice identity, currency and line amounts.
         """
         components: list[FreightCostComponent] = []
-        text_lower = text.lower()
-
-        for component_key, keywords in self._COMPONENT_KEYWORDS.items():
-            for kw in keywords:
-                if kw in text_lower:
-                    # Find the amount on the same line
-                    for line in text.split("\n"):
-                        if kw in line.lower():
-                            amounts = self._AMOUNT_PATTERN.findall(line)
-                            if amounts:
-                                # Take the last (rightmost) amount — usually the total
-                                amount_str = amounts[-1].replace(",", "")
-                                try:
-                                    amount = float(amount_str)
-                                    if amount > 0:
-                                        components.append(FreightCostComponent(
-                                            component=component_key,
-                                            amount_usd=amount,
-                                            notes=f"Extracted from: {line.strip()[:80]}",
-                                        ))
-                                        break
-                                except ValueError:
-                                    pass
-                        break  # matched keyword, move to next component
+        for line in text.splitlines():
+            lower_line = line.lower()
+            label_matches = [
+                (len(keyword), component_key)
+                for component_key, keywords in self._COMPONENT_KEYWORDS.items()
+                for keyword in keywords
+                if keyword in lower_line
+            ]
+            if not label_matches:
+                continue
+            amount_matches = list(self._AMOUNT_PATTERN.finditer(line))
+            if not amount_matches:
+                continue
+            # A line containing multiple monetary amounts is ambiguous without
+            # independently reviewed evidence; never guess its total.
+            if len(amount_matches) != 1:
+                continue
+            match = amount_matches[0]
+            amount_str = (match.group(1) or match.group(2)).replace(",", "")
+            amount = float(amount_str)
+            if amount > 0:
+                component_key = max(label_matches)[1]
+                components.append(FreightCostComponent(
+                    component=component_key,
+                    amount_usd=amount,
+                    notes=f"Unverified extracted line: {line.strip()[:80]}",
+                ))
         return components
 
     def allocate_to_skus(
@@ -119,15 +129,21 @@ class FreightCostParser:
         Returns {sku → {component → cost_per_case}}.
         """
         total_cases = sum(sku_allocations.values())
-        if total_cases == 0:
-            return {}
+        if total_cases <= 0 or any(cases < 0 for cases in sku_allocations.values()):
+            raise ValueError("SKU allocation requires positive total cases and nonnegative lines")
 
         result: dict[str, dict[str, float]] = {sku: {} for sku in sku_allocations}
 
         for comp in components:
             per_case = comp.amount_usd / total_cases
             for sku in sku_allocations:
-                result[sku][comp.component] = round(per_case, 4)
+                result[sku][comp.component] = (
+                    result[sku].get(comp.component, 0.0) + per_case
+                )
+
+        for sku_costs in result.values():
+            for component, value in sku_costs.items():
+                sku_costs[component] = round(value, 4)
 
         return result
 
@@ -152,19 +168,18 @@ class VesselTrackingAdapter(Protocol):
 
 class StubVesselTracker:
     """
-    Stub vessel tracker for development/testing.
-    In production, swap this for a real API integration.
+    Unavailable-provider fallback. It must never invent a live location/ETA.
     """
 
     def get_position(self, container_number: str) -> dict:
         return {
-            "lat": 35.0,
-            "lon": -40.0,
-            "status": "in_transit",
+            "lat": None,
+            "lon": None,
+            "status": "unknown",
             "current_port": None,
             "updated_eta": None,
-            "vessel_name": "MV STUB VESSEL",
-            "source": "stub",
+            "vessel_name": None,
+            "source": "unavailable",
         }
 
     def get_eta(self, booking_ref: str) -> Optional[str]:
@@ -227,7 +242,7 @@ class TransitTracker:
             )
 
         event = TrackingEvent(
-            booking_id=booking.id,
+            booking_id=booking.booking_ref or booking.id,
             vessel_lat=position.get("lat"),
             vessel_lon=position.get("lon"),
             current_port=position.get("current_port", ""),

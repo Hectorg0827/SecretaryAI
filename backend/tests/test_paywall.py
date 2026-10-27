@@ -153,7 +153,7 @@ def _gated_prefixes() -> set[str]:
 
 # Everything a customer pays for.
 PAID = [
-    "/api/chat", "/api/dashboard", "/api/accounts", "/api/inventory",
+    "/api/chat", "/api/dashboard", "/api/briefing", "/api/accounts", "/api/inventory",
     "/api/actions", "/api/agent", "/api/notifications", "/api/inbox",
     "/api/workflows", "/api/feed", "/api/computer-use", "/api/logistics",
     "/api/compliance",
@@ -266,6 +266,7 @@ class TestConnectorEndpointsSplit:
 class TestPaidRouteHttpEnforcement:
     @pytest.mark.parametrize("path,method", [
         ("/api/accounts/owned-account", "get"),
+        ("/api/briefing/today", "get"),
         ("/api/actions/approve/owned-draft", "post"),
     ])
     def test_unpaid_authenticated_tenant_gets_402_before_business_action(self, path, method):

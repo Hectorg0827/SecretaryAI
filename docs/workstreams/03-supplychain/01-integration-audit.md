@@ -1,0 +1,290 @@
+# Supply-chain workstream 03 — initial integration gate
+
+Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983`.
+Scope: source-level audit and synthetic HTTP contract regression, **not** a
+live-provider or database-backed acceptance test. No side effects authorized.
+
+## Nine stages at baseline
+
+| Stage | Real entry points | Integration result / evidence required |
+| --- | --- | --- |
+| 1. Demand/reorder | `app/api/logistics.py:evaluate_reorder_queue` -> `LogisticsModule.evaluate_reorder_queue` -> `ReorderEngine.build_reorder_queue` | Broken API-to-engine field contract and missing `supplier_name`; fixed in workstream 03 with an HTTP regression. API still accepts caller-supplied stock/history, not a source-verified company snapshot. |
+| 2. Draft PO | `app/api/logistics.py:generate_purchase_orders`; separate durable `/orders` RPC | Baseline route crashed for flat `SimpleNamespace` packages, could mint in-memory PO numbers, and falsely upsert stage 2 for caller-supplied `approved=true`. The legacy endpoint is now explicitly blocked with HTTP 409 until a server-verified approval contract exists. Independently approved durable `/orders` remains available but is not connected to reorder proposals. |
+| 3. Supplier response | `parse_vendor_response` -> `VendorResponseParser.parse` | Baseline route constructed an incomplete `PurchaseOrder`, read nonexistent response fields and best-effort advanced the pipeline. Now repaired as a pure unverified analysis preview: no DB write, supplier alert or status promotion. Authenticated inbound message association, authoritative PO lines and durable response event are still missing. |
+| 4. Freight/cost capture | `parse_freight_invoice` -> `FreightCostCapture` | Stage 3.4 fixes multi-line extraction, overlapping cost-label double count, repeated component allocation and non-USD input rejection. The route returns explicitly unverified candidate USD amounts, not independently matched invoices or durable shipment costs. |
+| 5. Transit | `LogisticsModule.check_shipment_status` -> `TransitTracker` | Engine exists, no HTTP workflow in `app/api/logistics.py` to persist a provider-verified carrier milestone and source timestamp. The default adapter previously fabricated coordinates, vessel name and `in_transit` status; it now reports unavailable/unknown instead. Live provider acceptance absent. |
+| 6. Port/customs | `log_customs_hold`, `check_demurrage_risk`, `parse_broker_email` | Stage 3.4 validates port-day/date inputs, rejects future arrival and invalid dates, guards negated release and pending duty statements, and labels all API outcomes as candidate/estimate only. No verified booking/arrival, duty evidence, real alerts or durable status transition. |
+| 7. Receiving/stock | Legacy `process_warehouse_receipt`, separate `/orders` + `/receipts` routes, and new `/warehouse/*` work-order previews | Legacy endpoint explicitly returns `analysis_only`. Durable V6 SQL supports distinct PO submit/approve, receipt stage/independent approval and atomic ledger posting (`supabase/migrations/20261017020000_purchasing_receiving.sql`, `20261017010000_stock_ledger.sql`). Stage 3.5 adds route-mounted, role-gated **preview-only** picking, cycle-count, capacity/slotting and supplier-claim drafts; no verified linkage to a posted receipt, tenant-owned bin or event ledger yet. SQL contract tests are not proof of deployed provider acceptance. |
+| 8. Landed-cost variances | `reconcile_costs` -> `CostReconciliationEngine` | Baseline accepted incomplete/mismatched cost payloads and falsely upserted stage 8 from client text. The route now validates source identity, same SKU, finite nonnegative components and positive cases; result is `analysis_only` with candidate alerts, never a verified invoice or stage transition. Independent invoice/currency/receipt match is still missing. |
+| 9. Learning/report | `build_seasonal_indices`, `monthly_logistics_report`, `LearningEngine` | Seasonal arithmetic exists; `LogisticsModule` is created fresh per request with empty `_lead_time_records`, so supplier performance/lead-time memory is not persisted or recovered from verified receipts. |
+
+Independent engines (`stochastic_inv.py`, `scor_toc.py`, `returns_mgmt.py`,
+`esg_tco.py`) have calculation and unit-test coverage but no verified durable
+event feed across these nine stages. Calculations are not executed transactions.
+
+## First owned regression
+
+`tests/test_wholesale_distribution/test_logistics/test_reorder_api_contract.py`
+dispatches through FastAPI with synthetic tenant-scoped company configuration.
+It covers valid reorder data, safe no-reorder stock, missing demand observations,
+seasonal-week conversion and unsupported supply type. It first reproduced the
+missing required `SKUProfile.supplier_name`. The API also passed keys the
+engine ignored and serialized a nonexistent package `.sku` attribute.
+
+This does not prove QuickBooks/warehouse source coverage, actual vendor lead
+times, or approval to issue a purchase order.
+
+## Second owned regression — supplier-response safety preview
+
+`tests/test_wholesale_distribution/test_logistics/test_vendor_response_api_contract.py`
+first reproduced the HTTP `PurchaseOrder` construction failure with caller-
+provided text. The repaired endpoint uses the real parser shape and returns
+`analysis_only` candidate classification with permanent `message_verified=false`,
+`po_link_verified=false`, `requires_human_review=true` and
+`supplier_action_permitted=false` until a verified message/PO contract exists.
+It performs no company lookup, cycle upsert, supplier alert, email send or
+inventory action. A parsed response is **not** evidence that the named supplier
+confirmed or rejected a durable purchase order.
+
+## Third owned regression — no phantom procurement states
+
+`tests/test_wholesale_distribution/test_logistics/test_pipeline_status_guard.py`
+first reproduced four failures: client-forged approval crashed the PO generator;
+landed-cost comparison lacked an analysis-only status, accepted mismatched SKU
+and allowed missing source identity. The stage 2 route is now a documented
+HTTP 409 until a canonical, server-verified human approval exists. Stage 8
+calculations remain available as previews with typed finite per-case inputs,
+no `procurement_cycles` upsert, no accounting claim, no actual alerts and no
+inventory/financial side effect. Suggested alerts require human review. The
+legacy best-effort `_upsert_cycle` helper was removed from the API file.
+
+## Fourth owned regression — freight, tracking and customs evidence boundaries
+
+`tests/test_wholesale_distribution/test_logistics/test_freight_customs_api_contract.py`
+reproduced 13 initial API/engine failures and additional cost/negation failures.
+The original freight parser broke on the first invoice line, omitted valid
+later components, double-counted overlapping THC labels and overwrote repeated
+component costs in SKU allocation. Now parsed lines are individually labeled
+candidate costs, ambiguous multi-amount lines are skipped, unsupported EUR/GBP
+inputs are rejected pending a reviewed FX contract, and allocation accumulates
+repeated components before rounding. A syntactically parsed USD amount is not
+evidence of invoice currency, supplier identity, PO match, or case-count unit.
+
+The fallback vessel adapter once returned invented coordinates and status;
+now it returns an unavailable/unknown observation. Customs holds and broker
+messages from caller text, and demurrage based on supplied dates, return only
+analysis-only estimates and candidate milestones. No authentic operational
+alert is returned or sent, and no cycle/stock/accounting state is changed.
+Invalid/future port dates are rejected rather than converted to zero cost.
+Negated releases and unpaid-duty messages cannot become positive milestones.
+These are synthetic HTTP and calculation checks, **not** real vessel, broker,
+forwarder or warehouse integration acceptance.
+
+## Fifth owned regression — warehouse work-order draft boundaries
+
+`app/api/warehouse.py` is mounted from the owned `app/api/logistics.py` router
+under `/api/logistics/warehouse/`; no shared application loader was edited.
+`app/intelligence/wholesale_distribution/warehouse/planning.py` accepts bounded,
+timezone-aware caller snapshots (strict **cases** unit) and generates:
+
+- FEFO-first bin/lot pick drafts, excluding expired observations and tracking
+  local bin availability across multiple order lines, with shortages flagged.
+- Cycle-count variance/recount drafts, with no stock-adjustment pathway.
+- Capacity utilization, reservation overcommit and slotting-move candidates;
+  fewer than 30 observed pick events yield `insufficient_data` confidence.
+- Supplier shortage, over-receipt and damaged-case claim drafts, with no sender,
+  claim filing or financial write.
+
+`tests/test_wholesale_distribution/test_warehouse_previews.py` covers the real
+logistics-router registration, role restrictions, tenant identity sourced from
+the authenticated actor, duplicate/negative/mixed-unit input rejection, stale
+and naive timestamps, FEFO, shortage, no repeated bin allocation, safe empty
+capacity, slotting sample size and claim exceptions. All responses are
+`analysis_only`, with unverified source and required human review.
+
+**Not yet an operational warehouse system:** A caller-supplied bin, order, PO or
+receipt identity is not proof that it belongs to the tenant; none is queried or
+persisted. Pick lists cannot be issued or marked shipped; stock adjustments and
+claims cannot be approved, posted or sent. Shared schema/RLS and durable policy
+contracts belong to Chat 1. Authenticated warehouse and QuickBooks snapshots,
+including bin+lot allocations and source timestamps, belong to Chat 2.
+
+## Sixth owned regression — analytical evidence and comparability
+
+`tests/test_wholesale_distribution/test_evidence_quality_gate.py` first
+reproduced deterministic-stockout inversion, a false zero-risk result for
+constant demand, empty/sparse lead-time substitution, fabricated echelon
+observations, missing-date SCOR delivery successes, unmeasured SCOR benchmark
+scores, ToC bottlenecks without actual queue evidence, and supplier TCO
+comparisons that assumed missing freight/duties meant zero cost. Additional
+tests reproduce invalid ESG rates, missing TCO volume, unequal annual volumes,
+unmatched units (case vs bottle), unspecified units, and mixed/unknown
+currencies. These failures have now been repaired inside the owned engines.
+
+- Stochastic recommendations expose demand and supplier lead-time sample sizes
+  and label the service level as **modeled**, not observed. Empty observations
+  are rejected; sparse histories are explicitly downgraded. Point-estimate
+  echelon lead time is one estimate, not synthetic repeat shipments. Available
+  in-transit inventory is included in the modeled risk, not silently ignored.
+- SCOR only scores verifiable, complete delivery inputs; samples and coverage
+  drive an `insufficient_data` rating rather than an unsupported benchmark.
+  Agility without measured change history and domains without observations
+  are unknown. ToC requires queue evidence to mark a constraint candidate and
+  labels throughput/gain numbers as unmeasured heuristics.
+- ESG reference factors are illustrative configuration values, **not**
+  independently verified industry norms. Supplier TCO comparisons require all
+  named costs, positive identical annual volumes, the same explicit unit of
+  measure, known current supplier, and USD currency pending reviewed FX.
+  Results remain analysis-only candidates for human review, never PO, stock,
+  supplier communication, finance or accounting actions. An explicit field
+  does not prove its value was independently sourced or verified.
+
+The calculations have synthetic regression coverage, **not** measured forecast
+accuracy, verified carrier/customer source data or live/sandbox end-to-end
+proof. Phase labels and formula heuristics are not production certification.
+
+## Seventh owned regression — returns / reverse-logistics safety
+
+`tests/test_wholesale_distribution/test_returns_safety_gate.py` initially
+reproduced an unknown reason silently classified as overstock, unrestricted
+return-value/revenue arithmetic (including duplicate IDs, invalid amounts and
+missing revenue represented as zero return rate), an assumed 85% recovery
+treated as though it were finance evidence, unconfirmed quality concerns
+counted as defective supplier returns, invalid received-unit denominators and
+claim thresholds, period-mismatched returns, unstable random claim IDs, and a
+missing return-preview HTTP route. Regression tests now cover those gaps,
+including role gates, forged tenant input, naive/future timestamps, mixed units
+and all external write flags remaining false. Word-boundary classification
+avoids incidental acronym matches inside unrelated words.
+
+`POST /api/logistics/returns/preview` is mounted from the Chat 3-owned
+logistics router. An authenticated staff member may submit a bounded
+timezone-aware **case** snapshot and receive an unverified classification,
+quarantine/inspection proposal and explicit next-step status for order matching,
+quarantine, independent QA, disposition approval, stock/credit posting and
+supplier claim. It reads no durable orders, verified receipt or stock snapshot,
+creates no RMA, performs no physical quarantine, and makes no ledger/financial
+write or supplier/customer contact. Even expired stock yields **inspection
+hold**, never an automatic destroy/adjustment. Missing order, lot and inspection
+provenance remain blockers rather than synthetic acceptance successes.
+
+The legacy `ReturnsManagementEngine` still serves calculation consumers through
+the shared wholesale module (which Chat 3 does not edit). Engine supplier claims
+are repeatable **draft identifiers**, not durable idempotency records; a
+categorized record or caller-provided receipt count has not been independently
+inspected, and quality concerns are excluded from confirmed-defect numerators.
+Financial recovery, handling fees and supplier thresholds are illustrative
+model inputs, not posted credit or independently accepted terms. Full RMA,
+stateful returns, reverse-logistics execution, lot quarantine and serialized
+audit replay remain **unimplemented** pending canonical Chat 1/Chat 2 contracts.
+
+## Eighth owned regression — multi-stage HTTP and outage containment
+
+`tests/test_wholesale_distribution/test_logistics/test_workflow_evidence_gate.py`
+exercises the actual FastAPI route chain using a synthetic tenant, a spy-only
+database and unverified example observations. It executes the reorder API,
+confirms forged client PO approval is blocked, parses a candidate supplier
+reply, freight invoice and broker status, previews a warehouse receipt, models
+landed-cost variance, queries the learning report, and reads the legacy
+pipeline status. **This is intentionally a cross-route negative acceptance
+test, not a completed nine-stage operational workflow**: no real PO is sent,
+no authenticated shipment milestone is received, and no stock event is posted.
+
+The tests first reproduced an empty portfolio reported as a safe zero-reorder
+result, malformed legacy receipt lines reaching calculation, missing/negative
+sale histories accepted as forecast evidence, no meaningful distinction between
+an empty monthly memory and "operations on track," and a mutable legacy
+pipeline stage looking authoritative. Additional input tests cover missing
+supplier lead observations, nonpositive pack/container capacities, negative
+stock snapshots and explicit case UOM. These now fail before any provider read.
+The report and pipeline read paths expressly identify unverified/transient
+history and nonauthoritative legacy stage provenance. The legacy receiving
+route exposes only candidate alerts and explicitly indicates no verified
+receipt, PO, carrier booking, staff intake, supplier lead history or stock post.
+
+Failure injection includes absent, duplicate and cross-tenant company
+configuration rows and a thrown company-read exception; all return HTTP 503
+without a successful forecast, raw private error content or outbound/write
+operation. Existing owned HTTP/SQL-contract tests independently cover failed
+durable purchasing RPC mapping and actor-sourced approval fields. The mocked
+API chain does **not** establish Postgres transaction isolation, idempotent
+replay, RLS, actual QuickBooks parity, durable audit persistence, provider
+timestamps or a real approved PO-to-receipt handoff. A missing stage-5
+carrier milestone route and missing stage-9 durable feedback ingestion still
+prevent full workflow acceptance. The V6 SQL integration harness must run
+against a dedicated isolated database before any claim of ledger acceptance.
+
+## Interface requests — owner to forward manually
+
+**Chat 1 — architecture / approval gate:** Define tenant-scoped
+`reorder_proposal_id`, immutable input snapshot/version, quantity unit,
+approval status/actor/time and durable idempotency key. Specify a transition
+from approved proposal to the existing V6 `purchasing_orders` and linked
+shipments, invoice claims and reviewed cost variances. Synthetic pipeline
+upserts must not advance verified state. Gate sending POs, posting stock,
+adjustments, returns and financial writes independently. Supply migration/RLS
+ownership for needed event tables; Chat 3 will not edit shared migrations.
+For warehouse execution, define tenant-scoped location/bin/lot and count-session
+identity, immutable snapshot hashes, approval actors, pick reservations,
+movement/recount/claim event idempotency and auditable state transitions.
+Approval must be independent of the requesting user and cannot be inferred from
+successful calculation or a caller-supplied boolean.
+For supply-chain analytics, define canonical SKU/base unit, case-pack/volume
+conversion, cost currency, reviewed FX source/date, observation provenance and
+required approval status for any forecast-initiated PO or supplier switch.
+For returns, own tenant-scoped RMA and inspection identifiers, immutable
+source/order/receipt references, quarantine lots, disposition approvals,
+independent reviewer roles, exactly-once stock adjustment/credit/claim events,
+and replay/concurrency invariants. A return-request preview must never act
+as an authorization to reverse inventory or issue a credit.
+For nine-stage verification, define the canonical durable event envelope
+(tenant, PO, stage, actor, source, source hash, observed_at, idempotency key,
+approval state) and make each successful transition queryable with exact
+replay and rollback semantics. Clarify whether legacy procurement cycles may
+remain display-only or should be retired once V6 order/receipt state is wired.
+
+**Chat 2 — data/connectors:** Supply a read-only authenticated snapshot of
+mapped QB IDs, warehouse stock, allocations, in-transit purchase lines, open
+orders, sales history, supplier lead times and source freshness (`observed_at`
+and `synced_at` UTC). Specify units, warehouse/QB overlap, pagination,
+completeness and provider-failure reason codes. Verify inbound supplier email
+thread, shipment/carrier milestones and customs evidence separately from
+parsed free text. Missing provider data cannot silently mean zero quantities.
+For stages 4–6, specify verified invoice byte/hash, currency and approved FX
+rate source/date; booking/container/PO association; carrier status source,
+provider timestamp and unknown/outage semantics; broker message identity;
+port arrival/free-time rules, terminal tariff schedule and independent invoice
+review. No caller text may be upgraded to a customs release or duty payment.
+For warehouse reads, specify verified bin location capacity, SKU/lot/unit and
+expiry provenance, allocations, quarantines, open orders, counted balances and
+pick-event history with UTC timestamps, complete pagination and tenant mapping.
+For analytical evidence, provide complete timestamped demand observations,
+actual received supplier lead times (not advertised estimates), measured SCOR
+promised vs delivered timestamps and damage counts, process queue/throughput
+time series, unit-normalized supplier quotes/cost breakdowns and attributable
+ESG emission factors with scope/boundary/method. Surface missing-source and
+stale-snapshot reasons instead of zero defaults or calculated confidence.
+For returns, supply independently matched customer invoice/order lines,
+receipt and sale case-pack units, warehouse physical intake and lot condition,
+dated QA inspection evidence, approved supplier return terms and credit-note
+status with source timestamps. Verify the denominator for supplier defect
+rates, including the same SKU/unit, supplier and bounded accounting period.
+For end-to-end provider acceptance, supply sandbox-only authenticated shipment
+and arrival milestones, verified supplier correspondence with PO references,
+receipt/photo evidence and matching invoices with currency/FX metadata;
+provide complete pagination and source timestamps so an outage is not mistaken
+for a zero-stock or zero-cost observation. A source adapter returning a success
+shape without authoritative evidence must remain unverified.
+
+## Acceptance still outstanding
+
+- Verified sandbox source snapshot with dates and units.
+- Proposal -> independent approval -> durable PO; no draft stock booking;
+  deterministic replay protection and approved supplier communications.
+- Independently sourced supplier confirmation, transit and customs milestones.
+- Inspected receipt -> exactly-once stock movement with concurrency,
+  bad-unit, replay and partial-failure tests plus full audit history.
+- Independent line-item landed-cost validation, documented exceptions and
+  durable historical learning events.
+- No live migrations, messages, financial writes or deployments absent owner
+  authorization and Chat 1's gate.

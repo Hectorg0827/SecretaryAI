@@ -105,6 +105,8 @@ export default function ApprovalsScreen() {
       setDrafts(data.drafts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load approvals');
+      // Stale drafts must not remain actionable while the source is unknown.
+      setDrafts([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -114,7 +116,7 @@ export default function ApprovalsScreen() {
   useEffect(() => { load(); }, [load]);
 
   const handleApprove = async (id: string) => {
-    Alert.alert('Approve Draft', 'Send this action for execution?', [
+    Alert.alert('Approve Draft', 'Authorize this draft for the execution queue? This does not confirm the provider completed the action.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Approve',
@@ -183,13 +185,19 @@ export default function ApprovalsScreen() {
         )}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={COLORS.primary} />}
-        ListEmptyComponent={
+        ListEmptyComponent={error ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="alert-circle-outline" size={48} color={COLORS.danger} />
+            <Text style={styles.emptyTitle}>Approval status unavailable</Text>
+            <Text style={styles.emptySubtitle}>Could not verify pending drafts. Pull to retry.</Text>
+          </View>
+        ) : (
           <View style={styles.emptyState}>
             <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.success} />
             <Text style={styles.emptyTitle}>All caught up!</Text>
             <Text style={styles.emptySubtitle}>No pending approvals.</Text>
           </View>
-        }
+        )}
       />
 
       {/* Reject Modal */}

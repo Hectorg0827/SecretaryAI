@@ -12,6 +12,7 @@ from app.middleware.subscription_guard import require_active_subscription
 from app.config import get_settings
 from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed, setup, computer_use as computer_use_router, billing
 from app.api import docs as docs_router
+from app.api import briefing as briefing_router
 from app.utils.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -285,6 +286,7 @@ else:
 
 app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"],          dependencies=_PAID)
 app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"],     dependencies=_PAID)
+app.include_router(briefing_router.router,  prefix="/api/briefing",      tags=["briefing"],      dependencies=_PAID)
 app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"],      dependencies=_PAID)
 app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"],     dependencies=_PAID)
 app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"],       dependencies=_PAID)

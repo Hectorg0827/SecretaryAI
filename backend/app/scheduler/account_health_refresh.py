@@ -12,7 +12,7 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
     """Re-score every account and persist updated scores."""
     from app.intelligence.account_health import score_account
 
-    results = {"updated": 0, "alerts": []}
+    results = {"updated": 0, "unscored": 0, "alerts": []}
 
     customers = await adapter.get_all_customers()
     date_to = date.today()
@@ -38,16 +38,35 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
             except ValueError:
                 last_order = None
 
-        balance = customer.balance if hasattr(customer, "balance") else 0
+        # A missing balance is unknown, not $0: score_account rejects it and
+        # the account is marked unscored below.
+        balance = customer.get("balance") if isinstance(customer, dict) else getattr(customer, "balance", None)
 
-        health = score_account(
-            account_id=cid,
-            account_name=customer.name if hasattr(customer, "name") else customer.get("name", ""),
-            last_order_date=last_order,
-            avg_order_cycle_days=None,
-            order_history=orders,
-            current_balance=balance,
-        )
+        try:
+            health = score_account(
+                account_id=cid,
+                account_name=customer.name if hasattr(customer, "name") else customer.get("name", ""),
+                last_order_date=last_order,
+                avg_order_cycle_days=None,
+                order_history=orders,
+                current_balance=balance,
+            )
+        except ValueError:
+            # A legitimate credit balance is negative; other unsupported
+            # records are also unscored. Never turn them into at-risk scores
+            # or abort the rest of the company's nightly account refresh.
+            log.warning("Health refresh: account %s is unscored", cid)
+            results["unscored"] += 1
+            try:
+                if hasattr(db, "table"):
+                    db.table("accounts").update({
+                        "health_status": "unknown",
+                        "health_score": None,
+                        "last_health_check": date.today().isoformat(),
+                    }).eq("qb_customer_id", cid).eq("company_id", company_id).execute()
+            except Exception as exc:
+                log.error("Health refresh: unscored DB update failed for %s: %s", cid, exc)
+            continue
 
         # Update account in DB
         try:

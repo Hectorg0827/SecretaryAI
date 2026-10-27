@@ -10,31 +10,20 @@ Base path: /api/logistics
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+import re
+from datetime import date
+from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 
-def _upsert_cycle(db, company_id: str, po_number: str, stage: int,
-                  stage_name: str, supplier_id: str = "", total_cases: int = 0) -> None:
-    """Persist the current pipeline stage to procurement_cycles. Best-effort."""
-    try:
-        db.table("procurement_cycles").upsert({
-            "company_id":    company_id,
-            "po_number":     po_number,
-            "current_stage": stage,
-            "stage_name":    stage_name,
-            **({"supplier_id":   supplier_id}   if supplier_id   else {}),
-            **({"total_cases":   total_cases}    if total_cases   else {}),
-        }, on_conflict="company_id,po_number").execute()
-    except Exception as exc:
-        log.warning("procurement_cycles upsert failed for %s: %s", po_number, exc)
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.deps import get_current_user, get_db
 from app.auth.rbac import require_permission
 from app.intelligence.wholesale_distribution.logistics import LogisticsModule
 from app.intelligence.wholesale_distribution.logistics.logistics_module import LogisticsConfig
+from app.intelligence.wholesale_distribution.logistics.vendor_tracker import VendorResponseParser
 from app.intelligence.wholesale_distribution.logistics.pipeline import (
     FreightBooking,
     LandedCostBreakdown,
@@ -59,8 +48,16 @@ def _get_logistics_module(user: dict, db) -> LogisticsModule:
     company_id = user["company_id"]
 
     # Load company config
-    result = db.table("companies").select("*").eq("id", company_id).execute()
-    company = result.data[0] if result.data else {}
+    try:
+        result = db.table("companies").select("*").eq("id", company_id).execute()
+        if (not isinstance(result.data, list) or len(result.data) != 1
+                or not isinstance(result.data[0], dict)
+                or str(result.data[0].get("id")) != str(company_id)):
+            raise ValueError("Company configuration absent or ambiguous")
+        company = result.data[0]
+    except Exception as exc:
+        log.warning("Supply-chain tenant config unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Company configuration unavailable") from exc
 
     # Build role→email map from the company settings if available
     role_email_map: dict[str, str] = {}
@@ -69,13 +66,16 @@ def _get_logistics_module(user: dict, db) -> LogisticsModule:
     if company.get("logistics_manager_email"):
         role_email_map["logistics_manager"] = company["logistics_manager_email"]
 
-    config = LogisticsConfig(
-        target_gross_margin_pct=float(company.get("target_gross_margin_pct", 30.0)),
-        shipments_per_year=int(company.get("shipments_per_year", 12)),
-        port_free_time_days=int(company.get("port_free_time_days", 5)),
-        demurrage_rate_per_day=float(company.get("demurrage_rate_per_day", 150.0)),
-        role_email_map=role_email_map,
-    )
+    try:
+        config = LogisticsConfig(
+            target_gross_margin_pct=float(company.get("target_gross_margin_pct", 30.0)),
+            shipments_per_year=int(company.get("shipments_per_year", 12)),
+            port_free_time_days=int(company.get("port_free_time_days", 5)),
+            demurrage_rate_per_day=float(company.get("demurrage_rate_per_day", 150.0)),
+            role_email_map=role_email_map,
+        )
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(status_code=503, detail="Company configuration unavailable") from exc
 
     return LogisticsModule(company_id=company_id, config=config)
 
@@ -88,23 +88,51 @@ class SKUDataItem(BaseModel):
     sku: str
     name: str
     supplier_id: str
-    supply_chain_type: str = "overseas"
+    supplier_name: str = ""
+    supply_chain_type: SupplyChainType = SupplyChainType.OVERSEAS
     origin_country: str = ""
-    unit_cost_fob: float = 0.0
-    cases_per_pallet: int = 50
-    cases_per_40hc_container: int = 1000
-    stock_on_hand: int = 0
-    stock_committed: int = 0
-    stock_in_transit: int = 0
-    daily_sales: list[float] = Field(default_factory=list)
-    lead_time_days: list[float] = Field(default_factory=list)
-    seasonal_indices: Optional[dict[int, float]] = None
+    unit_cost_fob: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    cases_per_pallet: int = Field(default=50, strict=True, gt=0)
+    cases_per_40hc_container: int = Field(default=1000, strict=True, gt=0)
+    stock_on_hand: int = Field(default=0, strict=True, ge=0)
+    stock_committed: int = Field(default=0, strict=True, ge=0)
+    stock_in_transit: int = Field(default=0, strict=True, ge=0)
+    minimum_order_cases: int = Field(default=0, strict=True, ge=0)
+    # Demand is required: silently returning an empty queue for absent history
+    # would incorrectly look like evidence that every SKU is sufficiently stocked.
+    daily_sales: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] = Field(min_length=1)
+    # A missing lead history cannot safely produce a timing-based proposal.
+    lead_time_days: list[Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(min_length=1)
+    seasonal_indices: Optional[list[float] | dict[int, float]] = None
     last_fob_price: Optional[float] = None
     current_fob_price: Optional[float] = None
 
 
 class ReorderQueueRequest(BaseModel):
-    skus: list[SKUDataItem]
+    skus: list[SKUDataItem] = Field(min_length=1, max_length=500)
+
+
+def _weekly_seasonal_indices(
+    indices: Optional[list[float] | dict[int, float]],
+) -> Optional[list[float]]:
+    """Map explicit 0- or 1-based API week keys to engine's 52-value array.
+
+    Reject ambiguous/incomplete calendars rather than silently applying the
+    wrong seasonal multiplier to a forecast.
+    """
+    if indices is None:
+        return None
+    if isinstance(indices, list):
+        values = indices
+    elif set(indices) == set(range(52)):
+        values = [indices[i] for i in range(52)]
+    elif set(indices) == set(range(1, 53)):
+        values = [indices[i] for i in range(1, 53)]
+    else:
+        raise HTTPException(status_code=422, detail="Seasonal indices must cover exactly 52 weeks")
+    if len(values) != 52 or any(not 0 <= v < float("inf") for v in values):
+        raise HTTPException(status_code=422, detail="Seasonal indices must be 52 finite nonnegative multipliers")
+    return values
 
 
 class GeneratePORequest(BaseModel):
@@ -113,44 +141,81 @@ class GeneratePORequest(BaseModel):
 
 
 class VendorResponseRequest(BaseModel):
-    po_number: str
-    supplier_id: str
-    email_subject: str
-    email_body: str
+    po_number: str = Field(min_length=1, max_length=100)
+    supplier_id: str = Field(min_length=1, max_length=200)
+    email_subject: str = Field(max_length=500)
+    email_body: str = Field(min_length=1, max_length=25000)
 
 
 class FreightInvoiceRequest(BaseModel):
-    booking_id: str
-    invoice_text: str
-    total_cases: int
+    booking_id: str = Field(min_length=1, max_length=150)
+    invoice_text: str = Field(min_length=1, max_length=50000)
+    total_cases: int = Field(gt=0, le=10000000)
 
 
 class CustomsHoldRequest(BaseModel):
-    booking_id: str
-    hold_reason: str
-    days_at_port: int
+    booking_id: str = Field(min_length=1, max_length=150)
+    hold_reason: str = Field(min_length=1, max_length=1000)
+    days_at_port: int = Field(ge=0, le=3650)
 
 
 class DemurrageRiskRequest(BaseModel):
-    booking_id: str
-    arrival_date: str               # ISO date string
-    today: Optional[str] = None
+    booking_id: str = Field(min_length=1, max_length=150)
+    arrival_date: date
+    today: Optional[date] = None
 
 
 class BrokerEmailRequest(BaseModel):
-    booking_id: str
-    subject: str
-    body: str
+    booking_id: str = Field(min_length=1, max_length=150)
+    subject: str = Field(max_length=500)
+    body: str = Field(min_length=1, max_length=25000)
+
+
+class LegacyReceiptLine(BaseModel):
+    """Caller quantity preview; never a booked warehouse receipt line."""
+    model_config = ConfigDict(extra="forbid")
+
+    sku: str = Field(min_length=1, max_length=120)
+    qty_ordered: int = Field(strict=True, gt=0, le=10000000)
+    qty_received: int = Field(strict=True, ge=0, le=10000000)
+    unit: Literal["case"]
+    condition_notes: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def reject_unmatched_quantity(self):
+        if self.qty_received > self.qty_ordered:
+            raise ValueError("Received cases exceed order line; verify units and order")
+        return self
 
 
 class WarehouseReceiptRequest(BaseModel):
-    booking_id: str
-    po_number: str
-    line_items: list[dict]          # [{sku, qty_ordered, qty_received, condition_notes}]
-    received_by: str = "system"
-    notes: str = ""
+    model_config = ConfigDict(extra="forbid")
+
+    booking_id: str = Field(min_length=1, max_length=150)
+    po_number: str = Field(min_length=1, max_length=100)
+    line_items: list[LegacyReceiptLine] = Field(min_length=1, max_length=200)
+    received_by: str = Field(default="system", max_length=150)
+    notes: str = Field(default="", max_length=2000)
     po_sent_at: Optional[str] = None
     supplier_ship_date: Optional[str] = None
+
+    @model_validator(mode="after")
+    def reject_ambiguous_duplicate_skus(self):
+        codes = [item.sku for item in self.line_items]
+        if len(codes) != len(set(codes)):
+            raise ValueError("Legacy receipt preview cannot disambiguate repeated SKU lines")
+        for field in ("po_sent_at", "supplier_ship_date"):
+            raw = getattr(self, field)
+            if raw:
+                try:
+                    value = date.fromisoformat(raw)
+                except ValueError as exc:
+                    raise ValueError(f"{field} must be a valid ISO date") from exc
+                if value > date.today():
+                    raise ValueError(f"{field} cannot be in the future")
+        if self.po_sent_at and self.supplier_ship_date and self.po_sent_at > self.supplier_ship_date:
+            raise ValueError("Supplier shipment must not precede PO sent date")
+        return self
 
 
 class LandedCostRequest(BaseModel):
@@ -171,15 +236,63 @@ class LandedCostRequest(BaseModel):
     drayage_total: Optional[float] = None
 
 
+class LandedCostComparisonInput(BaseModel):
+    """Unverified per-case USD component observations, never invoice evidence."""
+    po_number: str = Field(min_length=1, max_length=100)
+    sku: str = Field(min_length=1, max_length=120)
+    cases: int = Field(gt=0, le=10000000)
+    supplier_id: str = Field(min_length=1, max_length=200)
+    shipment_date: str = ""
+    fob_cost_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    ocean_freight_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    fuel_surcharge_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    origin_charges_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    insurance_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    customs_duty_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    broker_fees_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    port_charges_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    demurrage_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    drayage_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+    exam_fees_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+
+
 class CostReconcileRequest(BaseModel):
-    current: dict       # LandedCostBreakdown fields (serialised)
-    previous: dict      # LandedCostBreakdown fields (serialised)
-    selling_price_per_case: float = 0.0
+    current: LandedCostComparisonInput
+    previous: LandedCostComparisonInput
+    selling_price_per_case: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0
+
+
+class SeasonalObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    date: date
+    units: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+    @field_validator("units", mode="before")
+    @classmethod
+    def actual_numeric_quantity(cls, value):
+        if type(value) not in (int, float):
+            raise ValueError("Sales units require an explicit numeric observation")
+        return value
+
+    @field_validator("date")
+    @classmethod
+    def no_future_observation(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Sales observation cannot be future dated")
+        return value
 
 
 class SeasonalIndexRequest(BaseModel):
-    sku: str
-    daily_sales: list[dict]   # [{date: "2024-01-05", units: 12.5}, ...]
+    model_config = ConfigDict(extra="forbid")
+    sku: str = Field(min_length=1, max_length=120)
+    daily_sales: list[SeasonalObservation] = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode="after")
+    def chronological_unique_observations(self):
+        dates = [item.date for item in self.daily_sales]
+        if dates != sorted(set(dates)):
+            raise ValueError("Sales observations must have unique ascending dates")
+        return self
 
 
 
@@ -205,9 +318,6 @@ class DurablePORequest(BaseModel):
 
 
 from decimal import Decimal, InvalidOperation
-from typing import Literal
-
-
 class PurchasingEvidenceClaimRequest(BaseModel):
     evidence_key: str = Field(min_length=1, max_length=150)
     document_type: Literal[
@@ -955,16 +1065,12 @@ async def evaluate_reorder_queue(
 
     sku_data = []
     for item in request.skus:
-        try:
-            sct = SupplyChainType(item.supply_chain_type)
-        except ValueError:
-            sct = SupplyChainType.OVERSEAS
-
         profile = SKUProfile(
             sku=item.sku,
             name=item.name,
             supplier_id=item.supplier_id,
-            supply_chain_type=sct,
+            supplier_name=item.supplier_name or item.supplier_id,
+            supply_chain_type=item.supply_chain_type,
             origin_country=item.origin_country,
             unit_cost_fob=item.unit_cost_fob,
             cases_per_pallet=item.cases_per_pallet,
@@ -972,12 +1078,13 @@ async def evaluate_reorder_queue(
             stock_on_hand=item.stock_on_hand,
             stock_committed=item.stock_committed,
             stock_in_transit=item.stock_in_transit,
+            minimum_order_cases=item.minimum_order_cases,
         )
         sku_data.append({
             "profile": profile,
-            "daily_sales": item.daily_sales,
-            "lead_time_days": item.lead_time_days,
-            "seasonal_indices": item.seasonal_indices,
+            "daily_sales_history": item.daily_sales,
+            "lead_time_history": item.lead_time_days,
+            "seasonal_indices": _weekly_seasonal_indices(item.seasonal_indices),
             "last_fob_price": item.last_fob_price,
             "current_fob_price": item.current_fob_price,
         })
@@ -985,12 +1092,18 @@ async def evaluate_reorder_queue(
     results = lm.evaluate_reorder_queue(sku_data)
 
     return {
+        "status": "analysis_only",
+        "source_data_verified": False,
+        "inventory_snapshot_verified": False,
+        "supplier_lead_history_verified": False,
+        "po_creation_authorized": False,
+        "requires_human_review": True,
         "count": len(results),
         "red_count": sum(1 for r in results if r["package"].urgency.value == "red"),
         "yellow_count": sum(1 for r in results if r["package"].urgency.value == "yellow"),
         "reorder_queue": [
             {
-                "sku": r["package"].sku,
+                "sku": r["package"].sku_profile.sku,
                 "urgency": r["package"].urgency.value,
                 "days_of_supply": round(r["package"].days_of_supply, 1),
                 "recommended_qty": r["package"].recommended_qty,
@@ -1013,54 +1126,20 @@ async def evaluate_reorder_queue(
 async def generate_purchase_orders(
     request: GeneratePORequest,
     user: dict = Depends(require_permission("manage_inventory")),
-    db=Depends(get_db),
 ):
     """
-    Generate purchase orders from a list of approved reorder packages.
-    Groups by supplier; suggests fill additions for containers <90% full.
-    Returns POs with rendered email bodies ready to send.
+    Fail closed until approved reorder proposals can be verified server-side.
+
+    A client-provided `approved` flag is not a durable human approval. The
+    separate /orders flow supports independently approved durable PO drafts;
+    no unverified package may mint an order number or advance pipeline status.
     """
-    lm = _get_logistics_module(user, db)
-
-    # Deserialize packages (from JSON dict to simple namespace for PO generator)
-    from types import SimpleNamespace
-
-    def _dict_to_package(d: dict):
-        ns = SimpleNamespace(**d)
-        # Ensure urgency is the right type
-        from app.intelligence.wholesale_distribution.logistics.pipeline import UrgencyLevel
-        if isinstance(ns.urgency, str):
-            ns.urgency = UrgencyLevel(ns.urgency)
-        return ns
-
-    approved = [_dict_to_package(p) for p in request.approved_packages]
-    results = lm.generate_purchase_orders(approved, request.supplier_configs)
-
-    # Persist stage 2 for each generated PO
-    for r in results:
-        _upsert_cycle(
-            db, user["company_id"],
-            po_number=r["po"].po_number,
-            stage=2, stage_name="po_generated",
-            supplier_id=str(r["po"].supplier_id),
-            total_cases=r["po"].total_cases,
-        )
-
-    return {
-        "po_count": len(results),
-        "purchase_orders": [
-            {
-                "po_number": r["po"].po_number,
-                "supplier_id": r["po"].supplier_id,
-                "total_cases": r["po"].total_cases,
-                "total_value": round(r["po"].total_value, 2),
-                "status": r["po"].status,
-                "line_item_count": len(r["po"].line_items),
-                "email_body": r["email_body"],
-            }
-            for r in results
-        ],
-    }
+    raise HTTPException(
+        status_code=409,
+        detail=("Canonical human approval of a tenant-scoped reorder proposal "
+                "is required before PO generation; use the separately "
+                "approved durable purchasing workflow."),
+    )
 
 
 # ─── Stage 3 — Vendor Response Tracking ──────────────────────────────────────
@@ -1070,38 +1149,52 @@ async def generate_purchase_orders(
 async def parse_vendor_response(
     request: VendorResponseRequest,
     user: dict = Depends(require_permission("view_inventory")),
-    db=Depends(get_db),
 ):
     """
-    Parse a vendor email response for a PO.
-    Detects confirmation, rejection, ship date, price changes.
-    """
-    lm = _get_logistics_module(user, db)
+    Preview a vendor email response without changing an order or pipeline state.
 
-    # Build a minimal PO stub for the parser
+    The caller controls the subject/body, PO number and claimed supplier ID.
+    Until Chat 2 supplies verified message identity and Chat 1 specifies the
+    durable approval/event contract, these are *candidates*, not confirmations.
+    """
+    # The parser needs a PO object to read its line items. No authenticated PO
+    # lines are available in this preview, so price/quantity changes cannot be
+    # verified and no operational notification may be generated.
     po = PurchaseOrder(
         po_number=request.po_number,
         supplier_id=request.supplier_id,
+        supplier_name=request.supplier_id,
+        supplier_email="",
+        ship_to_address="",
+        payment_terms="",
+        requested_ship_date="",
     )
-
-    result = lm.parse_vendor_response(po, request.email_subject, request.email_body)
-    parsed = result["parsed"]
-
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.po_number,
-        stage=3, stage_name="vendor_response_received",
-        supplier_id=request.supplier_id,
-    )
+    parsed = VendorResponseParser().parse(request.email_subject, request.email_body, po)
 
     return {
         "po_number": request.po_number,
-        "is_confirmation": parsed.is_confirmation,
-        "promised_ship_date": parsed.promised_ship_date,
-        "price_change_detected": parsed.price_change_detected,
-        "issues_detected": parsed.issues_detected,
-        "raw_summary": parsed.raw_summary,
-        "alert": _serialize_alert(result["alert"]),
+        "status": "analysis_only",
+        "candidate_confirmation": parsed.order_confirmed,
+        "candidate_rejection": parsed.rejection,
+        "possible_ship_date": parsed.ship_date,
+        "possible_arrival_date": parsed.arrival_date,
+        "possible_supplier_reference": parsed.supplier_ref or None,
+        "issues_detected": parsed.issues,
+        # With no authenticated PO lines, absence of a price/quantity mention
+        # does not constitute a positive reconciliation result.
+        "price_review_required": True,
+        "quantity_review_required": True,
+        "requires_human_review": True,
+        "review_reason": (
+            "Supplier sender and PO association are unverified; inspect the "
+            "original message and independently approved PO before acting."
+            + (f" Parser notes: {parsed.review_reason}" if parsed.review_reason else "")
+        ),
+        "message_verified": False,
+        "po_link_verified": False,
+        "supplier_action_permitted": False,
+        "pipeline_status_changed": False,
+        "inventory_posted": False,
     }
 
 
@@ -1115,9 +1208,14 @@ async def parse_freight_invoice(
     db=Depends(get_db),
 ):
     """
-    Parse a forwarder invoice and extract cost components.
-    Returns the extracted components and total cost.
+    Parse caller-provided freight text into an unverified cost candidate.
+    No invoice, booking or currency has been independently checked.
     """
+    if re.search(r"[€£]|\b(?:EUR|GBP)\b", request.invoice_text, flags=re.IGNORECASE):
+        raise HTTPException(
+            status_code=422,
+            detail="Non-USD invoice currency requires a reviewed FX conversion contract",
+        )
     lm = _get_logistics_module(user, db)
 
     booking = FreightBooking(booking_ref=request.booking_id)
@@ -1126,6 +1224,13 @@ async def parse_freight_invoice(
 
     return {
         "booking_id": request.booking_id,
+        "status": "analysis_only",
+        "invoice_verified": False,
+        "booking_verified": False,
+        "currency_verified": False,
+        "accounting_posted": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
         "total_cost": summary["total_cost"],
         "components": summary["by_component"],
         "missing_components": summary["missing_components"],
@@ -1143,7 +1248,8 @@ async def log_customs_hold(
     db=Depends(get_db),
 ):
     """
-    Log a customs hold for a container. Fires a high-priority alert.
+    Calculate a candidate customs hold from unverified caller observations.
+    This does not confirm a hold, persist a milestone or fire an alert.
     """
     lm = _get_logistics_module(user, db)
     result = lm.log_customs_hold(
@@ -1154,11 +1260,17 @@ async def log_customs_hold(
 
     return {
         "booking_id": request.booking_id,
-        "milestone": result["event"].milestone,
+        "status": "analysis_only",
+        "candidate_milestone": result["event"].milestone,
         "hold_reason": result["event"].hold_reason,
-        "demurrage_accruing": result["event"].demurrage_accruing,
-        "demurrage_total": result["event"].demurrage_total,
-        "alert": _serialize_alert(result["alert"]),
+        "estimated_demurrage_accruing": result["event"].demurrage_accruing,
+        "estimated_demurrage_total": result["event"].demurrage_total,
+        "candidate_severity": result["alert"].severity,
+        "customs_event_verified": False,
+        "port_arrival_verified": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
+        "alert": None,
     }
 
 
@@ -1169,18 +1281,28 @@ async def check_demurrage_risk(
     db=Depends(get_db),
 ):
     """
-    Compute current demurrage exposure for a container at port.
+    Estimate demurrage from caller dates, not carrier-confirmed port events.
     """
+    evaluation_date = request.today or date.today()
+    if request.arrival_date > evaluation_date:
+        raise HTTPException(status_code=422, detail="Port arrival date cannot follow evaluation date")
+
     lm = _get_logistics_module(user, db)
     result = lm.check_demurrage_risk(
         booking_id=request.booking_id,
-        arrival_date_str=request.arrival_date,
-        today_str=request.today,
+        arrival_date_str=request.arrival_date.isoformat(),
+        today_str=evaluation_date.isoformat(),
     )
 
     return {
         **result["risk"],
-        "alert": _serialize_alert(result["alert"]),
+        "status": "analysis_only",
+        "port_arrival_verified": False,
+        "invoiced_demurrage_verified": False,
+        "pipeline_status_changed": False,
+        "requires_human_review": True,
+        "candidate_severity": result["risk"]["severity"],
+        "alert": None,
     }
 
 
@@ -1191,20 +1313,26 @@ async def parse_broker_email(
     db=Depends(get_db),
 ):
     """
-    Parse a customs broker email for clearance milestones.
-    Returns detected milestone (entry_filed, duties_paid, released, hold_placed, etc.)
+    Classify caller-provided broker text as a candidate milestone only.
+    Sender identity, booking association and customs status are unverified.
     """
     lm = _get_logistics_module(user, db)
     result = lm.parse_broker_email(request.booking_id, request.subject, request.body)
 
     return {
         "booking_id": request.booking_id,
-        "milestone_detected": result["milestone"],
-        "event": {
+        "status": "analysis_only",
+        "candidate_milestone": result["milestone"],
+        "candidate_event": {
             "milestone": result["event"].milestone,
             "hold_reason": result["event"].hold_reason,
-            "demurrage_accruing": result["event"].demurrage_accruing,
+            "estimated_demurrage_accruing": result["event"].demurrage_accruing,
         } if result["event"] else None,
+        "message_verified": False,
+        "booking_verified": False,
+        "customs_event_verified": False,
+        "requires_human_review": True,
+        "pipeline_status_changed": False,
     }
 
 
@@ -1227,7 +1355,7 @@ async def process_warehouse_receipt(
     result = lm.process_warehouse_receipt(
         booking=booking,
         po_number=request.po_number,
-        line_items_received=request.line_items,
+        line_items_received=[line.model_dump(exclude={"unit"}) for line in request.line_items],
         received_by=request.received_by,
         notes=request.notes,
         po_sent_at=request.po_sent_at,
@@ -1245,6 +1373,11 @@ async def process_warehouse_receipt(
         "po_number": request.po_number,
         "status": "analysis_only",
         "inventory_posted": False,
+        "receipt_verified": False,
+        "po_verified": False,
+        "booking_verified": False,
+        "received_by_verified": False,
+        "supplier_lead_time_verified": False,
         "accounting_reconciled": False,
         "requires_verified_receipt": True,
         "total_cases_received": receipt.total_cases_received,
@@ -1257,7 +1390,11 @@ async def process_warehouse_receipt(
             "customs_to_warehouse_days": receipt.customs_to_warehouse_days,
             "total_lead_time_days": receipt.total_lead_time_days,
         },
-        "alert": _serialize_alert(result["alert"]),
+        "alert": None,
+        "suggested_alert": (
+            {**_serialize_alert(result["alert"]), "requires_human_review": True}
+            if result["alert"] else None
+        ),
     }
 
 
@@ -1271,29 +1408,16 @@ async def reconcile_costs(
     db=Depends(get_db),
 ):
     """
-    Compare current vs. previous shipment landed costs.
-    Returns any significant variances with per-case and annualized impact.
+    Preview caller-supplied costs; never certify invoices or advance a PO.
     """
+    if request.current.sku != request.previous.sku:
+        raise HTTPException(status_code=422, detail="Cost comparison requires the same SKU")
     lm = _get_logistics_module(user, db)
 
-    def _dict_to_lcd(d: dict) -> LandedCostBreakdown:
+    def _dict_to_lcd(d: LandedCostComparisonInput) -> LandedCostBreakdown:
+        values = d.model_dump()
         return LandedCostBreakdown(
-            po_number=d.get("po_number", ""),
-            sku=d.get("sku", ""),
-            cases=d.get("cases", 0),
-            supplier_id=d.get("supplier_id", ""),
-            fob_cost_per_case=d.get("fob_cost_per_case", 0.0),
-            shipment_date=d.get("shipment_date", ""),
-            ocean_freight_per_case=d.get("ocean_freight_per_case", 0.0),
-            fuel_surcharge_per_case=d.get("fuel_surcharge_per_case", 0.0),
-            origin_charges_per_case=d.get("origin_charges_per_case", 0.0),
-            insurance_per_case=d.get("insurance_per_case", 0.0),
-            customs_duty_per_case=d.get("customs_duty_per_case", 0.0),
-            broker_fees_per_case=d.get("broker_fees_per_case", 0.0),
-            port_charges_per_case=d.get("port_charges_per_case", 0.0),
-            demurrage_per_case=d.get("demurrage_per_case", 0.0),
-            drayage_per_case=d.get("drayage_per_case", 0.0),
-            exam_fees_per_case=d.get("exam_fees_per_case", 0.0),
+            **values,
         )
 
     current = _dict_to_lcd(request.current)
@@ -1301,16 +1425,13 @@ async def reconcile_costs(
 
     result = lm.reconcile_costs(current, previous, request.selling_price_per_case)
 
-    # Persist stage 8 using current shipment's po_number
-    _upsert_cycle(
-        db, user["company_id"],
-        po_number=request.current.get("po_number", ""),
-        stage=8, stage_name="cost_reconciled",
-        supplier_id=str(request.current.get("supplier_id", "")),
-        total_cases=int(request.current.get("cases", 0)),
-    )
-
     return {
+        "status": "analysis_only",
+        "landed_cost_verified": False,
+        "accounting_reconciled": False,
+        "pipeline_status_changed": False,
+        "requires_independent_invoice_review": True,
+        "source": "caller_supplied_unverified_components",
         "variance_count": len(result["variances"]),
         "critical_count": sum(1 for v in result["variances"] if v.severity == "critical"),
         "variances": [
@@ -1326,7 +1447,11 @@ async def reconcile_costs(
             }
             for v, msg in zip(result["variances"], result["formatted"])
         ],
-        "alerts": [_serialize_alert(a) for a in result["alerts"]],
+        "alerts": [],
+        "suggested_alerts": [
+            {**_serialize_alert(a), "requires_human_review": True}
+            for a in result["alerts"]
+        ],
     }
 
 
@@ -1346,12 +1471,15 @@ async def build_seasonal_indices(
     lm = _get_logistics_module(user, db)
 
     # Convert [{date, units}] → [(date_str, float)]
-    daily_sales = [(d["date"], float(d["units"])) for d in request.daily_sales]
+    daily_sales = [(d.date.isoformat(), d.units) for d in request.daily_sales]
     indices = lm.build_seasonal_indices(request.sku, daily_sales)
 
     return {
         "sku": request.sku,
-        "status": indices.get("status"),
+        "status": "analysis_only",
+        "modeled_data_quality": indices.get("status"),
+        "sales_history_verified": False,
+        "historical_learning_persisted": False,
         "data_months": indices.get("data_months"),
         "index_count": len(indices.get("indices", {})),
         "indices": indices.get("indices", {}),
@@ -1369,8 +1497,18 @@ async def get_monthly_logistics_report(
     """
     lm = _get_logistics_module(user, db)
     report = lm.monthly_logistics_report()
-
-    return report
+    # Per-request module has no durable source history: empty is not success.
+    return {
+        **report,
+        "status": "insufficient_verified_history",
+        "source_history_verified": False,
+        "supplier_learning_persisted": False,
+        "accounting_reconciled": False,
+        "recommendation": (
+            "No source-verified supplier lead times, costs or shipment history "
+            "were loaded. Connect and reconcile durable observations before analysis."
+        ),
+    }
 
 
 # ─── Pipeline Status ──────────────────────────────────────────────────────────
@@ -1399,6 +1537,10 @@ async def get_pipeline_status(
     return {
         "po_number": cycle_data.get("po_number"),
         "current_stage": cycle_data.get("current_stage"),
+        "state_source": "legacy_procurement_cycles_unverified",
+        "stage_verified": False,
+        "authoritative_purchasing_state": False,
+        "verified_po_receipt_ledger_link": False,
         "supplier_id": cycle_data.get("supplier_id"),
         "total_cases": cycle_data.get("total_cases"),
         "started_at": cycle_data.get("started_at"),
@@ -1431,3 +1573,15 @@ def _serialize_alert(alert) -> Optional[dict]:
         "recipients": alert.recipients,
         "financial_impact_usd": alert.financial_impact_usd,
     }
+
+
+# Owned warehouse preview router. The shared application loader already mounts
+# logistics.router, so no cross-team route-registration edits are necessary.
+from app.api import warehouse as warehouse_preview_routes
+
+router.include_router(warehouse_preview_routes.router, prefix="/warehouse", tags=["warehouse"])
+
+# Return reviews are preview-only until canonical tenant stock/credit approvals.
+from app.api import returns as returns_preview_routes
+
+router.include_router(returns_preview_routes.router, prefix="/returns", tags=["returns"])

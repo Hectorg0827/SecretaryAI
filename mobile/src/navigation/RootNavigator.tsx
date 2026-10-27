@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore';
 import { RootStackParamList } from './types';
 import LoginScreen from '../screens/LoginScreen';
 import AppNavigator from './AppNavigator';
+import SettingsScreen from '../screens/SettingsScreen';
 import { COLORS } from '../theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -27,7 +28,14 @@ export default function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {isAuthenticated ? (
-        <Stack.Screen name="App" component={AppNavigator} />
+        <>
+          <Stack.Screen name="App" component={AppNavigator} />
+          <Stack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{ headerShown: true, title: 'Settings' }}
+          />
+        </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />
       )}

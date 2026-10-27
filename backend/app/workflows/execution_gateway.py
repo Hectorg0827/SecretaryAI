@@ -99,6 +99,10 @@ class PostgresDurableGateway:
         )
         if not data.get("execution_id") or type(data.get("queued")) is not bool:
             raise ExecutionDatabaseUnavailable("Invalid durable approval response")
+        if data["queued"] is False and data.get("already_processed") is not True:
+            raise ExecutionDatabaseUnavailable(
+                "Durable approval did not enqueue or establish prior processing"
+            )
         return data
 
     async def enqueue(self, company_id: str, draft_id: str, key: str) -> str:

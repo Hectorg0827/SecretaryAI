@@ -26,23 +26,36 @@ async def test_queue_rejects_losing_conditional_approval(edited):
 
 @pytest.mark.asyncio
 async def test_losing_concurrent_approval_never_repeats_external_action():
+    """An idempotent durable RPC, not the legacy PostgREST queue, decides the race."""
     db = MagicMock()
     db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
         {"id": "draft1", "status": "pending", "action_type": "email_reply",
-         "content": {"to": "a@example.com", "body": "Hi"}}
+         "content": {"to": "a@example.invalid", "body": "Synthetic only"}}
     ]
     adapter = MagicMock()
     adapter.send_email_reply = AsyncMock()
-    with patch.object(actions, "_execution_policy_effect", new_callable=AsyncMock,
-                      return_value="allow"), \
-         patch.object(actions.ApprovalQueue, "approve", new_callable=AsyncMock,
-                      return_value={"draft_id": "draft1", "status": "already_processed",
-                                    "already_processed": True}), \
+    gateway = MagicMock()
+    gateway.approve_and_enqueue = AsyncMock(return_value={
+        "execution_id": "already-queued-execution",
+        "status": "approved",
+        "queued": False,
+        "already_processed": True,
+    })
+    with patch.dict("os.environ", {"SECRETARYAI_DURABLE_APPROVAL_ENABLED": "1"}), \
+         patch.object(actions, "_execution_policy_effect", new_callable=AsyncMock,
+                      return_value="require_approval"), \
+         patch.object(actions.PostgresDurableGateway, "from_environment",
+                      return_value=gateway), \
+         patch.object(actions.ApprovalQueue, "approve", new_callable=AsyncMock) as legacy, \
          patch.object(actions, "write_audit_event") as audit:
         response = await actions.approve_draft(
             "draft1", actions.ApprovalRequest(),
-            user={"company_id": "co1", "sub": "owner1"}, db=db, adapter=adapter
+            user={"company_id": "co1", "sub": "owner1"}, db=db, adapter=adapter,
         )
     assert response["already_processed"] is True
+    assert response["execution_status"] == "already_processed"
+    assert response["execution_id"] == "already-queued-execution"
+    gateway.approve_and_enqueue.assert_awaited_once()
+    legacy.assert_not_awaited()
     adapter.send_email_reply.assert_not_awaited()
     audit.assert_not_called()

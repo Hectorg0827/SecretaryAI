@@ -97,7 +97,7 @@ class CustomsMonitor:
             booking_id=booking_id,
             milestone="hold_placed",
             hold_reason=hold_reason,
-            demurrage_accruing=days_at_port >= self.free_time_days,
+            demurrage_accruing=demurrage_days > 0,
             demurrage_rate_per_day=self.demurrage_rate,
             demurrage_days=demurrage_days,
         )
@@ -141,12 +141,12 @@ class CustomsMonitor:
         Calculate current demurrage exposure given arrival date and today's date.
         Returns a risk assessment dict.
         """
-        try:
-            arrival = date.fromisoformat(arrival_date_str[:10])
-            today = date.fromisoformat(today_str[:10]) if today_str else date.today()
-            days_at_port = (today - arrival).days
-        except (ValueError, TypeError):
-            days_at_port = 0
+        # Bad dates must not silently look like zero exposure.
+        arrival = date.fromisoformat(arrival_date_str)
+        today = date.fromisoformat(today_str) if today_str else date.today()
+        if arrival > today:
+            raise ValueError("Port arrival date cannot follow evaluation date")
+        days_at_port = (today - arrival).days
 
         free_remaining = max(0, self.free_time_days - days_at_port)
         demurrage_days = max(0, days_at_port - self.free_time_days)
@@ -186,6 +186,24 @@ class CustomsMonitor:
         """
         text = f"{subject}\n{body}".lower()
 
+        # Common negative statements mention the word "released" without a
+        # release occurring. Conflicting/negated signals need source review.
+        if re.search(
+            r"\b(?:not(?:\s+yet)?(?:\s+been)?|never|hasn't(?:\s+been)?)"
+            r"\s+(?:released|cleared|liberado|despachado)\b",
+            text,
+        ):
+            return None
+        if (
+            re.search(
+                r"\b(?:duty payment|duties|aranceles)\b.{0,35}"
+                r"\b(?:pending|due|unpaid|outstanding|not yet paid)\b",
+                text,
+            )
+            or re.search(r"\b(?:not|never|nothing)\b.{0,24}\bpaid\b", text)
+        ):
+            return None
+
         if any(kw in text for kw in ["entry filed", "entrada presentada", "filing submitted"]):
             return self.log_entry_filed(booking_id, notes=f"Detected from broker email: {subject[:60]}")
 
@@ -199,7 +217,6 @@ class CustomsMonitor:
             # Extract hold reason
             for issue in CRITICAL_DOC_ISSUES:
                 if issue in text:
-                    _, alert = self.log_hold(booking_id, issue.title(), days_at_port=0)
                     return self.log_hold(booking_id, issue.title(), days_at_port=0)[0]
             return self.log_hold(
                 booking_id,

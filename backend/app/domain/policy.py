@@ -59,6 +59,10 @@ _DEFAULT_EFFECTS: dict[ActionClass, str] = {
 }
 
 
+class PolicySourceUnavailable(RuntimeError):
+    """An authoritative tenant policy source could not be read."""
+
+
 class PolicyEngine:
     """
     Evaluates per-tenant policy rules from the DB (with Redis caching).
@@ -75,6 +79,8 @@ class PolicyEngine:
         self._db = db
         self._rules: list[dict] | None = None
         self._features: dict | None = None
+        self._rule_load_failed = False
+        self._feature_load_failed = False
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -85,6 +91,14 @@ class PolicyEngine:
         """
         rules = await self._load_rules()
         features = await self._load_features()
+
+        # Reading/drafting can remain available with conservative defaults.
+        # External writes may NOT use a default when explicit tenant rules or
+        # financial approval limits could not be loaded. Missing is not allow.
+        if proposal.action_class in (ActionClass.COMMIT, ActionClass.DESTRUCTIVE) and (
+            self._rule_load_failed or self._feature_load_failed
+        ):
+            raise PolicySourceUnavailable("Tenant policy source unavailable")
 
         for rule in rules:
             if self._rule_matches(rule, proposal):
@@ -113,7 +127,7 @@ class PolicyEngine:
             try:
                 self._db.table("policy_rules").insert(rule).execute()
             except Exception as exc:
-                log.warning("Failed to seed policy rule %s: %s", rule["rule_name"], exc)
+                log.warning("Failed to seed default policy rule")
 
         # Seed company_features with safe defaults
         try:
@@ -122,7 +136,7 @@ class PolicyEngine:
                 on_conflict="company_id",
             ).execute()
         except Exception as exc:
-            log.warning("Failed to seed company_features for %s: %s", self.company_id, exc)
+            log.warning("Failed to seed company_features defaults")
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -140,7 +154,8 @@ class PolicyEngine:
             )
             self._rules = result.data or []
         except Exception as exc:
-            log.warning("Could not load policy rules for %s: %s — using defaults", self.company_id, exc)
+            log.warning("Could not load policy rules")
+            self._rule_load_failed = True
             self._rules = []
         return self._rules
 
@@ -156,7 +171,8 @@ class PolicyEngine:
             )
             self._features = result.data[0] if result.data else {}
         except Exception as exc:
-            log.warning("Could not load company_features for %s: %s", self.company_id, exc)
+            log.warning("Could not load company_features")
+            self._feature_load_failed = True
             self._features = {}
         return self._features
 

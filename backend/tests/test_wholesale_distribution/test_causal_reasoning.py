@@ -126,6 +126,26 @@ class TestCustomerDropAnalysis:
 
 
 class TestInventoryAnomalyAnalysis:
+    def test_no_observed_demand_does_not_fabricate_days_of_supply(self, engine):
+        result = engine.analyse_inventory_anomaly(
+            sku="fixture-sku", sku_name="Fixture Item", current_stock=30,
+            avg_daily_demand=0, pending_po_units=0, supplier_lead_time_days=8,
+            recent_demand_spike=False, recent_supplier_delays=[],
+        )
+        assert result.primary_cause.root_cause == RootCause.UNKNOWN
+        assert "not computed" in result.data_quality_warning
+        assert result.overall_confidence == 0
+
+    def test_causal_output_explicitly_labels_heuristic_nature(self, engine):
+        result = engine.analyse_inventory_anomaly(
+            sku="fixture-sku", sku_name="Fixture Item", current_stock=15,
+            avg_daily_demand=5, pending_po_units=0, supplier_lead_time_days=8,
+            recent_demand_spike=True, recent_supplier_delays=[],
+        ).to_dict()
+        assert result["causal_identification"] == "not_established"
+        assert "not a statistical probability" in result["primary_cause"]["score_interpretation"]
+        assert result["primary_cause"]["counterfactual"].startswith("Unverified scenario hypothesis:")
+
     def test_demand_spike_identified(self, engine):
         result = engine.analyse_inventory_anomaly(
             sku="SKU-100",

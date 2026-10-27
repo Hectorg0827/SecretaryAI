@@ -52,6 +52,15 @@ class RulesEngine:
             quantity_cases=quantity_cases,
         )
 
+        if quantity_cases <= 0:
+            result.issues.append(ComplianceIssue(
+                severity=IssueSeverity.BLOCKER,
+                issue="Shipment case quantity must be positive",
+                action="Correct case quantity before requesting a compliance check",
+                category="quantity",
+            ))
+            return result
+
         product = self._registry.get_product(product_id)
         if product is None:
             result.issues.append(ComplianceIssue(
@@ -105,6 +114,13 @@ class RulesEngine:
                 action="Obtain TTB Basic Permit before any commercial activity",
                 category="federal_permit",
             ))
+        elif permit.status != LicenseStatus.ACTIVE:
+            result.issues.append(ComplianceIssue(
+                severity=IssueSeverity.BLOCKER,
+                issue="TTB Basic Permit is not recorded as active",
+                action="Verify permit status with TTB and update the registry",
+                category="federal_permit",
+            ))
         elif permit.is_expired:
             result.issues.append(ComplianceIssue(
                 severity=IssueSeverity.BLOCKER,
@@ -132,6 +148,13 @@ class RulesEngine:
                 severity=IssueSeverity.BLOCKER,
                 issue=f"No TTB Certificate of Label Approval (COLA) on file for {product.name}",
                 action="Obtain COLA from TTB before first shipment",
+                category="cola",
+            ))
+        elif cola.status != LicenseStatus.ACTIVE:
+            result.issues.append(ComplianceIssue(
+                severity=IssueSeverity.BLOCKER,
+                issue=f"COLA for {product.name} is not recorded as active",
+                action="Verify label approval status before shipment",
                 category="cola",
             ))
         elif cola.is_expired:
@@ -164,6 +187,14 @@ class RulesEngine:
                 severity=IssueSeverity.BLOCKER,
                 issue=f"No valid {product.product_type.value} supplier/importer license in {state.state_code}",
                 action=f"Apply for {state.permit_types[0] if state.permit_types else 'supplier'} permit in {state.state_code}",
+                state_code=state.state_code,
+                category="state_license",
+            ))
+        elif license_.status != LicenseStatus.ACTIVE:
+            result.issues.append(ComplianceIssue(
+                severity=IssueSeverity.BLOCKER,
+                issue=f"{state.state_code} {product.product_type.value} license is not recorded as active",
+                action="Verify state license status before shipment",
                 state_code=state.state_code,
                 category="state_license",
             ))
@@ -218,6 +249,14 @@ class RulesEngine:
             ))
             if fee:
                 result.fees["brand_registration"] = result.fees.get("brand_registration", 0.0) + fee
+        elif reg.status != BrandRegStatus.ACTIVE:
+            result.issues.append(ComplianceIssue(
+                severity=IssueSeverity.BLOCKER,
+                issue=f"{product.name} brand registration in {state.state_code} is not recorded as active",
+                action=f"Verify registration status with {state.regulator_name}",
+                state_code=state.state_code,
+                category="brand_registration",
+            ))
         elif reg.is_expired:
             result.issues.append(ComplianceIssue(
                 severity=IssueSeverity.BLOCKER,

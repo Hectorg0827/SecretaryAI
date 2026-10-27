@@ -4,15 +4,18 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const invokeMock = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (...a: any[]) => invokeMock(...a) }));
 
-import { saveToken, currentToken, authFetch, login } from './auth';
+import { saveToken, clearToken, currentToken, authFetch, login } from './auth';
 
 const SERVICE = 'secretary-auth';
 const KEY = 'token';
 
 describe('desktop auth (OS-vault token)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.unstubAllGlobals();
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
+    await clearToken();
+    invokeMock.mockClear();
   });
 
   it('saveToken persists to the credential vault and caches in memory', async () => {
@@ -53,5 +56,50 @@ describe('desktop auth (OS-vault token)', () => {
     }));
     const r = await login('a@b.com', 'pw');
     expect(r).toEqual({ requires2fa: true, preAuthToken: 'pat' });
+  });
+
+  it('completes 2FA with pre-auth token and code, without resending the password', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ access_token: 'step2-token' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(login('user@example.test', 'password-should-not-leak', {
+      preAuthToken: 'short-lived', totpCode: '123456',
+    })).resolves.toEqual({ ok: true });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      pre_auth_token: 'short-lived', totp_code: '123456',
+    });
+  });
+
+  it('rejects invalid second-factor input before making a network request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(login('user@example.test', 'pw', {
+      preAuthToken: 'short-lived', totpCode: 'not-a-code',
+    })).rejects.toThrow('six-digit');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails sign-in closed if the OS vault cannot persist the access token', async () => {
+    invokeMock.mockRejectedValueOnce(new Error('vault is locked'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ access_token: 'never-cached' }),
+    }));
+    await expect(login('user@example.test', 'pw')).rejects.toThrow('Secure credential storage');
+    expect(currentToken()).toBeNull();
+  });
+
+  it('does not claim sign-out succeeded if the OS vault still contains a session', async () => {
+    await saveToken('still-in-vault');
+    invokeMock.mockRejectedValueOnce(new Error('vault is locked'));
+    await expect(clearToken()).rejects.toThrow('Could not remove');
+    expect(currentToken()).toBe('still-in-vault');
+  });
+
+  it('rejects a malformed MFA challenge instead of displaying a broken code entry', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ requires_2fa: true }),
+    }));
+    await expect(login('user@example.test', 'pw')).rejects.toThrow('could not be started');
   });
 });

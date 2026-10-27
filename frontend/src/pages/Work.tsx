@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
+import { approvalNotice } from '../lib/approvalStatus';
 import { useAuth } from '../hooks/useAuth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -19,6 +20,7 @@ interface WorkItem {
   due_date?:   string;
   priority:    'high' | 'medium' | 'low';
   done:        boolean;
+  queued?:     boolean;
   payload?:    Record<string, unknown>;
 }
 
@@ -66,11 +68,13 @@ function WorkCard({
   onApprove,
   onReject,
   onDone,
+  allowDraftPO = false,
 }: {
   item: WorkItem;
   onApprove?: (id: string) => void;
   onReject?:  (id: string) => void;
   onDone?:    (id: string) => void;
+  allowDraftPO?: boolean;
 }) {
   const cfg = TYPE_CONFIG[item.type];
   const { Icon } = cfg;
@@ -79,6 +83,7 @@ function WorkCard({
     : Icon;
 
   const overdue = isOverdue(item.due_date) && !item.done;
+  const canComplete = item.type !== 'inventory' || allowDraftPO;
 
   return (
     <div
@@ -89,13 +94,22 @@ function WorkCard({
         }`}
     >
       {/* Done toggle */}
-      <button
-        onClick={() => !item.done && onDone?.(item.id)}
-        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
-          ${item.done ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-emerald-400'}`}
-      >
-        {item.done && <Check className="w-3 h-3 text-white" />}
-      </button>
+      {item.type === 'approval' ? (
+        <span className="mt-0.5 text-xs text-amber-700" aria-label="Requires an explicit approval decision">
+          <Circle className="w-5 h-5" />
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-label={item.type === 'inventory' ? `Create purchase order draft for ${item.title}` : `Complete ${item.title}`}
+          onClick={() => !item.done && !item.queued && onDone?.(item.id)}
+          disabled={item.done || item.queued || !canComplete}
+          className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors
+            ${item.done ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-emerald-400'} disabled:cursor-default`}
+        >
+          {item.done && <Check className="w-3 h-3 text-white" />}
+        </button>
+      )}
 
       {/* Icon */}
       <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${cfg.bg}`}>
@@ -108,6 +122,7 @@ function WorkCard({
           {item.title}
         </p>
         <p className="text-xs text-slate-500 mt-0.5 truncate">{item.subtitle}</p>
+        {item.queued && <p className="mt-1 text-xs font-medium text-amber-800" role="status">PO draft queued for approval; inventory is not resolved.</p>}
         {item.due_date && (
           <p className={`flex items-center gap-1 text-xs mt-1.5 font-medium
             ${overdue ? 'text-red-600' : 'text-slate-400'}`}
@@ -155,16 +170,18 @@ function Section({ label, count, children }: { label: string; count: number; chi
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Work() {
-  const { canApprove } = useAuth();
+  const { canApprove, canAccessInventory, canDraftPO, role } = useAuth();
   const [items, setItems]   = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sourceErrors, setSourceErrors] = useState<string[]>([]);
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
     const next: WorkItem[] = [];
+    const failures: string[] = [];
 
     // ── Pending approvals
     if (canApprove) {
@@ -193,11 +210,11 @@ export default function Work() {
             payload:  { draft_id: d.id, action_type: d.action_type, content: c },
           });
         }
-      } catch { /* ignore */ }
+      } catch { failures.push('Approvals'); }
     }
 
     // ── Follow-up notes (pending, with due dates)
-    try {
+    if (role === 'owner' || role === 'manager') try {
       const res = await api.get<{ notes: { id: string; text: string; account_name?: string; due_date?: string; done: boolean }[] }>(
         '/api/dashboard/notes'
       );
@@ -213,14 +230,14 @@ export default function Work() {
           payload:  { note_id: n.id },
         });
       }
-    } catch { /* ignore */ }
+    } catch { failures.push('Follow-up notes'); }
 
     // ── Critical inventory (auto-suggestions)
-    try {
-      const res = await api.get<{ items: { item_id: string; product_name: string; stock_status: string; needs_po: boolean }[] }>(
-        '/api/inventory?status=critical,out_of_stock'
+    if (canAccessInventory) try {
+      const res = await api.get<{ alerts: { item_id: string; product_name: string; stock_status: string; needs_po: boolean }[] }>(
+        '/api/inventory/alerts'
       );
-      for (const item of (res.items ?? []).filter((i) => i.needs_po)) {
+      for (const item of (res.alerts ?? []).filter((i) => i.needs_po)) {
         next.push({
           id:       `inventory:${item.item_id}`,
           type:     'inventory',
@@ -231,7 +248,7 @@ export default function Work() {
           payload:  { item_id: item.item_id, product_name: item.product_name },
         });
       }
-    } catch { /* ignore */ }
+    } catch { failures.push('Inventory'); }
 
     // Sort: overdue → today → high priority
     next.sort((a, b) => {
@@ -243,6 +260,7 @@ export default function Work() {
     });
 
     setItems(next);
+    setSourceErrors(failures);
     setLoading(false);
     setRefreshing(false);
   };
@@ -252,11 +270,14 @@ export default function Work() {
   const handleApprove = async (itemId: string) => {
     const item = items.find((i) => i.id === itemId);
     const draftId = item?.payload?.draft_id;
-    if (!draftId) return;
+    if (typeof draftId !== 'string') return;
+    if (!window.confirm('Approve this draft? An external action may be queued and needs separate delivery confirmation.')) return;
     try {
-      await api.post(`/api/actions/approve/${draftId}`, {});
+      const result = await api.actions.approve(draftId);
+      const notice = approvalNotice(result);
       setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
-      toast.success('Approved');
+      if (notice.severity === 'success') toast.success(notice.message);
+      else toast(notice.message);
     } catch {
       toast.error('Approval failed');
     }
@@ -265,7 +286,7 @@ export default function Work() {
   const handleReject = async (itemId: string) => {
     const item = items.find((i) => i.id === itemId);
     const draftId = item?.payload?.draft_id;
-    if (!draftId) return;
+    if (typeof draftId !== 'string') return;
     try {
       await api.post(`/api/actions/reject/${draftId}`, { reason: 'Rejected from work queue' });
       setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
@@ -282,20 +303,24 @@ export default function Work() {
     if (item.type === 'follow_up' && item.payload?.note_id) {
       try {
         await api.patch(`/api/dashboard/notes/${item.payload.note_id}`, { done: true });
-      } catch { /* best effort */ }
+        setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
+      } catch { toast.error('Follow-up could not be completed; no change was recorded.'); }
+      return;
     }
     if (item.type === 'inventory' && item.payload?.item_id) {
       try {
-        await api.post('/api/actions/draft-po', {
+        const result = await api.post<{ status: string; draft_id: string }>('/api/actions/draft-po', {
           item_id:      item.payload.item_id,
           product_name: item.payload.product_name,
         });
-        toast.success('PO draft created — check approvals');
+        if (result.status !== 'queued' || !result.draft_id) throw new Error('Draft queue confirmation missing');
+        setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, queued: true } : i));
+        toast.success('PO draft queued for approval; no order was sent.');
       } catch {
-        toast.error('Failed to create PO draft');
+        toast.error('PO draft was not confirmed; please verify before retrying.');
       }
+      return;
     }
-    setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
   };
 
   const pending = items.filter((i) => !i.done);
@@ -354,13 +379,19 @@ export default function Work() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6 max-w-2xl mx-auto w-full">
+        {!loading && sourceErrors.length > 0 && (
+          <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <AlertTriangle className="w-4 h-4 inline mr-1" />
+            Work data is incomplete. Unavailable sources: {sourceErrors.join(', ')}. Do not treat this as an all-clear.
+          </div>
+        )}
         {loading ? (
           <div className="space-y-3">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-16 bg-white rounded-xl border border-slate-200 animate-pulse" />
             ))}
           </div>
-        ) : totalPending === 0 && totalDone === 0 ? (
+        ) : totalPending === 0 && totalDone === 0 && sourceErrors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center">
               <CheckCircle2 className="w-6 h-6 text-slate-300" />
@@ -374,25 +405,25 @@ export default function Work() {
           <>
             <Section label="⚠ Overdue" count={overdue.length}>
               {overdue.map((item) => (
-                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} />
+                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} allowDraftPO={canDraftPO} />
               ))}
             </Section>
 
             <Section label="Today" count={today.length}>
               {today.map((item) => (
-                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} />
+                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} allowDraftPO={canDraftPO} />
               ))}
             </Section>
 
             <Section label="This week" count={thisWeek.length}>
               {thisWeek.map((item) => (
-                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} />
+                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} allowDraftPO={canDraftPO} />
               ))}
             </Section>
 
             <Section label="Later" count={later.length}>
               {later.map((item) => (
-                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} />
+                <WorkCard key={item.id} item={item} onApprove={handleApprove} onReject={handleReject} onDone={handleDone} allowDraftPO={canDraftPO} />
               ))}
             </Section>
 

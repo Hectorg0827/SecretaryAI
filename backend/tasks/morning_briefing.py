@@ -27,6 +27,8 @@ def send_morning_briefing_all(self, company_id: str | None = None):
     for company in companies:
         try:
             adapter = build_adapter(company)
+            # Needed to read inventory sell rates for the snapshot below.
+            adapter.set_db(db)
 
             # Compute dashboard KPIs (expensive QB calls happen here, once per company)
             dashboard_payload = asyncio.run(compute_dashboard_payload(adapter))

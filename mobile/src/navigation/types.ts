@@ -5,6 +5,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 export type RootStackParamList = {
   Login: undefined;
   App: undefined;
+  Settings: undefined;
 };
 
 // Bottom tab navigator (8 tabs)

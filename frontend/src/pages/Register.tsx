@@ -14,17 +14,20 @@ export function Register() {
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState<string | null>(null);
 
+  // Mirror backend/app/api/auth.py RegisterRequest, including bcrypt's 72-byte bound.
+  const passwordLength = new TextEncoder().encode(password).length;
+  const passwordValid = password.length >= 8 && passwordLength <= 72
+    && /[A-Za-z]/.test(password) && /[0-9]/.test(password) && !password.includes('\0');
   const valid =
     companyName.trim().length > 0 &&
     fullName.trim().length > 0 &&
-    email.includes('@') &&
-    password.length >= 8 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) &&
+    passwordValid &&
     password === confirm;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid) return;
-    if (password !== confirm) { setError('Passwords do not match'); return; }
 
     setLoading(true);
     setError(null);
@@ -34,12 +37,15 @@ export function Register() {
         '/auth/register',
         { email: email.trim().toLowerCase(), password, company_name: companyName.trim(), full_name: fullName.trim() },
       );
+      if (!data.access_token || !data.company_id || data.role !== 'owner') {
+        throw new Error('Account creation response was incomplete. Please contact support before retrying.');
+      }
       localStorage.setItem('secretary_token',     data.access_token);
       localStorage.setItem('secretary_company_id', data.company_id);
       localStorage.setItem('secretary_role',       data.role);
       navigate('/', { replace: true });
-    } catch (err: any) {
-      setError(err.message ?? 'Registration failed. Please try again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -63,7 +69,7 @@ export function Register() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
+              <div role="alert" className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
                 <AlertCircle size={14} className="flex-shrink-0" />
                 {error}
               </div>
@@ -117,7 +123,7 @@ export function Register() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="password">
-                Password <span className="text-slate-600 font-normal">(min. 8 characters)</span>
+                Password <span className="text-slate-600 font-normal">(8+ characters, a letter and a number)</span>
               </label>
               <input
                 id="password"
@@ -130,6 +136,11 @@ export function Register() {
                 placeholder="••••••••"
                 className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
               />
+              {password && !passwordValid && (
+                <p role="status" className="text-xs text-amber-800 mt-1">
+                  Use 8+ characters with a letter and a number, no more than 72 UTF-8 bytes.
+                </p>
+              )}
             </div>
 
             <div>
@@ -151,6 +162,9 @@ export function Register() {
                   <CheckCircle2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500" />
                 )}
               </div>
+              {confirm && password !== confirm && (
+                <p role="status" className="text-xs text-amber-800 mt-1">Passwords do not match.</p>
+              )}
             </div>
 
             <button

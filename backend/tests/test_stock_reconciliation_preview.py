@@ -164,7 +164,10 @@ async def test_legacy_warehouse_analysis_does_not_promote_po_status():
     db=MagicMock()
     with patch("app.api.logistics._get_logistics_module",return_value=lm):
         response=await process_warehouse_receipt(WarehouseReceiptRequest(
-            booking_id="BK1",po_number="PO1",line_items=[]
+            booking_id="BK1",po_number="PO1",line_items=[{
+                "sku":"CASE-A", "qty_ordered":1200,
+                "qty_received":1200, "unit":"case"
+            }]
         ),user=actor(),db=db)
     assert response["status"]=="analysis_only"
     assert response["inventory_posted"] is False

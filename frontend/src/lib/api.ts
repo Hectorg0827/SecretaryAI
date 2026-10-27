@@ -106,14 +106,48 @@ export interface FeedEvent {
 }
 
 export interface DashboardSummary {
-  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number };
+  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number } | null;
   inventory_alerts: InventoryAlert[];
-  pending_actions: number;
-  unread_emails: number;
+  pending_actions: number | null;
+  unread_emails: number | null;
   /** ISO timestamp of when the QB-derived data was last computed by the scheduler */
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */
   cached: boolean;
+}
+
+export type BriefingSectionV1 = 'red_alerts' | 'yellow_alerts' | 'opportunities'
+  | 'scoreboard' | 'todays_priorities' | 'actions_taken';
+
+export interface BriefingEvidenceV1 {
+  source_system: string;
+  source_record_id: string;
+  fetched_at: string;
+  quality: 'verified' | 'partial' | 'unavailable';
+  confidence: number;
+}
+
+export interface BriefingEntryV1 {
+  entry_id: string;
+  section: BriefingSectionV1;
+  title: string;
+  status: 'open' | 'resolved' | 'needs_review' | 'source_unavailable';
+  detected_at: string;
+  proposed_action_id: string | null;
+  evidence: BriefingEvidenceV1[];
+}
+
+export interface BriefingTodayResponseV1 {
+  contract_version: '1.0';
+  company_id: string;
+  audience_role: 'owner' | 'manager';
+  created_at: string;
+  sections: Record<BriefingSectionV1, BriefingEntryV1[]>;
+  source_coverage: 'dashboard_snapshot_only';
+  complete_digest: false;
+  source_quality: 'partial';
+  snapshot_generated_at: string;
+  snapshot_age_seconds: number;
 }
 
 export interface InventoryAlert {
@@ -175,6 +209,13 @@ export interface Draft {
   content: Record<string, unknown>;
   created_at: string;
   status: 'pending' | 'approved' | 'rejected';
+}
+
+export interface ActionApprovalResult {
+  draft_id: string;
+  status: string;
+  execution_status?: string;
+  already_processed?: boolean;
 }
 
 export interface AgentStatus {
@@ -291,19 +332,21 @@ export const api = {
       api.patch<FollowUpNote>(`/api/dashboard/notes/${id}`, { done: true }),
   },
 
+  briefing: {
+    today: () => api.get<BriefingTodayResponseV1>('/api/briefing/today'),
+  },
+
   emails: {
     draftReply: (emailId: string) =>
       api.post<{ draft: string; subject: string }>('/api/dashboard/emails/draft-reply', { email_id: emailId }),
     markRead: (emailId: string) =>
       api.post<void>(`/api/dashboard/emails/${emailId}/mark-read`, {}),
-    sendReply: (emailId: string, draft: string, subject: string, to: string) =>
-      api.post<void>('/api/dashboard/emails/send-reply', { email_id: emailId, body: draft, subject, to }),
   },
 
   actions: {
     pending: () => api.get<{ drafts: Draft[] }>('/api/actions/pending'),
     approve: (id: string, edits?: Record<string, unknown>) =>
-      api.post<void>(`/api/actions/approve/${id}`, edits ?? {}),
+      api.post<ActionApprovalResult>(`/api/actions/approve/${id}`, edits ?? {}),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
   },
@@ -357,11 +400,15 @@ export const api = {
   },
 
   auth: {
-    login: (email: string, password: string, totp_code?: string) =>
+    login: (email: string, password: string) =>
       api.post<
         | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
         | { requires_2fa: true; pre_auth_token: string }
-      >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
+      >('/auth/login', { email, password }),
+    verify2fa: (pre_auth_token: string, totp_code: string) =>
+      api.post<{ access_token: string; token_type: string; company_id: string; role: string }>(
+        '/auth/login', { pre_auth_token, totp_code },
+      ),
   },
 
   // ── Compliance types ──────────────────────────────────────────────────────────

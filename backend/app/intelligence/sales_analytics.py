@@ -40,6 +40,15 @@ def _active_invoices(invoices: list[dict]) -> list[dict]:
     return active
 
 
+def filter_billable_invoices(invoices: list[dict]) -> list[dict]:
+    """Keep billed invoices while detecting duplicate source identities.
+
+    Gross billed invoice totals are not recognized revenue. Callers must not
+    include drafts, voided, or cancelled documents in order/health metrics.
+    """
+    return _active_invoices(invoices)
+
+
 def _amount(value, *, label: str) -> Decimal:
     try:
         if value is None:

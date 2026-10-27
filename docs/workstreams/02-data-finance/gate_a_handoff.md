@@ -121,6 +121,48 @@ is not integrated into the shared pipeline until Gate A is accepted. Synthetic
 fixtures only—no user mail read, database migration, external message send,
 provider acceptance or deployed runtime is implied by these tests.
 
+## Follow-up: account reporting and partial-history semantics (Milestone 11)
+
+Owned account-list/detail API paths previously counted voided and draft
+invoices as fulfilled orders, used API enumeration order for the 20 "recent"
+invoices, reported `total=len(returned_page)` despite a limit, and passed
+`order_date`-only rows to the account health engine, which actually requires
+`date`—causing account-detail requests with invoices to fail. Synthetic
+tests reproduced these failures before correction. Both endpoints now share
+strict observed invoice ID/date/finite nonnegative total normalization and
+the same deduplicated, billable status filter as sales analytics. Recent
+invoice history can still display void/draft rows with their statuses, but
+such rows no longer enter billed average, last-order recency, account velocity
+or trend inputs. Invoice history is sorted by date descending before `[:20]`.
+The list `total` reports all role-accessible accounts, including those beyond
+the current response limit.
+
+The QBO adapter supplies a **365-day invoice window**; no invoice in that
+window does not mean the account never ordered. Instead of reporting a
+heuristic dormant/at-risk result, the account endpoints now return
+`health_status=unknown`, `health_score=null` with
+`health_data_quality=partial_365_day_window` and
+`history_window_days=365` when no billable orders are observed. The
+compatibility numeric `avg_order_value=0` is explicitly paired with
+`avg_order_value_observed=false` so consumers can show unavailable rather
+than falsely claiming the customer's average order is $0. A verified zero
+invoice still sets `avg_order_value_observed=true`. Even accounts with
+recent invoices retain partial-history quality because a verified entire
+order-cycle history is not available. Source errors and malformed financial
+fields propagate rather than masquerade as verified zero. A finite negative
+customer balance is preserved as a signed credit balance, but returns unknown
+health with `credit_balance_unscored` until the AR model can reconcile credits;
+the existing account-health scorer only supports nonnegative balances.
+
+**Chat 1 / Chat 5 action:** adopt the observed/quality fields and unknown
+health state in the canonical account API/UI contract. The current frontend
+list renders the numeric placeholder `$0` if `avg_order_value_observed`
+is false; Chat 5 should display an unavailable marker there. Chat 1 should
+supply canonical invoice source completeness and lifetime history (or
+appropriately bounded lookback evidence), then calibrate health thresholds
+before the product claims verified dormancy. No shared schema or frontend
+file was edited from Chat 2.
+
 ## Follow-up: source-independence test fixture results
 
 The default `AccessRouter.route("inventory")` API path uses the same

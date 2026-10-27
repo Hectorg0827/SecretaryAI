@@ -20,6 +20,8 @@ def _signal(**kwargs):
         signal_code="margin_breach", department="pricing", metric_value=D("9.5"),
         source_quality="verified", source_record_id="synthetic-ledger",
         source_revision="rev-1", observed_at=NOW - timedelta(seconds=30),
+        source_system="synthetic-cost-ledger",
+        source_fetched_at=NOW - timedelta(seconds=10), source_confidence=90,
     )
     return replace(value, **kwargs)
 
@@ -42,6 +44,10 @@ def test_verified_margin_signal_maps_to_auditable_draft_only_red_alert():
     assert result.status == "needs_review"
     assert result.display_metric == D("9.5")
     assert result.next_action_code == "review_margin_waterfall"
+    assert result.source_system == "synthetic-cost-ledger"
+    assert result.source_fetched_at == NOW - timedelta(seconds=10)
+    assert result.source_confidence == 90
+    assert result.evidence_quality == "verified"
     assert result.approval_required and not result.execution_claimed
 
 
@@ -51,6 +57,7 @@ def test_all_classified_statuses_use_gate_a_digest_entry_vocabulary():
                    _signal(source_quality="unavailable")):
         result = _classify(signal)
         assert result.status in allowed
+        assert (result.evidence_quality == "unavailable") == (result.status == "source_unavailable")
         assert result.approval_required is True
         assert result.execution_claimed is False
 
@@ -63,6 +70,8 @@ def test_missing_compliance_source_never_downgrades_critical_alert():
     assert result.status == "source_unavailable"
     assert result.display_metric is None
     assert result.next_action_code == "verify_source_evidence"
+    assert result.evidence_quality == "unavailable"
+    assert result.source_confidence == 0
 
 
 def test_verified_portfolio_stockout_is_an_operations_review_not_a_disposal_action():
@@ -78,10 +87,18 @@ def test_partial_or_stale_data_cannot_be_shown_as_verified_metric():
     for signal in (_signal(source_quality="partial"),
                    _signal(observed_at=NOW - timedelta(minutes=10)),
                    _signal(source_revision=""),
-                   _signal(observed_at=NOW + timedelta(minutes=1))):
+                   _signal(observed_at=NOW + timedelta(minutes=1)),
+                   _signal(source_system=""),
+                   _signal(source_fetched_at=None),
+                   _signal(source_confidence=0),
+                   _signal(source_fetched_at=NOW + timedelta(minutes=1)),
+                   _signal(source_fetched_at=NOW - timedelta(minutes=10)),
+                   _signal(source_fetched_at=NOW - timedelta(seconds=45))):
         result = _classify(signal)
         assert result.status == "source_unavailable"
         assert result.display_metric is None
+        assert result.evidence_quality == "unavailable"
+        assert result.source_confidence == 0
 
 
 def test_tenant_role_record_and_policy_scope_all_fail_closed():
@@ -105,6 +122,10 @@ def test_hr_detail_not_visible_to_existing_general_roles():
     {"signal_code": "freeform_model_claim"},
     {"department": "hr"},
     {"source_quality": "unknown"},
+    {"source_confidence": True},
+    {"source_confidence": -1},
+    {"source_confidence": 101},
+    {"source_fetched_at": datetime(2026, 10, 26, 22, 0)},
     {"metric_value": D("NaN")},
     {"observed_at": datetime(2026, 10, 26, 22, 0)},
 ])

@@ -86,7 +86,17 @@ signal codes, rather than trusting free-form model-generated event types.
 | HR | `hr_training_due` | Restricted red alert; private HR task review only |
 
 `GrowthSignal` carries tenant, opaque entity ref, exact signal code, metric,
-source quality, record ID, revision and time. `PolicyScope` is a *server-validated
+source quality, record ID, revision, source system, observed/fetched timestamps
+and integer confidence. A metric is visible only when the trusted adapter's
+quality is `verified`, both timestamps pass the configured freshness window,
+the fetch is not older than the observation, and source lineage/confidence are
+present. The classified result carries the same evidence fields and maps
+unavailable/stale/partial inputs to **zero confidence** and `unavailable`
+evidence quality, matching Gate A's strict unavailable-status invariant.
+Missing metadata remains visible as a review alert but cannot form a canonical
+`EvidenceRef` until a trusted upstream error record supplies mandatory lineage.
+This is a projection contract, **not** independent verification.
+`PolicyScope` is a *server-validated
 handoff requirement*, **not** an authentication credential. The classifier
 rejects wrong tenant, disallowed role, missing entity grant or missing policy
 decision ID. It removes metric values when evidence is stale, partial or

@@ -56,6 +56,10 @@ class GrowthSignal:
     source_record_id: str
     source_revision: str
     observed_at: datetime
+    # Supplied by a trusted connector, never by the browser or an LLM.
+    source_system: str = ""
+    source_fetched_at: datetime | None = None
+    source_confidence: int = 0
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,10 @@ class ClassifiedGrowthSignal:
     next_action_code: str
     source_record_id: str
     source_revision: str
+    source_system: str = ""
+    source_fetched_at: datetime | None = None
+    source_confidence: int = 0
+    evidence_quality: Literal["verified", "unavailable"] = "unavailable"
     approval_required: bool = True
     execution_claimed: bool = False
 
@@ -106,11 +114,29 @@ def classify_growth_signal(
         raise ValueError("Unknown source-quality status")
     if as_of.tzinfo is None or signal.observed_at.tzinfo is None:
         raise ValueError("Timezone-aware source timestamps required")
+    if signal.source_fetched_at is not None and (
+        signal.source_fetched_at.tzinfo is None
+        or signal.source_fetched_at.utcoffset() is None
+    ):
+        raise ValueError("Source fetch timestamp must include timezone")
+    if type(signal.source_confidence) is not int or not 0 <= signal.source_confidence <= 100:
+        raise ValueError("Source confidence must be an integer between 0 and 100")
     age = (as_of.astimezone(timezone.utc) - signal.observed_at.astimezone(timezone.utc)).total_seconds()
+    fetch_age = (
+        (as_of.astimezone(timezone.utc) - signal.source_fetched_at.astimezone(timezone.utc)).total_seconds()
+        if signal.source_fetched_at is not None else None
+    )
+    fetch_is_valid = (
+        fetch_age is not None and 0 <= fetch_age <= max_age_seconds
+        and signal.source_fetched_at >= signal.observed_at
+    )
     source_complete = (
         signal.source_quality == "verified"
+        and bool(signal.source_system)
         and bool(signal.source_record_id and signal.source_revision)
         and signal.metric_value is not None
+        and signal.source_confidence > 0
+        and fetch_is_valid
         and 0 <= age <= max_age_seconds
     )
     if signal.metric_value is not None and (
@@ -131,4 +157,9 @@ def classify_growth_signal(
         next_action_code=definition.next_action_code if source_complete else "verify_source_evidence",
         source_record_id=signal.source_record_id,
         source_revision=signal.source_revision,
+        source_system=signal.source_system,
+        source_fetched_at=signal.source_fetched_at,
+        # Gate A's EvidenceRef disallows confidence on unavailable evidence.
+        source_confidence=signal.source_confidence if source_complete else 0,
+        evidence_quality="verified" if source_complete else "unavailable",
     )

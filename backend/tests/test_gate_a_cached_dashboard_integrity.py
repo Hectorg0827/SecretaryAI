@@ -47,6 +47,7 @@ def stored(payload=None, generated_at=None):
     lambda x: x["accounts"].update(slowing=-1),
     lambda x: x.update(sales_30d=float("nan")),
     lambda x: x.update(sales_30d=float("inf")),
+    lambda x: x.update(sales_30d=10 ** 400),
     lambda x: x["inventory_alerts"].append({"stock_status": "healthy"}),
 ])
 def test_dashboard_cache_rejects_corruption(mutation):

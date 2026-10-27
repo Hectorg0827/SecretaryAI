@@ -28,7 +28,8 @@ def _fake_role_token(role: str) -> str:
     return "unsigned." + payload + ".synthetic-only"
 
 
-def _respond(route, *, summary_error: bool = False, role: str = "owner",
+def _respond(route, *, summary_error: bool = False, summary_malformed: bool = False,
+             approvals_malformed: bool = False, role: str = "owner",
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              auth_fields_seen: list[tuple[str, ...]] | None = None) -> None:
@@ -56,6 +57,15 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner",
         return
     if summary_error and path == "/api/dashboard/summary":
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic outage"}))
+        return
+    if summary_malformed and path == "/api/dashboard/summary":
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "accounts": {"healthy": 8}, "inventory_alerts": [],
+            "generated_at": SYNTHETIC_TIME,
+        }))
+        return
+    if approvals_malformed and path == "/api/actions/pending":
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"drafts": None}))
         return
     if work_error and path in ("/api/actions/pending", "/api/dashboard/notes", "/api/inventory/alerts"):
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic source outage"}))
@@ -116,6 +126,7 @@ def _respond(route, *, summary_error: bool = False, role: str = "owner",
 
 
 def _context(browser, role: str, width: int, *, summary_error: bool = False,
+             summary_malformed: bool = False, approvals_malformed: bool = False,
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              authenticated: bool = True,
@@ -124,7 +135,8 @@ def _context(browser, role: str, width: int, *, summary_error: bool = False,
     if authenticated:
         context.add_init_script(f"localStorage.setItem('secretary_token', {json.dumps(_fake_role_token(role))});")
     def mock_route(route):
-        _respond(route, summary_error=summary_error, role=role,
+        _respond(route, summary_error=summary_error, summary_malformed=summary_malformed,
+                 approvals_malformed=approvals_malformed, role=role,
                  email_fixture=email_fixture, work_error=work_error,
                  requests_seen=requests_seen, auth_fields_seen=auth_fields_seen)
     context.route("**/api/**", mock_route)
@@ -190,6 +202,44 @@ def main() -> None:
                     assert page.get_by_text("0 at-risk accounts").count() == 0
                 finally:
                     outage.close()
+
+                # HTTP 200 is not proof of business data completeness. Invalid
+                # counts must trigger unavailable evidence, not reassuring zeros.
+                incomplete = _context(browser, "owner", 390, summary_malformed=True)
+                try:
+                    page = incomplete.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Dashboard summary unavailable", exact=False).wait_for()
+                    assert page.get_by_text("0 at-risk accounts").count() == 0
+                    assert page.get_by_text("All products at healthy levels").count() == 0
+                finally:
+                    incomplete.close()
+
+                malformed_approvals = _context(browser, "owner", 390, approvals_malformed=True)
+                try:
+                    page = malformed_approvals.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Approvals source unavailable", exact=False).wait_for()
+                    assert page.get_by_text("Nothing waiting for approval").count() == 0
+                    assert page.get_by_role("region", name="5 · Today’s decisions").get_by_text("Source unavailable", exact=False).count() > 0
+                finally:
+                    malformed_approvals.close()
+
+                # Semantic links in the six-card briefing support keyboard-only
+                # navigation into the unified inbox, without authorizing action.
+                keyboard_context = _context(browser, "owner", 390)
+                try:
+                    page = keyboard_context.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    approval_link = page.get_by_role("link", name="Open approval inbox")
+                    approval_link.focus()
+                    assert approval_link.evaluate("element => document.activeElement === element")
+                    page.keyboard.press("Enter")
+                    page.wait_for_url(PREVIEW + "/inbox")
+                    # Route URL can update before React finishes mounting Inbox.
+                    page.get_by_role("button", name="Approvals").wait_for()
+                finally:
+                    keyboard_context.close()
 
                 # Direct email sending cannot be reachable from dashboard draft UX.
                 email_paths: list[str] = []

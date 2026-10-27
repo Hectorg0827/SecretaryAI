@@ -13,6 +13,7 @@ import { MorningBriefing } from '../components/dashboard/MorningBriefing';
 import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
+import { verifiedDashboardSummary } from '../lib/sourceEvidence';
 import { useAuth } from '../hooks/useAuth';
 
 export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => void }) {
@@ -26,7 +27,8 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
     setLoading(true);
     setLoadError(false);
     try {
-      const s = await api.dashboard.summary();
+      const s = verifiedDashboardSummary(await api.dashboard.summary());
+      if (!s) throw new Error('Dashboard summary response is incomplete');
       setSummary(s);
       onUnreadChange?.(s.unread_emails ?? 0);
     } catch {

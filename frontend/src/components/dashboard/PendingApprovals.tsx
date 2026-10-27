@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import clsx from 'clsx';
 import { CheckCircle, XCircle, Mail, ShoppingCart, FileText, Loader2, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, Draft } from '../../lib/api';
 import { approvalNotice } from '../../lib/approvalStatus';
+import { verifiedPendingDrafts } from '../../lib/sourceEvidence';
 import { Card, CardHeader } from '../ui/Card';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -104,23 +104,37 @@ export function PendingApprovals() {
 
   const fetch = () => {
     api.actions.pending()
-      .then((r) => { setDrafts(r.drafts ?? []); setError(false); })
+      .then((r) => {
+        const verified = verifiedPendingDrafts(r);
+        if (!verified) throw new Error('Pending approvals response is incomplete');
+        setDrafts(verified);
+        setError(false);
+      })
       .catch(() => { setDrafts([]); setError(true); })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
+    if (!canApprove) {
+      setDrafts([]);
+      setLoading(false);
+      return;
+    }
     fetch();
     const t = setInterval(fetch, 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [canApprove]);
 
   const remove = (id: string) => setDrafts((p) => p.filter((d) => d.id !== id));
 
   return (
     <Card>
-      <CardHeader title="Pending Approvals" count={drafts.length || undefined} />
-      {loading ? (
+      <CardHeader title="Pending Approvals" count={canApprove ? drafts.length || undefined : undefined} />
+      {!canApprove ? (
+        <p className="px-5 py-4 text-sm text-slate-600" role="status">
+          Approval details are restricted to authorized reviewers.
+        </p>
+      ) : loading ? (
         <div className="flex items-center gap-2 px-5 py-4 text-xs text-slate-400">
           <Loader2 size={13} className="animate-spin" /> Loading…
         </div>

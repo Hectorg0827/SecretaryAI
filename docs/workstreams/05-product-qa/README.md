@@ -94,6 +94,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Local PASS: mobile TypeScript check, cache-cleared Expo Android/iOS/web bundles, Chromium `signin` and `outage` at 390px/1024px, and the pre-existing unconfigured-bundle gate. All network traffic was intercepted or blocked; **no real server session, authorization or provider operation was tested**.
 - Live cross-tenant authorization, actual session revocation, accessibility screen-reader operation, physical-device sign-out, signed installers, deployment, and external provider acceptance remain **NOT TESTED**. The repository retains its existing backend auth; Auth0 security recommendations were used as general guidance only, without integrating that provider.
 
+## Eighth isolated executive-digest and approval-evidence increment
+
+- The active web dashboard now validates minimum business evidence before displaying counts: verified nonnegative account counts and structured inventory alerts are required. Incomplete HTTP `200` payloads result in the existing dashboard-unavailable state. Missing or invalid optional counts and timestamps remain **unknown**, not invented zero or live freshness.
+- The active pending-approvals widget distinguishes a verified empty `drafts: []` from malformed/missing draft arrays and incomplete draft records; malformed responses now show **approval status unknown** and no actionable stale list. Non-approvers do not request, display or count draft details. No backend endpoint or cross-team contract was altered.
+- Added 12 focused synthetic Vitest cases across source guards, six-section rendered digest, and human approval UX. They cover independently sourced counts, classified opportunities, due tasks, queued-vs-delivered audit evidence, owner source outages, malformed financial payloads, no automatic approval, cancel-before-approve, viewer read-only access, and rejection failures.
+- Expanded local Playwright browser acceptance at mobile width to reject malformed dashboard and approvals responses even on HTTP `200`, and verified keyboard-only navigation from the briefing into the inbox. No external messages or financial writes were made.
+- Local verification: **36** frontend Vitest assertions, typecheck, production web build and browser E2E PASS. Provider-backed data accuracy, canonical API freeze, authorization, screen readers, approval idempotency and audit receipt remain **NOT TESTED**. No staging/production deployment or merge.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -101,15 +109,15 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 24 passed; `npm run typecheck`: pass (local only) |
-| Web lint | PASS | `npm run lint`: 0 errors, 21 warnings including pre-existing areas |
+| Web unit tests and typecheck | PASS | 36 passed; `npm run typecheck`: pass (local only) |
+| Web lint | PASS | `npm run lint`: 0 errors, 20 warnings in pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |
 | Android/iOS JS release bundles | PASS | Local Expo exports compile with synthetic HTTPS URL; no emulator/device, App Store or signed package proof |
 | Native Expo mobile-web export | PASS | Expo 51 SPA export with installed `react-native-web` / `react-dom`, clean cache. Synthetic Chromium 390/1024px renders sign-in and fail-closed config; full provider/device acceptance NOT TESTED |
 | Mobile secure API destination | PASS | Four local fixture tests reject release HTTP/localhost, missing/placeholder and userinfo/query/fragment; real device requests NOT TESTED |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
-| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting, billing and onboarding checks |
+| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; role-denial, malformed HTTP `200` data, source outages, keyboard navigation, copy-only drafting, billing and onboarding checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |
 | Six digest sections source correctness | NOT TESTED | Provider-backed payload, freshness and per-role scope |
 | Approval-then-action idempotency | NOT TESTED | Test-only provider receipt and durable audit state |

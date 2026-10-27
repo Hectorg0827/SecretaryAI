@@ -143,6 +143,41 @@ The calculations have synthetic regression coverage, **not** measured forecast
 accuracy, verified carrier/customer source data or live/sandbox end-to-end
 proof. Phase labels and formula heuristics are not production certification.
 
+## Seventh owned regression — returns / reverse-logistics safety
+
+`tests/test_wholesale_distribution/test_returns_safety_gate.py` initially
+reproduced an unknown reason silently classified as overstock, unrestricted
+return-value/revenue arithmetic (including duplicate IDs, invalid amounts and
+missing revenue represented as zero return rate), an assumed 85% recovery
+treated as though it were finance evidence, unconfirmed quality concerns
+counted as defective supplier returns, invalid received-unit denominators and
+claim thresholds, period-mismatched returns, unstable random claim IDs, and a
+missing return-preview HTTP route. Regression tests now cover those gaps,
+including role gates, forged tenant input, naive/future timestamps, mixed units
+and all external write flags remaining false. Word-boundary classification
+avoids incidental acronym matches inside unrelated words.
+
+`POST /api/logistics/returns/preview` is mounted from the Chat 3-owned
+logistics router. An authenticated staff member may submit a bounded
+timezone-aware **case** snapshot and receive an unverified classification,
+quarantine/inspection proposal and explicit next-step status for order matching,
+quarantine, independent QA, disposition approval, stock/credit posting and
+supplier claim. It reads no durable orders, verified receipt or stock snapshot,
+creates no RMA, performs no physical quarantine, and makes no ledger/financial
+write or supplier/customer contact. Even expired stock yields **inspection
+hold**, never an automatic destroy/adjustment. Missing order, lot and inspection
+provenance remain blockers rather than synthetic acceptance successes.
+
+The legacy `ReturnsManagementEngine` still serves calculation consumers through
+the shared wholesale module (which Chat 3 does not edit). Engine supplier claims
+are repeatable **draft identifiers**, not durable idempotency records; a
+categorized record or caller-provided receipt count has not been independently
+inspected, and quality concerns are excluded from confirmed-defect numerators.
+Financial recovery, handling fees and supplier thresholds are illustrative
+model inputs, not posted credit or independently accepted terms. Full RMA,
+stateful returns, reverse-logistics execution, lot quarantine and serialized
+audit replay remain **unimplemented** pending canonical Chat 1/Chat 2 contracts.
+
 ## Interface requests — owner to forward manually
 
 **Chat 1 — architecture / approval gate:** Define tenant-scoped
@@ -161,6 +196,11 @@ successful calculation or a caller-supplied boolean.
 For supply-chain analytics, define canonical SKU/base unit, case-pack/volume
 conversion, cost currency, reviewed FX source/date, observation provenance and
 required approval status for any forecast-initiated PO or supplier switch.
+For returns, own tenant-scoped RMA and inspection identifiers, immutable
+source/order/receipt references, quarantine lots, disposition approvals,
+independent reviewer roles, exactly-once stock adjustment/credit/claim events,
+and replay/concurrency invariants. A return-request preview must never act
+as an authorization to reverse inventory or issue a credit.
 
 **Chat 2 — data/connectors:** Supply a read-only authenticated snapshot of
 mapped QB IDs, warehouse stock, allocations, in-transit purchase lines, open
@@ -183,6 +223,11 @@ promised vs delivered timestamps and damage counts, process queue/throughput
 time series, unit-normalized supplier quotes/cost breakdowns and attributable
 ESG emission factors with scope/boundary/method. Surface missing-source and
 stale-snapshot reasons instead of zero defaults or calculated confidence.
+For returns, supply independently matched customer invoice/order lines,
+receipt and sale case-pack units, warehouse physical intake and lot condition,
+dated QA inspection evidence, approved supplier return terms and credit-note
+status with source timestamps. Verify the denominator for supplier defect
+rates, including the same SKU/unit, supplier and bounded accounting period.
 
 ## Acceptance still outstanding
 

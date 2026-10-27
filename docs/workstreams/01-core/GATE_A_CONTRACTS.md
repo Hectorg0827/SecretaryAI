@@ -132,3 +132,12 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - The retired tests that previously expected direct provider `sent` or `needs_reconciliation` behavior have been replaced with parameterized negative tests asserting zero provider invocations for email, purchase_order and unknown action types.
 - New approved actions must use the durable gateway with policy, immutable snapshot, unique claim, verified provider receipt and explicit reconciliation on unknown outcomes. The old direct executor must not be reenabled behind a feature flag.
 - This change is not evidence that a worker or real provider has executed successfully. Approval/delivery E2E remains out of scope until staging authorization and safe test allowlists.
+
+
+## Gate A dashboard read-permission execution boundary
+
+- `GET /api/dashboard/summary` is a read surface, not a general provider-sync authorization. When no company snapshot exists, only `run_reports` or `view_all` roles (owner/manager/back_office) may perform the initial provider-wide data read and snapshot write; sales_rep/viewer/unknown roles receive HTTP 503 without invoking provider reads or snapshot persistence.
+- Cached company summary fields remain individually permission-filtered: accounts require `view_customers|view_all`, inventory `view_inventory|view_all`, financials `view_financials|view_all`, approval count `approve_actions|view_all`, unread inbox `trigger_actions|view_all`.
+- Crucially, live approval-count DB reads and inbox provider reads are **not performed at all** for roles without their permissions, rather than reading data and hiding it after the fact. Missing/unavailable authorized reads remain null; a confirmed zero still uses 0.
+- A sales rep's assigned-account intelligence needs a separately scoped query and cannot be inferred by giving all signed-in employees the company-wide reporting capability. Chat 5 must handle nullable counts and a 503 requiring a privileged refresh, not attempt a direct low-privilege refresh.
+- Regression tests assert role-level denial before provider IO, denied hidden live reads, and maintained owner first-load functionality. The new code is isolated in PR #75, not deployed or merged.

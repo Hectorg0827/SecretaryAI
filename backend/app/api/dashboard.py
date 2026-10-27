@@ -9,6 +9,7 @@ import uuid
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
+from math import isfinite
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -421,20 +422,31 @@ async def get_sales_data(
     total_revenue = 0.0
     order_count = 0
 
-    for inv in invoices:
-        inv_date = _invoice_date(inv)
-        inv_total = _invoice_amount(inv)
-        customer_name = _row_value(inv, "customer_name", "")
-
-        if inv_date:
-            d = str(inv_date)[:10]
-            daily[d]["revenue"] += inv_total
-            daily[d]["order_count"] += 1
-
-        total_revenue += inv_total
-        order_count += 1
-        if customer_name:
-            account_revenue[customer_name] += inv_total
+    try:
+        for inv in invoices:
+            inv_date = _invoice_date(inv)
+            inv_total = _invoice_amount(inv)
+            customer_name = _row_value(inv, "customer_name", "")
+    
+            if inv_date:
+                d = str(inv_date)[:10]
+                daily[d]["revenue"] += inv_total
+                daily[d]["order_count"] += 1
+    
+            total_revenue += inv_total
+            order_count += 1
+            if customer_name:
+                account_revenue[customer_name] += inv_total
+        if not isfinite(total_revenue) or any(
+            not isfinite(value) for value in account_revenue.values()
+        ):
+            raise ValueError("Sales totals are not finite")
+    except (ValueError, TypeError, ArithmeticError) as exc:
+        log.error("Malformed current sales data for company %s", user["company_id"])
+        raise HTTPException(
+            status_code=503,
+            detail="Sales source contains invalid financial data",
+        ) from exc
 
     # Build chart data — fill every calendar day (empty days = 0)
     chart_data = []
@@ -456,8 +468,12 @@ async def get_sales_data(
             d = _invoice_date(inv).isoformat()
             if d < cutoff_str:
                 prior_total += _invoice_amount(inv)
+        if not isfinite(prior_total):
+            raise ValueError("Prior sales total is not finite")
         if prior_total > 0:
             vs_prior_pct = round((total_revenue - prior_total) / prior_total * 100, 1)
+            if not isfinite(vs_prior_pct):
+                raise ValueError("Sales comparison is not finite")
     except Exception as exc:
         log.error("Prior-period sales data failed for company %s", user["company_id"])
         raise HTTPException(

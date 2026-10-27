@@ -141,3 +141,11 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - Crucially, live approval-count DB reads and inbox provider reads are **not performed at all** for roles without their permissions, rather than reading data and hiding it after the fact. Missing/unavailable authorized reads remain null; a confirmed zero still uses 0.
 - A sales rep's assigned-account intelligence needs a separately scoped query and cannot be inferred by giving all signed-in employees the company-wide reporting capability. Chat 5 must handle nullable counts and a 503 requiring a privileged refresh, not attempt a direct low-privilege refresh.
 - Regression tests assert role-level denial before provider IO, denied hidden live reads, and maintained owner first-load functionality. The new code is isolated in PR #75, not deployed or merged.
+
+
+## Gate A credential-safe dashboard dependency
+
+- FastAPI resolves dependencies before entering an endpoint. Previous `GET /api/dashboard/summary` used `adapter=Depends(get_adapter)`, meaning even sales_rep/viewer requests against a cached summary could cause service-role lookup, decrypted OAuth credentials and possible Google token refresh before the endpoint checked permissions.
+- The endpoint now uses `adapter=Depends(get_dashboard_adapter)`. That dependency avoids building a provider adapter entirely unless the verified role permits `run_reports`, `trigger_actions` or `view_all`. Cached-only roles receive `None`, can access only their already authorized cached fields, and cannot initiate first-load source sync. An attempted adapter construction failure returns sanitized HTTP 503.
+- HTTP-level regression tests demonstrate that sales_rep/viewer/unknown roles do not trigger `get_adapter` (and therefore never enter credential decrypt/token refresh logic), even with a missing cache; owner permission still allows the connector for live counts.
+- This is read-path authorization, not a complete provider-tenant isolation certification. Backend context must still verify every connector read is scoped to the JWT company's authorized account and assigned territory.

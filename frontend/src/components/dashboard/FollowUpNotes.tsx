@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { Plus, Check, StickyNote, Loader2, X, CalendarDays } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, FollowUpNote } from '../../lib/api';
+import { verifiedBriefingNotes } from '../../lib/sourceEvidence';
 import { Card, CardHeader } from '../ui/Card';
 
 function NoteRow({
@@ -69,6 +70,7 @@ function NoteRow({
 export function FollowUpNotes() {
   const [notes,   setNotes]   = useState<FollowUpNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(false);
   const [text,    setText]    = useState('');
   const [acct,    setAcct]    = useState('');
   const [due,     setDue]     = useState('');
@@ -78,8 +80,13 @@ export function FollowUpNotes() {
 
   useEffect(() => {
     api.dashboard.notes()
-      .then((r) => setNotes(r.notes ?? []))
-      .catch(() => setNotes([]))
+      .then((response) => {
+        const verified = verifiedBriefingNotes(response);
+        if (!verified) throw new Error('Follow-up source evidence is incomplete');
+        setNotes(verified.notes);
+        setError(false);
+      })
+      .catch(() => { setNotes([]); setError(true); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -113,8 +120,9 @@ export function FollowUpNotes() {
         count={pending.length > 0 ? pending.length : undefined}
         action={
           <button
+            disabled={error}
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
+            className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-40"
           >
             {showForm ? <X size={13} /> : <Plus size={13} />}
             {showForm ? 'Cancel' : 'Add note'}
@@ -123,7 +131,7 @@ export function FollowUpNotes() {
       />
 
       {/* Add note form */}
-      {showForm && (
+      {showForm && !error && (
         <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 animate-slide-down space-y-2">
           <input
             ref={inputRef}
@@ -160,6 +168,10 @@ export function FollowUpNotes() {
 
       {loading ? (
         <div className="px-5 py-4 text-sm text-slate-400">Loading…</div>
+      ) : error ? (
+        <p role="alert" className="px-5 py-4 text-sm text-amber-900 bg-amber-50">
+          Follow-up source unavailable. Pending status is unknown.
+        </p>
       ) : notes.length === 0 ? (
         <div className="flex flex-col items-center py-8 text-slate-400">
           <StickyNote size={24} className="mb-2 opacity-40" />

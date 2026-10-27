@@ -102,6 +102,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Expanded local Playwright browser acceptance at mobile width to reject malformed dashboard and approvals responses even on HTTP `200`, and verified keyboard-only navigation from the briefing into the inbox. No external messages or financial writes were made.
 - Local verification: **36** frontend Vitest assertions, typecheck, production web build and browser E2E PASS. Provider-backed data accuracy, canonical API freeze, authorization, screen readers, approval idempotency and audit receipt remain **NOT TESTED**. No staging/production deployment or merge.
 
+## Ninth isolated briefing source-record integrity increment
+
+- The six-card read-only briefing no longer trusts a response merely because its top-level list exists. Sales totals/order counts, follow-up record completion and dates, classified feed entries, the pending-draft queue, and audit event timestamps now have presentation-layer shape checks that mark a malformed **individual source unavailable**. A broken source does not hide verified data from other sections.
+- Shared pending-draft guards now require a `pending` status from the existing pending endpoint. Non-pending records cannot be presented as awaiting human approval. This frontend check is not proof of server authorization or queue idempotency.
+- The first multi-source browser run exposed a full-page crash in the existing Sales Analytics widget (`toFixed` on a string). Corrected the active Sales Analytics, Insights and Follow-up Notes widgets to verify the records they render. Each now displays an explicit source-unavailable message rather than crashing or claiming no activity; an unverified notes read also disables the new-note form.
+- Added eight synthetic Vitest cases across validators and rendered briefing behavior (**44 total**). The localhost Chromium gate now injects simultaneous malformed HTTP `200` rows for sales, notes, feed and audit, while independently checking that valid approvals and account warnings remain visible and that the broader dashboard stays mounted.
+- Canonical schemas still depend on Chats 1–4; no backend/CI contract, provider write, tenant authorization policy, migration, default/integration branch, or deployment changed. Real source freshness and cross-tenant acceptance remain **NOT TESTED**.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -109,7 +117,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 36 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 44 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 20 warnings in pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |
@@ -117,7 +125,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Native Expo mobile-web export | PASS | Expo 51 SPA export with installed `react-native-web` / `react-dom`, clean cache. Synthetic Chromium 390/1024px renders sign-in and fail-closed config; full provider/device acceptance NOT TESTED |
 | Mobile secure API destination | PASS | Four local fixture tests reject release HTTP/localhost, missing/placeholder and userinfo/query/fragment; real device requests NOT TESTED |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
-| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; role-denial, malformed HTTP `200` data, source outages, keyboard navigation, copy-only drafting, billing and onboarding checks |
+| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; role-denial, malformed HTTP `200` summary and individual source rows, source outages, keyboard navigation, copy-only drafting, billing and onboarding checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |
 | Six digest sections source correctness | NOT TESTED | Provider-backed payload, freshness and per-role scope |
 | Approval-then-action idempotency | NOT TESTED | Test-only provider receipt and durable audit state |

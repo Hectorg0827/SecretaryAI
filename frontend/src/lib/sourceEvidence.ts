@@ -1,4 +1,13 @@
-import type { DashboardSummary, Draft, InventoryAlert } from './api';
+import type { DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, SalesSummary } from './api';
+
+export type BriefingSales = Pick<SalesSummary, 'total_revenue' | 'order_count'>;
+export type BriefingFeedEvent = Pick<FeedEvent, 'id' | 'title' | 'event_type' | 'action_type'>;
+export type BriefingAuditEvent = {
+  id: string;
+  event_type: string;
+  created_at: string;
+  metadata?: Record<string, unknown>;
+};
 
 // These are presentation-layer guards, not a replacement for the canonical
 // backend contracts. An incomplete API payload must never become a plausible
@@ -9,6 +18,20 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function count(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function nonempty(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function timestamp(value: unknown): value is string {
+  return nonempty(value) && Number.isFinite(Date.parse(value));
+}
+
+function calendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function inventoryAlert(value: unknown): value is InventoryAlert {
@@ -31,7 +54,7 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
   // Optional counts are unknown if absent or malformed; never silently zero.
   const pendingActions = count(value.pending_actions) ? value.pending_actions : null;
   const unreadEmails = count(value.unread_emails) ? value.unread_emails : null;
-  const timestamp = typeof value.generated_at === 'string' && Number.isFinite(Date.parse(value.generated_at))
+  const generatedAt = timestamp(value.generated_at)
     ? value.generated_at : null;
   return {
     accounts: { healthy: accounts.healthy, slowing: accounts.slowing, at_risk: accounts.at_risk, dormant: accounts.dormant },
@@ -45,7 +68,7 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
     })),
     pending_actions: pendingActions,
     unread_emails: unreadEmails,
-    generated_at: timestamp,
+    generated_at: generatedAt,
     cached: value.cached === true,
   };
 }
@@ -53,9 +76,82 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
 export function verifiedPendingDrafts(value: unknown): Draft[] | null {
   if (!record(value) || !Array.isArray(value.drafts)) return null;
   if (!value.drafts.every((draft: unknown) => record(draft)
-    && typeof draft.id === 'string' && draft.id.length > 0
-    && typeof draft.action_type === 'string' && draft.action_type.length > 0
-    && typeof draft.created_at === 'string' && Number.isFinite(Date.parse(draft.created_at))
+    && nonempty(draft.id)
+    && nonempty(draft.action_type)
+    && draft.status === 'pending'
+    && timestamp(draft.created_at)
     && record(draft.content))) return null;
   return value.drafts as Draft[];
+}
+
+// Only fields actually consumed by the read-only six-card briefing are
+// accepted here; other source consumers keep their own API contract checks.
+export function verifiedBriefingSales(value: unknown): BriefingSales | null {
+  if (!record(value) || typeof value.total_revenue !== 'number'
+    || !Number.isFinite(value.total_revenue) || !count(value.order_count)) return null;
+  return { total_revenue: value.total_revenue, order_count: value.order_count };
+}
+
+export function verifiedBriefingNotes(value: unknown): { notes: FollowUpNote[] } | null {
+  if (!record(value) || !Array.isArray(value.notes)) return null;
+  if (!value.notes.every((note: unknown) => record(note)
+    && nonempty(note.id)
+    && typeof note.text === 'string'
+    && typeof note.done === 'boolean'
+    && timestamp(note.created_at)
+    && (note.due_date == null || calendarDate(note.due_date)))) return null;
+  return { notes: value.notes as FollowUpNote[] };
+}
+
+export function verifiedBriefingFeed(value: unknown): { events: BriefingFeedEvent[] } | null {
+  if (!record(value) || !Array.isArray(value.events)) return null;
+  if (!value.events.every((event: unknown) => record(event)
+    && nonempty(event.id)
+    && nonempty(event.title)
+    && nonempty(event.event_type)
+    && (event.action_type == null || typeof event.action_type === 'string'))) return null;
+  return { events: value.events.map((event: Record<string, unknown>) => ({
+    id: event.id as string,
+    title: event.title as string,
+    event_type: event.event_type as string,
+    action_type: typeof event.action_type === 'string' ? event.action_type : null,
+  })) };
+}
+
+export function verifiedBriefingApprovals(value: unknown): { drafts: Draft[] } | null {
+  const drafts = verifiedPendingDrafts(value);
+  return drafts === null ? null : { drafts };
+}
+
+export function verifiedBriefingAudit(value: unknown): { events: BriefingAuditEvent[] } | null {
+  if (!record(value) || !Array.isArray(value.events)) return null;
+  if (!value.events.every((event: unknown) => record(event)
+    && nonempty(event.id)
+    && nonempty(event.event_type)
+    && timestamp(event.created_at)
+    && (event.metadata == null || record(event.metadata)))) return null;
+  return { events: value.events as BriefingAuditEvent[] };
+}
+
+export function verifiedSalesChart(value: unknown): SalesSummary | null {
+  if (!verifiedBriefingSales(value) || !record(value)
+    || typeof value.avg_order_value !== 'number' || !Number.isFinite(value.avg_order_value)
+    || typeof value.vs_prior_period_pct !== 'number' || !Number.isFinite(value.vs_prior_period_pct)
+    || typeof value.top_account !== 'string'
+    || !Array.isArray(value.chart_data)) return null;
+  if (!value.chart_data.every((point: unknown) => record(point)
+    && calendarDate(point.date)
+    && typeof point.revenue === 'number' && Number.isFinite(point.revenue)
+    && count(point.order_count))) return null;
+  return value as unknown as SalesSummary;
+}
+
+export function verifiedDashboardFeed(value: unknown): { events: FeedEvent[] } | null {
+  if (!verifiedBriefingFeed(value) || !record(value) || !Array.isArray(value.events)) return null;
+  if (!value.events.every((event: unknown) => record(event)
+    && typeof event.body === 'string'
+    && (event.priority === 'high' || event.priority === 'medium' || event.priority === 'low')
+    && typeof event.is_read === 'boolean'
+    && (event.action_label == null || typeof event.action_label === 'string'))) return null;
+  return { events: value.events as FeedEvent[] };
 }

@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { api, SalesSummary } from '../../lib/api';
+import { verifiedSalesChart } from '../../lib/sourceEvidence';
 import { Card, CardHeader } from '../ui/Card';
 import { SkeletonCard } from '../ui/Skeleton';
 
@@ -49,17 +50,25 @@ export function SalesChart() {
   const [data,    setData]    = useState<SalesSummary | null>(null);
   const [days,    setDays]    = useState(30);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(false);
 
   useEffect(() => {
     setLoading(true);
     api.dashboard.sales(days)
-      .then(setData)
-      .catch(() => setData(null))
+      .then((response) => {
+        const verified = verifiedSalesChart(response);
+        if (!verified) throw new Error('Sales chart source evidence is incomplete');
+        setData(verified);
+        setError(false);
+      })
+      .catch(() => { setData(null); setError(true); })
       .finally(() => setLoading(false));
   }, [days]);
 
   if (loading) return <SkeletonCard lines={5} />;
-  if (!data)   return null;
+  if (error || !data) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">
+    Sales analytics source unavailable. Revenue and order totals are unknown.
+  </div>;
 
   const chartData = (data.chart_data ?? []).map((d) => ({
     ...d,

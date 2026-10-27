@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, FeedEvent } from '../../lib/api';
+import { verifiedDashboardFeed } from '../../lib/sourceEvidence';
 
 const PRIORITY_COLORS = {
   high:   'border-l-red-400 bg-red-50',
@@ -16,11 +17,17 @@ const PRIORITY_DOT = {
 export function ProactiveFeed() {
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const reload = () => {
     api.feed.list()
-      .then(r => setEvents(r.events))
-      .catch(() => {})
+      .then((response) => {
+        const verified = verifiedDashboardFeed(response);
+        if (!verified) throw new Error('Insights source evidence is incomplete');
+        setEvents(verified.events);
+        setError(false);
+      })
+      .catch(() => { setEvents([]); setError(true); })
       .finally(() => setLoading(false));
   };
 
@@ -35,6 +42,9 @@ export function ProactiveFeed() {
   };
 
   if (loading) return <div className="h-32 bg-white rounded-xl border border-slate-100 animate-pulse" />;
+  if (error) return <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+    Insights source unavailable. No empty-feed conclusion can be drawn.
+  </div>;
   if (!events.length) return (
     <div className="bg-white rounded-xl border border-slate-100 p-4 text-sm text-slate-400 text-center">
       No new insights

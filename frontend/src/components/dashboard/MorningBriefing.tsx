@@ -1,27 +1,25 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type DashboardSummary, type FeedEvent, type FollowUpNote, type SalesSummary } from '../../lib/api';
-
-type AuditEvent = {
-  id: string;
-  event_type: string;
-  created_at: string;
-  metadata?: Record<string, unknown>;
-};
+import { api, type DashboardSummary, type FollowUpNote } from '../../lib/api';
+import {
+  verifiedBriefingSales, verifiedBriefingNotes, verifiedBriefingFeed,
+  verifiedBriefingApprovals, verifiedBriefingAudit,
+  type BriefingSales, type BriefingFeedEvent, type BriefingAuditEvent,
+} from '../../lib/sourceEvidence';
 
 type ReadState<T> = { status: 'loading' | 'ready' | 'unavailable'; data: T | null };
 const loading = <T,>(): ReadState<T> => ({ status: 'loading', data: null });
-const settled = <T,>(result: PromiseSettledResult<T>, valid: (value: T) => boolean): ReadState<T> =>
-  result.status === 'fulfilled' && valid(result.value)
-    ? { status: 'ready', data: result.value }
-    : { status: 'unavailable', data: null };
+const settled = <T,>(result: PromiseSettledResult<unknown>, verify: (value: unknown) => T | null): ReadState<T> => {
+  const data = result.status === 'fulfilled' ? verify(result.value) : null;
+  return data === null ? { status: 'unavailable', data: null } : { status: 'ready', data };
+};
 
 export type BriefingSources = {
-  sales: ReadState<SalesSummary>;
+  sales: ReadState<BriefingSales>;
   notes: ReadState<{ notes: FollowUpNote[] }>;
-  feed: ReadState<{ events: FeedEvent[] }>;
+  feed: ReadState<{ events: BriefingFeedEvent[] }>;
   approvals: ReadState<{ drafts: { id: string }[] }>;
-  audit: ReadState<{ events: AuditEvent[] }>;
+  audit: ReadState<{ events: BriefingAuditEvent[] }>;
 };
 
 function localDay(date = new Date()): string {
@@ -33,7 +31,7 @@ export function dueFollowUps(notes: FollowUpNote[], today: string): FollowUpNote
   return notes.filter((note) => !note.done && note.due_date && note.due_date.slice(0, 10) <= today);
 }
 
-export function verifiedOpportunities(events: FeedEvent[]): FeedEvent[] {
+export function verifiedOpportunities(events: BriefingFeedEvent[]): BriefingFeedEvent[] {
   // Priority alone does not establish an opportunity. Require explicit classification.
   return events.filter((event) => event.event_type === 'opportunity' || event.action_type === 'opportunity');
 }
@@ -84,15 +82,15 @@ export function MorningBriefing({ summary, summaryLoading }: {
         api.dashboard.notes(),
         api.feed.list(),
         api.actions.pending(),
-        api.get<{ events: AuditEvent[] }>('/api/admin/audit-log?page=1&page_size=25'),
+        api.get<unknown>('/api/admin/audit-log?page=1&page_size=25'),
       ] as const);
       if (!current) return;
       setSources({
-        sales: settled(results[0], (value) => Number.isFinite(value.total_revenue) && Number.isFinite(value.order_count)),
-        notes: settled(results[1], (value) => Array.isArray(value.notes)),
-        feed: settled(results[2], (value) => Array.isArray(value.events)),
-        approvals: settled(results[3], (value) => Array.isArray(value.drafts)),
-        audit: settled(results[4], (value) => Array.isArray(value.events)),
+        sales: settled(results[0], verifiedBriefingSales),
+        notes: settled(results[1], verifiedBriefingNotes),
+        feed: settled(results[2], verifiedBriefingFeed),
+        approvals: settled(results[3], verifiedBriefingApprovals),
+        audit: settled(results[4], verifiedBriefingAudit),
       });
     }
     void readSources();

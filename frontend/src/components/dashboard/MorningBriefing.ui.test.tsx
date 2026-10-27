@@ -47,14 +47,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.sales.mockResolvedValue({ total_revenue: 1234, order_count: 4 });
   mocks.notes.mockResolvedValue({ notes: [
-    { id: 'due', text: 'Synthetic decision', due_date: '2020-01-01', done: false },
-    { id: 'done', text: 'Synthetic completed', due_date: '2020-01-01', done: true },
+    { id: 'due', text: 'Synthetic decision', due_date: '2020-01-01', done: false, created_at: '2026-10-26T12:00:00Z' },
+    { id: 'done', text: 'Synthetic completed', due_date: '2020-01-01', done: true, created_at: '2026-10-26T12:00:00Z' },
   ] });
   mocks.feed.mockResolvedValue({ events: [
     { id: 'insight', event_type: 'insight', action_type: null, title: 'Ordinary headline' },
     { id: 'opportunity', event_type: 'opportunity', action_type: null, title: 'Synthetic opportunity' },
   ] });
-  mocks.pending.mockResolvedValue({ drafts: [{ id: 'fixture-pending' }] });
+  mocks.pending.mockResolvedValue({ drafts: [{
+    id: 'fixture-pending', action_type: 'draft_purchase_order', content: {},
+    status: 'pending', created_at: '2026-10-26T12:00:00Z',
+  }] });
   mocks.audit.mockResolvedValue({ events: [{
     id: 'audit-1', event_type: 'workflow_failed', created_at: '2026-10-26T12:30:00Z',
   }] });
@@ -102,5 +105,26 @@ describe('six-section owner briefing (synthetic API-only)', () => {
     const node = await render(summary);
     expect(node.querySelector('[aria-label="4 · Scoreboard"]')?.textContent).toContain('Source unavailable');
     expect(node.querySelector('[aria-label="4 · Scoreboard"]')?.textContent).not.toContain('$0.00');
+  });
+
+  it('isolates malformed feed and audit events without crashing other cards', async () => {
+    mocks.feed.mockResolvedValue({ events: [null, { id: 'event', event_type: 'opportunity', title: 'Synthetic misleading headline' }] });
+    mocks.audit.mockResolvedValue({ events: [{ id: 'bad-audit', event_type: 'draft_approved', created_at: 'not-a-date' }] });
+    const node = await render(summary);
+    expect(node.querySelector('[aria-label="3 · Opportunities"]')?.textContent).toContain('Source unavailable');
+    expect(node.textContent).not.toContain('Synthetic misleading headline');
+    expect(node.querySelector('[aria-label="6 · Actions & failures"]')?.textContent).toContain('Source unavailable');
+    expect(node.querySelector('[aria-label="4 · Scoreboard"]')?.textContent).toContain('$1,234.00');
+  });
+
+  it('rejects incomplete notes and approvals independently of healthy source reads', async () => {
+    mocks.notes.mockResolvedValue({ notes: [{ id: 'note', done: 'false', due_date: '2026-02-30' }] });
+    mocks.pending.mockResolvedValue({ drafts: [{ id: 'approval', status: 'approved' }] });
+    const node = await render(summary);
+    const decisions = node.querySelector('[aria-label="5 · Today’s decisions"]')?.textContent;
+    expect(decisions).toContain('Source unavailable');
+    expect(decisions).not.toContain('0 drafts waiting for human approval');
+    expect(decisions).not.toContain('0 unfinished follow-ups');
+    expect(node.querySelector('[aria-label="3 · Opportunities"]')?.textContent).toContain('Synthetic opportunity');
   });
 });

@@ -29,7 +29,8 @@ def _fake_role_token(role: str) -> str:
 
 
 def _respond(route, *, summary_error: bool = False, summary_malformed: bool = False,
-             approvals_malformed: bool = False, role: str = "owner",
+             approvals_malformed: bool = False, briefing_malformed: bool = False,
+             role: str = "owner",
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              auth_fields_seen: list[tuple[str, ...]] | None = None) -> None:
@@ -66,6 +67,18 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
         return
     if approvals_malformed and path == "/api/actions/pending":
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"drafts": None}))
+        return
+    if briefing_malformed and path in (
+        "/api/dashboard/sales", "/api/dashboard/notes", "/api/feed/", "/api/admin/audit-log",
+    ):
+        invalid = {
+            "/api/dashboard/sales": {"total_revenue": "0", "order_count": 0},
+            "/api/dashboard/notes": {"notes": [{"id": "incomplete", "done": "false"}]},
+            "/api/feed/": {"events": [None]},
+            "/api/admin/audit-log": {"events": [{"id": "unverified", "event_type": "draft_approved",
+                                                   "created_at": "not-a-date"}]},
+        }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(invalid[path]))
         return
     if work_error and path in ("/api/actions/pending", "/api/dashboard/notes", "/api/inventory/alerts"):
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic source outage"}))
@@ -127,6 +140,7 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
 
 def _context(browser, role: str, width: int, *, summary_error: bool = False,
              summary_malformed: bool = False, approvals_malformed: bool = False,
+             briefing_malformed: bool = False,
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              authenticated: bool = True,
@@ -136,7 +150,8 @@ def _context(browser, role: str, width: int, *, summary_error: bool = False,
         context.add_init_script(f"localStorage.setItem('secretary_token', {json.dumps(_fake_role_token(role))});")
     def mock_route(route):
         _respond(route, summary_error=summary_error, summary_malformed=summary_malformed,
-                 approvals_malformed=approvals_malformed, role=role,
+                 approvals_malformed=approvals_malformed,
+                 briefing_malformed=briefing_malformed, role=role,
                  email_fixture=email_fixture, work_error=work_error,
                  requests_seen=requests_seen, auth_fields_seen=auth_fields_seen)
     context.route("**/api/**", mock_route)
@@ -224,6 +239,31 @@ def main() -> None:
                     assert page.get_by_role("region", name="5 · Today’s decisions").get_by_text("Source unavailable", exact=False).count() > 0
                 finally:
                     malformed_approvals.close()
+
+                # A well-formed top-level array can still contain malformed
+                # rows. Reject each affected read independently while leaving
+                # valid approvals and dashboard inventory evidence visible.
+                malformed_requests: list[str] = []
+                malformed_digest = _context(browser, "owner", 390, briefing_malformed=True,
+                                            requests_seen=malformed_requests)
+                try:
+                    page = malformed_digest.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    for title in ("3 · Opportunities", "4 · Scoreboard", "6 · Actions & failures"):
+                        page.get_by_role("region", name=title).get_by_text("Source unavailable", exact=False).wait_for()
+                    decisions = page.get_by_role("region", name="5 · Today’s decisions")
+                    decisions.get_by_text("Source unavailable", exact=False).wait_for()
+                    decisions.get_by_text("1 drafts waiting for human approval", exact=False).wait_for()
+                    page.get_by_role("region", name="1 · Red flags").get_by_text("1 at-risk accounts").wait_for()
+                    for warning in ("Sales analytics source unavailable", "Insights source unavailable",
+                                    "Follow-up source unavailable"):
+                        assert page.get_by_role("alert").get_by_text(warning, exact=False).count() > 0
+                    assert page.get_by_text("Something went wrong").count() == 0
+                    assert {"/api/dashboard/sales", "/api/dashboard/notes", "/api/feed/",
+                            "/api/admin/audit-log"}.issubset(set(malformed_requests))
+                    assert page.get_by_text("$0.00", exact=True).count() == 0
+                finally:
+                    malformed_digest.close()
 
                 # Semantic links in the six-card briefing support keyboard-only
                 # navigation into the unified inbox, without authorizing action.

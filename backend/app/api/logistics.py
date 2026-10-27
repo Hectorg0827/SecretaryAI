@@ -1475,3 +1475,8 @@ def _serialize_alert(alert) -> Optional[dict]:
 from app.api import warehouse as warehouse_preview_routes
 
 router.include_router(warehouse_preview_routes.router, prefix="/warehouse", tags=["warehouse"])
+
+# Return reviews are preview-only until canonical tenant stock/credit approvals.
+from app.api import returns as returns_preview_routes
+
+router.include_router(returns_preview_routes.router, prefix="/returns", tags=["returns"])

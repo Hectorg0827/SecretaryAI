@@ -35,12 +35,30 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def get_dashboard_adapter(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Do not decrypt OAuth credentials for cached-only dashboard viewers.
+
+    FastAPI resolves dependencies before the endpoint body runs. Checking
+    roles only inside get_dashboard_summary is too late to prevent
+    get_adapter from fetching provider tokens or refreshing an OAuth token.
+    Restricted roles can read their permitted cached fields without
+    receiving a provider adapter.
+    """
+    perms = ROLE_PERMISSIONS.get(user.get("role", "viewer"), set())
+    if "run_reports" not in perms and "trigger_actions" not in perms and "view_all" not in perms:
+        return None
+    return get_adapter(user=user, db=db)
+
+
 # ── /summary ──────────────────────────────────────────────────────────────────
 
 @router.get("/summary")
 async def get_dashboard_summary(
     user: dict = Depends(get_current_user),
-    adapter=Depends(get_adapter),
+    adapter=Depends(get_dashboard_adapter),
     db=Depends(get_db),
 ):
     """
@@ -73,6 +91,10 @@ async def get_dashboard_summary(
             raise HTTPException(
                 status_code=503,
                 detail="Dashboard snapshot unavailable; authorized refresh required",
+            )
+        if adapter is None:
+            raise HTTPException(
+                status_code=503, detail="Dashboard provider unavailable"
             )
         log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
         try:

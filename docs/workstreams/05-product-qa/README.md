@@ -78,6 +78,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Local tests: **12** desktop Vitest tests across two suites (including mocked native vault failure and explicit QB consent), desktop typecheck/lint (**0 errors, 1 pre-existing warning**)/build PASS; mobile typecheck PASS; **4** pure native URL validation tests PASS. Android JS bundle (`expo export --platform android`) and iOS JS bundle (`expo export --platform ios`) PASS with synthetic HTTPS configuration. **Actual devices, installed binaries, screen readers, Conductor, and provider-backed MFA remain NOT TESTED**. Mobile-web Expo export is blocked by missing `react-native-web`/`react-dom` dependencies; main web frontend is separate and not a substitute for that test.
 - The Auth0 MFA security guidance was used only as general fail-closed design review; this repository retains its existing backend auth, and **no Auth0 provider or SDK was introduced**.
 
+## Sixth isolated mobile-web runtime and release reproducibility increment
+
+- Added the SDK 51-compatible `react-native-web@0.19.10` and `react-dom@18.2.0` dependencies. Set Expo's web output to `single` for the app's actual non-router `App.tsx` entry. The prior `static` mode incorrectly expected an Expo Router route tree and could report an error even with process exit code 0.
+- Discovered a real blank-screen bug during local Chromium smoke testing: `expo-secure-store` methods are native-only and the web startup attempted to use them. The web client now holds its bearer token **only in this tab's memory**; a tab reload requires a fresh sign-in. Native iOS/Android still use SecureStore.
+- The compiled mobile-web SPA now renders at 390px and 1024px without JavaScript exceptions or horizontal overflow. A synthetic-only Playwright case verified invalid then successful MFA, exact no-password second-step request fields, a role-limited viewer dashboard, and account/security Settings access. All requests to the synthetic API host were intercepted; no provider or staging connection was made.
+- A second SPA exported without any API URL now displays a fail-closed configuration screen with **no** sign-in fields or outbound requests. A normal repeated Expo export unexpectedly reused the previous environment's Metro cache and API base URL; `--clear` produced the correct result. The reproducible `mobile npm run export:qa` script includes `--clear`; release engineering must verify the embedded destination and exact artifact hash every time an environment changes.
+- The mobile-web **bundle and synthetic browser** blocker is resolved, but device installs, native screen readers, test-only backend identity and real session revocation remain **NOT TESTED**. No artifact was deployed or signed.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -90,7 +98,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |
 | Android/iOS JS release bundles | PASS | Local Expo exports compile with synthetic HTTPS URL; no emulator/device, App Store or signed package proof |
-| Native Expo mobile-web export | FAIL | Required `react-native-web` and `react-dom` dependencies missing; separate existing web frontend does not validate this surface |
+| Native Expo mobile-web export | PASS | Expo 51 SPA export with installed `react-native-web` / `react-dom`, clean cache. Synthetic Chromium 390/1024px renders sign-in and fail-closed config; full provider/device acceptance NOT TESTED |
 | Mobile secure API destination | PASS | Four local fixture tests reject release HTTP/localhost, missing/placeholder and userinfo/query/fragment; real device requests NOT TESTED |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
 | Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; outage, role-denial, copy-only drafting, billing and onboarding checks |

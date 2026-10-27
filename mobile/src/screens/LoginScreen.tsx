@@ -186,6 +186,7 @@ export default function LoginScreen() {
 
         <Text style={styles.footer}>
           Contact your administrator to set up your account.
+          {Platform.OS === 'web' ? ' Web sessions end when this tab reloads.' : ''}
         </Text>
       </KeyboardAvoidingView>
     </SafeAreaView>

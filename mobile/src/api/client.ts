@@ -1,7 +1,12 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { validatedApiBase } from './connectionConfig';
 
 const TOKEN_KEY = 'secretary_access_token';
+// Expo SecureStore is native-only. In a web preview, keep the bearer token in
+// memory for this tab; never silently fall back to localStorage or expose it in
+// a URL. A reload requires fresh authentication.
+let webSessionToken: string | null = null;
 
 // No unverified destination is allowed to receive an access token.
 export let API_BASE = '';
@@ -11,14 +16,23 @@ export function setApiBase(url: string) {
 }
 
 export async function getToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return webSessionToken;
   return SecureStore.getItemAsync(TOKEN_KEY);
 }
 
 export async function setToken(token: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    webSessionToken = token;
+    return;
+  }
   await SecureStore.setItemAsync(TOKEN_KEY, token);
 }
 
 export async function clearToken(): Promise<void> {
+  if (Platform.OS === 'web') {
+    webSessionToken = null;
+    return;
+  }
   await SecureStore.deleteItemAsync(TOKEN_KEY);
 }
 

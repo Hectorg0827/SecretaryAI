@@ -40,13 +40,14 @@ All statuses are **NOT TESTED** until a tester records exact build, device/OS, t
 - Desktop 12 Vitest assertions, TypeScript/lint, and local unsigned webview bundle: **PASS (local only)**.
 - Mobile four endpoint-validation assertions and TypeScript: **PASS (local only)**.
 - Android/iOS Expo JavaScript export: **PASS (local only)**; no native package, simulator or physical device execution.
-- Expo mobile-web export: **FAIL (toolchain)**, missing `react-native-web`/`react-dom`; separate `frontend/` web app remains independently testable.
+- Expo mobile-web SPA export and synthetic 390px/1024px Chromium: **PASS (local only)** after dependency installation, SPA output selection and memory-only web token handling. One test-only MFA retry and role navigation completed with all external requests intercepted; provider-backed authentication is **NOT TESTED**.
+- Environment-switch reproducibility: **PASS (local only)** only with Expo `--clear` and an explicitly checked artifact. Without cache clearing a second export had reused the previous endpoint; release scripts must not omit this flag.
 
 ## Contract / signoff requests
 
 - **Chat 1:** MFA step-two replay prevention and throttling; enforce session revocation across clients, tenant isolation, role gates, audit/idempotency. Freeze staged gate before any real acceptance.
 - **Chat 2:** Conductor allowed auth-flow domain(s), signed install path, connection states distinct from first proven sync and as-of/source evidence. Backend status saying `active` alone is not financial record correctness.
 - **Chat 3/4:** Frozen read and safe action contract for the domain screens, permission mapping for finance/logistics/compliance, especially sales-rep record assignment.
-- **Chat 5:** Remove mobile-web build dependency blocker or explicitly descope that mobile-specific web target; run keyboard, screen reader, emulator, device tests with owner-approved synthetic accounts.
+- **Chat 5:** Mobile-web bundle blocker resolved; run keyboard, screen reader, emulator and physical-device tests with owner-approved synthetic accounts. Verify exact API origin from every release artifact after cache-cleared export.
 
 Owner approval field: **NOT SIGNED**. Gate A accepted: **NO**. Staging deployment approval for this workstream: **NO**. Production launch approval: **NO**.

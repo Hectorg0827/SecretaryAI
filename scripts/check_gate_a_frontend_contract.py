@@ -38,7 +38,7 @@ def check_contract(
         problems.append("Web API client must request /api/briefing/today")
     if not re.search(r"\bbriefing\s*:\s*\{[\s\S]*?\btoday\s*:", frontend_api):
         problems.append("Web API client must expose api.briefing.today()")
-    if not re.search(r"\bBriefingToday(?:Response|V1)\b", frontend_api):
+    if not re.search(r"\bBriefingToday(?:Response(?:V1)?|V1)\b", frontend_api):
         problems.append("Web API must publish a typed BriefingToday v1 response")
 
     if not re.search(r"\bapi\.briefing\.today\s*\(", briefing_ui):
@@ -60,11 +60,22 @@ def check_contract(
     # The server explicitly returns accounts=null for roles without
     # company-wide account visibility. TypeScript must not assume object-only.
     for name, src in (("Web", frontend_api), ("Mobile", mobile_api)):
-        match = re.search(
-            r"\baccounts\s*:\s*\{[^{}]*\}\s*\|\s*null\b", src,
-            flags=re.MULTILINE,
+        # Restrict the search to DashboardSummary, not unrelated interfaces
+        # (e.g. AccountSearchResponse). Allow inline object type or named type,
+        # including the equivalent "null | AccountHealth" order.
+        interface = re.search(
+            r"\b(?:export\s+)?interface\s+DashboardSummary\b[\s\S]*?\{",
+            src,
         )
-        if not match:
+        body = src[interface.end():] if interface else ""
+        account_decl = re.search(
+            r"\baccounts\s*:\s*"
+            r"(?:(?:\{[^{}]*\}|[A-Za-z_$][\w$]*)\s*\|\s*null"
+            r"|null\s*\|\s*(?:\{[^{}]*\}|[A-Za-z_$][\w$]*))"
+            r"\s*[;,]",
+            body,
+        )
+        if not account_decl:
             problems.append(f"{name} DashboardSummary.accounts must explicitly allow null")
 
     return problems

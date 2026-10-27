@@ -33,13 +33,18 @@ Supplier Quality Claim
 
 from __future__ import annotations
 
+import hashlib
+import math
+import re
 import statistics
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
 
 class ReturnCategory(str, Enum):
+    UNCLASSIFIED = "unclassified"
     DEFECTIVE = "defective"
     WRONG_ITEM = "wrong_item"
     OVERSTOCK = "overstock"
@@ -51,6 +56,7 @@ class ReturnCategory(str, Enum):
 
 
 class DispositionDecision(str, Enum):
+    HOLD_FOR_INSPECTION = "hold_for_inspection"
     RESTOCK = "restock"
     VENDOR_RETURN = "vendor_return"
     LIQUIDATE = "liquidate"
@@ -95,8 +101,13 @@ class ReturnRecord:
             "po_number": self.po_number,
             "return_date": self.return_date,
             "disposition": self.disposition.value if self.disposition else None,
-            "credit_issued": self.credit_issued,
-            "supplier_claim_filed": self.supplier_claim_filed,
+            "credit_issued_claimed": self.credit_issued,
+            "supplier_claim_filed_claimed": self.supplier_claim_filed,
+            "credit_status_verified": False,
+            "supplier_claim_status_verified": False,
+            "disposition_status_verified": False,
+            "source_evidence_verified": False,
+            "status": "analysis_only",
         }
 
 
@@ -105,8 +116,8 @@ class ReturnsMetrics:
     """Aggregate returns performance metrics for a period."""
     total_returns: int
     total_return_value: float
-    return_rate_pct: float              # % of revenue
-    avg_processing_time_days: float
+    return_rate_pct: Optional[float]    # unknown if revenue unavailable
+    avg_processing_time_days: Optional[float]
 
     by_category: dict[str, dict]        # category → {count, value, pct_of_returns}
     by_supplier: dict[str, dict]        # supplier → {count, value, defect_rate}
@@ -120,15 +131,21 @@ class ReturnsMetrics:
         return {
             "total_returns": self.total_returns,
             "total_return_value": round(self.total_return_value, 2),
-            "return_rate_pct": round(self.return_rate_pct, 2),
-            "avg_processing_time_days": round(self.avg_processing_time_days, 1),
+            "return_rate_pct": round(self.return_rate_pct, 2) if self.return_rate_pct is not None else None,
+            "avg_processing_time_days": round(self.avg_processing_time_days, 1) if self.avg_processing_time_days is not None else None,
+            "return_rate_basis_verified": False,
+            "processing_time_observed": False,
+            "status": "analysis_only",
+            "source_data_verified": False,
+            "requires_human_review": True,
             "by_category": self.by_category,
             "by_supplier": self.by_supplier,
             "by_sku": self.by_sku,
             "by_customer": self.by_customer,
             "top_return_drivers": self.top_return_drivers,
             "financial_impact": {
-                k: round(v, 2) for k, v in self.financial_impact.items()
+                k: round(v, 2) if type(v) in (int, float) else v
+                for k, v in self.financial_impact.items()
             },
         }
 
@@ -171,6 +188,14 @@ class SupplierQualityClaim:
             "claim_amount": round(self.claim_amount, 2),
             "claim_basis": self.claim_basis,
             "narrative": self.narrative,
+            "status": "analysis_only",
+            "source_evidence_verified": False,
+            "supplier_terms_verified": False,
+            "claim_filed": False,
+            "credit_issued": False,
+            "financial_write_performed": False,
+            "requires_human_review": True,
+            "idempotency_enforced_by_ledger": False,
         }
 
 
@@ -223,17 +248,21 @@ class ReturnsManagementEngine:
 
     def classify_return(self, record: ReturnRecord) -> ReturnCategory:
         """Classify a return record by matching reason text to category keywords."""
+        if not isinstance(record.return_reason, str):
+            raise ValueError("Return reason must be text")
         reason_lower = record.return_reason.lower()
         scores: dict[ReturnCategory, int] = {}
 
         for category, keywords in self.CATEGORY_KEYWORDS.items():
-            score = sum(1 for kw in keywords if kw.lower() in reason_lower)
+            score = sum(1 for kw in keywords if re.search(
+                r"(?<!\w)" + re.escape(kw.lower()) + r"(?!\w)", reason_lower
+            ))
             if score > 0:
                 scores[category] = score
 
         if scores:
             return max(scores, key=lambda c: scores[c])
-        return ReturnCategory.OVERSTOCK   # default fallback
+        return ReturnCategory.UNCLASSIFIED  # no inferred commercial justification
 
     # ── Disposition ───────────────────────────────────────────────────────────
 
@@ -248,6 +277,9 @@ class ReturnsManagementEngine:
         Recommend what to do with a returned item.
         """
         category = record.category or self.classify_return(record)
+
+        if category == ReturnCategory.UNCLASSIFIED:
+            return DispositionDecision.HOLD_FOR_INSPECTION
 
         # Expired product — destroy
         if category == ReturnCategory.EXPIRED:
@@ -282,7 +314,7 @@ class ReturnsManagementEngine:
 
         # Quality concern — inspect before decision; default to vendor return
         if category == ReturnCategory.QUALITY_CONCERN:
-            return DispositionDecision.VENDOR_RETURN
+            return DispositionDecision.HOLD_FOR_INSPECTION
 
         return DispositionDecision.RESTOCK
 
@@ -292,20 +324,29 @@ class ReturnsManagementEngine:
         self,
         returns: list[ReturnRecord],
         total_revenue: float,
-        avg_processing_days: float = 5.0,
+        avg_processing_days: Optional[float] = None,
         supplier_names: dict[str, str] | None = None,
     ) -> ReturnsMetrics:
         """Aggregate returns data into dashboard metrics."""
+        self._validate_records(returns)
+        if type(total_revenue) not in (int, float) or not math.isfinite(total_revenue) or total_revenue < 0:
+            raise ValueError("Total revenue must be a finite nonnegative amount")
+        if avg_processing_days is not None and (
+            type(avg_processing_days) not in (int, float)
+            or not math.isfinite(avg_processing_days) or avg_processing_days < 0
+        ):
+            raise ValueError("Processing duration must be finite and nonnegative")
         if not returns:
             return ReturnsMetrics(
                 total_returns=0, total_return_value=0.0,
-                return_rate_pct=0.0, avg_processing_time_days=0.0,
+                return_rate_pct=0.0 if total_revenue > 0 else None,
+                avg_processing_time_days=avg_processing_days,
                 by_category={}, by_supplier={}, by_sku={}, by_customer={},
                 top_return_drivers=[], financial_impact={},
             )
 
         total_value = sum(r.return_value for r in returns)
-        return_rate = (total_value / total_revenue * 100) if total_revenue else 0.0
+        return_rate = (total_value / total_revenue * 100) if total_revenue > 0 else None
 
         # ── By category ──────────────────────────────────────────────────────
         by_cat: dict[str, dict] = {}
@@ -337,6 +378,7 @@ class ReturnsManagementEngine:
             data["defect_rate_pct"] = round(
                 data["defective_count"] / max(data["count"], 1) * 100, 1
             )
+            data["defect_rate_basis"] = "share_of_return_records_not_received_units"
             data["value"] = round(data["value"], 2)
 
         # ── By SKU ───────────────────────────────────────────────────────────
@@ -384,6 +426,9 @@ class ReturnsManagementEngine:
             "estimated_recovery": restockable_value * 0.85,
             "estimated_net_cost": net_cost + handling_cost,
             "handling_cost_estimate": handling_cost,
+            "actual_recovery_amount": None,
+            "actual_recovery_verified": False,
+            "recovery_assumption": "illustrative_85pct_of_proposed_restock_or_vendor_return",
         }
 
         return ReturnsMetrics(
@@ -398,6 +443,27 @@ class ReturnsManagementEngine:
             top_return_drivers=drivers,
             financial_impact=financial_impact,
         )
+
+    @staticmethod
+    def _validate_records(returns: list[ReturnRecord]) -> None:
+        """Reject duplicate, impossible or malformed caller observations."""
+        ids: set[str] = set()
+        for item in returns:
+            if not isinstance(item, ReturnRecord):
+                raise ValueError("Return observations must be typed records")
+            if not isinstance(item.return_id, str) or not item.return_id.strip():
+                raise ValueError("Return ID is required")
+            if item.return_id in ids:
+                raise ValueError("Duplicate return ID in the snapshot")
+            ids.add(item.return_id)
+            if type(item.units) is not int or item.units <= 0:
+                raise ValueError("Return units must be a positive integer")
+            if type(item.unit_cost) not in (int, float) or not math.isfinite(item.unit_cost) or item.unit_cost < 0:
+                raise ValueError("Return unit cost must be finite and nonnegative")
+            for label in ("customer_id", "supplier_id", "sku", "return_reason"):
+                value = getattr(item, label)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"Return {label} must be nonempty text")
 
     # ── Supplier Quality Claim ────────────────────────────────────────────────
 
@@ -416,20 +482,46 @@ class ReturnsManagementEngine:
         Auto-generate a supplier quality claim if defect rate exceeds threshold.
         Returns None if no claim is warranted.
         """
-        import uuid
-        from datetime import date
+        self._validate_records(returns)
+        if type(total_units_received) is not int or total_units_received <= 0:
+            raise ValueError("Positive verified-basis received units are required")
+        if (type(agreed_defect_threshold_pct) not in (int, float)
+                or not math.isfinite(agreed_defect_threshold_pct)
+                or not 0 <= agreed_defect_threshold_pct <= 100):
+            raise ValueError("Defect threshold must be a percentage in [0, 100]")
+        if claim_basis not in {"credit", "replacement", "discount"}:
+            raise ValueError("Unknown supplier claim basis")
+        try:
+            start = date.fromisoformat(period_start)
+            end = date.fromisoformat(period_end)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Claim period must contain valid ISO dates") from exc
+        if start > end:
+            raise ValueError("Claim period start exceeds end")
+        if not isinstance(supplier_id, str) or not supplier_id.strip():
+            raise ValueError("Supplier ID is required")
+        if not isinstance(supplier_name, str) or not supplier_name.strip():
+            raise ValueError("Supplier name is required")
+        for item in returns:
+            try:
+                observed_date = date.fromisoformat(item.return_date)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Return date must be independently checked as a valid ISO date") from exc
+            if not start <= observed_date <= end:
+                raise ValueError("Return event is outside the selected claim period")
 
         defective_returns = [
             r for r in returns
             if r.supplier_id == supplier_id
-            and r.category in (ReturnCategory.DEFECTIVE, ReturnCategory.QUALITY_CONCERN,
-                               ReturnCategory.DAMAGED_IN_TRANSIT)
+            and r.category in (ReturnCategory.DEFECTIVE, ReturnCategory.DAMAGED_IN_TRANSIT)
         ]
 
         if not defective_returns:
             return None
 
         defective_units = sum(r.units for r in defective_returns)
+        if defective_units > total_units_received:
+            raise ValueError("Defect units exceed received units; reconcile units and returns")
         defective_value = sum(r.return_value for r in defective_returns)
         defect_rate = (defective_units / max(total_units_received, 1)) * 100
 
@@ -439,9 +531,16 @@ class ReturnsManagementEngine:
         excess_units = defective_units - int(total_units_received * agreed_defect_threshold_pct / 100)
         claim_amount = sum(r.return_value for r in defective_returns)
 
-        po_numbers = list({r.po_number for r in defective_returns if r.po_number})
-        lot_numbers = list({r.lot_number for r in defective_returns if r.lot_number})
-        return_ids = [r.return_id for r in defective_returns]
+        po_numbers = sorted({r.po_number for r in defective_returns if r.po_number})
+        lot_numbers = sorted({r.lot_number for r in defective_returns if r.lot_number})
+        return_ids = sorted(r.return_id for r in defective_returns)
+        candidate_key = "|".join([
+            self.company_id, supplier_id, period_start, period_end,
+            str(total_units_received), str(agreed_defect_threshold_pct), claim_basis,
+            *(f"{r.return_id}:{r.units}:{r.unit_cost}:{r.po_number}:{r.lot_number}"
+              for r in sorted(defective_returns, key=lambda item: item.return_id)),
+        ])
+        claim_id = "candidate-" + hashlib.sha256(candidate_key.encode("utf-8")).hexdigest()[:24]
 
         narrative = (
             f"During the period {period_start} to {period_end}, we received {defective_units} "
@@ -455,10 +554,10 @@ class ReturnsManagementEngine:
         )
 
         return SupplierQualityClaim(
-            claim_id=str(uuid.uuid4()),
+            claim_id=claim_id,
             supplier_id=supplier_id,
             supplier_name=supplier_name,
-            claim_date=date.today().isoformat(),
+            claim_date=datetime.now(timezone.utc).date().isoformat(),
             period_start=period_start,
             period_end=period_end,
             defective_units=defective_units,

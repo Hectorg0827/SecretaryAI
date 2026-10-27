@@ -16,6 +16,7 @@ from app.auth.rbac import require_permission
 from app.domain.briefing_contract import (
     BriefingSection, DigestEntry, EvidenceRef, RoleBriefing,
 )
+from app.domain.briefing_wire import BriefingTodayResponseV1
 from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness
 
 router = APIRouter()
@@ -125,7 +126,7 @@ def build_owner_briefing(
     return response
 
 
-@router.get("/today")
+@router.get("/today", response_model=BriefingTodayResponseV1)
 async def get_today_briefing(
     user: dict = Depends(require_permission("view_financials")),
     db=Depends(get_db),

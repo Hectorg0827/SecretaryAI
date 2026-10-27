@@ -62,3 +62,30 @@ async def test_scan_consumes_real_unified_adapter_contract():
 async def test_source_failure_never_returns_false_all_clear():
     with pytest.raises(RuntimeError, match="accounting source unavailable"):
         await run_overnight_scan("co-1", StrictUnifiedAdapter(fail=True))
+
+
+class CreditBalanceAdapter(StrictUnifiedAdapter):
+    async def get_all_customers(self):
+        credit = _customer("QB-C", "Customer in credit")
+        credit.balance = Decimal("-75.00")
+        return [credit, *await super().get_all_customers()]
+
+
+@pytest.mark.asyncio
+async def test_unscorable_account_does_not_abort_the_overnight_scan(monkeypatch):
+    from app.scheduler import overnight_scan
+
+    real_score = overnight_scan.score_account
+
+    def score(**kwargs):
+        # Mirrors the data-finance contract, which rejects credit balances.
+        if kwargs["current_balance"] < 0:
+            raise ValueError("current_balance is missing or invalid")
+        return real_score(**kwargs)
+
+    monkeypatch.setattr(overnight_scan, "score_account", score)
+    result = await run_overnight_scan("co-1", CreditBalanceAdapter())
+    assert result["accounts_unscored"] == 1
+    assert result["accounts_scanned"] == 2
+    assert [a["account_name"] for a in result["account_alerts"]] == ["No orders"]
+    assert result["inventory_alerts"][0]["status"] == "critical"

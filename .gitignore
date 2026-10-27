@@ -69,3 +69,6 @@ logs/
 *.p12
 *.pfx
 .claude/
+
+# Local Redis snapshots written by test runs
+dump.rdb

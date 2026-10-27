@@ -19,6 +19,7 @@ async def run_overnight_scan(company_id: str, adapter) -> dict:
     results = {
         "company_id": company_id,
         "accounts_scanned": 0,
+        "accounts_unscored": 0,
         "alerts_detected": 0,
         "alerts_queued": 0,  # legacy field: no delivery/queue is performed in this scan
         "inventory_alerts": [],
@@ -41,14 +42,20 @@ async def run_overnight_scan(company_id: str, adapter) -> dict:
     for customer in customers:
         cust_orders = orders_by_customer.get(customer.qb_id, [])
         last_order_date = max((o["date"] for o in cust_orders), default=None)
-        health = score_account(
-            account_id=customer.id,
-            account_name=customer.name,
-            last_order_date=last_order_date,
-            avg_order_cycle_days=None,
-            order_history=cust_orders,
-            current_balance=customer.balance,
-        )
+        try:
+            health = score_account(
+                account_id=customer.id,
+                account_name=customer.name,
+                last_order_date=last_order_date,
+                avg_order_cycle_days=None,
+                order_history=cust_orders,
+                current_balance=customer.balance,
+            )
+        except ValueError:
+            # An unscorable account (e.g. a customer credit balance) is
+            # counted, never alerted on, and must not abort the whole scan.
+            results["accounts_unscored"] += 1
+            continue
 
         results["accounts_scanned"] += 1
         if health.status in ("at_risk", "dormant"):

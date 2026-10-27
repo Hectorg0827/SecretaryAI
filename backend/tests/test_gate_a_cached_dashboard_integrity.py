@@ -41,6 +41,7 @@ def stored(payload=None, generated_at=None):
     lambda x: x.pop("inventory_alerts"),
     lambda x: x.update(source_read_status="failed"),
     lambda x: x.update(source_quality="unavailable"),
+    lambda x: x.update(source_quality="verified"),  # No provenance proof in v1
     lambda x: x["accounts"].update(total=300),
     lambda x: x["accounts"].update(healthy=True),
     lambda x: x["accounts"].update(slowing=-1),

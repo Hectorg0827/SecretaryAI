@@ -24,6 +24,14 @@ class SnapshotPersistenceUnavailable(RuntimeError):
     """A computed snapshot could not be stored durably."""
 
 
+class SnapshotReadUnavailable(RuntimeError):
+    """The snapshot store failed; distinguish outage from a missing cache row."""
+
+
+class SnapshotDataInvalid(ValueError):
+    """A stored dashboard payload does not meet the trusted read contract."""
+
+
 class SnapshotSourceUnavailable(RuntimeError):
     """A required source read failed; do not publish fictitious zero metrics."""
 
@@ -255,8 +263,49 @@ def snapshot_freshness(
         return {"status": "unknown", "age_seconds": None, "stale": True}
 
 
+def validate_dashboard_cached_payload(payload: dict) -> dict:
+    """Validate data provenance and aggregates before exposing cached KPIs.
+
+    A completed connector read is not a verified provider audit, but it must
+    at least yield internally consistent, finite business metrics.
+    Invalid cached data must never be represented as healthy zero activity.
+    """
+    if not isinstance(payload, dict):
+        raise SnapshotDataInvalid("Dashboard cache payload missing")
+    if payload.get("source_read_status") != "completed":
+        raise SnapshotDataInvalid("Dashboard cache source read incomplete")
+    if payload.get("source_quality") not in ("partial", "verified"):
+        raise SnapshotDataInvalid("Dashboard cache source quality unavailable")
+
+    accounts = payload.get("accounts")
+    if not isinstance(accounts, dict):
+        raise SnapshotDataInvalid("Dashboard account aggregates absent")
+    keys = ("healthy", "slowing", "at_risk", "dormant", "total")
+    if any(type(accounts.get(k)) is not int or accounts[k] < 0 for k in keys):
+        raise SnapshotDataInvalid("Dashboard account aggregates invalid")
+    if sum(accounts[k] for k in keys[:-1]) != accounts["total"]:
+        raise SnapshotDataInvalid("Dashboard account aggregates inconsistent")
+
+    revenue = payload.get("sales_30d")
+    if type(revenue) not in (int, float) or not isfinite(float(revenue)):
+        raise SnapshotDataInvalid("Dashboard revenue unavailable or invalid")
+
+    alerts = payload.get("inventory_alerts")
+    if not isinstance(alerts, list) or any(
+        not isinstance(item, dict)
+        or item.get("stock_status") not in ("critical", "low", "out_of_stock")
+        for item in alerts
+    ):
+        raise SnapshotDataInvalid("Dashboard inventory alerts invalid")
+    return payload
+
+
 def read_snapshot(db, company_id: str, report_type: str) -> dict | None:
-    """Return the latest snapshot payload for (company, report_type), or None."""
+    """Return the cached snapshot or None only when the row is absent.
+
+    Database read failures must never trigger a fresh source sync as if no
+    cache existed. A separate authorized refresh path may be used instead.
+    """
     try:
         result = (
             db.table("report_snapshots")
@@ -268,5 +317,5 @@ def read_snapshot(db, company_id: str, report_type: str) -> dict | None:
         )
         return result.data or None
     except Exception as exc:
-        log.error("Failed to read %s snapshot for company %s: %s", report_type, company_id, exc)
-        return None
+        log.error("Failed to read %s snapshot for company %s", report_type, company_id)
+        raise SnapshotReadUnavailable("Dashboard snapshot storage unavailable") from exc

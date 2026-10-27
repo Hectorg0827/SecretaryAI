@@ -17,7 +17,7 @@ from app.domain.briefing_contract import (
     BriefingSection, DigestEntry, EvidenceRef, RoleBriefing,
 )
 from app.domain.briefing_wire import BriefingTodayResponseV1
-from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness
+from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness, SnapshotReadUnavailable
 
 router = APIRouter()
 
@@ -137,7 +137,12 @@ async def get_today_briefing(
     company_id = user.get("company_id", "")
     if not company_id:
         raise HTTPException(status_code=403, detail="Invalid company session")
-    snapshot = read_snapshot(db, company_id, "dashboard_summary")
+    try:
+        snapshot = read_snapshot(db, company_id, "dashboard_summary")
+    except SnapshotReadUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Company briefing cache unavailable"
+        ) from exc
     try:
         return build_owner_briefing(
             company_id=company_id, role=user["role"], snapshot=snapshot,

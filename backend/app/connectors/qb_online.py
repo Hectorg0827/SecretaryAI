@@ -152,13 +152,22 @@ class QBOnlineAdapter(QuickBooksAdapter):
             sql = f"SELECT * FROM {entity} {where_clause}STARTPOSITION {start} MAXRESULTS {page_size}"
             data = await self._query(sql)
 
+            if isinstance(data, dict) and "Fault" in data:
+                raise ValueError("QBO provider returned a Fault")
             query_response = data.get("QueryResponse") if isinstance(data, dict) else None
             if not isinstance(query_response, dict):
                 raise ValueError("QBO source response missing valid QueryResponse")
             if entity not in query_response:
-                # A zero-result response must be explicit; a missing payload
-                # must not be misreported as no customers/invoices/stock.
-                if query_response.get("totalCount") == 0:
+                # Intuit also returns {"QueryResponse": {}, "time": ...}
+                # for a successful empty page, including after a full page.
+                # Require the provider response timestamp for that otherwise
+                # ambiguous representation; faults and malformed envelopes fail.
+                provider_empty = (
+                    not query_response
+                    and isinstance(data.get("time"), str)
+                    and bool(data["time"].strip())
+                )
+                if query_response.get("totalCount") == 0 or provider_empty:
                     items = []
                 else:
                     raise ValueError(f"QBO QueryResponse missing {entity} results")

@@ -143,7 +143,9 @@ class OutlookConnector:
             return [
                 {
                     "id": m["id"],
-                    "thread_id": m.get("conversationId", m["id"]),
+                    # Missing conversationId means thread membership is
+                    # unobserved. Do not invent a thread from message ID.
+                    "thread_id": m.get("conversationId") or None,
                     "message_id": m.get("internetMessageId"),
                     "from": (m.get("from") or {}).get("emailAddress", {}).get("name", ""),
                     "from_email": (m.get("from") or {}).get("emailAddress", {}).get("address", ""),

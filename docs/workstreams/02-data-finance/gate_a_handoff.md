@@ -90,6 +90,37 @@ never fill missing series with invented numbers or present bounds as facts.
 No migration, deployed SHA verification, production action or vendor-backed
 acceptance occurred in Chat 2's first audit.
 
+## Follow-up: mailbox identity and account-candidate safety (Milestone 10)
+
+`backend/app/connectors/email_identity.py` provides a pure, read-only identity
+contract for Gmail and Microsoft Graph normalized message payloads. It requires
+the caller to supply **verified** tenant ID, source-connection ID and mailbox
+identity, and produces versioned SHA-256 keys from collision-resistant encoded
+tuples of that scope and the case-sensitive provider message/thread IDs. The
+RFC Internet Message-ID is retained as secondary evidence only; it can be
+absent or shared across multiple copies and must not be the event dedup key.
+Missing thread identifiers remain unknown: Outlook no longer substitutes a
+message ID for an absent Graph `conversationId`.
+
+The optional account resolver requires a server-derived set of permitted
+account IDs; without it, matching is unavailable. It matches only a strictly
+parsed sender address to exact, tenant-matched permitted account contacts:
+no domain similarities, display-name heuristics or cross-tenant candidates.
+Duplicate rows for one account remain one candidate, but multiple distinct
+accounts sharing an address produce an **ambiguous** result without a selected
+account. Even a unique exact match is explicitly **unverified** because sender
+headers may be forged, and this helper does not prove delivery direction,
+sender authorization or an authenticated customer identity. The resolver
+must not directly authorize actions or account access.
+
+**Chat 1 / Chat 5 dependency:** approve `CommunicationEvent` and tenant/role
+identity contracts, obtain verified mailbox identity from the OAuth provider,
+persist event keys and checkpoints atomically for cross-run deduplication, and
+define a separately verified customer attribution workflow. This pure helper
+is not integrated into the shared pipeline until Gate A is accepted. Synthetic
+fixtures only—no user mail read, database migration, external message send,
+provider acceptance or deployed runtime is implied by these tests.
+
 ## Follow-up: source-independence test fixture results
 
 The default `AccessRouter.route("inventory")` API path uses the same

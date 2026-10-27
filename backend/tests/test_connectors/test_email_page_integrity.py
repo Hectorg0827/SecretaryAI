@@ -140,6 +140,22 @@ async def test_outlook_repeated_message_on_next_page_is_rejected():
 
 
 @pytest.mark.asyncio
+async def test_outlook_missing_conversation_id_does_not_create_a_fake_thread():
+    connector = _outlook()
+    connector._get_headers = AsyncMock(return_value={"Authorization": "Bearer synthetic"})
+    msg = _graph_message(1)
+    del msg["conversationId"]
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = httpx.Response(200, json={"value": [msg]},
+                                            request=httpx.Request("GET", "https://graph.microsoft.com/v1.0/me/messages"))
+    with patch("httpx.AsyncClient", return_value=client):
+        result = await connector.get_emails(max_results=1)
+    assert result[0]["thread_id"] is None
+    assert result[0]["id"] == "m1"
+
+
+@pytest.mark.asyncio
 async def test_outlook_rotating_credentials_require_company_scope():
     adapter = UnifiedDataAdapter.__new__(UnifiedDataAdapter)
     adapter._config = {}

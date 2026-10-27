@@ -106,7 +106,7 @@ export interface FeedEvent {
 }
 
 export interface DashboardSummary {
-  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number };
+  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number } | null;
   inventory_alerts: InventoryAlert[];
   pending_actions: number | null;
   unread_emails: number | null;
@@ -114,6 +114,40 @@ export interface DashboardSummary {
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */
   cached: boolean;
+}
+
+export type BriefingSectionV1 = 'red_alerts' | 'yellow_alerts' | 'opportunities'
+  | 'scoreboard' | 'todays_priorities' | 'actions_taken';
+
+export interface BriefingEvidenceV1 {
+  source_system: string;
+  source_record_id: string;
+  fetched_at: string;
+  quality: 'verified' | 'partial' | 'unavailable';
+  confidence: number;
+}
+
+export interface BriefingEntryV1 {
+  entry_id: string;
+  section: BriefingSectionV1;
+  title: string;
+  status: 'open' | 'resolved' | 'needs_review' | 'source_unavailable';
+  detected_at: string;
+  proposed_action_id: string | null;
+  evidence: BriefingEvidenceV1[];
+}
+
+export interface BriefingTodayResponseV1 {
+  contract_version: '1.0';
+  company_id: string;
+  audience_role: 'owner' | 'manager';
+  created_at: string;
+  sections: Record<BriefingSectionV1, BriefingEntryV1[]>;
+  source_coverage: 'dashboard_snapshot_only';
+  complete_digest: false;
+  source_quality: 'partial';
+  snapshot_generated_at: string;
+  snapshot_age_seconds: number;
 }
 
 export interface InventoryAlert {
@@ -296,6 +330,10 @@ export const api = {
       api.post<FollowUpNote>('/api/dashboard/notes', { text, account_name: accountName, due_date: dueDate }),
     doneNote: (id: string) =>
       api.patch<FollowUpNote>(`/api/dashboard/notes/${id}`, { done: true }),
+  },
+
+  briefing: {
+    today: () => api.get<BriefingTodayResponseV1>('/api/briefing/today'),
   },
 
   emails: {

@@ -125,6 +125,15 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Added nine synthetic Vitest assertions across Inbox store verification, dashboard rendered reload ordering and sidebar badge visibility (**55 total** in 12 suites). Web TypeScript, build, and existing localhost-only Chromium briefing acceptance **PASS**; lint has **0 errors / 20 pre-existing warnings**.
 - The backend can still suppress partial Inbox/provider errors and return apparently complete counts; precise server source-completeness metadata is a blocked Chat 1/2 contract. Provider-backed badge totals, source freshness, tenants, and staging behavior remain **NOT TESTED**. No backend/CI changes, external API writes, integration merge, or deployment.
 
+## Twelfth isolated canonical Morning Briefing v1 adoption
+
+- Consumed Chat 1's `GET /api/briefing/today` contract at its verified workstream head `b781fe4d365927ecac31f9155400c275242f32d6`. The active web Morning Briefing requests `api.briefing.today()` **once per read**, instead of inventing the canonical six sections with independent browser sales/feed/notes/audit reads. Six semantic section cards render the server's evidence-backed entries only.
+- The UI prominently identifies the response as **partial** (`contract_version=1.0`, `source_coverage=dashboard_snapshot_only`, `source_quality=partial`, `complete_digest=false`) and displays snapshot time, age and evidence quality. Empty opportunities, tasks and actions explicitly mean **not covered**, not that the business had no activity. No approval/queue event is represented as a delivered provider action.
+- The client rejects unexpected versions, verified/full-digest self-promotion, extra/missing fields, invalid role projections, unzoned or stale timestamps, malformed evidence and inconsistent status. HTTP 403/503, malformed HTTP 200 and transport failure render an actionable source-unavailable state with no healthy-zero fallback. Read-only retries cannot invoke delivery or dashboard scheduling.
+- Aligned web and native DashboardSummary `accounts` typing to explicit `null` for unauthorized account reads, with both dashboards showing unavailable rather than zero account metrics. Other workstreams remain responsible for backend record ownership, provider freshness and read-receipt completeness.
+- **Synthetic verification:** 57 frontend Vitest tests (12 suites), web/mobile TypeScript, web lint (**0 errors / 20 pre-existing warnings**), web build/CSS validation, and localhost-only Chromium acceptance across 390px/1440px all **PASS**. Reviewed Chat 1's `check_gate_a_frontend_contract.py` and confirmed its web API route, `api.briefing.today()` consumer, completeness/quality/coverage indicators, no browser `Promise.allSettled` synthesis, and nullable web/mobile account types via read-only source checks. The **exact five-branch CI gate is still pending**; that script was not executed directly from another branch under the local execution policy.
+- Backend endpoint and its shared schema reside only on **Chat 1's unmerged workstream**. Current SecretaryAI staging may return 404 until controlled integration. This is NOT a full operational morning digest, provider-backed data certification, or authority to merge/deploy. PR #74, LYO, SecretaryAI production, and other chat branches are untouched.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -132,7 +141,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 55 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 57 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 20 warnings in pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |

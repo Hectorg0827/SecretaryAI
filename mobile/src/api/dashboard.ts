@@ -6,7 +6,7 @@ export interface DashboardSummary {
     slowing: number;
     at_risk: number;
     dormant: number;
-  };
+  } | null;
   inventory_alerts: InventoryAlert[];
   pending_actions: number | null;
   unread_emails: number | null;

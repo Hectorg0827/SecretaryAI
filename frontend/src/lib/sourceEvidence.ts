@@ -1,4 +1,8 @@
-import type { DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, PriorityEmail, SalesSummary } from './api';
+import type { BriefingEntryV1, BriefingSectionV1, BriefingTodayResponseV1, DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, PriorityEmail, SalesSummary } from './api';
+
+export const BRIEFING_SECTIONS: readonly BriefingSectionV1[] = [
+  'red_alerts', 'yellow_alerts', 'opportunities', 'scoreboard', 'todays_priorities', 'actions_taken',
+];
 
 export type BriefingSales = Pick<SalesSummary, 'total_revenue' | 'order_count'>;
 export type BriefingFeedEvent = Pick<FeedEvent, 'id' | 'title' | 'event_type' | 'action_type'>;
@@ -36,6 +40,62 @@ function timestamp(value: unknown): value is string {
   return nonempty(value) && Number.isFinite(Date.parse(value));
 }
 
+function awareTimestamp(value: unknown): value is string {
+  return timestamp(value) && /(?:Z|[+-]\d{2}:\d{2})$/.test(value);
+}
+
+function exactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(value).length === fields.length && fields.every((field) => field in value);
+}
+
+/** Strict presentation boundary for Chat 1's partial, versioned executive projection. */
+export function verifiedBriefingToday(value: unknown): BriefingTodayResponseV1 | null {
+  if (!record(value) || !exactFields(value, [
+    'contract_version', 'company_id', 'audience_role', 'created_at', 'sections',
+    'source_coverage', 'complete_digest', 'source_quality',
+    'snapshot_generated_at', 'snapshot_age_seconds',
+  ])) return null;
+  if (value.contract_version !== '1.0' || !nonempty(value.company_id)
+    || !['owner', 'manager'].includes(String(value.audience_role))
+    || !awareTimestamp(value.created_at) || !awareTimestamp(value.snapshot_generated_at)
+    || value.source_coverage !== 'dashboard_snapshot_only' || value.complete_digest !== false
+    || value.source_quality !== 'partial' || typeof value.snapshot_age_seconds !== 'number'
+    || !Number.isFinite(value.snapshot_age_seconds) || value.snapshot_age_seconds < 0
+    || value.snapshot_age_seconds > 86400
+    || !record(value.sections) || !exactFields(value.sections, BRIEFING_SECTIONS)) return null;
+  // The V1 API refuses snapshots older than 24 hours. The API's own UTC
+  // created/snapshot timestamps should agree with its reported age; do not
+  // trust a stale HTTP 200 payload that simply advertises a low age.
+  const observedAge = (Date.parse(value.created_at) - Date.parse(value.snapshot_generated_at)) / 1000;
+  if (observedAge < -300 || Math.abs(observedAge - value.snapshot_age_seconds) > 300) return null;
+
+  const entryIsValid = (raw: unknown, section: BriefingSectionV1): raw is BriefingEntryV1 => {
+    if (!record(raw) || !exactFields(raw, [
+      'entry_id', 'section', 'title', 'status', 'detected_at', 'proposed_action_id', 'evidence',
+    ])) return false;
+    if (!nonempty(raw.entry_id) || raw.section !== section || !nonempty(raw.title)
+      || !['open', 'resolved', 'needs_review', 'source_unavailable'].includes(String(raw.status))
+      || !awareTimestamp(raw.detected_at)
+      || (raw.proposed_action_id !== null && !nonempty(raw.proposed_action_id))
+      || !Array.isArray(raw.evidence) || raw.evidence.length === 0) return false;
+    const validEvidence = raw.evidence.every((item: unknown) => record(item)
+      && exactFields(item, ['source_system', 'source_record_id', 'fetched_at', 'quality', 'confidence'])
+      && nonempty(item.source_system) && nonempty(item.source_record_id)
+      && awareTimestamp(item.fetched_at)
+      && ['verified', 'partial', 'unavailable'].includes(String(item.quality))
+      && count(item.confidence) && item.confidence <= 100
+      && (item.quality !== 'unavailable' || item.confidence === 0));
+    if (!validEvidence) return false;
+    const unavailable = raw.evidence.some((item: { quality: string }) => item.quality === 'unavailable');
+    return unavailable === (raw.status === 'source_unavailable');
+  };
+
+  const sections = value.sections as Record<string, unknown>;
+  if (!BRIEFING_SECTIONS.every((section) => Array.isArray(sections[section])
+    && (sections[section] as unknown[]).every((entry: unknown) => entryIsValid(entry, section)))) return null;
+  return value as unknown as BriefingTodayResponseV1;
+}
+
 function calendarDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
@@ -53,10 +113,15 @@ function inventoryAlert(value: unknown): value is InventoryAlert {
     && (value.stock_status === 'low' || value.stock_status === 'critical' || value.stock_status === 'out_of_stock');
 }
 
+function accountCounts(value: unknown): value is NonNullable<DashboardSummary['accounts']> {
+  return record(value) && count(value.healthy) && count(value.slowing)
+    && count(value.at_risk) && count(value.dormant);
+}
+
 export function verifiedDashboardSummary(value: unknown): DashboardSummary | null {
-  if (!record(value) || !record(value.accounts) || !Array.isArray(value.inventory_alerts)) return null;
+  if (!record(value) || !Array.isArray(value.inventory_alerts)) return null;
   const accounts = value.accounts;
-  if (!count(accounts.healthy) || !count(accounts.slowing) || !count(accounts.at_risk) || !count(accounts.dormant)) return null;
+  if (accounts !== null && !accountCounts(accounts)) return null;
   if (!value.inventory_alerts.every(inventoryAlert)) return null;
 
   // Optional counts are unknown if absent or malformed; never silently zero.
@@ -65,7 +130,10 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
   const generatedAt = timestamp(value.generated_at)
     ? value.generated_at : null;
   return {
-    accounts: { healthy: accounts.healthy, slowing: accounts.slowing, at_risk: accounts.at_risk, dormant: accounts.dormant },
+    accounts: accounts === null ? null : {
+      healthy: accounts.healthy, slowing: accounts.slowing,
+      at_risk: accounts.at_risk, dormant: accounts.dormant,
+    },
     inventory_alerts: value.inventory_alerts.map((item: InventoryAlert) => ({
       item_id: item.item_id,
       product_name: item.product_name,

@@ -59,7 +59,7 @@ export function Dashboard() {
     void loadSummary();
   };
 
-  const accounts = summary?.accounts  ?? { healthy: 0, slowing: 0, at_risk: 0, dormant: 0 };
+  const accounts = summary?.accounts ?? null;
   const alerts   = summary?.inventory_alerts ?? [];
 
   const showEmailInbox    = hasPermission('trigger_actions');   // owner, manager
@@ -73,7 +73,7 @@ export function Dashboard() {
   const statItems = summary ? [
     ...(showEmailInbox    ? [{ label: 'Unread Emails',    value: summary.unread_emails ?? 'Unavailable',     accent: 'blue'    as const }] : []),
     ...(showApprovals     ? [{ label: 'Pending Approvals',value: summary.pending_actions ?? 'Unavailable',   accent: 'amber'   as const }] : []),
-    ...(showAccountHealth ? [{ label: 'Accounts At Risk', value: accounts.at_risk + accounts.dormant,      accent: 'red'     as const }] : []),
+    ...(showAccountHealth && accounts ? [{ label: 'Accounts At Risk', value: accounts.at_risk + accounts.dormant, accent: 'red' as const }] : []),
     ...(showInventory     ? [{ label: 'Inventory Alerts', value: alerts.length,                            accent: 'amber'   as const }] : []),
   ] : [];
 
@@ -126,9 +126,12 @@ export function Dashboard() {
         {role === 'sales_rep' && <div role="status" className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
           Your assigned customer portfolio is awaiting server-side assignment verification. Account details and private follow-ups remain unavailable until access can be scoped safely.
         </div>}
+        {!loading && summary && showAccountHealth && !accounts && <div role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Account totals unavailable for this session. Missing totals are not zero.
+        </div>}
         {(role === 'owner' || role === 'manager') && (
           <div className="mb-5">
-            <MorningBriefing summary={summary} summaryLoading={loading} />
+            <MorningBriefing />
           </div>
         )}
         {hasLeftColumn ? (
@@ -149,7 +152,7 @@ export function Dashboard() {
                 </>
               ) : (
                 <>
-                  {summary && showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                  {summary && showAccountHealth && accounts && <AccountHealthPanel summary={accounts} />}
                   <ProactiveFeed />
                   {summary && showInventory     && <InventoryPanel alerts={alerts} />}
                   {showApprovals     && <PendingApprovals />}
@@ -169,7 +172,7 @@ export function Dashboard() {
               </>
             ) : (
               <>
-                {summary && showAccountHealth && <AccountHealthPanel summary={accounts} />}
+                {summary && showAccountHealth && accounts && <AccountHealthPanel summary={accounts} />}
                 {summary && showInventory     && <InventoryPanel alerts={alerts} />}
                 {showNotes         && <FollowUpNotes />}
               </>

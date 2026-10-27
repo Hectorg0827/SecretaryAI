@@ -32,8 +32,9 @@ function StatCard({ icon, iconColor, iconBg, label, value, sub }: StatCardProps)
 
 export default function StatStrip({ summary }: Props) {
   const accounts = summary.accounts;
-  const counts = [accounts.healthy, accounts.slowing, accounts.at_risk, accounts.dormant];
-  const scoredAccounts = counts.every(Number.isFinite) ? counts.reduce((sum, count) => sum + count, 0) : '—';
+  const counts = accounts ? [accounts.healthy, accounts.slowing, accounts.at_risk, accounts.dormant] : [];
+  const scoredAccounts = accounts && counts.every(Number.isFinite)
+    ? counts.reduce((sum, count) => sum + count, 0) : '—';
   return (
     <View style={styles.strip}>
       <StatCard
@@ -42,7 +43,7 @@ export default function StatStrip({ summary }: Props) {
         iconBg={COLORS.primaryLight}
         label="Accounts"
         value={scoredAccounts}
-        sub={summary.accounts.at_risk > 0 ? `${summary.accounts.at_risk} at risk` : undefined}
+        sub={accounts && accounts.at_risk > 0 ? `${accounts.at_risk} at risk` : undefined}
       />
       <StatCard
         icon="mail"

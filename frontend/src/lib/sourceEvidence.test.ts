@@ -30,6 +30,12 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
     expect(verifiedDashboardSummary({ ...validSummary(), inventory_alerts: [{ stock_status: 'critical' }] })).toBeNull();
   });
 
+  it('accepts an explicitly masked account field as unknown, never zero', () => {
+    const result = verifiedDashboardSummary({ ...validSummary(), accounts: null });
+    expect(result?.accounts).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), accounts: undefined })).toBeNull();
+  });
+
   it('marks absent, invalid, or unverified optional metrics as unknown', () => {
     const result = verifiedDashboardSummary({
       ...validSummary(), pending_actions: '0', unread_emails: undefined,

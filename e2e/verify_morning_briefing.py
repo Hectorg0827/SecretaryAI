@@ -30,6 +30,7 @@ def _fake_role_token(role: str) -> str:
 
 def _respond(route, *, summary_error: bool = False, summary_malformed: bool = False,
              approvals_malformed: bool = False, briefing_malformed: bool = False,
+             briefing_error: bool = False,
              dashboard_aux_malformed: bool = False,
              role: str = "owner",
              email_fixture: bool = False, work_error: bool = False,
@@ -66,6 +67,18 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
             "generated_at": SYNTHETIC_TIME,
         }))
         return
+    if path == "/api/briefing/today" and role not in ("owner", "manager"):
+        route.fulfill(status=403, content_type="application/json", body=json.dumps({"detail": "Forbidden"}))
+        return
+    if briefing_error and path == "/api/briefing/today":
+        route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic stale cache"}))
+        return
+    if briefing_malformed and path == "/api/briefing/today":
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "contract_version": "1.0", "sections": {"scoreboard": []},
+            "source_quality": "verified", "complete_digest": True,
+        }))
+        return
     if approvals_malformed and path == "/api/actions/pending":
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"drafts": None}))
         return
@@ -93,6 +106,24 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic source outage"}))
         return
     fixtures = {
+        "/api/briefing/today": {
+            "contract_version": "1.0", "company_id": "synthetic-tenant", "audience_role": role,
+            "created_at": SYNTHETIC_TIME,
+            "sections": {
+                "red_alerts": [{
+                    "entry_id": "risk", "section": "red_alerts",
+                    "title": "1 at-risk accounts, 1 dormant accounts, 1 critical inventory alert (snapshot only)",
+                    "status": "needs_review", "detected_at": SYNTHETIC_TIME, "proposed_action_id": None,
+                    "evidence": [{"source_system": "dashboard_snapshot", "source_record_id": "synthetic-tenant:risk",
+                                  "fetched_at": SYNTHETIC_TIME, "quality": "partial", "confidence": 40}],
+                }],
+                "yellow_alerts": [], "opportunities": [], "scoreboard": [],
+                "todays_priorities": [], "actions_taken": [],
+            },
+            "source_coverage": "dashboard_snapshot_only", "complete_digest": False,
+            "source_quality": "partial", "snapshot_generated_at": SYNTHETIC_TIME,
+            "snapshot_age_seconds": 60.0,
+        },
         "/api/dashboard/summary": {
             "accounts": {"healthy": 8, "slowing": 2, "at_risk": 1, "dormant": 1},
             "inventory_alerts": [{"item_id": "synthetic-sku", "product_name": "QA sample",
@@ -150,7 +181,8 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
 
 def _context(browser, role: str, width: int, *, summary_error: bool = False,
              summary_malformed: bool = False, approvals_malformed: bool = False,
-             briefing_malformed: bool = False, dashboard_aux_malformed: bool = False,
+             briefing_malformed: bool = False, briefing_error: bool = False,
+             dashboard_aux_malformed: bool = False,
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              authenticated: bool = True,
@@ -161,7 +193,7 @@ def _context(browser, role: str, width: int, *, summary_error: bool = False,
     def mock_route(route):
         _respond(route, summary_error=summary_error, summary_malformed=summary_malformed,
                  approvals_malformed=approvals_malformed,
-                 briefing_malformed=briefing_malformed,
+                 briefing_malformed=briefing_malformed, briefing_error=briefing_error,
                  dashboard_aux_malformed=dashboard_aux_malformed, role=role,
                  email_fixture=email_fixture, work_error=work_error,
                  requests_seen=requests_seen, auth_fields_seen=auth_fields_seen)
@@ -204,8 +236,10 @@ def main() -> None:
                         for name in ("1 · Red flags", "2 · Yellow watchlist", "3 · Opportunities",
                                      "4 · Scoreboard", "5 · Today’s decisions", "6 · Actions & failures"):
                             page.get_by_role("heading", name=name).wait_for()
-                        page.get_by_role("region", name="3 · Opportunities").get_by_text("Synthetic opportunity (QA only)").wait_for()
-                        page.get_by_text("queued", exact=False).first.wait_for()
+                        page.get_by_text("Partial briefing — not a complete daily digest", exact=False).wait_for()
+                        page.get_by_role("region", name="3 · Opportunities").get_by_text("not covered", exact=False).wait_for()
+                        page.get_by_role("region", name="6 · Actions & failures").get_by_text("No verified execution receipts", exact=False).wait_for()
+                        assert page.get_by_role("region", name="3 · Opportunities").get_by_text("Synthetic opportunity (QA only)").count() == 0
                         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                     finally:
                         context.close()
@@ -229,6 +263,17 @@ def main() -> None:
                 finally:
                     outage.close()
 
+                canonical_outage = _context(browser, "owner", 390, briefing_error=True)
+                try:
+                    page = canonical_outage.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    page.get_by_role("alert").get_by_text("Canonical briefing unavailable", exact=False).wait_for()
+                    for title in ("1 · Red flags", "4 · Scoreboard", "6 · Actions & failures"):
+                        page.get_by_role("region", name=title).get_by_role("status").wait_for()
+                    assert page.get_by_text("0 at-risk accounts").count() == 0
+                finally:
+                    canonical_outage.close()
+
                 # HTTP 200 is not proof of business data completeness. Invalid
                 # counts must trigger unavailable evidence, not reassuring zeros.
                 incomplete = _context(browser, "owner", 390, summary_malformed=True)
@@ -247,7 +292,7 @@ def main() -> None:
                     page.goto(PREVIEW, wait_until="domcontentloaded")
                     page.get_by_role("alert").get_by_text("Approvals source unavailable", exact=False).wait_for()
                     assert page.get_by_text("Nothing waiting for approval").count() == 0
-                    assert page.get_by_role("region", name="5 · Today’s decisions").get_by_text("Source unavailable", exact=False).count() > 0
+                    assert page.get_by_role("region", name="5 · Today’s decisions").get_by_text("not covered", exact=False).count() > 0
                 finally:
                     malformed_approvals.close()
 
@@ -260,18 +305,19 @@ def main() -> None:
                 try:
                     page = malformed_digest.new_page()
                     page.goto(PREVIEW, wait_until="domcontentloaded")
-                    for title in ("3 · Opportunities", "4 · Scoreboard", "6 · Actions & failures"):
-                        page.get_by_role("region", name=title).get_by_text("Source unavailable", exact=False).wait_for()
+                    for title in ("1 · Red flags", "3 · Opportunities", "4 · Scoreboard", "6 · Actions & failures"):
+                        page.get_by_role("region", name=title).get_by_role("status").wait_for()
                     decisions = page.get_by_role("region", name="5 · Today’s decisions")
-                    decisions.get_by_text("Source unavailable", exact=False).wait_for()
-                    decisions.get_by_text("1 drafts waiting for human approval", exact=False).wait_for()
-                    page.get_by_role("region", name="1 · Red flags").get_by_text("1 at-risk accounts").wait_for()
+                    decisions.get_by_role("status").wait_for()
+                    page.get_by_role("alert").get_by_text("Canonical briefing unavailable", exact=False).wait_for()
+                    assert decisions.get_by_text("1 drafts waiting for human approval", exact=False).count() == 0
                     for warning in ("Sales analytics source unavailable", "Insights source unavailable",
                                     "Follow-up source unavailable"):
                         assert page.get_by_role("alert").get_by_text(warning, exact=False).count() > 0
                     assert page.get_by_text("Something went wrong").count() == 0
-                    assert {"/api/dashboard/sales", "/api/dashboard/notes", "/api/feed/",
-                            "/api/admin/audit-log"}.issubset(set(malformed_requests))
+                    assert {"/api/briefing/today", "/api/dashboard/sales", "/api/dashboard/notes",
+                            "/api/feed/"}.issubset(set(malformed_requests))
+                    assert "/api/admin/audit-log" not in malformed_requests
                     assert page.get_by_text("$0.00", exact=True).count() == 0
                 finally:
                     malformed_digest.close()

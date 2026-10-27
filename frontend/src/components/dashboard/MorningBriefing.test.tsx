@@ -1,29 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { dueFollowUps, verifiedOpportunities } from './MorningBriefing';
-import type { FeedEvent, FollowUpNote } from '../../lib/api';
+import { verifiedBriefingToday } from '../../lib/sourceEvidence';
+import { fixtureBriefing } from './briefingFixture.test-data';
 
-const note = (id: string, due_date: string | undefined, done = false): FollowUpNote => ({
-  id, text: 'Synthetic QA follow-up', due_date, done, created_at: '2026-10-20T00:00:00Z',
-});
-
-const event = (id: string, event_type: string, action_type: string | null = null): FeedEvent => ({
-  id, event_type, action_type, title: 'Synthetic QA event', body: '', priority: 'low',
-  action_label: null, action_data: {}, entity_name: null, is_read: false,
-  created_at: '2026-10-20T00:00:00Z',
-});
-
-describe('morning briefing classifications (synthetic fixtures only)', () => {
-  it('shows only unfinished due or overdue notes, not future or completed work', () => {
-    expect(dueFollowUps([
-      note('overdue', '2026-10-22'), note('today', '2026-10-26'),
-      note('future', '2026-10-27'), note('completed', '2026-10-20', true), note('undated', undefined),
-    ], '2026-10-26').map((item) => item.id)).toEqual(['overdue', 'today']);
+describe('canonical Morning Briefing v1 source integrity (synthetic only)', () => {
+  it('requires exactly six server-scoped sections and partial provenance', () => {
+    expect(verifiedBriefingToday(fixtureBriefing())?.sections.scoreboard).toHaveLength(1);
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), sections: { red_alerts: [] } })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), source_quality: 'verified' })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), complete_digest: true })).toBeNull();
   });
 
-  it('does not mislabel low-priority news as verified sales opportunities', () => {
-    expect(verifiedOpportunities([
-      event('general', 'insight'), event('identified', 'opportunity'),
-      event('action', 'insight', 'opportunity'),
-    ]).map((item) => item.id)).toEqual(['identified', 'action']);
+  it('rejects entry role-independent evidence gaps and impossible source claims', () => {
+    const baseline = fixtureBriefing();
+    const entry = baseline.sections.red_alerts[0];
+    expect(verifiedBriefingToday({ ...baseline, sections: {
+      ...baseline.sections, red_alerts: [{ ...entry, evidence: [] }],
+    } })).toBeNull();
+    expect(verifiedBriefingToday({ ...baseline, sections: {
+      ...baseline.sections, red_alerts: [{ ...entry, section: 'opportunities' }],
+    } })).toBeNull();
+    expect(verifiedBriefingToday({ ...baseline, sections: {
+      ...baseline.sections, red_alerts: [{ ...entry, status: 'open', evidence: [{
+        ...entry.evidence[0], quality: 'unavailable', confidence: 0,
+      }] }],
+    } })).toBeNull();
+  });
+
+  it('rejects invalid or unzoned timestamps and fabricated freshness', () => {
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), created_at: '2026-10-26T12:00:00' })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), snapshot_age_seconds: -1 })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), snapshot_age_seconds: Infinity })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), snapshot_age_seconds: 86401 })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), snapshot_generated_at: '2026-10-24T12:00:00Z' })).toBeNull();
+    expect(verifiedBriefingToday({ ...fixtureBriefing(), source_coverage: 'all_sources' })).toBeNull();
   });
 });

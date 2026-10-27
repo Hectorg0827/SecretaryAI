@@ -46,7 +46,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 1
+          # A shallow clone makes legitimate shared-history branches appear
+          # unrelated and incorrectly blocks the disposable test merge.
+          fetch-depth: 0
       - name: Compose branch heads in disposable local git history
         shell: bash
         env:

@@ -32,11 +32,9 @@ const ALL_NAV_ITEMS = [
 ] as const;
 
 export function Sidebar({
-  unreadCount = 0,
   mobileOpen = false,
   onMobileClose = () => {},
 }: {
-  unreadCount?: number;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }) {
@@ -44,6 +42,7 @@ export function Sidebar({
   const [agent, setAgent] = useState<AgentStatus | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const inboxUnread = useInboxStore((s) => s.unread_count);
+  const inboxFilter = useInboxStore((s) => s.filter);
   // A visually offscreen drawer must also be removed from keyboard and
   // assistive-technology navigation. Desktop links remain fully accessible.
   const sidebarRef = useRef<HTMLElement>(null);
@@ -128,7 +127,10 @@ export function Sidebar({
       {/* Navigation */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {visibleItems.map(({ to, label, icon: Icon, exact, badge }) => {
-          const badgeCount = badge === 'inbox' ? (inboxUnread || unreadCount) : 0;
+          // The dashboard's email-only metric is not the unified Inbox count.
+          // The Inbox API count is filtered and paginated; only expose it as a
+          // badge when the unfiltered feed has actually been read successfully.
+          const badgeCount = badge === 'inbox' && inboxFilter === 'all' ? inboxUnread : null;
           return (
             <NavLink
               key={to}
@@ -146,8 +148,12 @@ export function Sidebar({
             >
               <Icon size={16} />
               {label}
-              {badgeCount > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none">
+              {badgeCount !== null && badgeCount > 0 && (
+                <span
+                  aria-label={`${badgeCount} unread items in the last loaded Inbox page`}
+                  title="Unread count in the most recently loaded unfiltered Inbox page (up to 50 items)"
+                  className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
+                >
                   {badgeCount > 99 ? '99+' : badgeCount}
                 </span>
               )}

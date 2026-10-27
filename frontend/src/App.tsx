@@ -21,7 +21,6 @@ import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {
-  const [unreadCount, setUnreadCount] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -93,10 +92,10 @@ function AppShell() {
         </button>
         <span className="font-semibold text-slate-900">SecretaryAI</span>
       </header>
-      <Sidebar unreadCount={unreadCount} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
+      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<Dashboard onUnreadChange={setUnreadCount} />} />
+          <Route path="/" element={<Dashboard />} />
           <Route
             path="/inbox"
             element={

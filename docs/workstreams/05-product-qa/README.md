@@ -117,6 +117,14 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Two new synthetic validator test cases raise the frontend Vitest count to **46**. The localhost Chromium gate now injects simultaneous malformed Inbox and Workflows HTTP `200` responses and asserts the main briefing remains visible, no false clean-inbox state appears, and the dashboard does not crash.
 - These are presentation-layer checks only. Backend suppression of provider failures, server approval/idempotency, cross-tenant enforcement, and provider-backed status/freshness remain independent **NOT TESTED/FAIL** gates. No other chat's branch, backend contract, financial write, merge, or deployment changed.
 
+## Eleventh isolated unread-count and refresh-order integrity increment
+
+- Separated the dashboard's **email-only** statistic from the unified Inbox navigation badge. A dashboard email count can no longer become an incorrect unified Inbox badge simply because the Inbox count is `0` or has never loaded.
+- The unified Inbox count is now **unknown (`null`)** until its current fetch returns a nonnegative integer and valid item records. Failed or malformed HTTP `200` responses cannot masquerade as a verified zero. Badge rendering is scoped to the last verified **unfiltered, paginated** Inbox read, and its accessible label states that scope; this is **not** a promise of an exhaustive cross-source total.
+- Applied latest-response-wins protection to overlapping read-only dashboard summaries and Inbox feed loads. The user-triggered dashboard button is labelled **Reload summary** to clarify it does not refresh all six independent briefing sources or invoke the unsafe worker-scheduling refresh POST.
+- Added nine synthetic Vitest assertions across Inbox store verification, dashboard rendered reload ordering and sidebar badge visibility (**55 total** in 12 suites). Web TypeScript, build, and existing localhost-only Chromium briefing acceptance **PASS**; lint has **0 errors / 20 pre-existing warnings**.
+- The backend can still suppress partial Inbox/provider errors and return apparently complete counts; precise server source-completeness metadata is a blocked Chat 1/2 contract. Provider-backed badge totals, source freshness, tenants, and staging behavior remain **NOT TESTED**. No backend/CI changes, external API writes, integration merge, or deployment.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -124,7 +132,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 46 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 55 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 20 warnings in pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |

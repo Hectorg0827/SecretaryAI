@@ -362,7 +362,7 @@ export default function Inbox() {
           <div className="flex items-center gap-2">
             <InboxIcon className="w-5 h-5 text-slate-700" />
             <h1 className="text-base font-semibold text-slate-900">Inbox</h1>
-            {unread_count > 0 && (
+            {unread_count !== null && unread_count > 0 && (
               <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-500 text-white">
                 {unread_count > 99 ? '99+' : unread_count}
               </span>

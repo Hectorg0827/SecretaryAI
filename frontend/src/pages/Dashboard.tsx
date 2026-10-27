@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { StatStrip } from '../components/dashboard/StatStrip';
 import { EmailInbox } from '../components/dashboard/EmailInbox';
@@ -16,36 +16,47 @@ import { api, DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
 import { useAuth } from '../hooks/useAuth';
 
-export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => void }) {
+export function Dashboard() {
   const [summary, setSummary]       = useState<DashboardSummary | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError]   = useState(false);
+  const summaryRequest = useRef(0);
   const { role, hasPermission, canApprove, canAccessChat } = useAuth();
 
   const loadSummary = useCallback(async () => {
+    const requestId = ++summaryRequest.current;
     setLoading(true);
     setLoadError(false);
     try {
       const s = verifiedDashboardSummary(await api.dashboard.summary());
+      if (requestId !== summaryRequest.current) return;
       if (!s) throw new Error('Dashboard summary response is incomplete');
       setSummary(s);
-      onUnreadChange?.(s.unread_emails ?? 0);
     } catch {
-      setSummary(null);
-      setLoadError(true);
+      if (requestId === summaryRequest.current) {
+        setSummary(null);
+        setLoadError(true);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === summaryRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [onUnreadChange]);
+  }, []);
 
-  useEffect(() => { void loadSummary(); }, [loadSummary]);
+  useEffect(() => {
+    void loadSummary();
+    const requestTracker = summaryRequest;
+    return () => { requestTracker.current++; };
+  }, [loadSummary]);
 
   const handleRefresh = () => {
     // This is intentionally a READ ONLY reload. POST /dashboard/refresh
     // currently schedules a morning-briefing worker and is not safe for UI refresh.
     setRefreshing(true);
-    void loadSummary().finally(() => setRefreshing(false));
+    void loadSummary();
   };
 
   const accounts = summary?.accounts  ?? { healthy: 0, slowing: 0, at_risk: 0, dormant: 0 };
@@ -90,7 +101,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
             disabled={refreshing}
             className="ml-1 underline hover:text-slate-600 disabled:opacity-50"
           >
-            {refreshing ? 'Reloading…' : 'Reload view'}
+            {refreshing ? 'Reloading…' : 'Reload summary'}
           </button>
         </div>
       )}

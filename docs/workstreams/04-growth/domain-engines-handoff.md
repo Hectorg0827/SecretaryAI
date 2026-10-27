@@ -49,6 +49,15 @@ mathematical safeguards, **not** proof of causal price elasticity. Chat 2 must
 provide independent account/SKU transaction lineage, comparable pre/post
 observation windows and event revisions before any real recommendation can be
 considered operationally grounded. Pricing changes always require review.
+When raw price events include a tenant, segment or product-category key, the
+pure engine excludes mismatches before fitting elasticity. It supports paired
+`period_before_days` / `period_after_days` to compare daily rates when windows
+differ, rejecting unpaired or invalid periods. Generated estimates and draft
+price/segment scenarios now serialize the tenant ID and `unverified_advisory`
+status. Legacy unscoped observations can still be modeled for offline tests;
+**they are not verified provider evidence**. Cost pass-through blends reject
+duplicate or cross-tenant segments and missing positive sales-volume weights,
+so the engine cannot silently claim a zero-percent blend with no volume basis.
 
 ## Chat 5 opportunity classification and drilldowns
 

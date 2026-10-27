@@ -82,6 +82,50 @@ def test_invalid_price_events_not_counted_as_observations():
     assert estimate.confidence < 0.5
 
 
+def test_tenant_segment_and_product_scoping_excludes_mismatched_observations():
+    event = {"old_price": 10, "new_price": 11, "units_before": 100,
+             "units_after": 90, "company_id": "synthetic-tenant",
+             "segment": "regional", "sku_category": "wine"}
+    estimate = _engine().estimate_elasticity("regional", "wine", [
+        event,
+        {**event, "company_id": "other-tenant"},
+        {**event, "segment": "independent"},
+        {**event, "sku_category": "spirits"},
+    ])
+    assert estimate.sample_size == 1
+    assert estimate.company_id == "synthetic-tenant"
+    assert estimate.to_dict()["company_id"] == "synthetic-tenant"
+
+
+def test_mismatched_tenant_elasticity_cannot_be_reused_for_pricing():
+    foreign = DynamicPricingEngine("other-tenant").estimate_elasticity(
+        "segment", "sku", [{"old_price": 10, "new_price": 11,
+                             "units_before": 100, "units_after": 90}],
+    )
+    with pytest.raises(ValueError, match="another tenant"):
+        _engine().recommend_price("sku", "segment", PricingTier.TIER_2, 10, 7, 100, foreign)
+
+
+def test_explicit_unequal_before_after_windows_use_daily_rates():
+    estimate = _engine().estimate_elasticity("segment", "sku", [
+        {"old_price": 10, "new_price": 11, "units_before": 300,
+         "units_after": 240, "period_before_days": 30, "period_after_days": 20},
+        {"old_price": 10, "new_price": 11, "units_before": 300,
+         "units_after": 240, "period_before_days": 30},
+    ])
+    # 10/day before and 12/day after => a positive observational PED,
+    # which downstream recommendations will still hold for causal review.
+    assert estimate.sample_size == 1
+    assert estimate.ped > 0
+
+
+@pytest.mark.parametrize("bad_size,bad_confidence", [(-1, 0.8), (True, 0.8), (2.0, 0.8), (4, math.nan)])
+def test_malformed_estimate_metadata_fails_closed(bad_size, bad_confidence):
+    estimate = ElasticityEstimate("segment", "sku", -1.2, bad_confidence, bad_size)
+    with pytest.raises(ValueError, match="Invalid elasticity"):
+        _engine().recommend_price("sku", "segment", PricingTier.TIER_2, 10, 7, 100, estimate)
+
+
 def test_supplier_cost_scenario_uses_real_cost_and_dollar_pass_through():
     plan = _engine().supplier_increase_strategy(
         supplier="supplier", sku="sku", unit_cost_before=5, unit_cost_after=6,
@@ -125,3 +169,35 @@ def test_supplier_scenario_rejects_missing_segments_and_boolean_units():
             "supplier", "sku", 500, 600, 1000,
             [{"segment": "segment", "annual_units": 1e308, "elasticity_ped": -2}],
         )
+
+
+@pytest.mark.parametrize("segments", [
+    [{"segment": "regional", "annual_units": 10}, {"segment": "regional", "annual_units": 20}],
+    [{"segment": "regional", "company_id": "other-tenant", "annual_units": 10}],
+    [{"segment": "regional", "sku": "foreign-sku", "annual_units": 10}],
+    [{"segment": " ", "annual_units": 10}],
+])
+def test_supplier_plan_rejects_cross_scope_or_duplicate_segments(segments):
+    with pytest.raises(ValueError, match="Segments must be unique"):
+        _engine().supplier_increase_strategy("supplier", "sku", 5, 6, 10, segments)
+
+
+def test_zero_unit_blend_and_malformed_observation_are_not_evidence():
+    engine = _engine()
+    observed = engine.estimate_elasticity("segment", "sku", [None, "untyped", []])
+    assert observed.sample_size == 0
+    with pytest.raises(ValueError, match="Positive, finite observed unit weights"):
+        engine.supplier_increase_strategy("supplier", "sku", 5, 6, 10,
+                                          [{"segment": "regional", "annual_units": 0}])
+
+
+def test_pricing_and_supplier_outputs_disclose_tenant_and_unverified_status():
+    engine = _engine()
+    draft = engine.recommend_price("sku", "segment", PricingTier.TIER_2,
+                                   10, 7, 100, engine.estimate_elasticity("segment", "sku", []))
+    assert draft.to_dict()["company_id"] == "synthetic-tenant"
+    assert draft.to_dict()["source_status"] == "unverified_advisory"
+    plan = engine.supplier_increase_strategy("supplier", "sku", 5, 6, 10,
+                                             [{"segment": "regional", "annual_units": 100}])
+    assert plan.to_dict()["company_id"] == "synthetic-tenant"
+    assert plan.to_dict()["segment_recommendations"][0]["source_status"] == "unverified_advisory"

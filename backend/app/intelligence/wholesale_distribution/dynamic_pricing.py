@@ -67,6 +67,7 @@ class ElasticityEstimate:
     confidence: float                       # 0–1
     sample_size: int                        # number of price-change events observed
     notes: str = ""
+    company_id: str = ""                    # scope of observed events; blank for legacy fixtures
 
     @property
     def is_elastic(self) -> bool:
@@ -84,6 +85,7 @@ class ElasticityEstimate:
 
     def to_dict(self) -> dict:
         return {
+            "company_id": self.company_id,
             "segment": self.segment,
             "sku_category": self.sku_category,
             "ped": round(self.ped, 3),
@@ -112,9 +114,11 @@ class PricingRecommendation:
     pass_through_strategy: Optional[PassThroughStrategy] = None
     staged_timeline_days: Optional[int] = None   # for STAGED strategy
     competitive_position: str = "unknown"   # below_market | at_market | above_market
+    company_id: str = ""
 
     def to_dict(self) -> dict:
         return {
+            "company_id": self.company_id,
             "sku": self.sku,
             "segment": self.segment,
             "pricing_tier": self.pricing_tier.value,
@@ -131,6 +135,7 @@ class PricingRecommendation:
             "staged_timeline_days": self.staged_timeline_days,
             "competitive_position": self.competitive_position,
             "requires_human_approval": True,
+            "source_status": "unverified_advisory",
         }
 
 
@@ -145,9 +150,11 @@ class SupplierIncreasePlan:
     margin_impact_at_zero_pass_through: float  # worst case (absorb all)
     margin_impact_at_full_pass_through: float  # best case (pass all through)
     recommended_action_summary: str
+    company_id: str = ""
 
     def to_dict(self) -> dict:
         return {
+            "company_id": self.company_id,
             "supplier": self.supplier,
             "sku": self.sku,
             "supplier_increase_pct": round(self.supplier_increase_pct, 2),
@@ -192,6 +199,16 @@ class DynamicPricingEngine:
         peds: list[float] = []
 
         for event in price_change_events:
+            if not isinstance(event, dict):
+                continue
+            # Ignore evidence explicitly belonging to another tenant, product
+            # category or segment. Missing IDs remain legacy unverified input.
+            if any(event.get(key) not in (None, expected) for key, expected in (
+                ("company_id", self.company_id),
+                ("segment", segment),
+                ("sku_category", sku_category),
+            )):
+                continue
             p1 = event.get("old_price", 0)
             p2 = event.get("new_price", 0)
             q1 = event.get("units_before", 0)
@@ -205,10 +222,20 @@ class DynamicPricingEngine:
 
             # Normalise quantities to same period length
             period = event.get("period_days", 30)
-            if not isinstance(period, (int, float)) or isinstance(period, bool) or not math.isfinite(period) or period <= 0:
+            # Unequal before/after sales windows must be compared as rates.
+            # If either explicit window is present, require the other one too.
+            has_before = "period_before_days" in event
+            has_after = "period_after_days" in event
+            if has_before != has_after:
                 continue
-            q1_daily = q1 / period
-            q2_daily = q2 / period
+            before_days = event.get("period_before_days", period)
+            after_days = event.get("period_after_days", period)
+            if any(not isinstance(days, (int, float)) or isinstance(days, bool)
+                   or not math.isfinite(days) or days <= 0
+                   for days in (before_days, after_days)):
+                continue
+            q1_daily = q1 / before_days
+            q2_daily = q2 / after_days
 
             # Arc elasticity: avoids endpoint sensitivity
             pct_q = (q2_daily - q1_daily) / ((q2_daily + q1_daily) / 2) if (q2_daily + q1_daily) else 0
@@ -227,6 +254,7 @@ class DynamicPricingEngine:
                 confidence=0.1,
                 sample_size=0,
                 notes="No price-change events to estimate elasticity — using default -1.0",
+                company_id=self.company_id,
             )
 
         ped = statistics.mean(peds)
@@ -242,6 +270,7 @@ class DynamicPricingEngine:
             ped=ped,
             confidence=confidence,
             sample_size=len(peds),
+            company_id=self.company_id,
         )
 
     # ── Pricing Recommendation ───────────────────────────────────────────────
@@ -264,8 +293,15 @@ class DynamicPricingEngine:
         self._validate_inputs(current_price, unit_cost, annual_units)
         if not sku or not segment or not isinstance(pricing_tier, PricingTier):
             raise ValueError("SKU, segment and a valid pricing tier are required")
-        if not math.isfinite(elasticity.ped) or not 0 <= elasticity.confidence <= 1:
+        if (not isinstance(elasticity.ped, (int, float)) or isinstance(elasticity.ped, bool)
+            or not math.isfinite(elasticity.ped)
+            or not isinstance(elasticity.confidence, (int, float)) or isinstance(elasticity.confidence, bool)
+            or not math.isfinite(elasticity.confidence) or not 0 <= elasticity.confidence <= 1
+            or not isinstance(elasticity.sample_size, int) or isinstance(elasticity.sample_size, bool)
+            or elasticity.sample_size < 0):
             raise ValueError("Invalid elasticity estimate")
+        if elasticity.company_id and elasticity.company_id != self.company_id:
+            raise ValueError("Elasticity evidence belongs to another tenant")
         current_margin = self._margin_pct(current_price, unit_cost)
         market_price = None
         if competitive_prices:
@@ -288,6 +324,7 @@ class DynamicPricingEngine:
                 projected_margin_pct=current_margin, revenue_impact_estimate=0.0,
                 volume_impact_estimate_pct=0.0, confidence=elasticity.confidence,
                 rationale="Insufficient or confounded price-change evidence; hold price for human review.",
+                company_id=self.company_id,
             )
 
         notes: list[str] = []
@@ -378,6 +415,7 @@ class DynamicPricingEngine:
             confidence=elasticity.confidence,
             rationale=" ".join(rationale_parts) or "Price is optimal — no change recommended.",
             competitive_position=competitive_position,
+            company_id=self.company_id,
         )
 
     # ── Supplier Price Increase Strategy ─────────────────────────────────────
@@ -405,11 +443,22 @@ class DynamicPricingEngine:
         recommendations: list[PricingRecommendation] = []
         weighted_pass_through = 0.0
         total_units = 0.0
+        seen_segments: set[str] = set()
         for segment in segment_data:
+            if not isinstance(segment, dict):
+                raise ValueError("Segment evidence must be an object")
+            name = segment.get("segment")
+            if (not isinstance(name, str) or not name.strip() or name in seen_segments
+                or segment.get("company_id", self.company_id) != self.company_id
+                or segment.get("sku", sku) != sku):
+                raise ValueError("Segments must be unique and match the tenant and SKU")
+            seen_segments.add(name)
             units = segment.get("annual_units", 0)
             if not isinstance(units, (int, float)) or isinstance(units, bool) or not math.isfinite(units) or units < 0:
                 raise ValueError("Segment annual units must be nonnegative and finite")
             total_units += units
+        if not math.isfinite(total_units) or total_units <= 0:
+            raise ValueError("Positive, finite observed unit weights are required for a blended plan")
 
         for seg in segment_data:
             seg_name = seg.get("segment", "unknown")
@@ -449,6 +498,7 @@ class DynamicPricingEngine:
                 confidence=0.0,
                 rationale="Unverified supplier/segment scenario only; validate cost, sales, price-posting and approve before action.",
                 competitive_position=position,
+                company_id=self.company_id,
             )
             rec.pass_through_strategy = strategy
             rec.staged_timeline_days = staged_days
@@ -484,6 +534,7 @@ class DynamicPricingEngine:
             margin_impact_at_zero_pass_through=full_absorption_margin - current_margin,
             margin_impact_at_full_pass_through=full_pass_margin - current_margin,
             recommended_action_summary=summary,
+            company_id=self.company_id,
         )
 
     # ── Private helpers ──────────────────────────────────────────────────────

@@ -247,3 +247,30 @@ The current model does not prove currency consistency, discount/tax treatment,
 returns, credit memos, payment allocations or reporting completeness. Do not
 label these outputs audited revenue, cash receipts or an authoritative sales
 ledger. Present incomplete/unknown evidence separately from a verified zero.
+
+## Follow-up: read-only AR balance aging prototype (Milestone 7)
+
+`backend/app/intelligence/receivables.py` contains an **internal, pure**
+invoice-balance aging calculation, not a shared schema, database table, API,
+tenant-authentication mechanism or verified AR ledger. It requires a
+tenant/connection-tagged invoice projection, source invoice ID and evidence
+reference, an as-of date, timezone-aware observations, verified currency, a
+successful and recent source snapshot, and an explicit assertion that **all
+historically open invoices** were included. A date-limited QuickBooks invoice
+query cannot fulfill the last requirement. Incomplete, stale, wrong-date or
+unconfirmed-currency inputs return unavailable with `total_open=None` and
+`buckets=None`, never a misleading zero. Wrong-tenant/connection rows raise
+`PermissionError`; duplicate invoices, unknown statuses, inconsistent balances
+and non-finite money fail closed. Missing due dates are counted only in a
+separate `unaged` category with partial aging quality, not silently current.
+
+The 0/1–30/31–60/61–90/91+ overdue buckets preserve `Decimal` and provide
+per-invoice source references for traceability. A genuinely complete, empty
+source snapshot can yield numeric zero, but its reconciliation status is still
+`not_reconciled_to_payments_or_gl`. This is **not** a GAAP-recognized revenue,
+collections or 13-week cash-flow result. The current QuickBooks adapters do
+not expose payment-history/allocations, unapplied cash/credits, historical
+balance snapshots or general-ledger validation. Chat 1 owns the accepted
+canonical `SourceSnapshot`, `Invoice`, `Payment`, `ARBucket` and RLS-bound
+caller contract; connect this calculation only after Gate A acceptance and
+source-backed tests. No financial writes or source calls occur in the module.

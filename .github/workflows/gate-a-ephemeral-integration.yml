@@ -31,6 +31,8 @@ jobs:
     name: Combined backend and client contracts (no persistent merge)
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Local CI-only data store. This service is destroyed after the run.
+    # Its localhost address cannot target staging or production.
     services:
       redis:
         image: redis:7-alpine
@@ -40,6 +42,18 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 3s
           --health-timeout 2s
+          --health-retries 10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sai"
+          --health-interval 5s
+          --health-timeout 3s
           --health-retries 10
     steps:
       - name: Checkout Chat 1 only, without persisted credentials
@@ -113,6 +127,45 @@ jobs:
         run: |
           python -m compileall -q app tasks
           python -m pytest -q
+      - name: Validate merged SQL schema against disposable PostgreSQL
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: sai
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PGHOST" = localhost
+          test "$PGDATABASE" = sai
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          bash scripts/validate_schema.sh
+          psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > combined-schema-manifest.json
+          python3 -c 'import json; d=json.load(open("combined-schema-manifest.json")); assert d["objects"]; print("Combined schema objects:", len(d["objects"]))'
+      - name: Verify disposable PostgreSQL execution, tenant isolation and receipts
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: sai
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
+          SECRETARYAI_EMAIL_WORKER_MODE: simulate
+          SECRETARYAI_EMAIL_DELIVERY_MODE: disabled
+          SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED: '0'
+          SECRETARYAI_DURABLE_APPROVAL_ENABLED: '0'
+          SECRETARYAI_EXECUTION_DATABASE_URL: postgresql://secretary_executor:ci-execution-only@localhost:5432/sai
+          PYTHONPATH: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PGHOST" = localhost
+          test "$PGDATABASE" = sai
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_executor LOGIN PASSWORD 'ci-execution-only'"
+          python scripts/test_execution_integration.py
       - name: Install Node 22
         uses: actions/setup-node@v4
         with:

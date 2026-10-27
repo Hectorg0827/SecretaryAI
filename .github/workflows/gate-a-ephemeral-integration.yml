@@ -187,3 +187,8 @@ jobs:
         run: |
           npm ci
           npm run typecheck
+      - name: Enforce canonical server briefing and nullable dashboard contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_gate_a_frontend_contract.py

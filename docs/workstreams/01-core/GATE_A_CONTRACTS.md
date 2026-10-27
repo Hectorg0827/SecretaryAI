@@ -114,3 +114,13 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - This is the **only authorized v1 schema** for Chat 5 to consume; the existing client-side aggregation from disparate live reads is not a server-authorized briefing. Frontend/mobile/desktop UI must show partial/incomplete status and error on HTTP 503, not automatically label empty sections as no activity.
 - Integration tests pin both the published OpenAPI reference and the strict runtime schema, including refusal of promoted verified/all-sources claims and extra output data.
 - Future full-digest v2 requires a new contract version and independent source + execution receipt validation. Do not change this v1 response model to falsely claim complete coverage.
+
+
+## Gate A follow-up notes permission and persistence boundary
+
+- `GET /api/dashboard/notes` permits owner and manager company-wide visibility but explicitly adds a server-side `user_id=<authenticated JWT subject>` filter for the `sales_rep` role. The company_id filter remains mandatory for every role. A rep's `view_own_accounts` permission is never implicit authorization to list other employees' notes.
+- `PATCH /api/dashboard/notes/{note_id}` enforces both tenant and rep ownership, returns HTTP 404 for zero authorized matches rather than fabricating a successful update, and HTTP 503 for provider failures.
+- `POST /api/dashboard/notes` populates company_id/user_id from the server-verified session and requires an acknowledged persisted row. Empty insert acknowledgement is HTTP 503, not a synthetic saved-note response.
+- `GET /api/dashboard/notes` now responds HTTP 503 on unavailable storage rather than disguising an outage as an empty follow-up list.
+- Chat 5: display 403/404/503 as authorization/not-found/unavailable, never success or 'zero notes'. Do not mix personal-rep notes and company-wide executive notes in the same unscoped UI.
+- These are API-level guardrails only; future customer/territory-specific note sharing requires a separately authorized assignment model and persisted row-level policy.

@@ -158,3 +158,11 @@ Contract and compatibility tests must pass on exact feature-branch tip; architec
 - `read_snapshot` now raises `SnapshotReadUnavailable` on database/query failures; only an actual absent row returns `None`. This prevents opportunistic provider-wide recomputation when the snapshot store is offline. Both `/api/dashboard/summary` and `/api/briefing/today` convert snapshot storage failures to sanitized 503 responses.
 - Regression tests exercise invalid totals, unavailable/unverified source claims, mismatched account aggregates, NaN/Infinity revenue, missing inventory fields, bad timestamps, stale-but-valid records, and real store exceptions (no provider sync attempted).
 - Chat 2/5: contract consumers must distinguish 503 unavailable from a VERIFIED zero; no frontend default `?? 0` for untrusted business metrics. A future independently verified V2 lineage must have explicit evidence and a new schema; never promote V1 snapshots by changing a flag.
+
+
+## Gate A authoritative snapshot persistence receipt
+
+- `store_snapshot` now treats the PostgREST upsert response as a required write acknowledgement. A successful refresh must include exactly one returned row matching both the trusted `company_id` and `report_type`. An empty, malformed, multiple-row or cross-company response is `SnapshotPersistenceUnavailable` instead of a false 'refreshed' state.
+- This is an acknowledgement requirement, not a guarantee of real external provider completeness. On an ambiguous write outcome, do not automatically retry a business mutation or claim durable success; investigate the row by tenant and report type.
+- Both manual refresh and API first-load flows already propagate `SnapshotPersistenceUnavailable` and must not claim success when an acknowledgement fails. New tests cover positive acknowledgement, empty results, mismatched company/report type, and storage exception.
+- Chat 2/5: independently distinguish `refresh_queued`, `refreshed` with durable acknowledgement, `unavailable`, and `partial source`; user-facing green status requires the appropriate stage to be proven. This change does not enable new provider writes or notifications.

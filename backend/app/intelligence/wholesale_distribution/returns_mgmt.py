@@ -211,9 +211,12 @@ class ReturnsManagementEngine:
     # Keywords that map return reasons to categories
     CATEGORY_KEYWORDS: dict[ReturnCategory, list[str]] = {
         ReturnCategory.DEFECTIVE: [
-            "defect", "defects", "defective", "broken", "malfunction",
+            "defect", "defects", "defective", "broken", "broke", "malfunction",
+            "malfunctions", "malfunctioned", "malfunctioning",
             "fail", "fails", "failed", "failing", "failure", "doesn't work",
-            "not working", "DOA", "dead on arrival", "faulty",
+            "does not work", "not working", "isn't working", "stopped working",
+            "won't work", "won't turn on", "will not turn on", "inoperable",
+            "DOA", "dead on arrival", "faulty",
         ],
         ReturnCategory.WRONG_ITEM: [
             "wrong item", "wrong sku", "incorrect", "not what i ordered", "wrong product",
@@ -243,28 +246,65 @@ class ReturnsManagementEngine:
         ],
     }
 
+    # A keyword preceded by one of these words in the same clause is negated
+    # ("not defective", "no defects", "non-defective").
+    NEGATION_CUES = frozenset({
+        "not", "no", "non", "never", "without", "isn't", "wasn't", "aren't",
+        "weren't", "don't", "doesn't", "didn't", "hasn't", "haven't",
+    })
+    NEGATION_WINDOW_WORDS = 3
+    _CLAUSE_BOUNDARY = re.compile(
+        r"[.,;:!?()\[\]]|\s-+\s|[–—]|\b(?:but|however|although|though)\b"
+    )
+
     def __init__(self, company_id: str):
         self.company_id = company_id
 
     # ── Classification ───────────────────────────────────────────────────────
 
     def classify_return(self, record: ReturnRecord) -> ReturnCategory:
-        """Classify a return record by matching reason text to category keywords."""
+        """Classify a return record by matching reason text to category keywords.
+
+        Whole words only; a longer phrase owns the words inside it ("wrong
+        color" is not a colour complaint); negated phrases are ignored; and
+        conflicting evidence stays UNCLASSIFIED for inspection instead of
+        being settled by keyword-table order. A false DEFECTIVE label feeds
+        supplier defect rates and supplier-claim candidates.
+        """
         if not isinstance(record.return_reason, str):
             raise ValueError("Return reason must be text")
-        reason_lower = record.return_reason.lower()
-        scores: dict[ReturnCategory, int] = {}
+        reason = re.sub(r"[‘’ʼ`]", "'", record.return_reason.lower())
 
+        matches: list[tuple[int, int, ReturnCategory, str]] = []
         for category, keywords in self.CATEGORY_KEYWORDS.items():
-            score = sum(1 for kw in keywords if re.search(
-                r"(?<!\w)" + re.escape(kw.lower()) + r"(?!\w)", reason_lower
-            ))
-            if score > 0:
-                scores[category] = score
+            for kw in keywords:
+                pattern = r"(?<!\w)" + re.escape(kw.lower()) + r"(?!\w)"
+                for match in re.finditer(pattern, reason):
+                    matches.append((match.start(), match.end(), category, kw.lower()))
 
-        if scores:
-            return max(scores, key=lambda c: scores[c])
-        return ReturnCategory.UNCLASSIFIED  # no inferred commercial justification
+        claimed: list[tuple[int, int]] = []
+        evidence: dict[ReturnCategory, set[str]] = {}
+        for start, end, category, kw in sorted(matches, key=lambda m: (m[0] - m[1], m[0])):
+            if any(start < used_end and used_start < end for used_start, used_end in claimed):
+                continue
+            claimed.append((start, end))
+            if not self._is_negated(reason, start):
+                evidence.setdefault(category, set()).add(kw)
+
+        if not evidence:
+            return ReturnCategory.UNCLASSIFIED  # no inferred commercial justification
+        best = max(len(kws) for kws in evidence.values())
+        leaders = [category for category, kws in evidence.items() if len(kws) == best]
+        if len(leaders) != 1:
+            return ReturnCategory.UNCLASSIFIED  # e.g. "defective" vs "cancelled"
+        return leaders[0]
+
+    def _is_negated(self, reason: str, start: int) -> bool:
+        clause_start = 0
+        for boundary in self._CLAUSE_BOUNDARY.finditer(reason, 0, start):
+            clause_start = boundary.end()
+        preceding = re.findall(r"[a-z0-9']+", reason[clause_start:start])
+        return any(word in self.NEGATION_CUES for word in preceding[-self.NEGATION_WINDOW_WORDS:])
 
     # ── Disposition ───────────────────────────────────────────────────────────
 

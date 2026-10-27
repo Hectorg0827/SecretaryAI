@@ -233,3 +233,75 @@ def test_inflected_defective_return_remains_eligible_for_unsent_supplier_claim()
     assert claim is not None
     assert claim.defective_units == 5
     assert claim.to_dict()["claim_filed"] is False
+
+
+@pytest.mark.parametrize("reason", [
+    "Item malfunctioned on first use",
+    "Malfunctioning compressor",
+    "Unit broke during install",
+    "Stopped working after a week",
+    "Doesn’t work",  # curly apostrophe from mobile keyboards
+    "Won't turn on",
+    "Unit does not work",
+])
+def test_natural_defect_wording_is_classified_defective(reason):
+    engine = ReturnsManagementEngine("tenant-a")
+    assert engine.classify_return(_record(reason=reason, category=None)) == ReturnCategory.DEFECTIVE
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("Not defective - customer changed mind", ReturnCategory.CUSTOMER_CANCEL),
+    ("No defects, customer cancelled order", ReturnCategory.CUSTOMER_CANCEL),
+    ("Customer cancelled; item not defective", ReturnCategory.CUSTOMER_CANCEL),
+    ("Non-defective unit, ordered too many", ReturnCategory.OVERSTOCK),
+    ("Arrived without defects", ReturnCategory.UNCLASSIFIED),
+])
+def test_negated_defect_wording_is_not_defective(reason, expected):
+    engine = ReturnsManagementEngine("tenant-a")
+    assert engine.classify_return(_record(reason=reason, category=None)) == expected
+
+
+def test_negation_does_not_reach_across_unrelated_words():
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason="No idea why it failed", category=None)
+    assert engine.classify_return(record) == ReturnCategory.DEFECTIVE
+
+
+def test_conflicting_reason_is_held_rather_than_defaulting_to_defective():
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason="Defective per customer, but customer cancelled", category=None)
+    assert engine.classify_return(record) == ReturnCategory.UNCLASSIFIED
+    assert engine.recommend_disposition(record) == DispositionDecision.HOLD_FOR_INSPECTION
+
+
+def test_longer_phrase_owns_its_words():
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason="Shipped wrong color", category=None)
+    assert engine.classify_return(record) == ReturnCategory.WRONG_ITEM
+
+
+@pytest.mark.parametrize("reason", [
+    "Not defective - customer changed mind",
+    "No defects, customer cancelled order",
+    "Defective per customer, but customer cancelled",
+])
+def test_negated_or_conflicting_wording_never_produces_supplier_claim(reason):
+    engine = ReturnsManagementEngine("tenant-a")
+    record = _record(reason=reason, category=None)
+    record.category = engine.classify_return(record)
+    claim = engine.generate_supplier_claim(
+        "S-1", "Test Supplier", [record], 100, "2026-10-01", "2026-10-31",
+    )
+    assert claim is None
+
+
+def test_return_preview_reports_negated_defect_as_not_defective():
+    response = _client().post(
+        "/api/logistics/returns/preview",
+        json=_request() | {"return_reason": "Not defective - customer changed mind"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["category_candidate"] == "customer_cancel"
+    assert data["proposed_disposition"] == "hold_for_inspection"
+    assert data["supplier_claim_filed"] is False

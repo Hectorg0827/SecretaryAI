@@ -39,10 +39,20 @@ def _classify(signal=None, scope=None, seconds=300):
 def test_verified_margin_signal_maps_to_auditable_draft_only_red_alert():
     result = _classify()
     assert result.section == "red_alerts"
-    assert result.status == "requires_human_review"
+    assert result.status == "needs_review"
     assert result.display_metric == D("9.5")
     assert result.next_action_code == "review_margin_waterfall"
     assert result.approval_required and not result.execution_claimed
+
+
+def test_all_classified_statuses_use_gate_a_digest_entry_vocabulary():
+    allowed = {"open", "resolved", "needs_review", "source_unavailable"}
+    for signal in (_signal(), _signal(source_quality="partial"),
+                   _signal(source_quality="unavailable")):
+        result = _classify(signal)
+        assert result.status in allowed
+        assert result.approval_required is True
+        assert result.execution_claimed is False
 
 
 def test_missing_compliance_source_never_downgrades_critical_alert():

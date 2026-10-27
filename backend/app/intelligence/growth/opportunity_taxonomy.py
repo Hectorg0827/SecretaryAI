@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,7 @@ class ClassifiedGrowthSignal:
     signal_code: str
     entity_ref: str
     section: str
-    status: str
+    status: Literal["needs_review", "source_unavailable"]
     display_metric: Decimal | None
     next_action_code: str
     source_record_id: str
@@ -123,7 +124,9 @@ def classify_growth_signal(
         entity_ref=signal.entity_ref,
         # Missing evidence must never downgrade an urgent red alert.
         section=definition.section,
-        status="requires_human_review" if source_complete else "source_unavailable",
+        # Use Gate A's canonical DigestEntry status vocabulary. The review
+        # decision is advisory; action authorization is never implied.
+        status="needs_review" if source_complete else "source_unavailable",
         display_metric=signal.metric_value if source_complete else None,
         next_action_code=definition.next_action_code if source_complete else "verify_source_evidence",
         source_record_id=signal.source_record_id,

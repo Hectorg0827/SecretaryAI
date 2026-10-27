@@ -81,6 +81,15 @@ handoff requirement*, **not** an authentication credential. The classifier
 rejects wrong tenant, disallowed role, missing entity grant or missing policy
 decision ID. It removes metric values when evidence is stale, partial or
 unavailable, retaining red-alert urgency instead of fabricating a healthy zero.
+The classifier now emits Gate A `DigestEntry`-compatible statuses
+(`needs_review` / `source_unavailable`) instead of an independent review label.
+Before construction of a canonical `EvidenceRef` / `DigestEntry`, Chat 1 and
+Chat 2 must still supply and validate the source system, fetched-at timestamp,
+confidence, authenticated role/record scope and approved evidence quality.
+Source revision here is not itself enough to claim `verified`. Unavailable
+or stale evidence must create an `EvidenceRef` with quality `unavailable` if
+the receiving entry has status `source_unavailable`; mixed quality/status
+must fail Gate A validation rather than be silently coerced.
 All outputs have `approval_required=True` and `execution_claimed=False`.
 The `actions_taken` briefing section is intentionally never generated here:
 that requires verified external receipts under Chat 1's authority.

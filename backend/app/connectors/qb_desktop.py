@@ -68,6 +68,8 @@ class QBDesktopAdapter(QuickBooksAdapter):
         """Fetch all pages from a Conductor endpoint."""
         results: list[dict] = []
         cursor: Optional[str] = None
+        seen_cursors: set[str] = set()
+        seen_ids: set[str] = set()
         base_params = params or {}
 
         while True:
@@ -76,11 +78,30 @@ class QBDesktopAdapter(QuickBooksAdapter):
                 page_params["cursor"] = cursor
 
             data = await self._get(path, page_params)
-            results.extend(data.get("data", []))
+            if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+                raise ValueError("Conductor response missing valid data list")
+            if not isinstance(data.get("hasMore"), bool):
+                raise ValueError("Conductor response missing valid hasMore flag")
+            for item in data["data"]:
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if not item_id:
+                    raise ValueError("Conductor source record missing id")
+                if item_id in seen_ids:
+                    raise ValueError("Conductor pagination returned duplicate id")
+                seen_ids.add(item_id)
+            results.extend(data["data"])
 
-            if not data.get("hasMore"):
+            if not data["hasMore"]:
                 break
-            cursor = data.get("nextCursor")
+            if not data["data"]:
+                raise ValueError("Conductor pagination hasMore with empty page")
+            next_cursor = data.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor.strip():
+                raise ValueError("Conductor pagination missing next cursor")
+            if next_cursor in seen_cursors:
+                raise ValueError("Conductor pagination repeated continuation cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
         return results
 
@@ -101,29 +122,49 @@ class QBDesktopAdapter(QuickBooksAdapter):
         )
 
     def _normalize_invoice(self, raw: dict) -> Invoice:
+        for field in ("id", "transactionDate", "totalAmount", "balanceRemaining"):
+            if raw.get(field) is None or raw.get(field) == "":
+                raise ValueError(f"Conductor invoice missing {field}")
+        try:
+            total = Decimal(str(raw["totalAmount"]))
+            balance = Decimal(str(raw["balanceRemaining"]))
+        except Exception as exc:
+            raise ValueError("Conductor invoice has invalid totalAmount or balanceRemaining") from exc
+        if not total.is_finite() or total < 0:
+            raise ValueError("Conductor invoice has invalid totalAmount")
+        if not balance.is_finite() or balance < 0:
+            raise ValueError("Conductor invoice has invalid balanceRemaining")
         return Invoice(
             id=raw["id"],
             qb_id=raw["id"],
             customer_id=raw.get("customer", {}).get("id", ""),
             customer_name=raw.get("customer", {}).get("name", ""),
-            date=date.fromisoformat(raw["transactionDate"]) if raw.get("transactionDate") else date.today(),
+            date=date.fromisoformat(raw["transactionDate"]),
             due_date=date.fromisoformat(raw["dueDate"]) if raw.get("dueDate") else None,
-            total=Decimal(str(raw.get("totalAmount", 0))),
-            balance=Decimal(str(raw.get("balanceRemaining", 0))),
-            status="open" if Decimal(str(raw.get("balanceRemaining", 0))) > 0 else "paid",
+            total=total,
+            balance=balance,
+            status="open" if balance > 0 else "paid",
             line_items=raw.get("lineItems", []),
         )
 
     def _normalize_inventory_item(self, raw: dict) -> InventoryItem:
+        if raw.get("quantityOnHand") is None or raw.get("quantityOnHand") == "":
+            raise ValueError("Conductor inventory missing quantityOnHand")
+        try:
+            quantity_on_hand = Decimal(str(raw["quantityOnHand"]))
+        except Exception as exc:
+            raise ValueError("Conductor inventory has invalid quantityOnHand") from exc
+        if not quantity_on_hand.is_finite():
+            raise ValueError("Conductor inventory has invalid quantityOnHand")
         return InventoryItem(
             id=raw["id"],
             qb_id=raw["id"],
             name=raw.get("name", ""),
             sku=raw.get("salesDescription"),
-            quantity_on_hand=Decimal(str(raw.get("quantityOnHand", 0))),
+            quantity_on_hand=quantity_on_hand,
             unit_price=Decimal(str(raw.get("salesPrice", 0))),
             purchase_cost=Decimal(str(raw.get("purchaseCost", 0))),
-            reorder_point=Decimal(str(raw["reorderPoint"])) if raw.get("reorderPoint") else None,
+            reorder_point=Decimal(str(raw["reorderPoint"])) if raw.get("reorderPoint") is not None else None,
         )
 
     def _normalize_purchase_order(self, raw: dict) -> PurchaseOrder:

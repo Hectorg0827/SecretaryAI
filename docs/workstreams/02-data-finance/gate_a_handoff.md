@@ -148,3 +148,36 @@ with SKU/UOM identity, freshness and source provenance. Do not remove this
 gate or infer `open_po_qty=0` from an absent field. The existing action label
 remains draft-only, but human approval and role/tenant enforcement belong in
 the shared actions API. No feed table schema or scheduler code was changed.
+
+## Follow-up: provider page and invoice integrity (Milestone 4)
+
+Read-only synthetic tests reproduced five categories of unsafe connector
+behavior before fixes: missing QBO `QueryResponse` interpreted as a clean
+empty result; duplicated full QBO pages; missing Conductor `data` interpreted
+as no invoices; Conductor `hasMore=True` with a missing/repeated `nextCursor`
+looping indefinitely; and absent Desktop invoice financial fields silently
+replaced by today's date or zero. The owned QBO/Desktop connector paths now
+require explicit response shapes, validate entity IDs and page deduplication,
+detect non-progressing cursors, and reject missing/non-finite/negative Desktop
+invoice totals or balances while preserving a genuine zero. Valid empty pages
+remain supported when explicitly returned by the provider contract.
+Both inventory-item normalizers also require a finite observed quantity: an
+absent `QtyOnHand`/`quantityOnHand` may no longer imply verified zero stock.
+The Desktop paginator rejects empty `hasMore=True` pages instead of waiting
+indefinitely for evidence that never progresses.
+
+**Chat 1 contract request:** a source-batch result must distinguish
+`completed_empty` from `failed_or_incomplete`; no dashboard, scheduler or
+cashflow projection may convert either a malformed provider response or a
+stalled cursor to verified zero activity. No shared source-result schema was
+modified in Chat 2.
+
+**Provider-backed validation still required:** obtain consented QBO sandbox
+multi-page query, zero-result and OAuth rotation evidence; obtain consented
+Conductor pagination fields (`data`, `hasMore`, `nextCursor`) and Desktop
+invoice field semantics from real vendor responses. These tests prove
+deterministic contracts only, not live provider compatibility. Neither
+QuickBooks adapter implements read-only payment history/allocation retrieval,
+so a verified customer AR roll-forward (`opening + invoices - credits -
+payments = closing`) is blocked. No payment estimate or 13-week cashflow
+figure should be produced as observed until source history is available.

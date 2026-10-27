@@ -136,6 +136,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
     async def _query_all(self, entity: str, where: str = "") -> list[dict]:
         """Paginate through all results for a QBO entity."""
         results: list[dict] = []
+        seen_ids: set[str] = set()
         page_size = 1000
         start = 1
 
@@ -144,8 +145,27 @@ class QBOnlineAdapter(QuickBooksAdapter):
             sql = f"SELECT * FROM {entity} {where_clause}STARTPOSITION {start} MAXRESULTS {page_size}"
             data = await self._query(sql)
 
-            query_response = data.get("QueryResponse", {})
-            items = query_response.get(entity, [])
+            query_response = data.get("QueryResponse") if isinstance(data, dict) else None
+            if not isinstance(query_response, dict):
+                raise ValueError("QBO source response missing valid QueryResponse")
+            if entity not in query_response:
+                # A zero-result response must be explicit; a missing payload
+                # must not be misreported as no customers/invoices/stock.
+                if query_response.get("totalCount") == 0:
+                    items = []
+                else:
+                    raise ValueError(f"QBO QueryResponse missing {entity} results")
+            else:
+                items = query_response[entity]
+            if not isinstance(items, list):
+                raise ValueError(f"QBO {entity} source results must be a list")
+            for item in items:
+                entity_id = item.get("Id") if isinstance(item, dict) else None
+                if not entity_id:
+                    raise ValueError(f"QBO {entity} record missing Id")
+                if entity_id in seen_ids:
+                    raise ValueError(f"QBO {entity} pagination returned duplicate Id")
+                seen_ids.add(entity_id)
             results.extend(items)
 
             if len(items) < page_size:
@@ -202,15 +222,23 @@ class QBOnlineAdapter(QuickBooksAdapter):
         )
 
     def _normalize_inventory_item(self, raw: dict) -> InventoryItem:
+        if raw.get("QtyOnHand") is None or raw.get("QtyOnHand") == "":
+            raise ValueError("QBO inventory missing quantity_on_hand QtyOnHand")
+        try:
+            quantity_on_hand = Decimal(str(raw["QtyOnHand"]))
+        except Exception as exc:
+            raise ValueError("QBO inventory has invalid quantity_on_hand QtyOnHand") from exc
+        if not quantity_on_hand.is_finite():
+            raise ValueError("QBO inventory has invalid quantity_on_hand QtyOnHand")
         return InventoryItem(
             id=raw["Id"],
             qb_id=raw["Id"],
             name=raw.get("Name", ""),
             sku=raw.get("Sku"),
-            quantity_on_hand=Decimal(str(raw.get("QtyOnHand", 0))),
+            quantity_on_hand=quantity_on_hand,
             unit_price=Decimal(str(raw.get("UnitPrice", 0))),
             purchase_cost=Decimal(str(raw.get("PurchaseCost", 0))),
-            reorder_point=Decimal(str(raw["ReorderPoint"])) if raw.get("ReorderPoint") else None,
+            reorder_point=Decimal(str(raw["ReorderPoint"])) if raw.get("ReorderPoint") is not None else None,
         )
 
     def _normalize_purchase_order(self, raw: dict) -> PurchaseOrder:

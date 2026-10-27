@@ -39,12 +39,22 @@ def _row_value(row, field: str, default=None):
 
 
 def _invoice_amount(row) -> float:
+    """Reject missing, non-finite or otherwise untrustworthy invoice values."""
     value = _row_value(row, "total")
     if value is None:
         value = _row_value(row, "total_amount")
-    if value is None:
-        raise ValueError("Invoice missing total")
-    return float(value)
+    if value is None or isinstance(value, bool):
+        raise ValueError("Invoice missing or invalid total")
+    try:
+        decimal_value = Decimal(str(value))
+        if not decimal_value.is_finite():
+            raise ValueError("Invoice amount must be finite")
+        amount = float(decimal_value)
+        if not Decimal(str(amount)).is_finite():
+            raise ValueError("Invoice amount exceeds supported range")
+        return amount
+    except (ValueError, ArithmeticError) as exc:
+        raise ValueError("Invoice amount is not a finite number") from exc
 
 
 def _invoice_date(row) -> date:

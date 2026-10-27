@@ -56,10 +56,10 @@ def build_owner_briefing(
     payload = snapshot.get("payload")
     if not isinstance(payload, dict) or payload.get("source_read_status") != "completed":
         raise BriefingSourceUnavailable("Incomplete source snapshot")
-    # Until provider provenance is checked, even an upstream verified label is
-    # intentionally downgraded to partial.
-    if payload.get("source_quality") not in ("partial", "verified"):
-        raise BriefingSourceUnavailable("Source quality is unknown")
+    # V1 has no independently verified provider-lineage certificate. A
+    # cached row cannot self-promote to "verified" merely by changing a flag.
+    if payload.get("source_quality") != "partial":
+        raise BriefingSourceUnavailable("Briefing snapshot provenance unverified")
     current = now or datetime.now(timezone.utc)
     observed = _snapshot_time(snapshot.get("generated_at"))
     freshness = snapshot_freshness(observed, now=current)
@@ -75,7 +75,13 @@ def build_owner_briefing(
               ("healthy", "slowing", "at_risk", "dormant", "total")}
     if sum(counts[x] for x in ("healthy", "slowing", "at_risk", "dormant")) != counts["total"]:
         raise BriefingSourceUnavailable("Account aggregate mismatch")
-    if type(sales) not in (int, float) or not isfinite(float(sales)):
+    if type(sales) not in (int, float):
+        raise BriefingSourceUnavailable("Invalid sales figure")
+    try:
+        finite_sales = isfinite(float(sales))
+    except (ValueError, OverflowError, TypeError):
+        finite_sales = False
+    if not finite_sales:
         raise BriefingSourceUnavailable("Invalid sales figure")
     for item in inventory:
         if not isinstance(item, dict) or item.get("stock_status") not in (

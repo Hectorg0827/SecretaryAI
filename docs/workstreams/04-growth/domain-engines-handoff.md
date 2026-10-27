@@ -174,6 +174,17 @@ inputs, division-by-zero cases, tenant mismatches, inventory dependencies,
 cannibalization, HR scoping and draft-only outcomes. Run together with
 existing compliance and pricing tests using the Python test environment.
 
+`tests/test_growth_seven_capability_rehearsal.py` also exercises one entirely
+synthetic, same-tenant commercial launch across **all seven workstream
+capabilities**. It checks that a stockout is routed to supply review, pricing
+and new-brand forecasts stay draft, partial launch and briefing observations
+hide unsupported metrics, a passing checklist never authorizes shipment,
+an unobserved elasticity estimate holds price, and restricted HR details
+remain employee-scoped. It additionally rejects cross-tenant portfolio input
+and unauthorized briefing role scope. This is an **in-process domain
+rehearsal**, *not* an HTTP/browser/provider, worker, migration, RBAC or
+staging E2E test.
+
 Not accepted until: Gate A contracts, source-backed adapters, API/RBAC/RLS
 integration, real staging E2E, audit durability, browser/role UX tests,
 human regulatory/pricing/HR approvals and CI/CodeQL exact-commit checks.

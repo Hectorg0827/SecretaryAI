@@ -107,3 +107,23 @@ async def test_sales_api_invalid_comparison_period_returns_503():
             adapter=adapter,
         )
     assert error.value.status_code == 503
+
+
+
+@pytest.mark.asyncio
+async def test_snapshot_aggregate_overflow_does_not_publish_nonfinite_revenue():
+    class Synthetic:
+        async def get_all_customers(self):
+            return []
+        async def get_orders_last_n_days(self, days):
+            if days == 365:
+                return []
+            return [
+                {"customer_id": "qb-a", "date": date.today(), "total": "8e307"}
+            ] * 3
+        async def get_inventory_merged(self):
+            return []
+
+    with pytest.raises(SnapshotSourceUnavailable) as error:
+        await compute_dashboard_payload(Synthetic())
+    assert error.value.source == "sales_30d"

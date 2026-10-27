@@ -490,17 +490,22 @@ async def list_notes(
 ):
     company_id = user["company_id"]
     try:
-        result = (
+        query = (
             db.table("follow_up_notes")
             .select("*")
             .eq("company_id", company_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        # Rep-level view_own_accounts is not permission to read all company
+        # follow-ups. Only the owning employee's records may be returned.
+        if user.get("role") == "sales_rep":
+            query = query.eq("user_id", user["sub"])
+        result = query.order("created_at", desc=True).execute()
         return {"notes": result.data or []}
     except Exception as exc:
-        log.error("Notes fetch failed: %s", exc)
-        return {"notes": []}
+        log.error("Notes read failed for company %s", company_id)
+        raise HTTPException(
+            status_code=503, detail="Follow-up notes temporarily unavailable"
+        ) from exc
 
 
 class CreateNoteRequest(BaseModel):
@@ -550,14 +555,22 @@ async def update_note(
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
-        result = (
+        query = (
             db.table("follow_up_notes")
             .update(update)
             .eq("id", note_id)
             .eq("company_id", company_id)
-            .execute()
         )
-        return result.data[0] if result.data else {"id": note_id, **update}
+        if user.get("role") == "sales_rep":
+            query = query.eq("user_id", user["sub"])
+        result = query.execute()
     except Exception as exc:
-        log.error("Note update failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to update note")
+        log.error("Note update failed for company %s", company_id)
+        raise HTTPException(
+            status_code=503, detail="Follow-up note update unavailable"
+        ) from exc
+    # A filtered-out note may belong to another employee or tenant.
+    # Never claim success when zero authorized rows were updated.
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Follow-up note not found")
+    return result.data[0]

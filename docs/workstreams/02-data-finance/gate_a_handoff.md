@@ -219,3 +219,31 @@ token or database resource was touched.
 The existing outbound email and financial-action policy is unchanged. Drafting
 and sending are **not** invoked by these connector tests; all outbound actions
 must remain disabled pending the shared approval gate.
+
+## Follow-up: invoiced-sales identity and exception checks (Milestone 6)
+
+`app.intelligence.sales_analytics` now rejects duplicate source invoice IDs
+instead of silently doubling the billing total; excludes explicitly voided,
+cancelled, deleted or draft records; keeps accounts and items with distinct
+verified IDs separate even if their names match; and validates line quantities,
+line amounts and account-velocity amounts before ranking/trend calculations.
+Valid zero amounts remain valid. All changes remain inside Chat 2 analytics
+and deterministic owned tests; no shared financial schema was changed.
+
+**Chat 1 owner defect:** `backend/app/api/chat.py:221–229` converts invoice
+objects using truthiness fallbacks and `inv.get(...)`. A valid dataclass zero
+`total`, empty `line_items`, or empty customer name can invoke `.get` on a
+dataclass and crash; the conversion also drops source `id`/`qb_id`,
+`customer_id` and `status`. This prevents the analytics engine from detecting
+duplicate/void invoices and distinguishing same-named accounts, even after
+Chat 2's calculation fix. Please normalize via a mapping/dataclass-safe field
+reader, preserve source IDs and status, and retain `Decimal` through the
+financial calculation instead of coercing input amounts to float.
+
+**Chat 1 / Chat 5 contract request:** the legacy `total_revenue` field is the
+sum of provided invoice totals, **not** recognized or net revenue. `order_count`
+is actually invoice count until canonical Order/SalesLine identity is approved.
+The current model does not prove currency consistency, discount/tax treatment,
+returns, credit memos, payment allocations or reporting completeness. Do not
+label these outputs audited revenue, cash receipts or an authoritative sales
+ledger. Present incomplete/unknown evidence separately from a verified zero.

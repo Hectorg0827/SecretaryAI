@@ -41,6 +41,32 @@ def test_target_margin_cannot_generate_division_by_zero():
         DynamicPricingEngine("synthetic-tenant", 100)
 
 
+@pytest.mark.parametrize("margin", [True, False, "30", math.nan, math.inf])
+def test_non_numeric_or_boolean_target_margin_is_rejected(margin):
+    with pytest.raises(ValueError, match="Target gross margin"):
+        DynamicPricingEngine("synthetic-tenant", margin)
+
+
+@pytest.mark.parametrize("competitor_prices", [[True], [20.0, True]])
+def test_boolean_competitor_prices_cannot_distort_price_recommendation(competitor_prices):
+    estimate = ElasticityEstimate("segment", "category", -1.2, 0.8, 10)
+    with pytest.raises(ValueError, match="Competitive prices"):
+        _engine().recommend_price(
+            "synthetic-sku", "segment", PricingTier.TIER_2, 25, 18, 100,
+            estimate, competitive_prices=competitor_prices,
+        )
+
+
+@pytest.mark.parametrize("competitor_prices", [[True], [25.0, True]])
+def test_boolean_competitor_prices_cannot_distort_supplier_plan(competitor_prices):
+    with pytest.raises(ValueError, match="Competitive prices"):
+        _engine().supplier_increase_strategy(
+            "synthetic-supplier", "synthetic-sku", 15, 16, 25,
+            [{"segment": "regional", "annual_units": 100,
+              "competitive_prices": competitor_prices}],
+        )
+
+
 def test_nonnegative_observational_elasticity_cannot_justify_a_price_change():
     estimate = ElasticityEstimate(
         segment="segment", sku_category="category", ped=0.8,

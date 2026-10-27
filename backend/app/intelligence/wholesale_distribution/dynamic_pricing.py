@@ -178,7 +178,10 @@ class DynamicPricingEngine:
     def __init__(self, company_id: str, target_gross_margin_pct: float = 30.0):
         if not company_id or not isinstance(company_id, str):
             raise ValueError("A tenant identifier is required for pricing intelligence")
-        if not math.isfinite(target_gross_margin_pct) or not 0 <= target_gross_margin_pct < 100:
+        if (not isinstance(target_gross_margin_pct, (int, float))
+            or isinstance(target_gross_margin_pct, bool)
+            or not math.isfinite(target_gross_margin_pct)
+            or not 0 <= target_gross_margin_pct < 100):
             raise ValueError("Target gross margin must be finite and in [0, 100)")
         self.company_id = company_id
         self.target_margin = target_gross_margin_pct
@@ -305,7 +308,8 @@ class DynamicPricingEngine:
         current_margin = self._margin_pct(current_price, unit_cost)
         market_price = None
         if competitive_prices:
-            if any(not isinstance(p, (int, float)) or not math.isfinite(p) or p <= 0
+            if any(not isinstance(p, (int, float)) or isinstance(p, bool)
+                   or not math.isfinite(p) or p <= 0
                    for p in competitive_prices):
                 raise ValueError("Competitive prices must be positive and finite")
             market_price = statistics.mean(competitive_prices)
@@ -482,7 +486,8 @@ class DynamicPricingEngine:
             volume_pct = max(-100.0, (ped if ped is not None else -1.0) * change_pct)
             position = "unknown"
             if comp_prices:
-                if any(not isinstance(p, (int, float)) or not math.isfinite(p) or p <= 0
+                if any(not isinstance(p, (int, float)) or isinstance(p, bool)
+                       or not math.isfinite(p) or p <= 0
                        for p in comp_prices):
                     raise ValueError("Competitive prices must be positive and finite")
                 comparison = (proposed_price / statistics.mean(comp_prices) - 1) * 100

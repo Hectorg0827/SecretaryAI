@@ -274,8 +274,10 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
         raise SnapshotDataInvalid("Dashboard cache payload missing")
     if payload.get("source_read_status") != "completed":
         raise SnapshotDataInvalid("Dashboard cache source read incomplete")
-    if payload.get("source_quality") not in ("partial", "verified"):
-        raise SnapshotDataInvalid("Dashboard cache source quality unavailable")
+    # V1 snapshots lack independent provider lineage certification. A DB row
+    # advertising verified cannot self-certify this business intelligence.
+    if payload.get("source_quality") != "partial":
+        raise SnapshotDataInvalid("Dashboard cache source quality unverified")
 
     accounts = payload.get("accounts")
     if not isinstance(accounts, dict):

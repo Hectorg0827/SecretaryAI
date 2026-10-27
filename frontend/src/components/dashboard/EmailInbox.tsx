@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, PriorityEmail } from '../../lib/api';
+import { verifiedPriorityEmails } from '../../lib/sourceEvidence';
 import { Badge } from '../ui/Badge';
 import { Card, CardHeader } from '../ui/Card';
 import { SkeletonCard } from '../ui/Skeleton';
@@ -61,6 +62,7 @@ function EmailRow({ email, onMarkRead, canReply }: EmailRowProps) {
     setLoadingDraft(true);
     try {
       const res = await api.emails.draftReply(email.id);
+      if (typeof res?.draft !== 'string' || !res.draft.trim()) throw new Error('Draft reply is incomplete');
       setDraft(res.draft);
       setShowDraft(true);
     } catch {
@@ -240,7 +242,9 @@ export function EmailInbox() {
   const fetchEmails = async () => {
     try {
       const res = await api.dashboard.emails();
-      setEmails(res.emails ?? []);
+      const verified = verifiedPriorityEmails(res);
+      if (!verified) throw new Error('Email source evidence is incomplete');
+      setEmails(verified.emails);
       setError(false);
     } catch {
       // A failed source is not evidence of an empty inbox.

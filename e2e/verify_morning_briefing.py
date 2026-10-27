@@ -30,6 +30,7 @@ def _fake_role_token(role: str) -> str:
 
 def _respond(route, *, summary_error: bool = False, summary_malformed: bool = False,
              approvals_malformed: bool = False, briefing_malformed: bool = False,
+             dashboard_aux_malformed: bool = False,
              role: str = "owner",
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
@@ -80,6 +81,14 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
         }
         route.fulfill(status=200, content_type="application/json", body=json.dumps(invalid[path]))
         return
+    if dashboard_aux_malformed and path in ("/api/dashboard/emails", "/api/workflows/"):
+        invalid = {
+            "/api/dashboard/emails": {"emails": [None]},
+            "/api/workflows/": {"workflows": [{"run_id": "synthetic-run", "status": "running",
+                                                "workflow_name": "fixture", "total_steps": 0}]},
+        }
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(invalid[path]))
+        return
     if work_error and path in ("/api/actions/pending", "/api/dashboard/notes", "/api/inventory/alerts"):
         route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Synthetic source outage"}))
         return
@@ -114,6 +123,7 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
         }] if email_fixture else [])},
         "/api/dashboard/emails/draft-reply": {"draft": "Synthetic draft — never send", "subject": "Synthetic reply"},
         "/api/inventory/alerts": {"alerts": []},
+        "/api/workflows/": {"workflows": []},
         "/api/inbox": {"items": [], "unread_count": 0, "total_count": 0},
         "/api/agent/status": {"connected": False, "last_seen": None},
         "/api/connectors/status": {"connectors": []},
@@ -140,7 +150,7 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
 
 def _context(browser, role: str, width: int, *, summary_error: bool = False,
              summary_malformed: bool = False, approvals_malformed: bool = False,
-             briefing_malformed: bool = False,
+             briefing_malformed: bool = False, dashboard_aux_malformed: bool = False,
              email_fixture: bool = False, work_error: bool = False,
              requests_seen: list[str] | None = None,
              authenticated: bool = True,
@@ -151,7 +161,8 @@ def _context(browser, role: str, width: int, *, summary_error: bool = False,
     def mock_route(route):
         _respond(route, summary_error=summary_error, summary_malformed=summary_malformed,
                  approvals_malformed=approvals_malformed,
-                 briefing_malformed=briefing_malformed, role=role,
+                 briefing_malformed=briefing_malformed,
+                 dashboard_aux_malformed=dashboard_aux_malformed, role=role,
                  email_fixture=email_fixture, work_error=work_error,
                  requests_seen=requests_seen, auth_fields_seen=auth_fields_seen)
     context.route("**/api/**", mock_route)
@@ -264,6 +275,20 @@ def main() -> None:
                     assert page.get_by_text("$0.00", exact=True).count() == 0
                 finally:
                     malformed_digest.close()
+
+                # Malformed inbox/workflow HTTP 200 bodies must not crash the
+                # owner dashboard or turn an unreadable source into a clean slate.
+                malformed_aux = _context(browser, "owner", 390, dashboard_aux_malformed=True)
+                try:
+                    page = malformed_aux.new_page()
+                    page.goto(PREVIEW, wait_until="domcontentloaded")
+                    for warning in ("Email source unavailable", "Workflow source unavailable"):
+                        page.get_by_role("alert").get_by_text(warning, exact=False).wait_for()
+                    page.get_by_role("heading", name="Your five-minute morning briefing").wait_for()
+                    assert page.get_by_text("No unread emails — inbox is clear.").count() == 0
+                    assert page.get_by_text("Something went wrong").count() == 0
+                finally:
+                    malformed_aux.close()
 
                 # Semantic links in the six-card briefing support keyboard-only
                 # navigation into the unified inbox, without authorizing action.

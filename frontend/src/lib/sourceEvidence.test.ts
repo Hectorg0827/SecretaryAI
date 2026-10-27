@@ -3,6 +3,7 @@ import {
   verifiedDashboardSummary, verifiedPendingDrafts,
   verifiedBriefingSales, verifiedBriefingNotes, verifiedBriefingFeed,
   verifiedBriefingApprovals, verifiedBriefingAudit, verifiedSalesChart, verifiedDashboardFeed,
+  verifiedPriorityEmails, verifiedWorkflowRuns,
 } from './sourceEvidence';
 
 const validSummary = () => ({
@@ -102,5 +103,33 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
     expect(verifiedDashboardFeed({ events: [{ id: 'test', title: 'Synthetic headline',
       event_type: 'opportunity', action_type: null, body: '', priority: 'unverified', is_read: false,
     }] })).toBeNull();
+  });
+
+  it('distinguishes verified empty email sources from missing or broken inbox records', () => {
+    const email = {
+      id: 'fixture-email', thread_id: 'fixture-thread', from: 'Synthetic sender',
+      from_email: 'sender@example.invalid', subject: 'Synthetic subject', snippet: '',
+      ai_summary: '', ai_priority: 'high', ai_action_needed: '',
+      received_at: '2026-10-26T12:00:00Z', is_read: false, labels: ['INBOX'],
+    };
+    expect(verifiedPriorityEmails({ emails: [] })).toEqual({ emails: [] });
+    expect(verifiedPriorityEmails({})).toBeNull();
+    expect(verifiedPriorityEmails({ emails: [email] })?.emails).toHaveLength(1);
+    expect(verifiedPriorityEmails({ emails: [null] })).toBeNull();
+    expect(verifiedPriorityEmails({ emails: [{ ...email, is_read: 'false' }] })).toBeNull();
+    expect(verifiedPriorityEmails({ emails: [{ ...email, ai_priority: 'unverified' }] })).toBeNull();
+  });
+
+  it('does not silently hide a failed workflow source or divide by invalid progress', () => {
+    const run = {
+      run_id: 'synthetic-run', workflow_name: 'fixture_workflow', status: 'running',
+      current_step: 1, total_steps: 3, current_step_name: 'Synthetic step',
+    };
+    expect(verifiedWorkflowRuns({ workflows: [] })).toEqual({ workflows: [] });
+    expect(verifiedWorkflowRuns({ workflows: [run] })?.workflows).toHaveLength(1);
+    expect(verifiedWorkflowRuns({ workflows: null })).toBeNull();
+    expect(verifiedWorkflowRuns({ workflows: [null] })).toBeNull();
+    expect(verifiedWorkflowRuns({ workflows: [{ ...run, total_steps: 0 }] })).toBeNull();
+    expect(verifiedWorkflowRuns({ workflows: [{ ...run, current_step: 4 }] })).toBeNull();
   });
 });

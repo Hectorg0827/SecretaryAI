@@ -1,4 +1,4 @@
-import type { DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, SalesSummary } from './api';
+import type { DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, PriorityEmail, SalesSummary } from './api';
 
 export type BriefingSales = Pick<SalesSummary, 'total_revenue' | 'order_count'>;
 export type BriefingFeedEvent = Pick<FeedEvent, 'id' | 'title' | 'event_type' | 'action_type'>;
@@ -7,6 +7,14 @@ export type BriefingAuditEvent = {
   event_type: string;
   created_at: string;
   metadata?: Record<string, unknown>;
+};
+export type DashboardWorkflowRun = {
+  run_id: string;
+  workflow_name: string;
+  status: string;
+  current_step: number;
+  total_steps: number;
+  current_step_name: string;
 };
 
 // These are presentation-layer guards, not a replacement for the canonical
@@ -154,4 +162,36 @@ export function verifiedDashboardFeed(value: unknown): { events: FeedEvent[] } |
     && typeof event.is_read === 'boolean'
     && (event.action_label == null || typeof event.action_label === 'string'))) return null;
   return { events: value.events as FeedEvent[] };
+}
+
+export function verifiedPriorityEmails(value: unknown): { emails: PriorityEmail[] } | null {
+  if (!record(value) || !Array.isArray(value.emails)) return null;
+  if (!value.emails.every((email: unknown) => record(email)
+    && nonempty(email.id)
+    && nonempty(email.thread_id)
+    && typeof email.from === 'string'
+    && typeof email.from_email === 'string'
+    && typeof email.subject === 'string'
+    && typeof email.snippet === 'string'
+    && typeof email.ai_summary === 'string'
+    && (email.ai_priority === 'high' || email.ai_priority === 'medium' || email.ai_priority === 'low')
+    && typeof email.ai_action_needed === 'string'
+    && timestamp(email.received_at)
+    && typeof email.is_read === 'boolean'
+    && Array.isArray(email.labels)
+    && email.labels.every((label: unknown) => typeof label === 'string'))) return null;
+  return { emails: value.emails as PriorityEmail[] };
+}
+
+export function verifiedWorkflowRuns(value: unknown): { workflows: DashboardWorkflowRun[] } | null {
+  if (!record(value) || !Array.isArray(value.workflows)) return null;
+  if (!value.workflows.every((run: unknown) => record(run)
+    && nonempty(run.run_id)
+    && nonempty(run.workflow_name)
+    && nonempty(run.status)
+    && nonempty(run.current_step_name)
+    && count(run.current_step)
+    && count(run.total_steps) && run.total_steps > 0
+    && (run.current_step as number) <= (run.total_steps as number))) return null;
+  return { workflows: value.workflows as DashboardWorkflowRun[] };
 }

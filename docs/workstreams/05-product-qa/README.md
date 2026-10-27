@@ -110,6 +110,13 @@ Baseline: `d79284a40db6e069aa3b39cb00376c95060c7983` (2026-10-26). Branch: `work
 - Added eight synthetic Vitest cases across validators and rendered briefing behavior (**44 total**). The localhost Chromium gate now injects simultaneous malformed HTTP `200` rows for sales, notes, feed and audit, while independently checking that valid approvals and account warnings remain visible and that the broader dashboard stays mounted.
 - Canonical schemas still depend on Chats 1–4; no backend/CI contract, provider write, tenant authorization policy, migration, default/integration branch, or deployment changed. Real source freshness and cross-tenant acceptance remain **NOT TESTED**.
 
+## Tenth isolated dashboard inbox and workflow evidence increment
+
+- The active Priority Inbox now distinguishes a verified empty email array from absent/malformed arrays and records (priority, read state, timestamps and display fields). Failed or incomplete reads display **inbox status unknown**, never “all read.” An incomplete draft-reply response cannot become a copyable draft.
+- The active Workflows panel now verifies progress record shape, bounds and nonzero total steps. Failed, missing or malformed workflow reads display **execution status unknown** instead of quietly removing the entire panel or rendering invalid progress percentages.
+- Two new synthetic validator test cases raise the frontend Vitest count to **46**. The localhost Chromium gate now injects simultaneous malformed Inbox and Workflows HTTP `200` responses and asserts the main briefing remains visible, no false clean-inbox state appears, and the dashboard does not crash.
+- These are presentation-layer checks only. Backend suppression of provider failures, server approval/idempotency, cross-tenant enforcement, and provider-backed status/freshness remain independent **NOT TESTED/FAIL** gates. No other chat's branch, backend contract, financial write, merge, or deployment changed.
+
 ## QA / release evidence checklist
 
 Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual staged source identity and timestamps are required for provider acceptance.
@@ -117,7 +124,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Gate | Status | Pending proof |
 | --- | --- | --- |
 | Pinned branch isolation | PASS | Exact baseline verified locally |
-| Web unit tests and typecheck | PASS | 44 passed; `npm run typecheck`: pass (local only) |
+| Web unit tests and typecheck | PASS | 46 passed; `npm run typecheck`: pass (local only) |
 | Web lint | PASS | `npm run lint`: 0 errors, 20 warnings in pre-existing areas |
 | Mobile typecheck | PASS | `npm run typecheck`: pass (local only) |
 | Desktop typecheck and native-UI unit tests | PASS | `npm run typecheck`: pass; `npm test -- --reporter=dot`: 12 passed; production Vite build with synthetic HTTPS URL passes; not signed or installed |
@@ -125,7 +132,7 @@ Synthetic fixtures belong **only** in preview/tests, never the live UI. Actual s
 | Native Expo mobile-web export | PASS | Expo 51 SPA export with installed `react-native-web` / `react-dom`, clean cache. Synthetic Chromium 390/1024px renders sign-in and fail-closed config; full provider/device acceptance NOT TESTED |
 | Mobile secure API destination | PASS | Four local fixture tests reject release HTTP/localhost, missing/placeholder and userinfo/query/fragment; real device requests NOT TESTED |
 | Built CSS token verification | PASS | `npm run test:css`: pass |
-| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; role-denial, malformed HTTP `200` summary and individual source rows, source outages, keyboard navigation, copy-only drafting, billing and onboarding checks |
+| Local synthetic browser briefing and role restriction | PASS | `e2e/verify_morning_briefing.py` on built localhost preview at 390/1440px; role-denial, malformed HTTP `200` summary, source rows, Inbox and Workflows, source outages, keyboard navigation, copy-only drafting, billing and onboarding checks |
 | Real browser login/MFA/session/restricted routes | NOT TESTED | Staged provider-backed auth and revoked-token acceptance |
 | Six digest sections source correctness | NOT TESTED | Provider-backed payload, freshness and per-role scope |
 | Approval-then-action idempotency | NOT TESTED | Test-only provider receipt and durable audit state |

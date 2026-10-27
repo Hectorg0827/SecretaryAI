@@ -209,7 +209,7 @@ async def compute_dashboard_payload(adapter) -> dict:
 def store_snapshot(db, company_id: str, report_type: str, payload: dict, generated_by: str = "scheduler") -> None:
     """Upsert a report snapshot row. One row per (company, report_type)."""
     try:
-        db.table("report_snapshots").upsert(
+        written = db.table("report_snapshots").upsert(
             {
                 "company_id":   company_id,
                 "report_type":  report_type,
@@ -222,6 +222,21 @@ def store_snapshot(db, company_id: str, report_type: str, payload: dict, generat
     except Exception as exc:
         log.error("Failed to store %s snapshot for company %s", report_type, company_id)
         raise SnapshotPersistenceUnavailable("Dashboard snapshot persistence failed") from exc
+
+    # PostgREST's representation response is evidence that a row was accepted.
+    # An empty/incorrect acknowledgement does not authorize an API/worker to
+    # report a successful refresh. Do not retry a potentially uncertain write.
+    rows = getattr(written, "data", None)
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 1
+        or not isinstance(rows[0], dict)
+        or rows[0].get("company_id") != company_id
+        or rows[0].get("report_type") != report_type
+    ):
+        raise SnapshotPersistenceUnavailable(
+            "Dashboard snapshot persistence not confirmed"
+        )
 
 
 def snapshot_freshness(

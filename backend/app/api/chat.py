@@ -189,14 +189,24 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                             last_order = date.fromisoformat(max(dates))
                         except ValueError:
                             pass
-                    health = score_account(
-                        account_id=cid,
-                        account_name=getattr(customer, "name", ""),
-                        last_order_date=last_order,
-                        avg_order_cycle_days=None,
-                        order_history=cust_invoices,
-                        current_balance=float(getattr(customer, "balance", 0)),
-                    )
+                    try:
+                        health = score_account(
+                            account_id=cid,
+                            account_name=getattr(customer, "name", ""),
+                            last_order_date=last_order,
+                            avg_order_cycle_days=None,
+                            order_history=cust_invoices,
+                            current_balance=getattr(customer, "balance", None),
+                        )
+                    except ValueError:
+                        # Unscorable (e.g. a customer credit balance): list it
+                        # as unknown rather than truncating the overview.
+                        data["accounts"].append({
+                            "name": getattr(customer, "name", ""),
+                            "health_status": "unknown",
+                            "health_score": None,
+                        })
+                        continue
                     data["accounts"].append({
                         "name": getattr(customer, "name", ""),
                         "health_status": health.status,

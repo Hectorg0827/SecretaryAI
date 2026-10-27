@@ -22,7 +22,7 @@ def _desktop():
 async def test_qbo_provider_fault_is_not_reported_as_zero_customers():
     qb = _qbo()
     qb._query = AsyncMock(return_value={"Fault": {"Error": [{"Message": "Synthetic outage"}]}})
-    with pytest.raises(ValueError, match="QueryResponse"):
+    with pytest.raises(ValueError, match="Fault"):
         await qb.get_customers()
 
 

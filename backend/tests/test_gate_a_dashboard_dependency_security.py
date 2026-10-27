@@ -85,6 +85,7 @@ def test_authorized_but_unconfigured_provider_fails_without_false_first_load():
          patch.object(dashboard, "read_snapshot", return_value=None), \
          patch.object(dashboard, "store_snapshot") as saved:
         with _client("owner", db) as client:
-            with pytest.raises(RuntimeError, match="fixture provider offline"):
-                client.get("/api/dashboard/summary")
+            response = client.get("/api/dashboard/summary")
+    assert response.status_code == 503
+    assert "fixture provider offline" not in response.text
     saved.assert_not_called()

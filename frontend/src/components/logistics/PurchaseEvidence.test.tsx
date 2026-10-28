@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createHash } from 'node:crypto';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../lib/api';
 import { PurchaseEvidence, evidenceStorageKey } from './PurchaseEvidence';
 import {
   button, cleanup, click, confirm, dialog, field, flush, mockApi, render, setRole, type,
@@ -10,11 +11,14 @@ import type { Role } from '../../hooks/useAuth';
 const EVIDENCE_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 const LIST_PATH = '/api/logistics/orders/PO-1/evidence';
 const BASE = `/api/logistics/evidence/${EVIDENCE_ID}`;
+const FILE_BYTES = new TextEncoder().encode('%PDF-1.4 synthetic invoice');
+const FILE_SHA256 = createHash('sha256').update(FILE_BYTES).digest('hex');
 
 function claims(submittedBy = 'clerk-1') {
   return {
     evidence_claims: [{
       id: EVIDENCE_ID, evidence_key: 'INV-42', document_type: 'purchase_invoice', claimed_amount: '120.50',
+      claimed_sha256: FILE_SHA256,
       currency: 'USD', verification_status: 'unverified', submitted_by: submittedBy, created_at: '2026-10-20T09:00:00Z',
     }],
     claim_count: 1, unverified_claim_totals_by_currency: { USD: '120.50' }, evidence_status_message: '',
@@ -26,6 +30,14 @@ function status(scan: string, reviewed = false, uploaded = true) {
     [`${BASE}/integrity`]: { integrity_status: uploaded ? 'sha256_matched_at_upload' : 'not_checked', malware_scan_status: scan },
     [`${BASE}/malware-status`]: { scan_status: scan, approved_for_review: reviewed },
   };
+}
+
+async function choose(container: HTMLElement, file: File) {
+  const input = field(container, 'File to upload (the same PDF, PNG or JPEG)') as HTMLInputElement;
+  await act(async () => {
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
 async function show(role: Role, user: string, poStatus = 'approved') {
@@ -43,7 +55,7 @@ describe('purchase documents', () => {
     expect(container.textContent).toContain('Amount stated (not checked): 120.50 USD');
     await click(button(container, 'Check status'));
     expect(container.textContent).toContain('Not uploaded yet');
-    expect(container.textContent).toContain('Uploading files from the web app is not available yet');
+    expect(container.textContent).toContain('The file itself has not been uploaded yet.');
     expect(button(container, 'Run virus scan')).toBeUndefined();
   });
 
@@ -126,6 +138,80 @@ describe('purchase documents', () => {
       currency: 'USD',
     });
     expect(container.textContent).toContain('The server recorded the document details as an unchecked claim.');
+  });
+
+  it('uploads the file only after confirmation and shows the server result', async () => {
+    const { getRoutes } = mockApi({ [LIST_PATH]: claims(), ...status('not_scanned', false, false) });
+    const upload = vi.spyOn(api, 'upload').mockResolvedValue({
+      integrity_check_id: 'ic-1', replayed: false, integrity_status: 'sha256_matched_at_upload',
+      malware_scan_status: 'not_scanned', bytes_received: FILE_BYTES.length,
+    });
+    const container = await show('back_office', 'clerk-2');
+    await click(button(container, 'Check status'));
+    await choose(container, new File([FILE_BYTES], 'invoice.pdf', { type: 'application/pdf' }));
+    await click(button(container, 'Review upload'));
+    await flush();
+    expect(upload).not.toHaveBeenCalled();
+    expect(dialog(container)?.textContent).toContain('cannot be replaced or deleted');
+    expect(dialog(container)?.textContent).toContain('does not scan it for viruses');
+    Object.assign(getRoutes, status('not_scanned'));
+    await confirm(container);
+    expect(upload).toHaveBeenCalledTimes(1);
+    const [path, form] = upload.mock.calls[0];
+    expect(path).toBe(`${BASE}/upload`);
+    expect(form).toBeInstanceOf(FormData);
+    const sent = (form as FormData).get('file') as File;
+    expect(sent.name).toBe('invoice.pdf');
+    expect(new Uint8Array(await sent.arrayBuffer())).toEqual(FILE_BYTES);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      `The server stored the file (${FILE_BYTES.length} bytes) and confirmed it matches the recorded fingerprint.`);
+    expect(container.textContent).toContain('It has not been scanned for viruses yet.');
+    expect(container.textContent).toContain('Yes, fingerprint matches');
+    expect(button(container, 'Review upload')).toBeUndefined();
+  });
+
+  it('refuses a different file before anything is sent', async () => {
+    mockApi({ [LIST_PATH]: claims(), ...status('not_scanned', false, false) });
+    const upload = vi.spyOn(api, 'upload');
+    const container = await show('owner', 'approver-1');
+    await click(button(container, 'Check status'));
+    await choose(container, new File([new TextEncoder().encode('%PDF-1.4 other')], 'other.pdf', { type: 'application/pdf' }));
+    await click(button(container, 'Review upload'));
+    await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('not the same file');
+    expect(dialog(container)).toBeNull();
+    expect(upload).not.toHaveBeenCalled();
+    await choose(container, new File(['plain text'], 'notes.txt', { type: 'text/plain' }));
+    await click(button(container, 'Review upload'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Choose a PDF, PNG or JPEG file.');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('shows a refused upload as an error and never as stored', async () => {
+    mockApi({ [LIST_PATH]: claims(), ...status('not_scanned', false, false) });
+    vi.spyOn(api, 'upload').mockRejectedValue(new Error('Private evidence storage unavailable'));
+    const container = await show('manager', 'approver-1');
+    await click(button(container, 'Check status'));
+    await choose(container, new File([FILE_BYTES], 'invoice.pdf', { type: 'application/pdf' }));
+    await click(button(container, 'Review upload'));
+    await flush();
+    await confirm(container);
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Private evidence storage unavailable');
+    expect(alert?.textContent).toContain('Refresh to check whether anything changed');
+    expect(container.textContent).not.toContain('The server stored the file');
+  });
+
+  it('does not offer the upload to sales staff or once the file is stored', async () => {
+    mockApi({ [LIST_PATH]: claims(), ...status('not_scanned', false, false) });
+    let container = await show('sales_rep', 'rep-1');
+    await click(button(container, 'Check status'));
+    expect(button(container, 'Review upload')).toBeUndefined();
+    await cleanup();
+    mockApi({ [LIST_PATH]: claims(), ...status('not_scanned') });
+    container = await show('owner', 'approver-1');
+    await click(button(container, 'Check status'));
+    expect(button(container, 'Review upload')).toBeUndefined();
   });
 
   it('builds storage keys the server accepts', () => {

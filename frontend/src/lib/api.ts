@@ -46,16 +46,25 @@ async function responseError(response: Response): Promise<Error> {
   return new Error(`Request failed (HTTP ${response.status}). Please try again.`);
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = getToken();
-  const response = await fetch(`${API_BASE}${path}`, {
+/**
+ * Fetch options for one attempt. A FormData body is sent as-is with no
+ * Content-Type header, so the browser adds the multipart boundary itself.
+ */
+function requestInit(method: string, token: string | null, body?: unknown): RequestInit {
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+  return {
     method,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+    body: isForm ? body : body ? JSON.stringify(body) : undefined,
+  };
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${API_BASE}${path}`, requestInit(method, token, body));
 
   if (response.status === 401 && path !== '/auth/login' && path !== '/auth/register') {
     // Attempt a silent token refresh once
@@ -65,11 +74,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     const newToken = await _refreshing;
     if (newToken) {
       // Retry the original request with the new token
-      const retry = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      const retry = await fetch(`${API_BASE}${path}`, requestInit(method, newToken, body));
       if (retry.ok) return retry.status === 204 ? undefined as T : retry.json();
       // A valid refreshed session can still lack permissions or a subscription.
       if (retry.status !== 401) throw await responseError(retry);
@@ -311,6 +316,8 @@ export const api = {
   put:    <T>(path: string, body: unknown) => request<T>('PUT',    path, body),
   delete:         <T>(path: string)               => request<T>('DELETE', path),
   deleteWithBody: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
+  /** Multipart file upload; the browser sets the Content-Type boundary. */
+  upload: <T>(path: string, form: FormData) => request<T>('POST', path, form),
 
   connectors: {
     status:              () => api.get<{ connectors: ConnectorRegistration[] }>('/api/connectors/status'),

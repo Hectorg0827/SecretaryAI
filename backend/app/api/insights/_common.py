@@ -28,14 +28,19 @@ def advisory_response(result: dict[str, Any], *, source: Source) -> dict[str, An
     """Return ``result`` stamped as an analysis-only recommendation."""
     if source not in ("connected_data", "user_supplied"):
         raise ValueError("Unknown advisory source")
-    return {
-        **result,
+    stamp = {
         "status": "analysis_only",
         "source": source,
         "requires_human_review": True,
         "actions_executed": False,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Engines may carry the same stamp; a different value would be silently
+    # overwritten, so treat that clash as a bug rather than lose the field.
+    if "generated_at" in result or any(
+        key in result and result[key] != value for key, value in stamp.items()
+    ):
+        raise ValueError("Advisory result conflicts with a reserved top-level key")
+    return {**result, **stamp, "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
 async def read_source(call: Awaitable[T], *, source_name: str) -> T:

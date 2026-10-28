@@ -21,6 +21,14 @@ def test_advisory_response_rejects_unknown_source():
         advisory_response({}, source="guess")
 
 
+def test_advisory_response_refuses_to_overwrite_result_fields():
+    with pytest.raises(ValueError):
+        advisory_response({"status": "suggested_change"}, source="user_supplied")
+    # An engine's own matching stamp is fine.
+    same = advisory_response({"status": "analysis_only", "requires_human_review": True}, source="user_supplied")
+    assert same["status"] == "analysis_only"
+
+
 @pytest.mark.asyncio
 async def test_source_failure_is_an_outage_not_an_empty_result():
     async def broken():

@@ -61,7 +61,8 @@ def ledger():
         approved = NOW - timedelta(days=40 + n)
         orders.append({"id": f"po-{n}", "status": "received", "approved_at": approved.isoformat()})
         lines.append({"po_id": f"po-{n}", "sku": "MALT-1", "qty_ordered": 10, "qty_received": 10})
-        receipts.append({"po_id": f"po-{n}", "posted_at": (approved + timedelta(days=days)).isoformat()})
+        receipts.append({"po_id": f"po-{n}", "posted_at": (approved + timedelta(days=days)).isoformat(),
+                         "payload": [{"sku": "MALT-1", "accepted_qty": 1}]})
     return FakeDB({
         "purchasing_orders": orders,
         "purchasing_order_lines": lines,

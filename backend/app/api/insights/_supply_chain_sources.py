@@ -18,6 +18,10 @@ CLOSED_INVOICE_STATUSES = frozenset({"void", "voided", "cancelled", "canceled", 
 OPEN_PO_STATUSES = frozenset({"approved", "partially_received"})
 # Most recent purchase orders read from the purchasing ledger per request.
 MAX_LEDGER_ORDERS = 200
+# Outstanding orders count toward stock position however old they are.
+MAX_OPEN_ORDERS = 2000
+# Keeps each PostgREST ``in`` filter well inside URL limits.
+_IN_CHUNK = 100
 MAX_LEDGER_CHILD_ROWS = 5000
 # A received PO taking longer than this is a data error, not a lead time.
 MAX_LEAD_TIME_DAYS = 730
@@ -212,19 +216,44 @@ def _rows(query) -> list:
     return data
 
 
+def _rows_by_order(make_query, ids: list[str]) -> list:
+    rows: list = []
+    for start in range(0, len(ids), _IN_CHUNK):
+        rows.extend(_rows(make_query(ids[start:start + _IN_CHUNK])))
+        if len(rows) > MAX_LEDGER_CHILD_ROWS:
+            raise ValueError("Purchasing records exceed the supported page")
+    return rows
+
+
+def _lead_days(approved: Optional[datetime], received: Optional[datetime]) -> Optional[float]:
+    if approved is None or received is None:
+        return None
+    days = (received - approved).total_seconds() / 86400
+    return days if 0 < days <= MAX_LEAD_TIME_DAYS else None
+
+
 async def read_purchasing_history(db, company_id: str, *, now: Optional[datetime] = None) -> PurchasingHistory:
     """Observed supplier lead times (approval to first posted receipt) and open PO units."""
     now = now or datetime.now(timezone.utc)
     history = PurchasingHistory()
-    orders = _rows(
+    recent = _rows(
         db.table("purchasing_orders")
           .select("id,status,approved_at")
           .eq("company_id", company_id)
           .order("created_at", desc=True)
           .limit(MAX_LEDGER_ORDERS)
     )
+    outstanding = _rows(
+        db.table("purchasing_orders")
+          .select("id,status,approved_at")
+          .eq("company_id", company_id)
+          .in_("status", sorted(OPEN_PO_STATUSES))
+          .limit(MAX_OPEN_ORDERS + 1)
+    )
+    if len(outstanding) > MAX_OPEN_ORDERS:
+        raise ValueError("Outstanding purchase orders exceed the supported page")
     by_id: dict[str, dict] = {}
-    for order in orders:
+    for order in [*recent, *outstanding]:
         if isinstance(order, dict) and order.get("id"):
             by_id[str(order["id"])] = order
         else:
@@ -233,24 +262,25 @@ async def read_purchasing_history(db, company_id: str, *, now: Optional[datetime
     if not by_id:
         return history
     ids = list(by_id)
-    lines = _rows(
+    lines = _rows_by_order(lambda chunk: (
         db.table("purchasing_order_lines")
           .select("po_id,sku,qty_ordered,qty_received")
           .eq("company_id", company_id)
-          .in_("po_id", ids)
+          .in_("po_id", chunk)
           .limit(MAX_LEDGER_CHILD_ROWS + 1)
-    )
-    receipts = _rows(
+    ), ids)
+    receipts = _rows_by_order(lambda chunk: (
         db.table("warehouse_receipt_documents")
-          .select("po_id,posted_at")
+          .select("po_id,posted_at,payload")
           .eq("company_id", company_id)
-          .in_("po_id", ids)
+          .in_("po_id", chunk)
           .limit(MAX_LEDGER_CHILD_ROWS + 1)
-    )
-    if len(lines) > MAX_LEDGER_CHILD_ROWS or len(receipts) > MAX_LEDGER_CHILD_ROWS:
-        raise ValueError("Purchasing records exceed the supported page")
+    ), ids)
 
+    # A PO's first delivery gives the supplier lead time; each SKU's own first
+    # delivery gives that SKU's lead time (split deliveries arrive at different times).
     first_receipt: dict[str, datetime] = {}
+    first_sku_receipt: dict[tuple[str, str], datetime] = {}
     for receipt in receipts:
         posted = as_datetime(receipt.get("posted_at")) if isinstance(receipt, dict) else None
         po_id = str(receipt.get("po_id")) if isinstance(receipt, dict) else ""
@@ -259,20 +289,23 @@ async def read_purchasing_history(db, company_id: str, *, now: Optional[datetime
             continue
         if po_id not in first_receipt or posted < first_receipt[po_id]:
             first_receipt[po_id] = posted
+        payload = receipt.get("payload")
+        skus = {norm(line.get("sku")) for line in payload if isinstance(line, dict)} \
+            if isinstance(payload, list) else set()
+        skus.discard("")
+        if not skus:
+            history.rows_skipped += 1
+            continue
+        for sku in skus:
+            key = (po_id, sku)
+            if key not in first_sku_receipt or posted < first_sku_receipt[key]:
+                first_sku_receipt[key] = posted
 
-    lead_by_po: dict[str, float] = {}
-    for po_id, order in by_id.items():
-        approved = as_datetime(order.get("approved_at"))
-        if po_id not in first_receipt:
-            continue
-        if approved is None:
+    for po_id, received_at in first_receipt.items():
+        lead_days = _lead_days(as_datetime(by_id[po_id].get("approved_at")), received_at)
+        if lead_days is None:
             history.rows_skipped += 1
             continue
-        lead_days = (first_receipt[po_id] - approved).total_seconds() / 86400
-        if not 0 < lead_days <= MAX_LEAD_TIME_DAYS:
-            history.rows_skipped += 1
-            continue
-        lead_by_po[po_id] = lead_days
         history.supplier_lead_times.append(lead_days)
 
     for line in lines:
@@ -287,12 +320,14 @@ async def read_purchasing_history(db, company_id: str, *, now: Optional[datetime
                 or ordered <= 0 or not 0 <= received <= ordered:
             history.rows_skipped += 1
             continue
-        if received > 0 and po_id in lead_by_po:
-            history.lead_times_by_sku.setdefault(sku, []).append(lead_by_po[po_id])
         order = by_id[po_id]
+        approved = as_datetime(order.get("approved_at"))
+        if received > 0:
+            lead_days = _lead_days(approved, first_sku_receipt.get((po_id, sku)))
+            if lead_days is not None:
+                history.lead_times_by_sku.setdefault(sku, []).append(lead_days)
         if norm(order.get("status")) in OPEN_PO_STATUSES and ordered > received:
             history.open_units_by_sku[sku] = history.open_units_by_sku.get(sku, 0.0) + ordered - received
-            approved = as_datetime(order.get("approved_at"))
             if approved is not None and approved <= now:
                 history.open_order_ages_by_sku.setdefault(sku, []).append(
                     (now - approved).total_seconds() / 86400

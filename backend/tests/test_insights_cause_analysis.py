@@ -58,7 +58,8 @@ def ledger():
         approved = NOW - timedelta(days=60 + n)
         orders.append({"id": f"po-{n}", "status": "received", "approved_at": approved.isoformat()})
         lines.append({"po_id": f"po-{n}", "sku": "MALT-1", "qty_ordered": 100, "qty_received": 100})
-        receipts.append({"po_id": f"po-{n}", "posted_at": (approved + timedelta(days=10)).isoformat()})
+        receipts.append({"po_id": f"po-{n}", "posted_at": (approved + timedelta(days=10)).isoformat(),
+                         "payload": [{"sku": "MALT-1", "accepted_qty": 1}]})
     orders.append({"id": "po-late", "status": "approved",
                    "approved_at": (NOW - timedelta(days=20)).isoformat()})
     lines.append({"po_id": "po-late", "sku": "MALT-1", "qty_ordered": 100, "qty_received": 0})

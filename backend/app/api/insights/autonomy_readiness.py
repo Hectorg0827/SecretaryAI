@@ -128,8 +128,8 @@ def _engine_tier(action_type: ActionType, reliability: float,
             if reliability < 0.65:
                 reason = "Reliability is below the 65% the autonomy engine requires to act."
             elif action_type == ActionType.REORDER and largest_amount is None:
-                reason = ("Past proposals don't record an amount, so they can't be checked "
-                          "against the automatic-order limit.")
+                reason = ("Some past proposals don't record an amount, so they can't all be "
+                          "checked against the automatic-order limit.")
             else:
                 reason = "Past proposals fall outside the automatic-action limits."
             break
@@ -138,7 +138,7 @@ def _engine_tier(action_type: ActionType, reliability: float,
 
 
 def _assess(action_type: str, counts: dict[str, int],
-            largest_amount: Optional[float]) -> dict[str, Any]:
+            largest_amount: Optional[float], amounts_missing: int = 0) -> dict[str, Any]:
     approved = counts["approved"]
     edited = counts["edited_and_approved"]
     rejected = counts["rejected"]
@@ -156,6 +156,7 @@ def _assess(action_type: str, counts: dict[str, int],
         "as_is_rate": round(approved / decided, 4) if decided else None,
         "accepted_rate": round((approved + edited) / decided, 4) if decided else None,
         "rejected_rate": round(rejected / decided, 4) if decided else None,
+        "proposals_without_amount": amounts_missing,
         "reliability_score": None,
         # Everything in the approval queue currently waits for a person.
         "current_tier": 2,
@@ -180,7 +181,12 @@ def _assess(action_type: str, counts: dict[str, int],
         tier, assessment = 2, "keep_approval"
         reason = "No automatic-action limits are defined for this kind of action; keep approving each one."
     else:
-        tier, reason = _engine_tier(_ENGINE_TYPES[action_type][0], reliability, largest_amount)
+        engine_type = _ENGINE_TYPES[action_type][0]
+        # One unpriced order can't be checked against the limit, so the largest
+        # known amount would overstate how much of the history fits it.
+        if engine_type == ActionType.REORDER and amounts_missing:
+            largest_amount = None
+        tier, reason = _engine_tier(engine_type, reliability, largest_amount)
         if tier >= 3 and decided < MIN_DECISIONS_TIER3:
             tier = 2
             reason = (f"Reliable so far, but {MIN_DECISIONS_TIER3} reviewed proposals are needed "
@@ -201,6 +207,7 @@ def analyse_history(rows: list[Any]) -> dict[str, Any]:
     """Group AI drafts by action type; malformed rows are skipped and counted."""
     counts: dict[str, dict[str, int]] = {}
     largest: dict[str, float] = {}
+    missing: dict[str, int] = {}
     skipped = 0
     for row in rows:
         if not isinstance(row, dict):
@@ -216,9 +223,11 @@ def analyse_history(rows: list[Any]) -> dict[str, Any]:
         amount = _amount(row.get("content"))
         if amount is not None:
             largest[action_type] = max(largest.get(action_type, 0.0), abs(amount))
+        else:
+            missing[action_type] = missing.get(action_type, 0) + 1
 
     action_types = sorted(
-        (_assess(t, c, largest.get(t)) for t, c in counts.items()),
+        (_assess(t, c, largest.get(t), missing.get(t, 0)) for t, c in counts.items()),
         key=lambda r: (-r["decided"], r["action_type"]),
     )
     total_decided = sum(r["decided"] for r in action_types)

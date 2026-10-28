@@ -250,6 +250,15 @@ def test_purchase_order_guardrails_cap_the_recommendation():
     assert "don't record an amount" in row["reason"]
 
 
+def test_unpriced_purchase_orders_are_not_hidden_by_one_priced_order():
+    rows = (_drafts("draft_purchase_order", "approved", 99)
+            + _drafts("draft_purchase_order", "approved", 1, content={"amount": 100}))
+    [row] = analyse_history(rows)["action_types"]
+    assert row["proposals_without_amount"] == 99
+    assert row["recommended_tier"] == 2 and row["assessment"] == "keep_approval"
+    assert "don't record an amount" in row["reason"]
+
+
 def test_mounted_on_the_paid_insights_prefix():
     from fastapi.routing import iter_route_contexts
     from app.main import app

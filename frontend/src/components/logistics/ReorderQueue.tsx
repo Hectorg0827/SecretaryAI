@@ -1,187 +1,129 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
-import { ShoppingCart, ClipboardList, Check } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { UrgencyBadge, Urgency } from './UrgencyBadge';
-import { api } from '../../lib/api';
+import { AlertTriangle, ClipboardList, Package, XCircle } from 'lucide-react';
+import { api, InventoryAlert } from '../../lib/api';
+import { BUTTON_SECONDARY, ErrorNote } from './logisticsShared';
 
-export interface ReorderItem {
-  id: string;
-  sku_name: string;
-  sku_id: string;
-  urgency: Urgency;
-  days_of_supply: number;
-  recommended_qty: number;
-  container_fill_pct: number;
-  lead_time_p80_days: number;
-  unit_cost?: number;
-  approved?: boolean;
+const STATUS: Record<InventoryAlert['stock_status'], {
+  label: string; badge: string; border: string; icon: React.ElementType; rank: number;
+}> = {
+  out_of_stock: { label: 'Out of stock', badge: 'bg-red-100 text-red-700',       border: 'border-l-red-500',    icon: XCircle,       rank: 0 },
+  critical:     { label: 'Critical',     badge: 'bg-orange-100 text-orange-700', border: 'border-l-orange-400', icon: AlertTriangle, rank: 1 },
+  low:          { label: 'Low',          badge: 'bg-amber-100 text-amber-700',   border: 'border-l-amber-400',  icon: Package,       rank: 2 },
+};
+
+/** Most urgent first: out of stock, then critical, then low; shortest runway first. */
+export function sortReorderAlerts(alerts: InventoryAlert[]): InventoryAlert[] {
+  const rank = (a: InventoryAlert) => STATUS[a.stock_status]?.rank ?? 3;
+  return [...alerts].sort((a, b) =>
+    rank(a) - rank(b)
+    || (a.weeks_remaining ?? Infinity) - (b.weeks_remaining ?? Infinity)
+    || a.product_name.localeCompare(b.product_name));
 }
 
-interface ReorderQueueProps {
-  items: ReorderItem[];
-  loading: boolean;
-  onItemsChange: (items: ReorderItem[]) => void;
+function runway(weeks: number | null): string {
+  return weeks == null ? 'Unknown' : `~${weeks.toFixed(1)} wks`;
 }
 
-export function ReorderQueue({ items, loading, onItemsChange }: ReorderQueueProps) {
-  const [generatingPos, setGeneratingPos] = useState(false);
+const SOURCE_NOTE =
+  'Based on QuickBooks stock levels and recorded sales rates. Products without a recorded sales rate only appear here once they run out.';
 
-  const approvedItems = items.filter((i) => i.approved);
+/**
+ * Products that need reordering, from GET /api/inventory/alerts. A failed read
+ * is shown as an error, never as an empty queue.
+ */
+export function ReorderQueue({ onCountChange }: { onCountChange?: (count: number | null) => void }) {
+  const [alerts, setAlerts] = useState<InventoryAlert[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+  const [revision, setRevision] = useState(0);
 
-  const handleApprove = (id: string) => {
-    onItemsChange(items.map((i) => i.id === id ? { ...i, approved: !i.approved } : i));
-  };
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError(null);
+    api.get<{ alerts: InventoryAlert[]; count: number }>('/api/inventory/alerts').then((data) => {
+      if (!Array.isArray(data?.alerts)) throw new Error('The reorder list is unavailable.');
+      if (current) setAlerts(sortReorderAlerts(data.alerts));
+    }).catch((reason: unknown) => {
+      if (!current) return;
+      setAlerts([]);
+      setError(reason ?? new Error('The reorder list is unavailable.'));
+    }).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [revision]);
 
-  const handleGeneratePos = async () => {
-    if (approvedItems.length === 0) {
-      toast.error('No approved items to generate POs for');
-      return;
-    }
-    setGeneratingPos(true);
-    try {
-      await api.logistics.generatePos(
-        approvedItems.map((i) => ({
-          sku_id: i.sku_id,
-          sku_name: i.sku_name,
-          recommended_qty: i.recommended_qty,
-        })),
-        {},
-      );
-      toast.success(`Generated POs for ${approvedItems.length} item(s)`);
-      onItemsChange(items.map((i) => i.approved ? { ...i, approved: false } : i));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to generate POs');
-    } finally {
-      setGeneratingPos(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-2 p-6">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-14 bg-slate-100 rounded-lg animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-
-  if (items.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-3">
-        <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center">
-          <ClipboardList className="w-6 h-6 text-slate-300" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-medium text-slate-500">No reorder decisions</p>
-          <p className="text-xs mt-1 text-slate-600">Run the reorder evaluation to populate this queue</p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    onCountChange?.(loading || error ? null : alerts.length);
+  }, [alerts, loading, error, onCountChange]);
 
   return (
-    <div>
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50">
-        <p className="text-sm text-slate-500">
-          {items.length} item{items.length !== 1 ? 's' : ''} in queue
-          {approvedItems.length > 0 && (
-            <span className="ml-2 text-blue-600 font-medium">
-              · {approvedItems.length} approved
-            </span>
-          )}
-        </p>
-        <button
-          onClick={handleGeneratePos}
-          disabled={generatingPos || approvedItems.length === 0}
-          className={clsx(
-            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-            approvedItems.length > 0
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
-              : 'bg-slate-100 text-slate-600 cursor-not-allowed',
-          )}
-        >
-          <ShoppingCart size={14} />
-          {generatingPos ? 'Generating…' : `Generate POs for approved (${approvedItems.length})`}
-        </button>
+    <section className="p-4 sm:p-6 space-y-4" aria-label="Reorder queue">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-slate-900">Products to reorder</h2>
+          <p className="text-sm text-slate-600 max-w-2xl">{SOURCE_NOTE}</p>
+          <p className="text-sm text-slate-600 max-w-2xl">
+            To order more, create a purchase order on the Purchase Orders tab.
+          </p>
+        </div>
+        <button type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}
+          className={BUTTON_SECONDARY}>Refresh</button>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-white border-b border-slate-100">
-            <tr>
-              {['SKU', 'Urgency', 'Days of Supply', 'Rec. Qty', 'Container Fill', 'Lead Time (p80)', 'Action'].map((h) => (
-                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {items.map((item) => (
-              <tr
-                key={item.id}
-                className={clsx(
-                  'hover:bg-slate-50 transition-colors border-l-4',
-                  item.urgency === 'RED'    ? 'border-l-red-500'    : '',
-                  item.urgency === 'YELLOW' ? 'border-l-amber-400'  : '',
-                  item.urgency === 'GREEN'  ? 'border-l-green-400'  : '',
-                  item.approved && 'bg-blue-50/40',
-                )}
-              >
-                <td className="px-5 py-3.5">
-                  <div className="text-sm font-semibold text-slate-800">{item.sku_name}</div>
-                  <div className="text-xs text-slate-600 font-mono">{item.sku_id}</div>
-                </td>
-                <td className="px-5 py-3.5">
-                  <UrgencyBadge level={item.urgency} />
-                </td>
-                <td className="px-5 py-3.5 text-sm text-slate-700">
-                  {item.days_of_supply} days
-                </td>
-                <td className="px-5 py-3.5 text-sm text-slate-700">
-                  {item.recommended_qty.toLocaleString()} units
-                </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className={clsx(
-                          'h-full rounded-full',
-                          item.container_fill_pct >= 90 ? 'bg-green-500' :
-                          item.container_fill_pct >= 70 ? 'bg-amber-400' : 'bg-red-400',
-                        )}
-                        style={{ width: `${Math.min(item.container_fill_pct, 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-slate-600">{item.container_fill_pct.toFixed(0)}%</span>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-sm text-slate-700">
-                  {item.lead_time_p80_days} days
-                </td>
-                <td className="px-5 py-3.5">
-                  <button
-                    onClick={() => handleApprove(item.id)}
-                    className={clsx(
-                      'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                      item.approved
-                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700 border border-slate-200',
-                    )}
-                  >
-                    {item.approved && <Check size={11} />}
-                    {item.approved ? 'Approved' : 'Approve'}
-                  </button>
-                </td>
+      {loading ? (
+        <div className="space-y-2" role="status" aria-label="Loading reorder list">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-14 bg-slate-100 rounded-lg animate-pulse" />
+          ))}
+        </div>
+      ) : error ? (
+        <ErrorNote error={error} fallback="The reorder list is unavailable." />
+      ) : alerts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-slate-600 gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center">
+            <ClipboardList className="w-6 h-6 text-slate-400" />
+          </div>
+          <p className="text-sm font-medium text-slate-700">No products are low or out of stock right now.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-slate-200 rounded-xl">
+          <table className="w-full">
+            <thead className="bg-white border-b border-slate-100">
+              <tr>
+                {['Product', 'Status', 'Qty on Hand', 'Est. Runway', 'Needs a PO'].map((h) => (
+                  <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {alerts.map((alert) => {
+                const cfg = STATUS[alert.stock_status] ?? STATUS.low;
+                const Icon = cfg.icon;
+                return (
+                  <tr key={alert.item_id || alert.product_name} className={clsx('border-l-4', cfg.border)}>
+                    <td className="px-5 py-3.5">
+                      <div className="text-sm font-semibold text-slate-800">{alert.product_name}</div>
+                      <div className="text-xs text-slate-600 font-mono">{alert.item_id}</div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span className={clsx('inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg', cfg.badge)}>
+                        <Icon size={11} />
+                        {cfg.label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">{Number(alert.total_qty).toLocaleString()} units</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">{runway(alert.weeks_remaining)}</td>
+                    <td className="px-5 py-3.5 text-sm text-slate-700">{alert.needs_po ? 'Yes' : 'Not yet'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

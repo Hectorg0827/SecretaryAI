@@ -20,9 +20,19 @@ export async function getInventory(
   return apiFetch<{ items: InventoryItem[]; total: number }>(`/api/inventory${query}`);
 }
 
+/** One entry of GET /api/inventory/alerts (backend inventory._build_alert_dict). */
+export interface InventoryAlert {
+  item_id: string;
+  product_name: string;
+  total_qty: number;
+  weeks_remaining: number | null;
+  stock_status: 'low' | 'critical' | 'out_of_stock';
+  needs_po: boolean;
+}
+
 export async function getInventoryAlerts(): Promise<{
-  items: InventoryItem[];
-  total: number;
+  alerts: InventoryAlert[];
+  count: number;
 }> {
-  return apiFetch<{ items: InventoryItem[]; total: number }>('/api/inventory/alerts');
+  return apiFetch<{ alerts: InventoryAlert[]; count: number }>('/api/inventory/alerts');
 }

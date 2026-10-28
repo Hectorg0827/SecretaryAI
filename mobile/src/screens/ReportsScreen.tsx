@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { getSalesData, SalesData } from '../api/dashboard';
 import { getAccounts, Account } from '../api/accounts';
-import { getInventoryAlerts, InventoryItem } from '../api/inventory';
+import { getInventoryAlerts, InventoryAlert } from '../api/inventory';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 
 type Period = 30 | 60 | 90;
@@ -43,7 +43,7 @@ export default function ReportsScreen() {
   const [sales, setSales] = useState<SalesData | null>(null);
   const [prevSales, setPrevSales] = useState<SalesData | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [alerts, setAlerts] = useState<InventoryItem[]>([]);
+  const [alerts, setAlerts] = useState<InventoryAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +60,7 @@ export default function ReportsScreen() {
       setSales(s);
       setPrevSales(pS);
       setAccounts(acc.accounts);
-      setAlerts(inv.items);
+      setAlerts(inv.alerts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
     } finally {
@@ -219,7 +219,9 @@ export default function ReportsScreen() {
         {/* Inventory status */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Inventory Alerts</Text>
-          {alerts.length === 0 ? (
+          {error ? (
+            <Text style={[styles.noAlertsText, { color: COLORS.textSecondary }]}>Inventory alerts unavailable.</Text>
+          ) : alerts.length === 0 ? (
             <View style={styles.noAlerts}>
               <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
               <Text style={styles.noAlertsText}>All stock levels healthy</Text>
@@ -229,14 +231,14 @@ export default function ReportsScreen() {
               <View key={item.item_id} style={styles.alertRow}>
                 <View style={[
                   styles.alertDot,
-                  { backgroundColor: item.stock_status === 'critical' ? COLORS.danger : COLORS.warning }
+                  { backgroundColor: item.stock_status === 'low' ? COLORS.warning : COLORS.danger }
                 ]} />
                 <Text style={styles.alertName} numberOfLines={1}>{item.product_name}</Text>
                 <Text style={[
                   styles.alertStatus,
-                  { color: item.stock_status === 'critical' ? COLORS.danger : COLORS.warning }
+                  { color: item.stock_status === 'low' ? COLORS.warning : COLORS.danger }
                 ]}>
-                  {item.stock_status === 'critical' ? 'Critical' : 'Low'}
+                  {item.stock_status === 'out_of_stock' ? 'Out of stock' : item.stock_status === 'critical' ? 'Critical' : 'Low'}
                 </Text>
                 <Text style={styles.alertQty}>{item.total_qty} units</Text>
               </View>

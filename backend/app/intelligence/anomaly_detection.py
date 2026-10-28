@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
+import math
 import statistics
 
 
@@ -43,10 +44,14 @@ def detect_order_anomalies(
         by_account.setdefault(acct, []).append(inv)
 
     for acct_name, acct_invoices in by_account.items():
+        # Flag only the orders the baseline was computed from: an order outside
+        # the window (or with an unreadable amount) is not compared at all,
+        # and a missing amount is never treated as a $0 order.
         amounts = [
-            float(inv.get("total_amount", 0))
+            amount
             for inv in acct_invoices
             if _parse_date(inv.get("order_date", "")) >= cutoff
+            and (amount := _parse_amount(inv.get("total_amount"))) is not None
         ]
 
         if len(amounts) < 4:
@@ -55,8 +60,7 @@ def detect_order_anomalies(
         mean = statistics.mean(amounts)
         stdev = statistics.stdev(amounts) if len(amounts) > 1 else 0
 
-        for inv in acct_invoices:
-            amount = float(inv.get("total_amount", 0))
+        for amount in amounts:
             if stdev == 0:
                 continue
 
@@ -125,6 +129,16 @@ def detect_inventory_anomalies(
             ))
 
     return anomalies
+
+
+def _parse_amount(value) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (ValueError, TypeError):
+        return None
+    return amount if math.isfinite(amount) else None
 
 
 def _parse_date(value) -> date:

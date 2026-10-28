@@ -15,6 +15,7 @@ vi.mock('../components/layout/TopBar', () => ({ TopBar: () => null }));
 vi.mock('../components/dashboard/EmailInbox', () => ({ EmailInbox: () => null }));
 vi.mock('../components/dashboard/ProactiveFeed', () => ({ ProactiveFeed: () => null }));
 vi.mock('../components/dashboard/MorningBriefing', () => ({ MorningBriefing: () => null }));
+vi.mock('../components/dashboard/WeeklyReport', () => ({ WeeklyReport: () => null }));
 vi.mock('../components/dashboard/StatStrip', () => ({
   StatStrip: ({ stats }: { stats: Array<{ label: string; value: string | number }> }) => (
     <div>{stats.map((item) => <span key={item.label}>{item.label}: {item.value}</span>)}</div>

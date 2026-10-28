@@ -13,11 +13,23 @@ log = logging.getLogger(__name__)
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
+        # Pydantic v2 can include a raw ValueError in error["ctx"] and the
+        # submitted value in error["input"]. Neither belongs in an API
+        # response: ctx is not JSON serializable and input may be a secret.
+        safe_errors = [
+            {
+                "type": str(error.get("type", "value_error")),
+                "loc": [part if isinstance(part, (str, int)) else str(part)
+                        for part in error.get("loc", ())],
+                "msg": str(error.get("msg", "Invalid value")),
+            }
+            for error in exc.errors()
+        ]
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={
                 "error": "validation_error",
-                "detail": exc.errors(),
+                "detail": safe_errors,
                 "message": "Request validation failed",
             },
         )

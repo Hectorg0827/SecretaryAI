@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user, require_permission
+from app.auth.rbac import get_current_user, require_permission  # noqa: F401  (tests override it)
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -177,7 +177,8 @@ async def list_plans(db=Depends(get_db)):
 
 @router.get("/subscription")
 async def get_subscription(
-    user: dict = Depends(get_current_user),
+    # Billing is shown to the owner only (Settings → Billing).
+    user: dict = Depends(_require_billing_owner),
     db=Depends(get_db),
 ):
     """Get the current company subscription along with full plan details."""
@@ -339,7 +340,8 @@ async def create_portal_session(
 
 @router.get("/invoices")
 async def list_invoices(
-    user: dict = Depends(get_current_user),
+    # Billing is shown to the owner only (Settings → Billing).
+    user: dict = Depends(_require_billing_owner),
     db=Depends(get_db),
 ):
     """List billing event history for the current company."""

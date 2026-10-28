@@ -330,3 +330,14 @@ def test_billing_logs_are_constant_events():
         assert len(call.args) == 1 and not call.keywords, f"billing.py:{call.lineno} interpolates a log field"
         assert isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str), (
             f"billing.py:{call.lineno} must use a literal log event")
+
+
+# ── Who may read billing history ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("role", ["manager", "back_office", "sales_rep", "viewer"])
+@pytest.mark.parametrize("path", ["/api/billing/subscription", "/api/billing/invoices"])
+def test_only_the_owner_can_read_billing_records(role, path):
+    db = FakeDB(company_subscriptions=[{"stripe_customer_id": "cus_a"}])
+    response = client_for(db, role=role).get(path)
+    assert response.status_code == 403
+    assert db.queries == []

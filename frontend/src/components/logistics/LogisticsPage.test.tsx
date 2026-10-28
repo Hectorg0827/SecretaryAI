@@ -30,3 +30,21 @@ describe('logistics page tabs', () => {
     expect(container.textContent).toContain('Seasonal demand pattern');
   });
 });
+
+describe('logistics page for back office', () => {
+  it('opens purchasing screens without calling owner/manager-only endpoints', async () => {
+    setRole('back_office');
+    const { get } = mockApi({
+      '/api/logistics/orders': { orders: [] },
+    });
+    const container = await render(<Logistics />);
+
+    await click(button(container, 'Purchase Orders'));
+    expect(get).toHaveBeenCalledWith('/api/logistics/orders');
+
+    await click(button(container, 'Receiving'));
+    // GET /receipts/pending needs approve_actions; back office would get 403.
+    expect(get).not.toHaveBeenCalledWith('/api/logistics/receipts/pending');
+    expect(container.textContent).toContain('Stock check against QuickBooks');
+  });
+});

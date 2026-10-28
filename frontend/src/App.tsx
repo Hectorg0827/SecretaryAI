@@ -148,7 +148,9 @@ function AppShell() {
           <Route
             path="/logistics"
             element={
-              <RoleGuard roles={['owner', 'manager']}>
+              // Back office runs purchasing and receiving; approvals stay owner/manager
+              // inside the page and on the server.
+              <RoleGuard roles={['owner', 'manager', 'back_office']}>
                 <Logistics />
               </RoleGuard>
             }

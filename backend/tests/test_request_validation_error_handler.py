@@ -138,3 +138,26 @@ def test_real_app_requires_auth_before_reorder_body_validation():
 
     assert response.status_code == 401
     assert "sensitive-tenant-key" not in response.text
+
+
+def test_internal_pydantic_validation_errors_fail_closed_without_leaking_secrets():
+    # Direct model validation inside a route is not an HTTP body validation
+    # error. Pydantic's exception subclasses ValueError and includes input_value
+    # in its string representation, so the generic ValueError handler is unsafe.
+    app = FastAPI()
+    register_error_handlers(app)
+
+    class _InternalModel(BaseModel):
+        amount: int
+
+    @app.get("/internal")
+    async def internal():
+        _InternalModel.model_validate({"amount": "private-source-token"})
+        return {"ok": True}
+
+    response = TestClient(app, raise_server_exceptions=False).get("/internal")
+
+    assert response.status_code == 500
+    assert response.json()["error"] == "internal_error"
+    assert "private-source-token" not in response.text
+    assert "input_value" not in response.text

@@ -6,6 +6,7 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,21 @@ def register_error_handlers(app: FastAPI) -> None:
                 "error": "validation_error",
                 "detail": safe_errors,
                 "message": "Request validation failed",
+            },
+        )
+
+    @app.exception_handler(ValidationError)
+    async def internal_validation_error_handler(request: Request, exc: ValidationError):
+        # Request schema errors are handled above as 422. Model validation
+        # inside a handler is a server defect, not an invalid HTTP request.
+        # Pydantic ValidationError subclasses ValueError, whose handler below
+        # would otherwise echo str(exc), including submitted secret values.
+        log.error("Internal model validation failed at %s", request.url.path)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal_error",
+                "message": "An unexpected error occurred. Our team has been notified.",
             },
         )
 

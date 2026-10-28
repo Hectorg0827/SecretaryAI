@@ -66,17 +66,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await getMe();
       set({ user, isAuthenticated: true, isLoading: false, error: null });
     } catch (err) {
+      // A failed profile read after token issuance is still a failed sign-in.
+      // Do not leave an apparently signed-out device holding that JWT.
+      let credentialClearFailed = false;
+      try { await clearToken(); } catch { credentialClearFailed = true; }
+      const failure = credentialClearFailed
+        ? new Error('Could not clear the incomplete session from secure storage. Contact your administrator.')
+        : err;
       set({
         isLoading: false,
-        error: err instanceof Error ? err.message : 'Login failed',
+        error: failure instanceof Error ? failure.message : 'Login failed',
       });
-      throw err;
+      throw failure;
     }
   },
 
   submitTotp: async (code: string) => {
     const { preAuthToken } = get();
-    if (!preAuthToken) return;
+    if (!preAuthToken) {
+      const error = new Error('Your sign-in challenge expired. Start again.');
+      set({ needs2fa: false, error: error.message });
+      throw error;
+    }
     set({ isLoading: true, error: null });
     try {
       await apiLoginWithTotp(preAuthToken, code);
@@ -90,11 +101,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     } catch (err) {
+      let credentialClearFailed = false;
+      try { await clearToken(); } catch { credentialClearFailed = true; }
+      const failure = credentialClearFailed
+        ? new Error('Could not clear the incomplete session from secure storage. Contact your administrator.')
+        : err;
       set({
         isLoading: false,
-        error: err instanceof Error ? err.message : 'Invalid 2FA code',
+        error: failure instanceof Error ? failure.message : 'Invalid 2FA code',
       });
-      throw err;
+      throw failure;
     }
   },
 

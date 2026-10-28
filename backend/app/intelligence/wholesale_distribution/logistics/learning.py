@@ -382,7 +382,7 @@ class LearningEngine:
                     )
 
         portfolio_cost_change = (
-            round(statistics.mean(total_cost_changes), 1) if total_cost_changes else 0.0
+            round(statistics.mean(total_cost_changes), 1) if total_cost_changes else None
         )
 
         # Top and bottom suppliers
@@ -390,8 +390,15 @@ class LearningEngine:
         top_suppliers = [s.to_dict() for s in sorted_suppliers[:3]]
         bottom_suppliers = [s.to_dict() for s in sorted_suppliers[-2:] if s.overall_score < 70]
 
+        observed_count = len(lead_time_records) + len(total_cost_changes) + len(supplier_scores)
+
         return {
             "period": "last_12_months",
+            "status": "analysis_only" if observed_count else "insufficient_data",
+            "source_data_verified": False,
+            "observation_count": observed_count,
+            "cost_trend_sample_count": len(total_cost_changes),
+            "supplier_score_sample_count": len(supplier_scores),
             "lead_time_summary": {
                 "avg_days": avg_lt,
                 "avg_variance_vs_predicted": avg_variance,
@@ -400,17 +407,19 @@ class LearningEngine:
             "portfolio_landed_cost_change_pct": portfolio_cost_change,
             "top_performing_suppliers": top_suppliers,
             "underperforming_suppliers": bottom_suppliers,
-            "recommendation": self._monthly_recommendation(
-                portfolio_cost_change, avg_variance, bottom_suppliers
+            "recommendation": (
+                self._monthly_recommendation(portfolio_cost_change, avg_variance, bottom_suppliers)
+                if observed_count else
+                "Insufficient observations: verify and load durable purchasing/receipt history first."
             ),
         }
 
     @staticmethod
     def _monthly_recommendation(
-        cost_change: float, avg_variance: Optional[float], bottom_suppliers: list[dict]
+        cost_change: Optional[float], avg_variance: Optional[float], bottom_suppliers: list[dict]
     ) -> str:
         parts: list[str] = []
-        if cost_change > 5:
+        if cost_change is not None and cost_change > 5:
             parts.append(f"Portfolio landed cost up {cost_change:.1f}% — review pricing strategy.")
         if avg_variance and avg_variance > 5:
             parts.append(
@@ -420,7 +429,7 @@ class LearningEngine:
         if bottom_suppliers:
             names = ", ".join(s.get("supplier_name", "") for s in bottom_suppliers[:2])
             parts.append(f"Supplier performance alerts: {names} — review relationship or qualify alternatives.")
-        return " ".join(parts) or "Operations on track — no significant issues detected."
+        return " ".join(parts) or "No significant issue in supplied samples; completeness and source unverified."
 
     @staticmethod
     def _percentile(data: list[float], p: int) -> float:

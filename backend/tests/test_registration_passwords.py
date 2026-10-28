@@ -32,7 +32,8 @@ async def test_registration_hashes_and_verifies_the_actual_submitted_password():
         result = await register(body, _=None)
     assert result['role'] == 'owner'
     assert result['access_token']
-    stored = users.insert.call_args.args[0]['password_hash']
+    stored = users.insert.call_args.args[0]['hashed_password']
+    assert 'password_hash' not in users.insert.call_args.args[0]
     assert verify_password(body.password, stored)
     assert not verify_password('Wrong-password17!', stored)
 

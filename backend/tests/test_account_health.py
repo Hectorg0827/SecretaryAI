@@ -1,5 +1,5 @@
 """Tests for account health scoring engine."""
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -79,3 +79,64 @@ def test_high_balance_flag():
         current_balance=Decimal("15000"),
     )
     assert any("balance" in f.lower() for f in result.flags)
+
+
+def _healthy_fixture(**changes):
+    today = date(2026, 10, 26)
+    args = {
+        "account_id": "fictional-1", "account_name": "Fixture Account",
+        "last_order_date": today - timedelta(days=7),
+        "avg_order_cycle_days": 30,
+        "order_history": [
+            {"date": (today - timedelta(days=30)).isoformat(), "total": "200.00"},
+            {"date": today - timedelta(days=7), "total": "100.00"},
+        ],
+        "current_balance": Decimal("0"), "today": today,
+    }
+    args.update(changes)
+    return score_account(**args)
+
+
+def test_mixed_string_and_date_history_with_last_order_string_is_valid():
+    result = _healthy_fixture(last_order_date="2026-10-19")
+    assert result.status == "healthy"
+    assert result.days_since_last_order == 7
+
+
+def test_last_order_is_derived_from_observed_history_if_not_supplied():
+    result = _healthy_fixture(last_order_date=None)
+    assert result.days_since_last_order == 7
+    assert "No orders on record" not in result.flags
+
+
+@pytest.mark.parametrize("balance", [None, "NaN", "Infinity", "-1", "unavailable"])
+def test_missing_or_invalid_balance_never_scores_as_healthy(balance):
+    with pytest.raises(ValueError, match="balance"):
+        _healthy_fixture(current_balance=balance)
+
+
+@pytest.mark.parametrize("row", [
+    {"date": "garbage", "total": "100"},
+    {"date": "2026-10-27", "total": "100"},
+    {"date": "2026-10-15", "total": None},
+    {"date": "2026-10-15", "total": "NaN"},
+])
+def test_bad_order_history_fails_instead_of_silently_ignoring(row):
+    with pytest.raises(ValueError, match="[Oo]rder"):
+        _healthy_fixture(order_history=[row])
+
+
+def test_recent_order_cannot_precede_last_order_if_both_observed():
+    with pytest.raises(ValueError, match="last_order_date"):
+        _healthy_fixture(last_order_date=date(2026, 9, 1))
+
+
+@pytest.mark.parametrize("cycle", [0, -10, float("nan")])
+def test_invalid_observed_cycle_does_not_silently_substitute_30_days(cycle):
+    with pytest.raises(ValueError, match="cycle"):
+        _healthy_fixture(avg_order_cycle_days=cycle)
+
+
+def test_unobserved_cycle_is_explicitly_labeled_heuristic():
+    result = _healthy_fixture(avg_order_cycle_days=None)
+    assert any("unverified" in flag.lower() and "cycle" in flag.lower() for flag in result.flags)

@@ -1,0 +1,168 @@
+# Gate A — SecretaryAI shared architecture contracts (v1.0)
+
+**Scope:** contract freeze for five workstreams. No provider calls, migrations, side effects, merges or deployments from this document. PR #74 and LYO remain unchanged.
+
+## Canonical ownership and compatibility
+
+- **Industry module interface:** `app.industry_modules.base.IndustryModule` (all ten methods) and `app.industry_modules.loader.get_module_for_company` are the canonical **configuration/industry knowledge** contract.
+- `app.intelligence.industry_registry` and `app.intelligence.wholesale_distribution.module.WholesaleDistributionModule` are **legacy operational intelligence façades** for currently tested callers. Do not create new imports of the legacy registry. Do not delete or replace it until Chat 2/3/4 migrate consumers through a documented compatibility layer. They are not a second canonical industry configuration API.
+- **Business entities and action policy:** `app.domain.contracts` dataclasses, including `ActionProposal`, `ActionDecision`, `ActionClass`, `DataPath`; **one server-side policy authority**: `app.domain.policy.PolicyEngine`. Additional per-module scoring/guardrails may reduce permissions, never authorize effects forbidden by the tenant policy.
+- **Provider read adapter:** `UnifiedDataAdapter.get_all_customers()`, `get_orders_last_n_days(days)`, `get_inventory_qb()`, `get_inventory_merged()`, `get_emails(...)`. Source-native `QuickBooksAdapter.get_customers/get_invoices/get_inventory` are NOT methods of `UnifiedDataAdapter`. Chat 2 owns any adapter changes; callers must conform to the unified interface.
+- **Briefing:** `app.domain.briefing_contract` defines the **new** typed `EvidenceRef`, `DigestEntry`, `RoleBriefing` contract, version `1.0`. It is read-only and does not bypass API-side tenant and permission checks. Call `RoleBriefing.project()` only after authenticating the user, resolving effective role AND record-level permissions, and reducing input entries to resources the viewer may access. `RoleBriefing.to_payload()` returns the stable JSON representation for web/mobile/desktop. The contract itself enforces tenant and coarse role scope, not customer/territory permissions.
+
+## Ten industry-module methods — required (canonical)
+
+`get_profile`, `get_entity_schema`, `get_kpi_definitions`, `get_scoring_config`, `get_causal_trees`, `get_workflow_definitions`, `get_pricing_config`, `get_compliance_calendar`, `get_terminology`, `get_benchmarks`.
+
+Chat 2/3/4 implement domain-specific computations behind this interface; Chat 1 maintains loader and shared shape. New industries may not silently fall back to wholesale logic if configuration was explicitly set incorrectly.
+
+## Data snapshot contract v1 (cross-team)
+
+Represent individual source reads through existing `app.domain.data_result.DataResult` (source, fetched_at, confidence, is_ok/error, capability, correlation_id). Never treat `is_ok=False`, stale records, or missing permissions as numeric zero. Before persisting or cross-role sharing, attach company_id from verified authentication, provider/source record ID, UTC observed and retrieved timestamps, source synchronization status, normalization version, and source-quality state (verified/partial/unavailable). Chat 2 implements persisted normalization and lineage; Chat 1 owns schema migration approvals.
+
+Missing source is a **visible data-quality incident**, not an empty-success report. Missing data must not produce a claim of operational health, an automatic PO, or an email.
+
+**Implemented safety check on Chat 1 branch:** `compute_dashboard_payload` now raises `SnapshotSourceUnavailable` if any required account, inventory, or sales read fails rather than fabricating healthy zero metrics. No incomplete snapshot is written by the morning worker. Successful reads are labeled `source_read_status=completed` and `source_quality=partial` until Chat 2 proves provider-level lineage, freshness and completeness; a returned adapter payload alone is NOT a verified source. The initial on-demand dashboard request returns HTTP 503 when required data cannot be read. Chat 5 must display a dedicated unavailable-data state for HTTP 503 rather than rendering zero-valued default tiles. Cached snapshots must always show their `generated_at` age; handling of stale existing snapshots remains a Gate B acceptance item.
+
+## Event v1 and deduplication
+
+A scheduled insight/work item must have `company_id`, stable `event_type`, `entity_type`, `entity_id`, `detected_at` (UTC), `source_ids`, `correlation_id`, rule/model version, and a stable dedupe key over tenant + event type + entity + effective data/version window. Events are tenant-scoped and retry-safe. Changes from Chat 2/3/4 must be visible to Chat 1 before schema additions.
+
+## Six-section digest v1
+
+Always produce: `red_alerts`, `yellow_alerts`, `opportunities`, `scoreboard`, `todays_priorities`, `actions_taken`. Each entry must cite evidence, retain source freshness/quality, and have explicit allowed roles and tenant. Read-only role projection must not widen access. Owners and managers may view only company-authorized data; assigned reps get only their permitted accounts. Source-unavailable is explicit and cannot be misreported as resolved. An entry whose evidence is marked unavailable MUST have status `source_unavailable`; callers may never report it as open/resolved or suppress it as a healthy zero. JSON keys are `contract_version`, `company_id`, `audience_role`, `created_at`, `sections`; each section is an array of evidence-backed entries.
+
+`actions_taken` requires execution receipts and independently checked external-provider outcomes. A queue acknowledgement is not confirmation of an external side effect.
+
+## Actions and authority v1
+
+Flow: `ActionProposal` → tenant PolicyEngine → (deny | draft/approval | allow) → immutable approval evidence → durable execution claim → provider effect → provider verification → immutable receipt/audit → outcome reconciliation. Never re-run an ambiguous provider side effect automatically. Executing a previously approved action must re-evaluate current policy, tenancy, amount limits, content integrity and allowed destination.
+
+Autonomy tiers apply **per capability**, user-approved, no self-promotion:
+1 = observe/inform; 2 = recommend/draft; 3 = selected routine actions inside configured rules; 4 = exception-led operation with all prohibitions still enforced. Legacy `AutonomyEngine` and `ActionEngine` cannot independently override the server policy; consolidation requires dedicated regression tests and incremental caller migration.
+
+## Background execution topology
+
+Required staging-only services: one FastAPI API, web frontend, Redis, a distinct Celery worker and a distinct Celery beat (scheduler). Dedicated worker must be able to invoke `tasks.overnight`, `tasks.morning_briefing`, `tasks.workflow_runner`, and `tasks.workflow_reaper`; beat owns the schedule. Redis must persist as configured; workers need health probes and runtime execution logs.
+
+**Current read-only staging observation:** API, Web, Redis online, but no worker or beat service was listed. API container entrypoint starts Uvicorn, not Celery. Never claim scheduled briefings run until the two services are deployed and observed. All staging external sends/writes remain disabled; staging rollout requires explicit authorization.
+
+## Dashboard data-integrity and side-effect boundary (Chat 1)
+
+- \`compute_dashboard_payload\` uses the single \`total_qty\` supplied by Chat 2's merged inventory adapter; QB and warehouse quantities are two representations of the same stock and must not be summed. A missing or invalid authoritative quantity fails closed. Snapshot records distinguish successful top-level reads from unverified upstream source provenance.
+- Dashboard API GET \`/summary\` returns \`snapshot_freshness\`, \`snapshot_age_seconds\`, \`snapshot_stale\`, \`source_read_status\`, and \`source_quality\`. Stale snapshots may be shown only with a clear timestamp/warning. Unknown timestamps or implausible future timestamps are not considered fresh.
+- POST \`/refresh\` **only enqueues** \`tasks.dashboard_refresh.refresh_dashboard_snapshot\`: read-only company-scoped data fetch + snapshot persistence. It never enqueues \`tasks.morning_briefing.send_morning_briefing_all\`, which may involve an email delivery under separately authorized settings. Broker or persistence failure must return an error, not a false success.
+- \`store_snapshot\` now raises \`SnapshotPersistenceUnavailable\` instead of swallowing write errors; owner-facing refresh may not claim completed storage if Supabase failed.
+- **Chat 5 UI acceptance:** do not treat \`source_quality=partial\` as source-verified; show explicit stale/unknown warnings; never conflate \`refresh_queued\` with \`refreshed\`. Treat \`pending_actions=null\` and \`unread_emails=null\` as unavailable, not zero.
+- **Chat 2 data acceptance:** prove adapter \`total_qty\` semantics, warehouse/QB non-additivity, location/ownership logic, weekly velocity presence/freshness, and fail-closed source unavailability before upgrading source-quality to verified.
+
+## Immediate cross-team compatibility requests
+
+- **Chat 2:** freeze provider adapter method signatures; reject missing source as empty success; add source lineage and amount/units normalization fixtures.
+- **Chat 3:** in `backend/app/api/logistics.py`, pass `daily_sales_history` and `lead_time_history` matching `ReorderEngine.build_reorder_queue`; add API-through-engine tests and verify unit normalization. Do not change the shared domain contract.
+- **Chat 4:** expose new capabilities using canonical industry configuration; no direct action execution or unilateral DB migration.
+- **Chat 5:** consume `RoleBriefing` six-section projection via a versioned read endpoint once Chat 1 wires it; treat unavailable data as degraded (never show "zero issues"). E2E must include RBAC, duplicate retries, stale data and provider failures.
+
+## Gate A acceptance
+
+Contract and compatibility tests must pass on exact feature-branch tip; architecture specification must be reviewed with Chat 2–5, and no shared-interface changes may be merged until the relevant owners adopt v1. This contract freeze does not represent live end-to-end verification, safe autonomous execution, or permission to deploy.
+
+
+## Security release blockers and mitigations (2026-10-26)
+
+- **Quarantined in Chat 1 PR #75:** legacy POST /api/dashboard/emails/send-reply unconditionally returns HTTP 409 without resolving a provider or emitting email. Browser confirmation cannot bypass tenant policy, durable approval or idempotent execution. It stays disabled pending separately verified gateway.
+- **Provider failure truthful:** POST /api/dashboard/emails/{email_id}/mark-read now raises HTTP 503 on provider exceptions. OPEN: Chat 2 must change UnifiedDataAdapter.mark_email_read to reject missing connector rather than silently succeeding.
+- **Current and prior sales failures truthful:** GET /api/dashboard/sales raises HTTP 503 for failed source reads instead of fabricating $0. Dataclass/dict dates and amounts use shared validation accessors. OPEN: Chat 2 must supply independent source-completeness/freshness evidence.
+- **PO draft authorization:** POST /api/actions/draft-po requires explicit server-side draft_purchase_orders permission: owner, manager, back_office only; sales_rep/viewer denied. Positive optional quantities enforced. OPEN: tenant-owned inventory/vendor validation before draft-to-execution promotion.
+- **OPEN:** approve/{draft_id} legacy provider sends and PO dispatches are not certified for unattended external effects. Mandatory future gateway needs durable execution receipt, policy recheck, idempotency and a test-only allowlist.
+- **OPEN:** app.api.inbox partial read and mark-read success semantics require per-source health metadata and fail-closed errors. UI cannot infer swallowed backend exceptions.
+
+
+## Gate A durable approval convergence (Chat 1)
+
+- `POST /api/actions/approve/{draft_id}` no longer has an active fallback from human approval into inline email delivery or PO dispatch. When `SECRETARYAI_DURABLE_APPROVAL_ENABLED` is not `1`, the endpoint denies with HTTP 409 *before mutation*. A healthy durable transport remains a prerequisite for even queueing a reviewed email.
+- The enabled branch supports **email draft approval + atomic durable enqueue only** via `PostgresDurableGateway`. Purchase-order dispatch stays blocked until a separately reviewed durable execution claim, vendor/line-item validation and provider receipt exist.
+- The private execution RPC must return a valid `execution_id` plus `queued=true`; `queued=false` is accepted only with `already_processed=true`. API responses distinguish `execution_status=queued` from `already_processed` and suppress second approval-audit attempts. Neither outcome proves actual provider delivery.
+- `PolicyEngine.evaluate` now fails closed for COMMIT/DESTRUCTIVE when either authoritative `policy_rules` or tenant `company_features` cannot be loaded. READ/DRAFT may continue with conservative defaults. The API converts a policy-source failure to deny rather than allowing a default approval threshold.
+- Synthetic tests exercise the disabled path, policy-store outages, queue-only behavior, PO refusal, duplicate approval, ambiguous ledger response and protected transport. No external email or PO was sent.
+- **Remaining release blockers:** independent verification of the SQL RPC and immutable receipt schema; comprehensive provider callback/reconciliation tests; no automatic retry of unknown outcomes; approved worker/beat deployment in staging after separate authorization; per-company scopes and app data-source completeness.
+
+
+## Gate A read-only executive briefing API (initial partial integration)
+
+- New `GET /api/briefing/today` is registered under the paid API guard and requires an authenticated `owner` or `manager` with `view_financials` permission. Other roles receive HTTP 403; company_id is from the trusted JWT, not the request body.
+- Source: the existing `report_snapshots` tenant-filtered `dashboard_summary` cache only. The endpoint **never connects to Gmail, QuickBooks or a provider and never creates or executes an action**.
+- The response uses `RoleBriefing.to_payload()` v1.0 with six canonical sections and evidence references. `source_coverage=dashboard_snapshot_only`, `complete_digest=false` and `source_quality=partial` disclose the intentionally incomplete scope. Opportunities and actions_taken remain empty until verified evidence, not because the company necessarily had none.
+- Missing/invalid/stale snapshots, unverified read status, invalid figures and aggregate inconsistencies return HTTP 503 rather than misrepresenting an operational all-clear. Currently supports company totals and critical/low inventory counts, not record-level account data.
+- Chat 5 may consume this endpoint as an additional executive prototype but must prominently display the partial-coverage disclaimer and 503 unavailable state. Do NOT substitute it as the validated full morning briefing until real provider evidence, account-level RBAC, worker execution receipts and proof of source coverage are integrated.
+- Before enabling sales-rep or logistics views, Chat 1/2/3 must agree on record-level ownership, territory, permission checks and per-source reliability. Client role hiding is not authorization.
+
+
+## Gate A source-observation compatibility (Chat 1 ↔ Chat 2)
+
+- `UnifiedDataAdapter.get_inventory_merged` currently emits `weekly_sell_rate=0.0` when Supabase inventory velocity is missing but also emits `weekly_sell_rate_observed=false` and `weekly_sell_rate_source_status=missing|unavailable`. This is a **placeholder** zero, not a measured business zero.
+- `compute_dashboard_payload` now REQUIRES `weekly_sell_rate_observed is True` for every reported inventory row. Missing/false observation raises `SnapshotSourceUnavailable('inventory')`; no stale/unknown velocity is silently converted to zero demand. An actually observed zero rate remains accepted as numeric zero but overall source quality is still `partial` until the provider coverage is proven.
+- **Chat 2 handoff:** Preserve `weekly_sell_rate_observed` and its source status, ideally also attach the observation time and window. Do not silently change the flag to true or remove it without a versioned contract migration. If the rate is missing, return unavailable/partial in a future per-SKU diagnostic contract rather than false healthy stock.
+- **Chat 3/5 handoff:** Do not calculate confident reorder health or display 'no stock risk' when weekly demand was never measured. A 503 dashboard refresh is preferable to an inaccurate green status. Account for partially complete inventory at per-item level in Gate B.
+
+
+## Gate A machine-readable partial briefing contract (OpenAPI)
+
+- Canonical endpoint: `GET /api/briefing/today`. The FastAPI decorator now explicitly declares response_model=`app.domain.briefing_wire.BriefingTodayResponseV1`, exposing `#/components/schemas/BriefingTodayResponseV1` through `/openapi.json`.
+- Required JSON response fields: `contract_version`, `company_id`, `audience_role`, `created_at`, `sections`, `source_coverage`, `complete_digest`, `source_quality`, `snapshot_generated_at`, `snapshot_age_seconds`.
+- The schema is deliberately strict: `contract_version` must be `1.0`; `audience_role` is owner or manager; `source_coverage` is dashboard_snapshot_only; `complete_digest` MUST be false; `source_quality` MUST be partial. Unknown fields are prohibited. Each of the six sections must exist as an array of typed evidence-backed entries.
+- This is the **only authorized v1 schema** for Chat 5 to consume; the existing client-side aggregation from disparate live reads is not a server-authorized briefing. Frontend/mobile/desktop UI must show partial/incomplete status and error on HTTP 503, not automatically label empty sections as no activity.
+- Integration tests pin both the published OpenAPI reference and the strict runtime schema, including refusal of promoted verified/all-sources claims and extra output data.
+- Future full-digest v2 requires a new contract version and independent source + execution receipt validation. Do not change this v1 response model to falsely claim complete coverage.
+
+
+## Gate A follow-up notes permission and persistence boundary
+
+- `GET /api/dashboard/notes` permits owner and manager company-wide visibility but explicitly adds a server-side `user_id=<authenticated JWT subject>` filter for the `sales_rep` role. The company_id filter remains mandatory for every role. A rep's `view_own_accounts` permission is never implicit authorization to list other employees' notes.
+- `PATCH /api/dashboard/notes/{note_id}` enforces both tenant and rep ownership, returns HTTP 404 for zero authorized matches rather than fabricating a successful update, and HTTP 503 for provider failures.
+- `POST /api/dashboard/notes` populates company_id/user_id from the server-verified session and requires an acknowledged persisted row. Empty insert acknowledgement is HTTP 503, not a synthetic saved-note response.
+- `GET /api/dashboard/notes` now responds HTTP 503 on unavailable storage rather than disguising an outage as an empty follow-up list.
+- Chat 5: display 403/404/503 as authorization/not-found/unavailable, never success or 'zero notes'. Do not mix personal-rep notes and company-wide executive notes in the same unscoped UI.
+- These are API-level guardrails only; future customer/territory-specific note sharing requires a separately authorized assignment model and persisted row-level policy.
+
+
+## Gate A legacy inline executor retirement
+
+- `app.api.actions._execute_approved_draft` is now a **fail-closed compatibility tombstone**: it always raises `RuntimeError` and contains no provider or Celery send calls. This removes the otherwise callable orphan bypass while retaining the symbol for backward-compatible imports/test patching.
+- The retired tests that previously expected direct provider `sent` or `needs_reconciliation` behavior have been replaced with parameterized negative tests asserting zero provider invocations for email, purchase_order and unknown action types.
+- New approved actions must use the durable gateway with policy, immutable snapshot, unique claim, verified provider receipt and explicit reconciliation on unknown outcomes. The old direct executor must not be reenabled behind a feature flag.
+- This change is not evidence that a worker or real provider has executed successfully. Approval/delivery E2E remains out of scope until staging authorization and safe test allowlists.
+
+
+## Gate A dashboard read-permission execution boundary
+
+- `GET /api/dashboard/summary` is a read surface, not a general provider-sync authorization. When no company snapshot exists, only `run_reports` or `view_all` roles (owner/manager/back_office) may perform the initial provider-wide data read and snapshot write; sales_rep/viewer/unknown roles receive HTTP 503 without invoking provider reads or snapshot persistence.
+- Cached company summary fields remain individually permission-filtered: accounts require `view_customers|view_all`, inventory `view_inventory|view_all`, financials `view_financials|view_all`, approval count `approve_actions|view_all`, unread inbox `trigger_actions|view_all`.
+- Crucially, live approval-count DB reads and inbox provider reads are **not performed at all** for roles without their permissions, rather than reading data and hiding it after the fact. Missing/unavailable authorized reads remain null; a confirmed zero still uses 0.
+- A sales rep's assigned-account intelligence needs a separately scoped query and cannot be inferred by giving all signed-in employees the company-wide reporting capability. Chat 5 must handle nullable counts and a 503 requiring a privileged refresh, not attempt a direct low-privilege refresh.
+- Regression tests assert role-level denial before provider IO, denied hidden live reads, and maintained owner first-load functionality. The new code is isolated in PR #75, not deployed or merged.
+
+
+## Gate A credential-safe dashboard dependency
+
+- FastAPI resolves dependencies before entering an endpoint. Previous `GET /api/dashboard/summary` used `adapter=Depends(get_adapter)`, meaning even sales_rep/viewer requests against a cached summary could cause service-role lookup, decrypted OAuth credentials and possible Google token refresh before the endpoint checked permissions.
+- The endpoint now uses `adapter=Depends(get_dashboard_adapter)`. That dependency avoids building a provider adapter entirely unless the verified role permits `run_reports`, `trigger_actions` or `view_all`. Cached-only roles receive `None`, can access only their already authorized cached fields, and cannot initiate first-load source sync. An attempted adapter construction failure returns sanitized HTTP 503.
+- HTTP-level regression tests demonstrate that sales_rep/viewer/unknown roles do not trigger `get_adapter` (and therefore never enter credential decrypt/token refresh logic), even with a missing cache; owner permission still allows the connector for live counts.
+- This is read-path authorization, not a complete provider-tenant isolation certification. Backend context must still verify every connector read is scoped to the JWT company's authorized account and assigned territory.
+
+
+## Gate A corrupt-snapshot and storage-read contract
+
+- The summary API now validates every cached dashboard payload before presenting its KPIs. Required: `source_read_status=completed`, `source_quality=partial` (V1 has no verified provider-lineage certificate), nonnegative integer healthy/slowing/at_risk/dormant/total counts with matching sum, finite numeric `sales_30d`, and an inventory alert list containing only recognized alert statuses.
+- A malformed or unqualified cached payload returns HTTP 503, never `{accounts:{}, sales_30d:0}` or a false healthy dashboard. Freshly computed payloads are validated before being persisted. Cached timestamps must be timezone-aware and plausible; historical but valid snapshots remain explicitly `snapshot_stale=true` instead of silently current.
+- `read_snapshot` now raises `SnapshotReadUnavailable` on database/query failures; only an actual absent row returns `None`. This prevents opportunistic provider-wide recomputation when the snapshot store is offline. Both `/api/dashboard/summary` and `/api/briefing/today` convert snapshot storage failures to sanitized 503 responses.
+- Regression tests exercise invalid totals, unavailable/unverified source claims, mismatched account aggregates, NaN/Infinity revenue, missing inventory fields, bad timestamps, stale-but-valid records, and real store exceptions (no provider sync attempted).
+- Chat 2/5: contract consumers must distinguish 503 unavailable from a VERIFIED zero; no frontend default `?? 0` for untrusted business metrics. A future independently verified V2 lineage must have explicit evidence and a new schema; never promote V1 snapshots by changing a flag.
+
+
+## Gate A authoritative snapshot persistence receipt
+
+- `store_snapshot` now treats the PostgREST upsert response as a required write acknowledgement. A successful refresh must include exactly one returned row matching both the trusted `company_id` and `report_type`. An empty, malformed, multiple-row or cross-company response is `SnapshotPersistenceUnavailable` instead of a false 'refreshed' state.
+- This is an acknowledgement requirement, not a guarantee of real external provider completeness. On an ambiguous write outcome, do not automatically retry a business mutation or claim durable success; investigate the row by tenant and report type.
+- Both manual refresh and API first-load flows already propagate `SnapshotPersistenceUnavailable` and must not claim success when an acknowledgement fails. New tests cover positive acknowledgement, empty results, mismatched company/report type, and storage exception.
+- Chat 2/5: independently distinguish `refresh_queued`, `refreshed` with durable acknowledgement, `unavailable`, and `partial source`; user-facing green status requires the appropriate stage to be proven. This change does not enable new provider writes or notifications.

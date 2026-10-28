@@ -45,35 +45,70 @@ class GmailConnector:
         return await loop.run_in_executor(None, self._fetch_emails, query, max_results)
 
     def _fetch_emails(self, query: str, max_results: int) -> list[dict]:
+        if max_results <= 0:
+            raise ValueError("max_results must be positive")
         service = self._get_service()
-        result = service.users().messages().list(
-            userId="me", q=query, maxResults=max_results
-        ).execute()
-
         emails = []
-        for ref in result.get("messages", []):
-            try:
-                msg = service.users().messages().get(
-                    userId="me", id=ref["id"], format="full"
-                ).execute()
+        seen_ids: set[str] = set()
+        seen_tokens: set[str] = set()
+        next_token = None
+        while len(emails) < max_results:
+            params = {"userId": "me", "q": query, "maxResults": min(max_results - len(emails), 500)}
+            if next_token:
+                params["pageToken"] = next_token
+            result = service.users().messages().list(**params).execute()
+            if not isinstance(result, dict):
+                raise ValueError("Gmail messages response must be a mapping")
+            refs = result.get("messages")
+            if refs is None:
+                if result.get("resultSizeEstimate") == 0 and not result.get("nextPageToken"):
+                    refs = []
+                else:
+                    raise ValueError("Gmail messages response missing message results")
+            if not isinstance(refs, list):
+                raise ValueError("Gmail messages response has invalid message results")
 
-                headers = {
-                    h["name"].lower(): h["value"]
-                    for h in msg.get("payload", {}).get("headers", [])
-                }
+            for ref in refs[: max_results - len(emails)]:
+                ref_id = ref.get("id") if isinstance(ref, dict) else None
+                if not isinstance(ref_id, str) or not ref_id:
+                    raise ValueError("Gmail message reference missing id")
+                if ref_id in seen_ids:
+                    raise ValueError("Gmail pages contain duplicate message id")
+                seen_ids.add(ref_id)
+                try:
+                    msg = service.users().messages().get(
+                        userId="me", id=ref_id, format="full"
+                    ).execute()
+                    if not isinstance(msg, dict) or msg.get("id") != ref_id:
+                        raise ValueError("Gmail message source identity mismatch")
+                    headers = {
+                        h["name"].lower(): h["value"]
+                        for h in msg.get("payload", {}).get("headers", [])
+                    }
+                    emails.append({
+                        "id": msg["id"],
+                        "thread_id": msg.get("threadId"),
+                        "message_id": headers.get("message-id"),
+                        "from": headers.get("from", ""),
+                        "to": headers.get("to", ""),
+                        "subject": headers.get("subject", ""),
+                        "date": headers.get("date", ""),
+                        "snippet": msg.get("snippet", ""),
+                        "labels": msg.get("labelIds", []),
+                        "body_preview": self._extract_body(msg)[:500],
+                    })
+                except Exception:
+                    # Never hide a partial mailbox read or log message PII.
+                    log.warning("Gmail message retrieval failed")
+                    raise
 
-                emails.append({
-                    "id": msg["id"],
-                    "from": headers.get("from", ""),
-                    "to": headers.get("to", ""),
-                    "subject": headers.get("subject", ""),
-                    "date": headers.get("date", ""),
-                    "snippet": msg.get("snippet", ""),
-                    "labels": msg.get("labelIds", []),
-                    "body_preview": self._extract_body(msg)[:500],
-                })
-            except Exception as e:
-                log.warning("Failed to fetch email %s: %s", ref["id"], e)
+            new_token = result.get("nextPageToken")
+            if len(emails) >= max_results or not new_token:
+                break
+            if not refs or not isinstance(new_token, str) or new_token in seen_tokens:
+                raise ValueError("Gmail messages pagination stalled or repeated token")
+            seen_tokens.add(new_token)
+            next_token = new_token
 
         return emails
 

@@ -102,6 +102,7 @@ def summarize_accounts_overview(accounts: list[dict], industry_module=None) -> s
         f"  Slowing: {by_status.get('slowing', 0)}",
         f"  At risk: {by_status.get('at_risk', 0)}",
         f"  Dormant: {by_status.get('dormant', 0)}",
+        f"  Unknown / unscored: {by_status.get('unknown', 0)}",
     ]
 
     at_risk = [a for a in accounts if a.get("health_status") in ("at_risk", "dormant")]

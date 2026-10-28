@@ -1,0 +1,194 @@
+name: Gate A ephemeral five-workstream integration
+
+# This job tests a disposable combination of five independently reviewed
+# branches. It NEVER pushes, merges a PR, deploys, emails, or accesses secrets
+# beyond a short-lived read-only checkout token used only during fetch.
+on:
+  push:
+    branches:
+      - workstream/01-core-20261026
+    paths:
+      - .github/workflows/gate-a-ephemeral-integration.yml
+      - backend/**
+      - frontend/**
+      - mobile/**
+      - scripts/**
+      - supabase/**
+      - desktop/**
+      - connector/**
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-a-ephemeral-integration
+  cancel-in-progress: true
+
+jobs:
+  combined-contracts:
+    name: Combined backend and client contracts (no persistent merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # Local CI-only data store. This service is destroyed after the run.
+    # Its localhost address cannot target staging or production.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sai"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout Chat 1 only, without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # A shallow clone makes legitimate shared-history branches appear
+          # unrelated and incorrectly blocks the disposable test merge.
+          fetch-depth: 0
+      - name: Compose branch heads in disposable local git history
+        shell: bash
+        env:
+          READ_ONLY_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'SecretaryAI Ephemeral CI'
+          git config user.email 'secretaryai-ci@users.noreply.github.com'
+          auth="$(printf 'x-access-token:%s' "$READ_ONLY_GITHUB_TOKEN" | base64 -w0)"
+          branches=(
+            program/secretaryai-integration-20261026
+            workstream/01-core-20261026
+            workstream/02-data-finance-20261026
+            workstream/03-supplychain-20261026
+            workstream/04-growth-20261026
+            workstream/05-product-qa-20261026
+          )
+          refs=()
+          for branch in "${branches[@]}"; do
+            refs+=("+refs/heads/$branch:refs/remotes/origin/$branch")
+          done
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags origin "${refs[@]}"
+          git switch --detach refs/remotes/origin/program/secretaryai-integration-20261026
+          git switch -c ci/ephemeral-five-workstreams
+          for branch in "${branches[@]:1}"; do
+            sha="$(git rev-parse "refs/remotes/origin/$branch")"
+            echo "Combining for TEST ONLY: $branch @ $sha"
+            git merge --no-ff --no-edit "$sha" || {
+              echo "::error::Ephemeral integration merge failed at $branch; no remote branch was modified"
+              git status --short
+              exit 1
+            }
+          done
+          git diff --check
+          git status --porcelain
+          echo "All five heads combined locally; this local history is discarded with the runner."
+          # Do not run tests with the GitHub token still in the environment.
+      - name: Install Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install combined backend test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-test.txt
+      - name: Test merged backend contracts with synthetic sources
+        working-directory: backend
+        env:
+          # This runner is not deployed staging and has no staging secrets.
+          # Actual staging validation remains a separate release gate.
+          SECRETARYAI_DEPLOYMENT_ENV: ci
+          INTUIT_ENVIRONMENT: sandbox
+          COMPUTER_USE_ENABLED: 'false'
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
+          SECRETARYAI_EMAIL_DELIVERY_MODE: disabled
+          SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED: '0'
+          SECRETARYAI_DURABLE_APPROVAL_ENABLED: '0'
+        run: |
+          python -m compileall -q app tasks
+          python -m pytest -q
+      - name: Validate merged SQL schema against disposable PostgreSQL
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: sai
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PGHOST" = localhost
+          test "$PGDATABASE" = sai
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          bash scripts/validate_schema.sh
+          psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > combined-schema-manifest.json
+          python3 -c 'import json; d=json.load(open("combined-schema-manifest.json")); assert d["objects"]; print("Combined schema objects:", len(d["objects"]))'
+      - name: Verify disposable PostgreSQL execution, tenant isolation and receipts
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: sai
+          SECRETARYAI_TEST_DATABASE_ONLY: '1'
+          SECRETARYAI_EMAIL_WORKER_MODE: simulate
+          SECRETARYAI_EMAIL_DELIVERY_MODE: disabled
+          SECRETARYAI_LIVE_EMAIL_DELIVERY_APPROVED: '0'
+          SECRETARYAI_DURABLE_APPROVAL_ENABLED: '0'
+          SECRETARYAI_EXECUTION_DATABASE_URL: postgresql://secretary_executor:ci-execution-only@localhost:5432/sai
+          PYTHONPATH: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PGHOST" = localhost
+          test "$PGDATABASE" = sai
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_executor LOGIN PASSWORD 'ci-execution-only'"
+          python scripts/test_execution_integration.py
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Match lockfile npm resolver
+        run: npm install --global npm@11.19.1
+      - name: Verify combined web application without deployment
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm run test
+          npm run build
+      - name: Verify combined mobile types
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Enforce canonical server briefing and nullable dashboard contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_gate_a_frontend_contract.py

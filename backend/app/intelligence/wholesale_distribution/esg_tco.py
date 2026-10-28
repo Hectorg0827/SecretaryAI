@@ -43,6 +43,7 @@ Total Cost of Ownership (TCO)
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -130,6 +131,10 @@ class ESGSnapshot:
                 "governance": round(self.governance_score, 1),
                 "overall": round(self.overall_esg_score, 1),
             },
+            "status": "analysis_only",
+            "source_data_verified": False,
+            "benchmark_basis": "illustrative_configured_reference_not_verified_industry_data",
+            "requires_human_review": True,
             "improvement_opportunities": self.improvement_opportunities,
         }
 
@@ -143,6 +148,8 @@ class TCOBreakdown:
     supplier_id: str
     sku: str
     annual_volume: float                # units per year
+    unit_of_measure: str = ""           # explicit shared quantity basis
+    currency: str = ""                  # USD only pending verified FX contract
 
     # Cost components (per unit)
     purchase_price_per_unit: float = 0.0
@@ -186,6 +193,8 @@ class TCOBreakdown:
             "supplier_id": self.supplier_id,
             "sku": self.sku,
             "annual_volume": self.annual_volume,
+            "unit_of_measure": self.unit_of_measure,
+            "currency": self.currency,
             "cost_per_unit": {
                 "purchase_price": round(self.purchase_price_per_unit, 4),
                 "inbound_freight": round(self.inbound_freight_per_unit, 4),
@@ -215,6 +224,10 @@ class SupplierTCOComparison:
     def to_dict(self) -> dict:
         return {
             "sku": self.sku,
+            "status": "analysis_only",
+            "inputs_verified": False,
+            "requires_human_review": True,
+            "financial_write_performed": False,
             "recommended_supplier_id": self.recommended_supplier_id,
             "annual_savings_vs_current": round(self.savings_vs_current, 2),
             "rationale": self.recommendation_rationale,
@@ -232,11 +245,13 @@ class ESGTCOEngine:
     Computes ESG scores and TCO for wholesale distribution supplier/product decisions.
     """
 
-    # Industry benchmark values (wholesale distribution, 2024)
-    CARBON_BENCHMARK_KG_PER_CASE = 0.8      # kg CO₂e per case — industry median
+    # Illustrative configured values, NOT independently verified industry data.
+    CARBON_BENCHMARK_KG_PER_CASE = 0.8
     INTERNAL_CARBON_PRICE_USD_PER_TON = 25  # internal shadow price
 
     def __init__(self, company_id: str, wacc_pct: float = 10.0):
+        if not math.isfinite(wacc_pct) or not 0 <= wacc_pct <= 100:
+            raise ValueError("WACC must be a finite percentage in [0, 100]")
         self.company_id = company_id
         self.wacc = wacc_pct / 100
 
@@ -256,6 +271,14 @@ class ESGTCOEngine:
         on_time_payment_rate: float,
         import_compliance_rate: float,
     ) -> ESGSnapshot:
+        percent_values = (recyclable_packaging_pct, supplier_audit_pass_rate,
+                          local_sourcing_pct, on_time_payment_rate, import_compliance_rate)
+        absolute_values = (carbon_per_case, packaging_waste_kg_per_unit,
+                           water_intensity, safety_incidents)
+        if any(not math.isfinite(v) or not 0 <= v <= 100 for v in percent_values):
+            raise ValueError("ESG percentages must be finite and within [0, 100]")
+        if any(not math.isfinite(v) or v < 0 for v in absolute_values):
+            raise ValueError("ESG observations must be finite and nonnegative")
         snap = ESGSnapshot(
             entity_id=entity_id,
             entity_type=entity_type,
@@ -308,7 +331,7 @@ class ESGTCOEngine:
             opps.append(
                 f"Carbon footprint {carbon_per_case:.2f} kg CO₂e/case is "
                 f"{((carbon_per_case / self.CARBON_BENCHMARK_KG_PER_CASE - 1) * 100):.0f}% "
-                "above industry median — investigate consolidation and modal shift"
+                "above the configured illustrative baseline — review source data and modal options"
             )
         if recyclable_packaging_pct < 70:
             opps.append(
@@ -317,8 +340,8 @@ class ESGTCOEngine:
             )
         if safety_incidents > 2.0:
             opps.append(
-                f"Safety incident rate {safety_incidents:.1f}/100 employees exceeds BLS "
-                "wholesale distribution average (1.8) — review safety program"
+                f"Safety incident rate {safety_incidents:.1f}/100 employees exceeds "
+                "the configured illustrative threshold — review safety program"
             )
         if supplier_audit_pass_rate < 80:
             opps.append(
@@ -356,12 +379,33 @@ class ESGTCOEngine:
         replacement_cost_per_return: float,
         kg_co2e_per_unit: float,
         volume_rebate_pct: float = 0.0,
+        unit_of_measure: str = "",
+        currency: str = "",
     ) -> TCOBreakdown:
         """Compute all-in TCO for one supplier × SKU combination."""
+        if not isinstance(unit_of_measure, str) or not unit_of_measure.strip():
+            raise ValueError("Explicit unit_of_measure is required for TCO")
+        if currency != "USD":
+            raise ValueError("TCO requires explicit USD currency pending reviewed FX conversion")
+        amounts = (annual_volume, purchase_price, inbound_freight_per_unit,
+                   brokerage_per_unit, days_inventory_outstanding,
+                   return_handling_cost, replacement_cost_per_return, kg_co2e_per_unit)
+        rates = (customs_duty_rate_pct, holding_cost_rate_pct,
+                 return_rate_pct, volume_rebate_pct)
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+               for value in amounts):
+            raise ValueError("TCO quantities and costs must be finite and nonnegative")
+        if annual_volume <= 0:
+            raise ValueError("TCO requires a positive, comparable annual volume")
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               or not 0 <= value <= 100 for value in rates):
+            raise ValueError("TCO percentages must be finite and within [0, 100]")
         breakdown = TCOBreakdown(
             supplier_id=supplier_id,
             sku=sku,
             annual_volume=annual_volume,
+            unit_of_measure=unit_of_measure.strip().lower(),
+            currency=currency,
             purchase_price_per_unit=purchase_price,
         )
 
@@ -400,34 +444,63 @@ class ESGTCOEngine:
         current_supplier_id: str,
     ) -> SupplierTCOComparison:
         """
-        Compare multiple supplier TCOs and recommend the lowest-cost option.
-        Each supplier dict must include all fields required by calculate_tco().
+        Compare only fully specified supplier TCO inputs at the same volume.
+        Missing component observations are NOT free services or zero cost.
         """
+        required = {
+            "supplier_id", "annual_volume", "purchase_price",
+            "inbound_freight_per_unit", "customs_duty_rate_pct", "brokerage_per_unit",
+            "days_inventory_outstanding", "holding_cost_rate_pct",
+            "return_rate_pct", "return_handling_cost", "replacement_cost_per_return",
+            "kg_co2e_per_unit", "volume_rebate_pct",
+            "unit_of_measure", "currency",
+        }
+        if len(suppliers) < 2:
+            raise ValueError("TCO comparison requires two fully specified suppliers")
+        if any(not isinstance(s, dict) or required - s.keys() for s in suppliers):
+            raise ValueError("Supplier TCO input is missing required cost observations")
+        ids = [s["supplier_id"] for s in suppliers]
+        if any(not isinstance(i, str) or not i.strip() for i in ids) or len(ids) != len(set(ids)):
+            raise ValueError("Supplier identities must be nonempty and unique")
+        if current_supplier_id not in ids:
+            raise ValueError("Current supplier must be present in the comparison")
+        if any(type(s["annual_volume"]) not in (int, float)
+               or not math.isfinite(s["annual_volume"]) or s["annual_volume"] <= 0
+               for s in suppliers):
+            raise ValueError("Annual volumes must be finite positive numbers")
+        if len({s["annual_volume"] for s in suppliers}) != 1:
+            raise ValueError("Supplier TCO comparisons require identical annual volumes")
+        if any(not isinstance(s["unit_of_measure"], str)
+               or not s["unit_of_measure"].strip() for s in suppliers):
+            raise ValueError("Supplier TCO comparison requires an explicit unit of measure")
+        if len({s["unit_of_measure"].strip().lower() for s in suppliers}) != 1:
+            raise ValueError("Supplier TCO comparisons require matching units of measure")
+        if any(s["currency"] != "USD" for s in suppliers):
+            raise ValueError("Supplier TCO comparison requires explicit USD currency")
         tco_breakdowns: list[TCOBreakdown] = []
         for s in suppliers:
             tco = self.calculate_tco(
                 supplier_id=s["supplier_id"],
                 sku=sku,
-                annual_volume=s.get("annual_volume", 0),
-                purchase_price=s.get("purchase_price", 0),
-                inbound_freight_per_unit=s.get("inbound_freight_per_unit", 0),
-                customs_duty_rate_pct=s.get("customs_duty_rate_pct", 0),
-                brokerage_per_unit=s.get("brokerage_per_unit", 0),
-                days_inventory_outstanding=s.get("days_inventory_outstanding", 30),
-                holding_cost_rate_pct=s.get("holding_cost_rate_pct", 25),
-                return_rate_pct=s.get("return_rate_pct", 1),
-                return_handling_cost=s.get("return_handling_cost", 15),
-                replacement_cost_per_return=s.get("replacement_cost_per_return", 0),
-                kg_co2e_per_unit=s.get("kg_co2e_per_unit", 0),
-                volume_rebate_pct=s.get("volume_rebate_pct", 0),
+                annual_volume=s["annual_volume"],
+                purchase_price=s["purchase_price"],
+                inbound_freight_per_unit=s["inbound_freight_per_unit"],
+                customs_duty_rate_pct=s["customs_duty_rate_pct"],
+                brokerage_per_unit=s["brokerage_per_unit"],
+                days_inventory_outstanding=s["days_inventory_outstanding"],
+                holding_cost_rate_pct=s["holding_cost_rate_pct"],
+                return_rate_pct=s["return_rate_pct"],
+                return_handling_cost=s["return_handling_cost"],
+                replacement_cost_per_return=s["replacement_cost_per_return"],
+                kg_co2e_per_unit=s["kg_co2e_per_unit"],
+                volume_rebate_pct=s["volume_rebate_pct"],
+                unit_of_measure=s["unit_of_measure"],
+                currency=s["currency"],
             )
             tco_breakdowns.append(tco)
 
         best = min(tco_breakdowns, key=lambda t: t.total_tco_per_unit)
-        current = next(
-            (t for t in tco_breakdowns if t.supplier_id == current_supplier_id),
-            tco_breakdowns[0] if tco_breakdowns else None,
-        )
+        current = next(t for t in tco_breakdowns if t.supplier_id == current_supplier_id)
 
         savings = (
             (current.total_tco_per_unit - best.total_tco_per_unit) * best.annual_volume
@@ -442,7 +515,7 @@ class ESGTCOEngine:
             )
         else:
             rationale = (
-                f"Switching to {best.supplier_id} saves ${savings:,.0f}/year on {sku}. "
+                f"Candidate switch to {best.supplier_id} models ${savings:,.0f}/year savings on {sku}; "
                 f"TCO ${best.total_tco_per_unit:.4f}/unit vs "
                 f"${current.total_tco_per_unit:.4f}/unit (current). "
                 f"Non-purchase costs are "

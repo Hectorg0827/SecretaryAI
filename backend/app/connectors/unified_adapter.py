@@ -81,6 +81,7 @@ class UnifiedDataAdapter:
                 client_secret=cfg.get("ms_client_secret", ""),
                 access_token=cfg["ms_access_token"],
                 refresh_token=cfg.get("ms_refresh_token", ""),
+                on_token_refresh=self._persist_outlook_tokens,
             )
 
         # Shopify connector
@@ -114,14 +115,14 @@ class UnifiedDataAdapter:
     async def _persist_qbo_tokens(
         self, access_token: str, refresh_token: str, expires_in: int = 3600
     ) -> None:
-        """Encrypt and save refreshed QBO tokens back to Supabase."""
+        """Durably persist rotating tokens or fail the refresh as incomplete."""
         import logging
         from datetime import datetime, timezone
         log = logging.getLogger(__name__)
 
         company_id = self._config.get("id")
         if not company_id:
-            return
+            raise RuntimeError("Cannot persist QBO token refresh without a company identifier")
 
         try:
             from supabase import create_client
@@ -130,14 +131,43 @@ class UnifiedDataAdapter:
 
             settings = get_settings()
             db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             db.table("companies").update({
                 "qbo_access_token": encrypt(access_token, settings.secret_key),
                 "qbo_refresh_token": encrypt(refresh_token, settings.secret_key),
                 "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+                "qbo_token_expires_at": expires_at.isoformat(),
             }).eq("id", company_id).execute()
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
-            log.error("Failed to persist refreshed QBO tokens for %s: %s", company_id, exc)
+            log.error("Failed to persist refreshed QBO tokens for company %s", company_id)
+            raise RuntimeError("QBO token refresh could not be persisted") from exc
+
+    async def _persist_outlook_tokens(self, access_token: str, refresh_token: str) -> None:
+        """Persist rotating Microsoft credentials before treating refresh as complete."""
+        import logging
+
+        log = logging.getLogger(__name__)
+        company_id = self._config.get("id")
+        if not company_id:
+            raise RuntimeError("Cannot persist Outlook token refresh without a company identifier")
+        try:
+            from supabase import create_client
+            from app.config import get_settings
+            from app.utils.encryption import encrypt
+
+            settings = get_settings()
+            db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+            result = db.table("companies").update({
+                "ms_access_token": encrypt(access_token, settings.secret_key),
+                "ms_refresh_token": encrypt(refresh_token, settings.secret_key),
+            }).eq("id", company_id).execute()
+            if not getattr(result, "data", None):
+                raise RuntimeError("Outlook token persistence matched no company")
+            log.info("Outlook tokens refreshed and persisted for a company")
+        except Exception as exc:
+            log.error("Outlook token refresh could not be persisted")
+            raise RuntimeError("Outlook token refresh could not be persisted") from exc
 
     def set_db(self, db) -> None:
         """Attach a DB client so the AccessRouter can log path decisions."""
@@ -238,17 +268,55 @@ class UnifiedDataAdapter:
         """
         qb_items = await self.get_inventory_qb()
 
+        policy = self._config.get("inventory_quantity_policy", "qb_authoritative")
+        if policy not in ("qb_authoritative", "warehouse_authoritative"):
+            raise ValueError("Unknown inventory quantity authority policy")
+
         router = self._get_router()
         warehouse_data: list[dict] = []
+        warehouse_source_status = "unavailable"
+        warehouse_source_path = None
+        warehouse_fetched_at = None
         try:
             result = await router.route("inventory", {})
-            # Router returns raw items; we need only the warehouse quantities
-            warehouse_data = result.data.get("rows", result.data.get("items", []))
+            if getattr(result, "is_ok", True) is False:
+                raise RuntimeError("Warehouse read returned a source error")
+            source = getattr(result, "source", None)
+            warehouse_source_path = getattr(source, "value", None)
+            fetched_at = getattr(result, "fetched_at", None)
+            warehouse_fetched_at = fetched_at.isoformat() if fetched_at else None
+            # AccessRouter's default inventory API path queries QuickBooks
+            # again. It is NOT an independent warehouse observation.
+            if warehouse_source_path == "api":
+                warehouse_source_status = "not_independent"
+            else:
+                payload = result.data
+                if isinstance(payload, list):
+                    warehouse_data = payload
+                elif isinstance(payload, dict):
+                    warehouse_data = payload.get("rows", payload.get("items", []))
+                else:
+                    raise ValueError("Warehouse response lacks item data")
+                if not isinstance(warehouse_data, list):
+                    raise ValueError("Warehouse response is not a list of items")
+                file_is_outdated = (
+                    warehouse_source_path == "file"
+                    and getattr(result, "confidence", 100) <= 45
+                )
+                if getattr(result, "is_stale", False) or file_is_outdated:
+                    warehouse_source_status = "stale"
+                else:
+                    warehouse_source_status = "available" if warehouse_data else "missing"
         except Exception:
-            pass  # QB data stands alone if no warehouse source available
+            warehouse_source_status = "unavailable"
+        if policy == "warehouse_authoritative" and warehouse_source_status in (
+            "unavailable", "not_independent", "missing", "stale"
+        ):
+            raise RuntimeError("Required independent warehouse source unavailable or stale")
 
         # Load weekly_sell_rate from Supabase inventory table (populated by Celery sync)
         sell_rate_by_qb_id: dict[str, float] = {}
+        sell_rate_source_status = "missing"
         if self._db:
             try:
                 company_id = self._config.get("id")
@@ -257,9 +325,11 @@ class UnifiedDataAdapter:
                 ).execute()
                 for row in (result.data or []):
                     if row.get("qb_id") and row.get("weekly_sell_rate") is not None:
-                        sell_rate_by_qb_id[row["qb_id"]] = float(row["weekly_sell_rate"])
+                        value = float(row["weekly_sell_rate"])
+                        if 0 <= value < float("inf"):
+                            sell_rate_by_qb_id[row["qb_id"]] = value
             except Exception:
-                pass
+                sell_rate_source_status = "unavailable"
 
         merged: list[dict] = []
         for item in qb_items:
@@ -274,6 +344,17 @@ class UnifiedDataAdapter:
                 "unit_price": float(item.unit_price),
                 "purchase_cost": float(item.purchase_cost),
                 "weekly_sell_rate": sell_rate_by_qb_id.get(item.qb_id, 0.0),
+                # Legacy numeric fields remain compatible, but are not proof of
+                # a real zero unless the corresponding observed flag is true.
+                "weekly_sell_rate_observed": item.qb_id in sell_rate_by_qb_id,
+                "weekly_sell_rate_source_status": (
+                    "observed" if item.qb_id in sell_rate_by_qb_id else sell_rate_source_status
+                ),
+                "warehouse_qty_observed": False,
+                "warehouse_source_status": warehouse_source_status,
+                "warehouse_source_path": warehouse_source_path,
+                "warehouse_fetched_at": warehouse_fetched_at,
+                "source_quality": "partial",
                 "source": "qb",
             }
 
@@ -282,9 +363,6 @@ class UnifiedDataAdapter:
             # supported until locations and lot ownership are reconciled.
             entry["quantity_source"] = "quickbooks"
             entry["reconciliation_required"] = False
-            policy = self._config.get("inventory_quantity_policy", "qb_authoritative")
-            if policy not in ("qb_authoritative", "warehouse_authoritative"):
-                policy = "qb_authoritative"
             entry["inventory_quantity_policy"] = policy
             for w in warehouse_data:
                 if not isinstance(w, dict):
@@ -304,6 +382,10 @@ class UnifiedDataAdapter:
                     if not 0 <= qty < float("inf"):
                         continue
                     entry["warehouse_qty"] = qty
+                    entry["warehouse_qty_observed"] = True
+                    entry["warehouse_source_status"] = (
+                        "stale" if warehouse_source_status == "stale" else "observed"
+                    )
                     entry["source"] = "qb+warehouse"
                     entry["reconciliation_required"] = qty != entry["qb_qty"]
                     if policy == "warehouse_authoritative":
@@ -312,6 +394,11 @@ class UnifiedDataAdapter:
                     # Default: QB stays authoritative until the business
                     # explicitly selects an authoritative warehouse source.
                     break
+
+            if not entry["warehouse_qty_observed"] and warehouse_source_status == "available":
+                entry["warehouse_source_status"] = "missing"
+            if policy == "warehouse_authoritative" and not entry["warehouse_qty_observed"]:
+                raise RuntimeError("Required warehouse quantity missing or invalid")
 
             merged.append(entry)
 
@@ -349,7 +436,7 @@ class UnifiedDataAdapter:
             return await self._gmail.get_recent_emails(query=query, max_results=max_results)
         if self._outlook:
             return await self._outlook.get_emails(query=query, max_results=max_results)
-        return []
+        raise RuntimeError("No email connector configured")
 
     async def send_email_reply(self, to: str, subject: str, body: str) -> dict:
         """Send an email reply — routes to Gmail or Outlook."""
@@ -400,22 +487,31 @@ class UnifiedDataAdapter:
             results["quickbooks"] = await self._qb.test_connection()
         if self._gmail:
             try:
-                async with __import__("httpx").AsyncClient(timeout=5) as client:
-                    r = await client.get(
-                        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-                        headers={"Authorization": f"Bearer {self._gmail._token}"},
-                    )
-                    results["gmail"] = r.status_code == 200
+                credentials = getattr(self._gmail, "_creds_dict", None)
+                token = credentials.get("token") if isinstance(credentials, dict) else getattr(self._gmail, "_token", None)
+                if not isinstance(token, str) or not token:
+                    results["gmail"] = False
+                else:
+                    async with __import__("httpx").AsyncClient(timeout=5) as client:
+                        r = await client.get(
+                            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
+                        results["gmail"] = r.status_code == 200
             except Exception:
                 results["gmail"] = False
         if self._outlook:
-            results["outlook"] = True
+            health_check = getattr(self._outlook, "test_connection", None)
+            try:
+                results["outlook"] = bool(await health_check()) if callable(health_check) else False
+            except Exception:
+                results["outlook"] = False
         if self._sheets:
-            results["google_sheets"] = True
+            results["google_sheets"] = False  # no probe implemented; unverified is not healthy
         if self._shopify:
-            results["shopify"] = True
+            results["shopify"] = False  # no probe implemented; unverified is not healthy
         if self._shiptrack:
-            results["shiptrack"] = True
+            results["shiptrack"] = False  # carrier configuration does not establish connectivity
         return results
 
 

@@ -16,6 +16,13 @@ from app.connectors.base import (
     PurchaseOrder,
     QuickBooksAdapter,
 )
+from app.connectors.invoice_integrity import (
+    decimal_field,
+    invoice_balance,
+    optional_decimal_field,
+    require_invoice_lines,
+    unique_line_id,
+)
 
 QBO_BASE = "https://quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
@@ -136,6 +143,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
     async def _query_all(self, entity: str, where: str = "") -> list[dict]:
         """Paginate through all results for a QBO entity."""
         results: list[dict] = []
+        seen_ids: set[str] = set()
         page_size = 1000
         start = 1
 
@@ -144,8 +152,36 @@ class QBOnlineAdapter(QuickBooksAdapter):
             sql = f"SELECT * FROM {entity} {where_clause}STARTPOSITION {start} MAXRESULTS {page_size}"
             data = await self._query(sql)
 
-            query_response = data.get("QueryResponse", {})
-            items = query_response.get(entity, [])
+            if isinstance(data, dict) and "Fault" in data:
+                raise ValueError("QBO provider returned a Fault")
+            query_response = data.get("QueryResponse") if isinstance(data, dict) else None
+            if not isinstance(query_response, dict):
+                raise ValueError("QBO source response missing valid QueryResponse")
+            if entity not in query_response:
+                # Intuit also returns {"QueryResponse": {}, "time": ...}
+                # for a successful empty page, including after a full page.
+                # Require the provider response timestamp for that otherwise
+                # ambiguous representation; faults and malformed envelopes fail.
+                provider_empty = (
+                    not query_response
+                    and isinstance(data.get("time"), str)
+                    and bool(data["time"].strip())
+                )
+                if query_response.get("totalCount") == 0 or provider_empty:
+                    items = []
+                else:
+                    raise ValueError(f"QBO QueryResponse missing {entity} results")
+            else:
+                items = query_response[entity]
+            if not isinstance(items, list):
+                raise ValueError(f"QBO {entity} source results must be a list")
+            for item in items:
+                entity_id = item.get("Id") if isinstance(item, dict) else None
+                if not entity_id:
+                    raise ValueError(f"QBO {entity} record missing Id")
+                if entity_id in seen_ids:
+                    raise ValueError(f"QBO {entity} pagination returned duplicate Id")
+                seen_ids.add(entity_id)
             results.extend(items)
 
             if len(items) < page_size:
@@ -172,39 +208,78 @@ class QBOnlineAdapter(QuickBooksAdapter):
         )
 
     def _normalize_invoice(self, raw: dict) -> Invoice:
-        line_items = [
-            {
-                "description": li.get("Description", ""),
-                "quantity": li.get("SalesItemLineDetail", {}).get("Qty", 0),
-                "unit_price": li.get("SalesItemLineDetail", {}).get("UnitPrice", 0),
-                "amount": li.get("Amount", 0),
-            }
-            for li in raw.get("Line", [])
-            if li.get("DetailType") == "SalesItemLineDetail"
-        ]
+        # Missing financial source fields cannot be interpreted as paid/zero.
+        for required in ("Id", "TxnDate", "TotalAmt", "Balance"):
+            if raw.get(required) is None or raw.get(required) == "":
+                raise ValueError(f"QBO invoice missing {required}")
+        total = decimal_field(raw["TotalAmt"], "QBO TotalAmt")
+        balance = decimal_field(raw["Balance"], "QBO Balance")
+        invoice_balance(total, balance, "QBO Balance")
+
+        raw_lines = require_invoice_lines(raw.get("Line"), total, "QBO")
+        line_items: list[dict] = []
+        seen_line_ids: set[str] = set()
+        non_sales_types = {
+            "TaxLineDetail", "DiscountLineDetail", "SubTotalLineDetail",
+            "DescriptionOnly", "GroupLineDetail",
+        }
+        for line in raw_lines:
+            line_id = unique_line_id(line, seen_line_ids, "QBO", key="Id")
+            kind = line.get("DetailType")
+            if kind in non_sales_types:
+                # Invoice total includes tax/discount/subtotal adjustments;
+                # these are not sold inventory units and must not be counted.
+                if "Amount" in line:
+                    decimal_field(line["Amount"], "QBO invoice line adjustment Amount", signed=True)
+                continue
+            if kind != "SalesItemLineDetail":
+                raise ValueError("QBO invoice line has unknown or missing DetailType")
+            detail = line.get("SalesItemLineDetail")
+            if not isinstance(detail, dict):
+                raise ValueError("QBO invoice line missing SalesItemLineDetail")
+            item_ref = detail.get("ItemRef")
+            if not isinstance(item_ref, dict) or not isinstance(item_ref.get("value"), str) or not item_ref["value"].strip():
+                raise ValueError("QBO invoice line missing ItemRef.value")
+            line_items.append({
+                "line_id": line_id,
+                "item_id": item_ref["value"],
+                "name": item_ref.get("name") or "",
+                "description": line.get("Description") or "",
+                "quantity": decimal_field(detail.get("Qty"), "QBO invoice line Qty", signed=True),
+                "unit_price": optional_decimal_field(detail.get("UnitPrice"), "QBO invoice line UnitPrice"),
+                "amount": decimal_field(line.get("Amount"), "QBO invoice line Amount", signed=True),
+            })
         return Invoice(
             id=raw["Id"],
             qb_id=raw["Id"],
             customer_id=raw.get("CustomerRef", {}).get("value", ""),
             customer_name=raw.get("CustomerRef", {}).get("name", ""),
-            date=date.fromisoformat(raw["TxnDate"]) if raw.get("TxnDate") else date.today(),
+            date=date.fromisoformat(raw["TxnDate"]),
             due_date=date.fromisoformat(raw["DueDate"]) if raw.get("DueDate") else None,
-            total=Decimal(str(raw.get("TotalAmt", 0))),
-            balance=Decimal(str(raw.get("Balance", 0))),
-            status="open" if Decimal(str(raw.get("Balance", 0))) > 0 else "paid",
+            total=total,
+            balance=balance,
+            status="open" if balance > 0 else "paid",
             line_items=line_items,
         )
 
     def _normalize_inventory_item(self, raw: dict) -> InventoryItem:
+        if raw.get("QtyOnHand") is None or raw.get("QtyOnHand") == "":
+            raise ValueError("QBO inventory missing quantity_on_hand QtyOnHand")
+        try:
+            quantity_on_hand = Decimal(str(raw["QtyOnHand"]))
+        except Exception as exc:
+            raise ValueError("QBO inventory has invalid quantity_on_hand QtyOnHand") from exc
+        if not quantity_on_hand.is_finite():
+            raise ValueError("QBO inventory has invalid quantity_on_hand QtyOnHand")
         return InventoryItem(
             id=raw["Id"],
             qb_id=raw["Id"],
             name=raw.get("Name", ""),
             sku=raw.get("Sku"),
-            quantity_on_hand=Decimal(str(raw.get("QtyOnHand", 0))),
+            quantity_on_hand=quantity_on_hand,
             unit_price=Decimal(str(raw.get("UnitPrice", 0))),
             purchase_cost=Decimal(str(raw.get("PurchaseCost", 0))),
-            reorder_point=Decimal(str(raw["ReorderPoint"])) if raw.get("ReorderPoint") else None,
+            reorder_point=Decimal(str(raw["ReorderPoint"])) if raw.get("ReorderPoint") is not None else None,
         )
 
     def _normalize_purchase_order(self, raw: dict) -> PurchaseOrder:

@@ -8,8 +8,8 @@ from the active IndustryModule — no values are hardcoded. Different industries
 have different dormancy patterns, balance thresholds, and scoring sensitivities.
 """
 from dataclasses import dataclass
-from datetime import date, timedelta
-from decimal import Decimal
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 
@@ -23,6 +23,35 @@ class AccountHealthResult:
     avg_order_cycle_days: Optional[int]
     current_balance: Decimal
     flags: list[str]           # specific issues found
+
+
+def _business_date(value, *, field: str, today: date) -> date:
+    if isinstance(value, datetime):
+        raise ValueError(f"Order {field} must be a calendar date")
+    if isinstance(value, date):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(f"Order {field} is invalid") from exc
+    else:
+        raise ValueError(f"Order {field} is missing or invalid")
+    if parsed > today:
+        raise ValueError(f"Order {field} is in the future")
+    return parsed
+
+
+def _finite_nonnegative(value, *, field: str) -> Decimal:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{field} is missing or invalid")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{field} is missing or invalid") from exc
+    if not amount.is_finite() or amount < 0:
+        raise ValueError(f"{field} is missing or invalid")
+    return amount
 
 
 def _load_scoring_config(industry_module=None) -> dict:
@@ -94,6 +123,27 @@ def score_account(
     When None, falls back to wholesale distribution defaults (backward compatible).
     """
     today = today or date.today()
+    if isinstance(today, datetime) or not isinstance(today, date):
+        raise ValueError("today must be a calendar date")
+    current_balance = _finite_nonnegative(current_balance, field="current_balance")
+
+    observed_orders: list[tuple[date, Decimal]] = []
+    for order in order_history:
+        if not isinstance(order, dict):
+            raise ValueError("Order history row must be a mapping")
+        observed_orders.append((
+            _business_date(order.get("date"), field="date", today=today),
+            _finite_nonnegative(order.get("total"), field="Order total"),
+        ))
+    observed_orders.sort(key=lambda entry: entry[0])
+
+    if last_order_date is None and observed_orders:
+        last_order_date = observed_orders[-1][0]
+    elif last_order_date is not None:
+        last_order_date = _business_date(last_order_date, field="last_order_date", today=today)
+        if observed_orders and last_order_date < observed_orders[-1][0]:
+            raise ValueError("last_order_date precedes a verified order history row")
+
     cfg = _load_scoring_config(industry_module)
     flags: list[str] = []
     score = 100
@@ -106,7 +156,16 @@ def score_account(
     else:
         days_since = (today - last_order_date).days
 
-    cycle = avg_order_cycle_days or 30
+    if avg_order_cycle_days is None:
+        # Existing consumers do not supply observed cycles. Preserve their
+        # historical score shape, but expose the heuristic in the evidence.
+        cycle = 30
+        flags.append("Order cycle unverified; using heuristic 30d default")
+    else:
+        parsed_cycle = _finite_nonnegative(avg_order_cycle_days, field="avg_order_cycle_days cycle")
+        if parsed_cycle == 0 or parsed_cycle != parsed_cycle.to_integral_value():
+            raise ValueError("avg_order_cycle_days cycle must be a positive whole number")
+        cycle = int(parsed_cycle)
     overdue_threshold = int(cycle * cfg["overdue_cycle_multiplier"])
     severe_threshold = int(cycle * cfg["severe_cycle_multiplier"])
 
@@ -118,12 +177,12 @@ def score_account(
         score -= cfg["overdue_recency_penalty"]
 
     # Declining order size trend
-    if len(order_history) >= 4:
-        recent = [float(o["total"]) for o in sorted(order_history, key=lambda x: x["date"])[-4:]]
-        if recent[-1] < recent[0] * cfg["trend_critical_threshold"]:
+    if len(observed_orders) >= 4:
+        recent = [amount for _, amount in observed_orders[-4:]]
+        if recent[-1] < recent[0] * Decimal(str(cfg["trend_critical_threshold"])):
             flags.append("Order value declining trend (>30% drop)")
             score -= cfg["trend_critical_penalty"]
-        elif recent[-1] < recent[0] * cfg["trend_warning_threshold"]:
+        elif recent[-1] < recent[0] * Decimal(str(cfg["trend_warning_threshold"])):
             flags.append("Order value declining trend")
             score -= cfg["trend_warning_penalty"]
 

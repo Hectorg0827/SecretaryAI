@@ -136,6 +136,8 @@ class InventoryRecommendation:
 
     data_quality: str                   # good | sparse | insufficient
     notes: list[str]
+    demand_observations: int = 0
+    supplier_lead_time_observations: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -156,6 +158,11 @@ class InventoryRecommendation:
             "lead_time_mean_days": round(self.lead_time_mean_days, 1),
             "lead_time_std_days": round(self.lead_time_std_days, 1),
             "data_quality": self.data_quality,
+            "demand_observations": self.demand_observations,
+            "supplier_lead_time_observations": self.supplier_lead_time_observations,
+            "service_level_is_observed": False,
+            "data_source_verified": False,
+            "requires_human_review": True,
             "notes": self.notes,
         }
 
@@ -204,6 +211,14 @@ class StochasticInventoryEngine:
         holding_cost_rate: float = 0.25,         # 25% of unit cost per year
         service_level: float = 0.95,
     ):
+        if not math.isfinite(annual_revenue) or annual_revenue < 0:
+            raise ValueError("Annual revenue must be finite and nonnegative")
+        if not math.isfinite(ordering_cost_per_po) or ordering_cost_per_po < 0:
+            raise ValueError("Ordering cost must be finite and nonnegative")
+        if not math.isfinite(holding_cost_rate) or holding_cost_rate <= 0:
+            raise ValueError("Holding cost rate must be finite and positive")
+        if not math.isfinite(service_level) or not 0 < service_level < 1:
+            raise ValueError("Service level must be finite and strictly between 0 and 1")
         self.annual_revenue = annual_revenue
         self.ordering_cost = ordering_cost_per_po
         self.holding_cost_rate = holding_cost_rate
@@ -227,15 +242,27 @@ class StochasticInventoryEngine:
         # Data quality assessment
         n_demand = len(demand.daily_demand_history)
         n_lt = len(lead_time.lead_time_history)
-        if n_demand < 30:
+        if not n_demand or not n_lt:
+            raise ValueError("Demand and supplier lead-time observations are required")
+        if any(not math.isfinite(v) or v < 0 for v in demand.daily_demand_history):
+            raise ValueError("Daily demand observations must be finite and nonnegative")
+        if any(not math.isfinite(v) or v <= 0 for v in lead_time.lead_time_history):
+            raise ValueError("Lead-time observations must be finite and positive")
+        if not math.isfinite(unit_cost) or unit_cost <= 0:
+            raise ValueError("Unit cost must be finite and positive")
+        if current_stock < 0:
+            raise ValueError("Current stock must be nonnegative")
+        if n_demand < 30 or n_lt < 5:
             data_quality = "insufficient"
             notes.append(
-                f"Only {n_demand} days of demand data — using conservative safety stock multiplier"
+                f"Only {n_demand} daily demand and {n_lt} supplier lead-time observations; "
+                "using conservative safety stock assumptions"
             )
-        elif n_demand < 90:
+        elif n_demand < 90 or n_lt < 10:
             data_quality = "sparse"
             notes.append(
-                f"{n_demand} days of demand data — consider collecting more before relying on these numbers"
+                f"{n_demand} demand and {n_lt} supplier lead-time observations — "
+                "collect more before relying on this estimate"
             )
         else:
             data_quality = "good"
@@ -282,7 +309,7 @@ class StochasticInventoryEngine:
         eoq = (
             math.ceil(math.sqrt(2 * annual_demand * self.ordering_cost / h))
             if h > 0 and annual_demand > 0
-            else 1
+            else 0
         )
 
         # ── Stockout probability without safety stock ─────────────────────────
@@ -291,7 +318,7 @@ class StochasticInventoryEngine:
         demand_during_lt_std = math.sqrt(lt_mean * d_std ** 2 + d_mean ** 2 * lt_std ** 2)
         stockout_prob = self._normal_ccdf(
             current_stock, demand_during_lt_mean, demand_during_lt_std
-        ) if demand_during_lt_std > 0 else 0.0
+        )
 
         # Expected stockouts per year (assuming ~12 order cycles)
         orders_per_year = annual_demand / max(eoq, 1)
@@ -300,7 +327,7 @@ class StochasticInventoryEngine:
         # Achieved service level (with safety stock)
         achieved_sl = 1.0 - self._normal_ccdf(
             rop, demand_during_lt_mean, demand_during_lt_std
-        ) if demand_during_lt_std > 0 else 1.0
+        )
 
         days_supply_at_rop = rop / max(d_mean, 0.01)
 
@@ -321,6 +348,8 @@ class StochasticInventoryEngine:
             lead_time_std_days=lt_std,
             data_quality=data_quality,
             notes=notes,
+            demand_observations=n_demand,
+            supplier_lead_time_observations=n_lt,
         )
 
     def calculate_multi_echelon(
@@ -340,15 +369,18 @@ class StochasticInventoryEngine:
 
         for node in nodes:
             demand = node.demand_distribution
+            if not math.isfinite(node.replenishment_lead_time_days) or node.replenishment_lead_time_days <= 0:
+                raise ValueError("Multi-echelon lead-time estimate must be finite and positive")
+            if node.current_stock < 0 or node.in_transit_units < 0:
+                raise ValueError("Multi-echelon stock and in-transit quantities must be nonnegative")
             lt_dist = LeadTimeDistribution(
                 supplier_id="upstream",
                 sku=sku,
-                lead_time_history=[node.replenishment_lead_time_days] * 5,
+                # This is one caller estimate, not five observed deliveries.
+                lead_time_history=[node.replenishment_lead_time_days],
             )
-            rec = self.calculate(demand, lt_dist, unit_cost, node.current_stock)
-
-            # Add in-transit to effective stock
             effective_stock = node.current_stock + node.in_transit_units
+            rec = self.calculate(demand, lt_dist, unit_cost, effective_stock)
             shortfall = max(0, rec.reorder_point_units - effective_stock)
 
             node_stockout_prob = rec.stockout_probability_without_ss
@@ -369,10 +401,13 @@ class StochasticInventoryEngine:
                 "effective_stock": effective_stock,
                 "shortfall_to_rop": shortfall,
                 "stockout_probability": round(node_stockout_prob, 3),
+                "lead_time_observation_count": 1,
+                "lead_time_source": "caller_point_estimate",
+                "data_quality": rec.data_quality,
             })
             system_ss += rec.safety_stock_units
 
-        system_sl = 1.0 - worst_stockout_prob  # conservative: system SL = worst node
+        system_sl = max(0.0, 1.0 - min(1.0, worst_stockout_prob))
 
         return MultiEchelonResult(
             nodes=node_results,
@@ -389,6 +424,8 @@ class StochasticInventoryEngine:
         """
         Returns (should_reorder, reason).
         """
+        if recommendation.demand_mean_daily == 0:
+            return False, "No observed demand; review observations before proposing an order."
         if current_stock <= recommendation.reorder_point_units:
             return True, (
                 f"Stock ({current_stock}) at or below reorder point "
@@ -442,7 +479,7 @@ class StochasticInventoryEngine:
     def _normal_ccdf(x: float, mean: float, std: float) -> float:
         """P(X > x) where X ~ Normal(mean, std)."""
         if std <= 0:
-            return 0.0 if x < mean else 1.0
+            return 1.0 if x < mean else 0.0
         z = (x - mean) / std
         # erfc approximation
         return 0.5 * math.erfc(z / math.sqrt(2))

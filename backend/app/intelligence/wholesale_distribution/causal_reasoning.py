@@ -54,7 +54,7 @@ class CustomerSegment(str, Enum):
 
 @dataclass
 class CausalChain:
-    """A single causal hypothesis with supporting evidence."""
+    """An unvalidated, rule-ranked hypothesis, not a causal effect estimate."""
     root_cause: RootCause
     probability: float          # 0.0–1.0 estimated probability this is THE cause
     evidence: list[str]         # Human-readable evidence items
@@ -67,10 +67,11 @@ class CausalChain:
         return {
             "root_cause": self.root_cause.value,
             "probability": round(self.probability, 3),
+            "score_interpretation": "uncalibrated heuristic rank; not a statistical probability",
             "evidence": self.evidence,
-            "counterfactual": self.counterfactual,
+            "counterfactual": f"Unverified scenario hypothesis: {self.counterfactual}",
             "intervention": self.intervention,
-            "expected_impact": self.expected_impact,
+            "expected_impact": f"Unvalidated possible outcome: {self.expected_impact}",
             "confidence": round(self.confidence, 3),
         }
 
@@ -99,6 +100,8 @@ class CausalAnalysis:
             "segment_reasoning": self.segment_reasoning,
             "overall_confidence": round(self.overall_confidence, 3),
             "data_quality_warning": self.data_quality_warning,
+            "analysis_type": "heuristic_hypothesis_generation",
+            "causal_identification": "not_established",
         }
 
 
@@ -155,7 +158,7 @@ class CausalReasoningEngine:
                         "Initiate quality review of returned SKUs. Reach out personally to "
                         f"{customer_name} with acknowledgment + credit note offer."
                     ),
-                    expected_impact="60–80% recovery probability with proactive outreach + credit within 2 weeks.",
+                    expected_impact="Relationship repair may improve repeat orders; effect size is unknown.",
                     confidence=0.75,
                 ))
 
@@ -181,7 +184,7 @@ class CausalReasoningEngine:
                         f"Offer {customer_name} a temporary volume discount or price-lock "
                         "agreement. Benchmark against known competitor pricing."
                     ),
-                    expected_impact="40–60% recovery if competitive pricing is restored within 30 days.",
+                    expected_impact="Competitive pricing may help recover ordering; effect size is unknown.",
                     confidence=0.65,
                 ))
 
@@ -218,7 +221,7 @@ class CausalReasoningEngine:
                     "No intervention may be needed."
                 ),
                 intervention="Monitor; send light-touch 'We're here when you're ready' message.",
-                expected_impact="Customer will likely re-engage at start of next buying season.",
+                expected_impact="Customer may re-engage next season; timing and likelihood are unknown.",
                 confidence=0.70,
             ))
 
@@ -239,7 +242,7 @@ class CausalReasoningEngine:
                     "Schedule discovery call to understand changed needs. "
                     "Explore new product lines that match their evolving business."
                 ),
-                expected_impact="50% recovery with relationship investment over 60-90 days.",
+                expected_impact="Discovery and relationship work may help; effect size is unknown.",
                 confidence=0.4,
             ))
 
@@ -270,6 +273,10 @@ class CausalReasoningEngine:
             customer_segment=segment,
             segment_reasoning=segment_reasoning,
             overall_confidence=overall_confidence,
+            data_quality_warning=(
+                "No order history supplied; identification and recovery cannot be assessed."
+                if not order_history else ""
+            ),
         )
 
     def analyse_inventory_anomaly(
@@ -284,6 +291,22 @@ class CausalReasoningEngine:
         recent_supplier_delays: list[dict],
     ) -> CausalAnalysis:
         """Identify why a SKU is at risk (stockout, overstock, or demand spike)."""
+        if avg_daily_demand <= 0:
+            unknown = CausalChain(
+                root_cause=RootCause.UNKNOWN,
+                probability=0.0,
+                evidence=["Positive observed daily demand is unavailable"],
+                counterfactual="Insufficient demand information to calculate a scenario.",
+                intervention="Validate recent item-level sales and source freshness before forecasting.",
+                expected_impact="Not estimable with the available data.",
+                confidence=0.0,
+            )
+            return CausalAnalysis(
+                entity_id=sku, entity_type="sku",
+                anomaly_description=f"Stock position for {sku_name} cannot be assessed",
+                primary_cause=unknown, overall_confidence=0.0,
+                data_quality_warning="Daily demand missing, zero, or invalid; days of supply not computed.",
+            )
         days_of_supply = current_stock / max(avg_daily_demand, 0.01)
         hypotheses: list[CausalChain] = []
 
@@ -303,7 +326,7 @@ class CausalReasoningEngine:
                     f"Expedite PO for {sku}. "
                     "Investigate demand spike source — new customer, seasonal, or promotional."
                 ),
-                expected_impact="Prevent stockout if expedited PO placed within 48 hours.",
+                expected_impact="Expediting supply may lower stockout risk; effect size is unknown.",
                 confidence=0.8,
             ))
 
@@ -327,7 +350,7 @@ class CausalReasoningEngine:
                     "Escalate to alternative supplier for emergency coverage. "
                     "Negotiate partial shipment from primary supplier."
                 ),
-                expected_impact="Risk of stockout reduced by 60–80% with dual-source strategy.",
+                expected_impact="A second supply source may lower disruption risk; effect size is unknown.",
                 confidence=0.85,
             ))
 

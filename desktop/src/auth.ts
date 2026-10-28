@@ -27,23 +27,25 @@ export async function loadToken(): Promise<string | null> {
 
 /** Persist the token to the OS vault so the background agent can authenticate. */
 export async function saveToken(token: string): Promise<void> {
-  _token = token;
   try {
     await invoke('store_credential', { service: SERVICE, key: KEY, value: token });
-  } catch (e) {
-    // In-memory token still works this session, but background sync (which reads
-    // the vault) won't be authenticated. Surface for diagnostics.
-    console.error('Failed to persist session token to OS vault:', e);
+  } catch {
+    // The UI and background sync MUST share one durable authenticated session.
+    // Do not declare login successful if the native credential store failed.
+    _token = null;
+    throw new Error('Secure credential storage is unavailable. Sign-in was not completed.');
   }
+  _token = token;
 }
 
 export async function clearToken(): Promise<void> {
-  _token = null;
   try {
     await invoke('delete_credential', { service: SERVICE, key: KEY });
   } catch {
-    /* best-effort */
+    // Keep the UI signed in: the agent still has the token in the vault.
+    throw new Error('Could not remove the stored session. Please try signing out again.');
   }
+  _token = null;
 }
 
 export function currentToken(): string | null {
@@ -104,9 +106,18 @@ export async function login(
   password: string,
   opts: { totpCode?: string; preAuthToken?: string } = {},
 ): Promise<LoginResult> {
-  const body: Record<string, unknown> = { email, password };
-  if (opts.totpCode) body.totp_code = opts.totpCode;
-  if (opts.preAuthToken) body.pre_auth_token = opts.preAuthToken;
+  // Second-factor completion uses the short-lived pre-auth credential only.
+  // Never transmit the first-factor password a second time.
+  let body: Record<string, unknown>;
+  if (opts.preAuthToken) {
+    if (!/^\d{6}$/.test(opts.totpCode ?? '')) {
+      throw new Error('Enter the six-digit authenticator code.');
+    }
+    body = { pre_auth_token: opts.preAuthToken, totp_code: opts.totpCode };
+  } else {
+    if (!email.trim() || !password) throw new Error('Email and password are required.');
+    body = { email: email.trim().toLowerCase(), password };
+  }
 
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
@@ -117,6 +128,9 @@ export async function login(
   if (!res.ok) throw new Error(data?.detail ?? `Login failed (${res.status})`);
 
   if (data?.requires_2fa) {
+    if (typeof data.pre_auth_token !== 'string' || !data.pre_auth_token) {
+      throw new Error('Two-factor authentication could not be started.');
+    }
     return { requires2fa: true, preAuthToken: data.pre_auth_token };
   }
   if (data?.access_token) {

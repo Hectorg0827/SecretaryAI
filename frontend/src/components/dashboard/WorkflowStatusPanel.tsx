@@ -1,14 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-
-interface WorkflowRun {
-  run_id: string;
-  workflow_name: string;
-  status: string;
-  current_step: number;
-  total_steps: number;
-  current_step_name: string;
-}
+import { verifiedWorkflowRuns, type DashboardWorkflowRun } from '../../lib/sourceEvidence';
 
 const STATUS_COLORS: Record<string, string> = {
   running: 'bg-blue-100 text-blue-700',
@@ -18,14 +10,23 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function WorkflowStatusPanel() {
-  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [runs, setRuns] = useState<DashboardWorkflowRun[]>([]);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    api.get<{ workflows: WorkflowRun[] }>('/api/workflows/')
-      .then(r => setRuns(r.workflows))
-      .catch(() => {});
+    api.get<unknown>('/api/workflows/')
+      .then((response) => {
+        const verified = verifiedWorkflowRuns(response);
+        if (!verified) throw new Error('Workflow status source evidence is incomplete');
+        setRuns(verified.workflows);
+        setError(false);
+      })
+      .catch(() => { setRuns([]); setError(true); });
   }, []);
 
+  if (error) return <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+    Workflow source unavailable. Execution status is unknown.
+  </div>;
   if (!runs.length) return null;
 
   return (

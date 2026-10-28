@@ -9,6 +9,7 @@ import uuid
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
+from math import isfinite
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,10 +23,45 @@ from app.scheduler.dashboard_snapshot import (
     compute_dashboard_payload,
     store_snapshot,
     read_snapshot,
+    SnapshotSourceUnavailable,
+    SnapshotPersistenceUnavailable,
+    SnapshotReadUnavailable,
+    SnapshotDataInvalid,
+    validate_dashboard_cached_payload,
+    snapshot_freshness,
+    _invoice_amount,
+    _invoice_date,
+    _row_value,
 )
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def get_dashboard_adapter(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Do not decrypt OAuth credentials for cached-only dashboard viewers.
+
+    FastAPI resolves dependencies before the endpoint body runs. Checking
+    roles only inside get_dashboard_summary is too late to prevent
+    get_adapter from fetching provider tokens or refreshing an OAuth token.
+    Restricted roles can read their permitted cached fields without
+    receiving a provider adapter.
+    """
+    perms = ROLE_PERMISSIONS.get(user.get("role", "viewer"), set())
+    if "run_reports" not in perms and "trigger_actions" not in perms and "view_all" not in perms:
+        return None
+    try:
+        return get_adapter(user=user, db=db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("Dashboard connector unavailable")
+        raise HTTPException(
+            status_code=503, detail="Dashboard provider initialization unavailable"
+        ) from exc
 
 
 # ── /summary ──────────────────────────────────────────────────────────────────
@@ -33,7 +69,7 @@ router = APIRouter()
 @router.get("/summary")
 async def get_dashboard_summary(
     user: dict = Depends(get_current_user),
-    adapter=Depends(get_adapter),
+    adapter=Depends(get_dashboard_adapter),
     db=Depends(get_db),
 ):
     """
@@ -47,58 +83,109 @@ async def get_dashboard_summary(
     fallback and is immediately stored for subsequent callers.
     """
     company_id = user["company_id"]
+    role = user.get("role", "viewer")
+    perms = ROLE_PERMISSIONS.get(role, set())
+    has_view_all = "view_all" in perms
 
     # ── Read QB-derived data from the shared snapshot ─────────────────────
-    snap = read_snapshot(db, company_id, "dashboard_summary")
+    try:
+        snap = read_snapshot(db, company_id, "dashboard_summary")
+    except SnapshotReadUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Dashboard cache temporarily unavailable"
+        ) from exc
     if snap:
-        cached_payload = snap["payload"]
-        generated_at = snap["generated_at"]
+        try:
+            cached_payload = validate_dashboard_cached_payload(snap["payload"])
+            generated_at = snap["generated_at"]
+            freshness = snapshot_freshness(generated_at)
+            if freshness["status"] == "unknown":
+                raise SnapshotDataInvalid("Invalid dashboard cache timestamp")
+        except (KeyError, TypeError, SnapshotDataInvalid) as exc:
+            raise HTTPException(
+                status_code=503, detail="Dashboard snapshot is incomplete or invalid"
+            ) from exc
         cached = True
-        log.debug("Dashboard summary served from cache for company %s (generated %s)", company_id, generated_at)
+        log.debug("Dashboard summary served from cache")
     else:
-        # No snapshot yet — compute fresh and store for everyone else today
-        log.info("Dashboard summary: no snapshot found for %s, computing fresh", company_id)
-        cached_payload = await compute_dashboard_payload(adapter)
-        store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
+        # Loading a read-only dashboard cannot grant every signed-in user the
+        # authority to perform connector-wide reporting reads or DB writes.
+        # Sales reps and viewers must wait for an authorized scheduled refresh.
+        if "run_reports" not in perms and not has_view_all:
+            raise HTTPException(
+                status_code=503,
+                detail="Dashboard snapshot unavailable; authorized refresh required",
+            )
+        if adapter is None:
+            raise HTTPException(
+                status_code=503, detail="Dashboard provider unavailable"
+            )
+        log.info("Dashboard summary: no snapshot found; computing fresh")
+        try:
+            cached_payload = await compute_dashboard_payload(adapter)
+        except SnapshotSourceUnavailable as exc:
+            log.warning("Dashboard summary source unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="Business data temporarily unavailable; dashboard refresh not completed",
+            ) from exc
+        try:
+            validate_dashboard_cached_payload(cached_payload)
+        except SnapshotDataInvalid as exc:
+            raise HTTPException(
+                status_code=503, detail="Business source produced incomplete metrics"
+            ) from exc
+        try:
+            store_snapshot(db, company_id, "dashboard_summary", cached_payload, generated_by="on_demand")
+        except SnapshotPersistenceUnavailable as exc:
+            raise HTTPException(
+                status_code=503, detail="Dashboard data could not be saved"
+            ) from exc
         generated_at = None
         cached = False
+
+    if not cached:
+        freshness = {"status": "fresh", "age_seconds": 0.0, "stale": False}
 
     accounts         = cached_payload.get("accounts", {})
     inventory_alerts = cached_payload.get("inventory_alerts", [])
     sales_30d        = cached_payload.get("sales_30d", 0.0)
 
-    # ── Pending approvals — always live (cheap DB query) ───────────────────
-    pending_count = 0
-    try:
-        result = (
-            db.table("drafts")
-            .select("id", count="exact")
-            .eq("company_id", company_id)
-            .eq("status", "pending")
-            .execute()
-        )
-        pending_count = result.count or 0
-    except Exception as exc:
-        log.warning("Dashboard summary: pending count failed: %s", exc)
+    # Fetch sensitive live sources only when the role can see the result.
+    # Filtering the JSON after a provider read is not an authorization gate.
+    pending_count: int | None = None
+    if "approve_actions" in perms or has_view_all:
+        try:
+            result = (
+                db.table("drafts")
+                .select("id", count="exact")
+                .eq("company_id", company_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            pending_count = result.count if result.count is not None else None
+        except Exception:
+            log.warning("Dashboard summary: pending count unavailable")
 
-    # ── Unread email count — always live (real-time inbox) ─────────────────
-    unread_count = 0
-    try:
-        emails = await adapter.get_emails(query="is:unread", max_results=50)
-        unread_count = len(emails)
-    except Exception as exc:
-        log.warning("Dashboard summary: unread count failed: %s", exc)
-
-    # ── Role-based field filtering ──────────────────────────────────────────
-    role = user.get("role", "viewer")
-    perms = ROLE_PERMISSIONS.get(role, set())
-    has_view_all = "view_all" in perms
+    unread_count: int | None = None
+    if "trigger_actions" in perms or has_view_all:
+        try:
+            emails = await adapter.get_emails(query="is:unread", max_results=50)
+            unread_count = len(emails)
+        except Exception:
+            log.warning("Dashboard summary: unread inbox unavailable")
 
     return {
         "company_id": company_id,
-        "accounts":   accounts,
+        # Full-company totals are not scoped to each representative's accounts.
+        "accounts": accounts if ("view_customers" in perms or has_view_all) else None,
         # Only roles with inventory access see alerts
         "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
+        # In-stock items not assessed because their sell rate was never measured
+        "inventory_unassessed": (
+            cached_payload.get("inventory_unassessed", 0)
+            if ("view_inventory" in perms or has_view_all) else None
+        ),
         # Financial figures visible to owner + manager only
         "sales_30d":        round(float(sales_30d), 2) if ("view_financials" in perms or has_view_all) else None,
         # Approval count visible to approvers only
@@ -108,6 +195,11 @@ async def get_dashboard_summary(
         # Cache metadata — frontend uses this to show "Data as of X"
         "generated_at":     generated_at,
         "cached":           cached,
+        "source_quality":   cached_payload.get("source_quality", "unknown"),
+        "source_read_status": cached_payload.get("source_read_status", "unknown"),
+        "snapshot_freshness": freshness["status"],
+        "snapshot_age_seconds": freshness["age_seconds"],
+        "snapshot_stale": freshness["stale"],
     }
 
 
@@ -118,12 +210,24 @@ async def trigger_dashboard_refresh(
     user: dict = Depends(require_permission("run_reports")),
 ):
     """
-    Enqueue an immediate dashboard snapshot refresh for this company.
+    Enqueue an internal-only dashboard snapshot refresh for this company.
     Only roles with 'run_reports' permission (back_office, manager, owner) may call this.
     """
-    from tasks.morning_briefing import send_morning_briefing_all
-    send_morning_briefing_all.apply_async(kwargs={"company_id": user["company_id"]})
-    return {"status": "refresh_queued", "company_id": user["company_id"]}
+    from tasks.dashboard_refresh import refresh_dashboard_snapshot
+    try:
+        result = refresh_dashboard_snapshot.apply_async(
+            kwargs={"company_id": user["company_id"]}
+        )
+    except Exception as exc:
+        log.error("Dashboard refresh could not be queued")
+        raise HTTPException(
+            status_code=503, detail="Dashboard refresh service unavailable"
+        ) from exc
+    return {
+        "status": "refresh_queued",
+        "company_id": user["company_id"],
+        "task_id": result.id,
+    }
 
 
 # ── Email helpers ──────────────────────────────────────────────────────────────
@@ -201,7 +305,7 @@ async def _ai_analyze_emails(emails: list[dict]) -> list[dict]:
             text = re.split(r"```(?:json)?", text)[1]
         return json.loads(text.strip())
     except Exception as exc:
-        log.warning("Email AI analysis failed (%s) — using heuristics", exc)
+        log.warning("Email AI analysis failed; using heuristics")
         return [_heuristic(e) for e in emails]
 
 
@@ -297,7 +401,7 @@ async def draft_email_reply(
         )
         draft_text = response.content[0].text.strip()
     except Exception as exc:
-        log.error("Draft reply generation failed: %s", exc)
+        log.error("Draft reply generation failed")
         draft_text = (
             "Thank you for your email. I have reviewed your message and will "
             "follow up with you shortly.\n\nBest regards"
@@ -322,32 +426,18 @@ class SendReplyRequest(BaseModel):
 async def send_email_reply(
     body: SendReplyRequest,
     user: dict = Depends(require_permission("trigger_actions")),
-    adapter=Depends(get_adapter),
-    db=Depends(get_db),
 ):
-    """Send a reply email. The user has already reviewed and approved the draft."""
-    company_id = user["company_id"]
-    try:
-        result = await adapter.send_email_reply(
-            to=body.to, subject=body.subject, body=body.body
-        )
-        # Audit log
-        try:
-            db.table("action_log").insert({
-                "company_id":    company_id,
-                "actor":         user["sub"],
-                "action_type":   "email_reply_sent",
-                "autonomy_level": "DRAFT_AND_WAIT",
-                "description":   f"Email reply sent to {body.to}: {body.subject}",
-                "data_involved": {"email_id": body.email_id, "to": body.to},
-                "status":        "completed",
-            }).execute()
-        except Exception:
-            pass
-        return {"status": "sent", "message_id": result.get("message_id")}
-    except Exception as exc:
-        log.error("Send email reply failed: %s", exc)
-        raise HTTPException(status_code=503, detail=f"Failed to send email: {exc}")
+    """Disabled: this legacy endpoint bypasses durable policy and audit approval.
+
+    No provider call may occur here. Use the authorized drafts and durable
+    execution gateway once those are proven end-to-end. A user manually
+    confirming a browser button does NOT establish a company-scoped policy
+    decision, immutable approval, idempotency, or durable execution receipt.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail="Direct email sending is disabled; use the approved draft workflow",
+    )
 
 
 # ── /emails/{id}/mark-read ─────────────────────────────────────────────────────
@@ -362,7 +452,11 @@ async def mark_email_read(
     try:
         await adapter.mark_email_read(email_id)
     except Exception as exc:
-        log.warning("mark-read failed for %s: %s", email_id, exc)
+        log.warning("Email mark-read failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Email read status could not be confirmed",
+        ) from exc
     return {"status": "ok"}
 
 
@@ -380,28 +474,42 @@ async def get_sales_data(
     try:
         invoices = await adapter.get_orders_last_n_days(days)
     except Exception as exc:
-        log.error("Sales data fetch failed: %s", exc)
-        invoices = []
+        log.error("Sales data fetch failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Sales source unavailable; revenue and order counts not verified",
+        ) from exc
 
     daily: dict[str, dict] = defaultdict(lambda: {"revenue": 0.0, "order_count": 0})
     account_revenue: dict[str, float] = defaultdict(float)
     total_revenue = 0.0
     order_count = 0
 
-    for inv in invoices:
-        inv_date = getattr(inv, "date", None) or inv.get("order_date")
-        inv_total = float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
-        customer_name = getattr(inv, "customer_name", "") or inv.get("customer_name", "")
-
-        if inv_date:
-            d = str(inv_date)[:10]
-            daily[d]["revenue"] += inv_total
-            daily[d]["order_count"] += 1
-
-        total_revenue += inv_total
-        order_count += 1
-        if customer_name:
-            account_revenue[customer_name] += inv_total
+    try:
+        for inv in invoices:
+            inv_date = _invoice_date(inv)
+            inv_total = _invoice_amount(inv)
+            customer_name = _row_value(inv, "customer_name", "")
+    
+            if inv_date:
+                d = str(inv_date)[:10]
+                daily[d]["revenue"] += inv_total
+                daily[d]["order_count"] += 1
+    
+            total_revenue += inv_total
+            order_count += 1
+            if customer_name:
+                account_revenue[customer_name] += inv_total
+        if not isfinite(total_revenue) or any(
+            not isfinite(value) for value in account_revenue.values()
+        ):
+            raise ValueError("Sales totals are not finite")
+    except (ValueError, TypeError, ArithmeticError) as exc:
+        log.error("Malformed current sales data")
+        raise HTTPException(
+            status_code=503,
+            detail="Sales source contains invalid financial data",
+        ) from exc
 
     # Build chart data — fill every calendar day (empty days = 0)
     chart_data = []
@@ -420,13 +528,21 @@ async def get_sales_data(
         prior_invoices = await adapter.get_orders_last_n_days(days * 2)
         prior_total = 0.0
         for inv in prior_invoices:
-            d = str(getattr(inv, "date", None) or inv.get("order_date", "") or "")[:10]
-            if d and d < cutoff_str:
-                prior_total += float(getattr(inv, "total", 0) or inv.get("total_amount", 0))
+            d = _invoice_date(inv).isoformat()
+            if d < cutoff_str:
+                prior_total += _invoice_amount(inv)
+        if not isfinite(prior_total):
+            raise ValueError("Prior sales total is not finite")
         if prior_total > 0:
             vs_prior_pct = round((total_revenue - prior_total) / prior_total * 100, 1)
-    except Exception:
-        pass
+            if not isfinite(vs_prior_pct):
+                raise ValueError("Sales comparison is not finite")
+    except Exception as exc:
+        log.error("Prior-period sales data failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Prior-period sales source unavailable; comparison not verified",
+        ) from exc
 
     top_account = (
         max(account_revenue, key=lambda k: account_revenue[k])
@@ -453,17 +569,22 @@ async def list_notes(
 ):
     company_id = user["company_id"]
     try:
-        result = (
+        query = (
             db.table("follow_up_notes")
             .select("*")
             .eq("company_id", company_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        # Rep-level view_own_accounts is not permission to read all company
+        # follow-ups. Only the owning employee's records may be returned.
+        if user.get("role") == "sales_rep":
+            query = query.eq("user_id", user["sub"])
+        result = query.order("created_at", desc=True).execute()
         return {"notes": result.data or []}
     except Exception as exc:
-        log.error("Notes fetch failed: %s", exc)
-        return {"notes": []}
+        log.error("Notes read failed")
+        raise HTTPException(
+            status_code=503, detail="Follow-up notes temporarily unavailable"
+        ) from exc
 
 
 class CreateNoteRequest(BaseModel):
@@ -490,10 +611,17 @@ async def create_note(
     }
     try:
         result = db.table("follow_up_notes").insert(record).execute()
-        return result.data[0] if result.data else record
     except Exception as exc:
-        log.error("Note creation failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to create note")
+        log.error("Note creation failed")
+        raise HTTPException(
+            status_code=503, detail="Follow-up note could not be saved"
+        ) from exc
+    if not result.data:
+        raise HTTPException(
+            status_code=503,
+            detail="Follow-up note creation was not confirmed",
+        )
+    return result.data[0]
 
 
 class UpdateNoteRequest(BaseModel):
@@ -513,14 +641,22 @@ async def update_note(
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
     try:
-        result = (
+        query = (
             db.table("follow_up_notes")
             .update(update)
             .eq("id", note_id)
             .eq("company_id", company_id)
-            .execute()
         )
-        return result.data[0] if result.data else {"id": note_id, **update}
+        if user.get("role") == "sales_rep":
+            query = query.eq("user_id", user["sub"])
+        result = query.execute()
     except Exception as exc:
-        log.error("Note update failed: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to update note")
+        log.error("Note update failed")
+        raise HTTPException(
+            status_code=503, detail="Follow-up note update unavailable"
+        ) from exc
+    # A filtered-out note may belong to another employee or tenant.
+    # Never claim success when zero authorized rows were updated.
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Follow-up note not found")
+    return result.data[0]

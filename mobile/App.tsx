@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -12,7 +12,14 @@ import RootNavigator from './src/navigation/RootNavigator';
 
 // Configure API base URL — set EXPO_PUBLIC_API_URL in .env
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
-setApiBase(API_URL);
+let apiConfigError = false;
+try {
+  setApiBase(API_URL);
+} catch {
+  // An unsafe/missing production API configuration must not receive login,
+  // refresh or chat credentials. Show an actionable error without a session.
+  apiConfigError = true;
+}
 
 // Show notifications while app is in foreground
 Notifications.setNotificationHandler({
@@ -55,6 +62,16 @@ function PushNotificationSetup() {
 }
 
 export default function App() {
+  if (apiConfigError) {
+    return (
+      <SafeAreaProvider>
+        <View style={{ flex: 1, justifyContent: 'center', padding: 24 }} accessible accessibilityRole="alert">
+          <Text style={{ fontSize: 20, fontWeight: '700' }}>SecretaryAI server not configured</Text>
+          <Text style={{ marginTop: 12 }}>A secure API connection is required. Contact your administrator or install a correctly configured build.</Text>
+        </View>
+      </SafeAreaProvider>
+    );
+  }
   return (
     <SafeAreaProvider>
       <NavigationContainer>

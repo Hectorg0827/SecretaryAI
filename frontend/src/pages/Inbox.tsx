@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { useInboxStore, InboxItem, ItemType } from '../stores/inboxStore';
 import { InlineAssistant } from '../components/layout/InlineAssistant';
 import { api } from '../lib/api';
+import { approvalNotice } from '../lib/approvalStatus';
 import { useAuth } from '../hooks/useAuth';
 
 // ── Item type config ──────────────────────────────────────────────────────────
@@ -87,10 +88,11 @@ function DetailPanel({ item }: { item: InboxItem }) {
   const { markRead } = useInboxStore();
   const [draftReply, setDraftReply]   = useState('');
   const [drafting, setDrafting]       = useState(false);
-  const [sending, setSending]         = useState(false);
+  const [copying, setCopying]         = useState(false);
   const [approving, setApproving]     = useState(false);
   const [rejecting, setRejecting]     = useState(false);
   const [done, setDone]               = useState(false);
+  const [completionNote, setCompletionNote] = useState('');
 
   const payload = item.payload as Record<string, unknown>;
 
@@ -109,29 +111,28 @@ function DetailPanel({ item }: { item: InboxItem }) {
     }
   };
 
-  const handleSendReply = async () => {
-    setSending(true);
+  const handleCopyReply = async () => {
+    setCopying(true);
     try {
-      await api.post('/api/dashboard/emails/send-reply', {
-        email_id: payload.id ?? payload.thread_id,
-        subject:  `Re: ${item.subtitle}`,
-        body:     draftReply,
-      });
-      toast.success('Reply sent');
-      markRead(item.id);
-      setDone(true);
+      await navigator.clipboard.writeText(draftReply);
+      toast.success('Draft copied. Nothing was sent.');
     } catch {
-      toast.error('Failed to send reply');
+      toast.error('Could not copy. Select the draft text manually.');
     } finally {
-      setSending(false);
+      setCopying(false);
     }
   };
 
   const handleApprove = async () => {
+    if (!window.confirm('Approve this draft? It may queue an external action; approval is not proof of delivery.')) return;
     setApproving(true);
     try {
-      await api.post(`/api/actions/approve/${payload.draft_id}`, {});
-      toast.success('Approved');
+      if (typeof payload.draft_id !== 'string') throw new Error('Missing draft reference');
+      const result = await api.actions.approve(payload.draft_id);
+      const notice = approvalNotice(result);
+      if (notice.severity === 'success') toast.success(notice.message);
+      else toast(notice.message);
+      setCompletionNote(notice.message);
       markRead(item.id);
       setDone(true);
     } catch {
@@ -146,6 +147,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
     try {
       await api.post(`/api/actions/reject/${payload.draft_id}`, { reason: 'Rejected from inbox' });
       toast.success('Rejected');
+      setCompletionNote('Rejection recorded; no action was authorized.');
       markRead(item.id);
       setDone(true);
     } catch {
@@ -162,7 +164,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400">
         <Check className="w-10 h-10 text-emerald-500" />
-        <p className="text-sm font-medium text-slate-600">Done</p>
+        <p className="text-sm font-medium text-slate-600 text-center">{completionNote || 'Review recorded'}</p>
       </div>
     );
   }
@@ -210,13 +212,16 @@ function DetailPanel({ item }: { item: InboxItem }) {
                       onChange={(e) => setDraftReply(e.target.value)}
                       className="w-full text-sm px-4 py-3 border border-slate-200 rounded-xl resize-none outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50"
                     />
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2" role="status">
+                      Sending is disabled until the approved outbound policy and audit contract are verified. Copying does not send an email.
+                    </p>
                     <div className="flex gap-2">
                       <button
-                        onClick={handleSendReply}
-                        disabled={sending}
+                        onClick={handleCopyReply}
+                        disabled={copying}
                         className="flex-1 py-2 text-sm font-medium rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                       >
-                        {sending ? 'Sending…' : 'Send Reply'}
+                        {copying ? 'Copying…' : 'Copy draft (do not send)'}
                       </button>
                       <button
                         onClick={() => setDraftReply('')}
@@ -335,7 +340,7 @@ function DetailPanel({ item }: { item: InboxItem }) {
 
 // ── Main Inbox page ───────────────────────────────────────────────────────────
 export default function Inbox() {
-  const { items, unread_count, loading, selectedId, filter, fetch, setFilter, selectItem } =
+  const { items, unread_count, loading, error, mutationError, selectedId, filter, fetch, setFilter, selectItem } =
     useInboxStore();
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
@@ -357,7 +362,7 @@ export default function Inbox() {
           <div className="flex items-center gap-2">
             <InboxIcon className="w-5 h-5 text-slate-700" />
             <h1 className="text-base font-semibold text-slate-900">Inbox</h1>
-            {unread_count > 0 && (
+            {unread_count !== null && unread_count > 0 && (
               <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-500 text-white">
                 {unread_count > 99 ? '99+' : unread_count}
               </span>
@@ -391,6 +396,12 @@ export default function Inbox() {
 
         {/* Feed */}
         <div className="flex-1 overflow-y-auto">
+          {(error || mutationError) && (
+            <div className="m-3 p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-xs" role="alert">
+              <AlertTriangle className="inline w-3.5 h-3.5 mr-1" />
+              {error ?? mutationError}
+            </div>
+          )}
           {loading && filteredItems.length === 0 ? (
             <div className="space-y-0">
               {[...Array(6)].map((_, i) => (
@@ -403,7 +414,7 @@ export default function Inbox() {
                 </div>
               ))}
             </div>
-          ) : filteredItems.length === 0 ? (
+          ) : error ? null : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <InboxIcon className="w-10 h-10 mb-3 text-slate-200" />
               <p className="text-sm font-medium">All caught up</p>

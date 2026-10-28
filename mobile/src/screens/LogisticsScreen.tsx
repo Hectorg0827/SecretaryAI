@@ -11,271 +11,222 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  CostVariance,
-  ReorderAlert,
-  ShipmentStatus,
-  getCostVariances,
-  getReorderAlerts,
-  getShipments,
+  InventoryAlert,
+  PurchaseOrderDetail,
+  PurchaseOrderSummary,
+  getPurchaseOrder,
+  getPurchaseOrders,
+  getStockAlerts,
+  logisticsErrorMessage,
+  purchaseOrderStatusLabel,
+  sortStockAlerts,
+  urgentAlertCount,
 } from '../api/logistics';
 import { COLORS, RADIUS, SHADOW } from '../theme';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const URGENCY_CONFIG = {
-  red:    { color: COLORS.danger,  bg: COLORS.dangerLight,  label: 'Urgent'  },
-  yellow: { color: COLORS.warning, bg: COLORS.warningLight, label: 'Watch'   },
-  green:  { color: COLORS.success, bg: COLORS.successLight, label: 'OK'      },
+const STOCK_CONFIG = {
+  out_of_stock: { color: COLORS.danger,  bg: COLORS.dangerLight,  label: 'Out of stock' },
+  critical:     { color: COLORS.danger,  bg: COLORS.dangerLight,  label: 'Critical'     },
+  low:          { color: COLORS.warning, bg: COLORS.warningLight, label: 'Low'          },
 };
 
-const SEVERITY_CONFIG = {
-  info:     { color: COLORS.textSecondary, bg: COLORS.border        },
-  warning:  { color: COLORS.warning,       bg: COLORS.warningLight  },
-  alert:    { color: COLORS.danger,        bg: COLORS.dangerLight   },
-  critical: { color: COLORS.danger,        bg: COLORS.dangerLight   },
-};
-
-function formatCurrency(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000)     return `$${(n / 1_000).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
+function formatDate(iso: string | null): string {
+  if (!iso) return '—';
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatPct(n: number): string {
-  const sign = n > 0 ? '+' : '';
-  return `${sign}${n.toFixed(1)}%`;
+function formatWeeks(weeks: number | null): string {
+  if (weeks == null || !Number.isFinite(Number(weeks))) return '—';
+  return `~${Number(weeks).toFixed(1)} wks`;
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Shared pieces ─────────────────────────────────────────────────────────────
 
-function ReorderCard({ alert }: { alert: ReorderAlert }) {
-  const cfg = URGENCY_CONFIG[alert.urgency];
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <View style={styles.errorBox} accessibilityRole="alert">
+      <Ionicons name="alert-circle" size={16} color={COLORS.danger} />
+      <Text style={styles.errorText}>{message}</Text>
+    </View>
+  );
+}
+
+function Loading() {
+  return (
+    <View style={styles.centered}>
+      <ActivityIndicator size="large" color={COLORS.primary} />
+    </View>
+  );
+}
+
+// ── Low stock ─────────────────────────────────────────────────────────────────
+
+function StockAlertCard({ alert }: { alert: InventoryAlert }) {
+  const cfg = STOCK_CONFIG[alert.stock_status] ?? STOCK_CONFIG.low;
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{alert.sku}</Text>
+        <Text style={[styles.cardTitle, { flex: 1, marginRight: 8 }]} numberOfLines={1}>{alert.product_name}</Text>
         <View style={[styles.badge, { backgroundColor: cfg.bg }]}>
           <Text style={[styles.badgeText, { color: cfg.color }]}>{cfg.label}</Text>
         </View>
       </View>
       <View style={styles.statsRow}>
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>Days of Supply</Text>
-          <Text style={[styles.statValue, alert.urgency === 'red' && { color: COLORS.danger }]}>
-            {alert.days_of_supply}d
+          <Text style={styles.statLabel}>On hand</Text>
+          <Text style={styles.statValue}>{Number(alert.total_qty).toLocaleString()} units</Text>
+        </View>
+        <View style={styles.stat}>
+          <Text style={styles.statLabel}>Runs out in</Text>
+          <Text style={[styles.statValue, alert.stock_status !== 'low' && { color: COLORS.danger }]}>
+            {formatWeeks(alert.weeks_remaining)}
           </Text>
         </View>
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>Rec. Order Qty</Text>
-          <Text style={styles.statValue}>{alert.recommended_qty.toLocaleString()}</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statLabel}>Lead Time P80</Text>
-          <Text style={styles.statValue}>{alert.lead_time_p80_days}d</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={styles.statLabel}>Container Fill</Text>
-          <Text style={styles.statValue}>{alert.container_fill_pct.toFixed(0)}%</Text>
+          <Text style={styles.statLabel}>Needs a PO</Text>
+          <Text style={styles.statValue}>{alert.needs_po ? 'Yes' : 'Not yet'}</Text>
         </View>
       </View>
     </View>
   );
 }
 
-function ShipmentCard({ shipment }: { shipment: ShipmentStatus }) {
-  const isDelayed = shipment.delay_days > 0;
+function StockTab({
+  alerts, loading, refreshing, onRefresh, error,
+}: {
+  alerts: InventoryAlert[];
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+  error: string | null;
+}) {
+  if (loading) return <Loading />;
   return (
-    <View style={styles.card}>
+    <ScrollView
+      contentContainerStyle={styles.tabContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+    >
+      {error ? (
+        <ErrorBox message={error} />
+      ) : alerts.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="checkmark-circle-outline" size={40} color={COLORS.textMuted} />
+          <Text style={styles.emptyText}>No products are low on stock right now.</Text>
+        </View>
+      ) : (
+        alerts.map((a) => <StockAlertCard key={a.item_id || a.product_name} alert={a} />)
+      )}
+    </ScrollView>
+  );
+}
+
+// ── Purchase orders ───────────────────────────────────────────────────────────
+
+function PurchaseOrderCard({ order }: { order: PurchaseOrderSummary }) {
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<PurchaseOrderDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const toggle = useCallback(async () => {
+    const next = !open;
+    setOpen(next);
+    if (!next || detail || detailLoading) return;
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      setDetail(await getPurchaseOrder(order.po_number));
+    } catch (err) {
+      setDetailError(logisticsErrorMessage(err, 'this purchase order'));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [open, detail, detailLoading, order.po_number]);
+
+  return (
+    <TouchableOpacity style={styles.card} onPress={toggle} activeOpacity={0.8} accessibilityRole="button">
       <View style={styles.cardHeader}>
         <View style={{ flex: 1, marginRight: 8 }}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{shipment.booking_ref}</Text>
-          <Text style={styles.cardSubtitle}>{shipment.vessel_name}</Text>
+          <Text style={styles.cardTitle} numberOfLines={1}>{order.po_number}</Text>
+          <Text style={styles.cardSubtitle} numberOfLines={1}>{order.supplier_ref || 'Supplier not recorded'}</Text>
         </View>
-        {isDelayed ? (
-          <View style={[styles.badge, { backgroundColor: COLORS.dangerLight }]}>
-            <Ionicons name="alert-circle" size={11} color={COLORS.danger} />
-            <Text style={[styles.badgeText, { color: COLORS.danger }]}>
-              +{shipment.delay_days}d delay
-            </Text>
-          </View>
-        ) : (
-          <View style={[styles.badge, { backgroundColor: COLORS.successLight }]}>
-            <Ionicons name="checkmark-circle" size={11} color={COLORS.success} />
-            <Text style={[styles.badgeText, { color: COLORS.success }]}>On Time</Text>
-          </View>
-        )}
+        <View style={[styles.badge, { backgroundColor: COLORS.primaryLight }]}>
+          <Text style={[styles.badgeText, { color: COLORS.primary }]}>{purchaseOrderStatusLabel(order.status)}</Text>
+        </View>
       </View>
       <View style={styles.statsRow}>
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>ETA</Text>
-          <Text style={styles.statValue}>{shipment.eta}</Text>
+          <Text style={styles.statLabel}>Created</Text>
+          <Text style={styles.statValue}>{formatDate(order.created_at)}</Text>
         </View>
         <View style={styles.stat}>
-          <Text style={styles.statLabel}>Status</Text>
-          <Text style={styles.statValue}>{shipment.status}</Text>
+          <Text style={styles.statLabel}>Approved</Text>
+          <Text style={styles.statValue}>{order.approved_at ? formatDate(order.approved_at) : 'Not yet'}</Text>
         </View>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.textMuted} />
       </View>
-    </View>
+
+      {open && (
+        <View style={styles.detail}>
+          {detailLoading ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : detailError ? (
+            <ErrorBox message={detailError} />
+          ) : detail ? (
+            <>
+              <View style={styles.statsRow}>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>Cases ordered</Text>
+                  <Text style={styles.statValue}>{detail.ordered_cases}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>Received</Text>
+                  <Text style={styles.statValue}>{detail.received_cases}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>Still to come</Text>
+                  <Text style={styles.statValue}>{detail.remaining_cases}</Text>
+                </View>
+              </View>
+              {!detail.accounting_reconciled && (
+                <Text style={styles.note}>Not yet checked against QuickBooks.</Text>
+              )}
+            </>
+          ) : null}
+        </View>
+      )}
+    </TouchableOpacity>
   );
 }
 
-function CostVarianceRow({ item }: { item: CostVariance }) {
-  const cfg = SEVERITY_CONFIG[item.severity];
-  const isNegative = item.change_pct < 0;
-  return (
-    <View style={styles.costRow}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{item.component}</Text>
-      </View>
-      <View style={styles.costRight}>
-        <Text style={[styles.costPct, { color: isNegative ? COLORS.success : COLORS.danger }]}>
-          {formatPct(item.change_pct)}
-        </Text>
-        <Text style={styles.costImpact}>{formatCurrency(item.annualized_impact)}/yr</Text>
-        <View style={[styles.badge, { backgroundColor: cfg.bg, marginLeft: 6 }]}>
-          <Text style={[styles.badgeText, { color: cfg.color }]}>{item.severity}</Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-// ── Tab content components ────────────────────────────────────────────────────
-
-function ReorderTab({
-  alerts,
-  loading,
-  refreshing,
-  onRefresh,
-  error,
+function OrdersTab({
+  orders, loading, refreshing, onRefresh, error,
 }: {
-  alerts: ReorderAlert[];
+  orders: PurchaseOrderSummary[];
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
   error: string | null;
 }) {
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
-  }
+  if (loading) return <Loading />;
   return (
     <ScrollView
       contentContainerStyle={styles.tabContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-      }
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
     >
-      {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
-      {alerts.length === 0 && !error ? (
+      {error ? (
+        <ErrorBox message={error} />
+      ) : orders.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="checkmark-circle-outline" size={40} color={COLORS.textMuted} />
-          <Text style={styles.emptyText}>No reorder alerts — all SKUs are well stocked.</Text>
+          <Ionicons name="document-text-outline" size={40} color={COLORS.textMuted} />
+          <Text style={styles.emptyText}>No saved purchase orders yet.</Text>
         </View>
       ) : (
-        alerts.map((a) => <ReorderCard key={a.sku} alert={a} />)
-      )}
-    </ScrollView>
-  );
-}
-
-function ShipmentsTab({
-  shipments,
-  loading,
-  refreshing,
-  onRefresh,
-  error,
-}: {
-  shipments: ShipmentStatus[];
-  loading: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
-  error: string | null;
-}) {
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
-  }
-  return (
-    <ScrollView
-      contentContainerStyle={styles.tabContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-      }
-    >
-      {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
-      {shipments.length === 0 && !error ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="boat-outline" size={40} color={COLORS.textMuted} />
-          <Text style={styles.emptyText}>No active shipments.</Text>
-        </View>
-      ) : (
-        shipments.map((s) => <ShipmentCard key={s.booking_ref} shipment={s} />)
-      )}
-    </ScrollView>
-  );
-}
-
-function CostsTab({
-  variances,
-  totalLandedCost,
-  loading,
-  refreshing,
-  onRefresh,
-  error,
-}: {
-  variances: CostVariance[];
-  totalLandedCost: number | null;
-  loading: boolean;
-  refreshing: boolean;
-  onRefresh: () => void;
-  error: string | null;
-}) {
-  if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
-  }
-  return (
-    <ScrollView
-      contentContainerStyle={styles.tabContent}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-      }
-    >
-      {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
-
-      {/* Summary card */}
-      {totalLandedCost != null && (
-        <View style={[styles.summaryCard, SHADOW.md]}>
-          <Text style={styles.summaryLabel}>Total Landed Cost</Text>
-          <Text style={styles.summaryValue}>{formatCurrency(totalLandedCost)}</Text>
-          <Text style={styles.summaryCaption}>Annualised across all SKUs</Text>
-        </View>
-      )}
-
-      {variances.length === 0 && !error ? (
-        <View style={styles.emptyState}>
-          <Ionicons name="trending-up-outline" size={40} color={COLORS.textMuted} />
-          <Text style={styles.emptyText}>No cost variances detected.</Text>
-        </View>
-      ) : (
-        <View style={styles.card}>
-          {variances.map((v, i) => (
-            <React.Fragment key={v.component}>
-              <CostVarianceRow item={v} />
-              {i < variances.length - 1 && <View style={styles.divider} />}
-            </React.Fragment>
-          ))}
-        </View>
+        orders.map((o) => <PurchaseOrderCard key={o.id || o.po_number} order={o} />)
       )}
     </ScrollView>
   );
@@ -283,82 +234,56 @@ function CostsTab({
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
-type TabKey = 'Reorder' | 'Shipments' | 'Costs';
-const TABS: TabKey[] = ['Reorder', 'Shipments', 'Costs'];
+type TabKey = 'Low stock' | 'Purchase orders';
+const TABS: TabKey[] = ['Low stock', 'Purchase orders'];
 
 export default function LogisticsScreen() {
-  const [activeTab, setActiveTab] = useState<TabKey>('Reorder');
+  const [activeTab, setActiveTab] = useState<TabKey>('Low stock');
 
-  // Reorder state
-  const [alerts, setAlerts] = useState<ReorderAlert[]>([]);
+  const [alerts, setAlerts] = useState<InventoryAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
   const [alertsRefreshing, setAlertsRefreshing] = useState(false);
   const [alertsError, setAlertsError] = useState<string | null>(null);
 
-  // Shipments state
-  const [shipments, setShipments] = useState<ShipmentStatus[]>([]);
-  const [shipmentsLoading, setShipmentsLoading] = useState(true);
-  const [shipmentsRefreshing, setShipmentsRefreshing] = useState(false);
-  const [shipmentsError, setShipmentsError] = useState<string | null>(null);
-
-  // Costs state
-  const [variances, setVariances] = useState<CostVariance[]>([]);
-  const [totalLandedCost, setTotalLandedCost] = useState<number | null>(null);
-  const [costsLoading, setCostsLoading] = useState(true);
-  const [costsRefreshing, setCostsRefreshing] = useState(false);
-  const [costsError, setCostsError] = useState<string | null>(null);
+  const [orders, setOrders] = useState<PurchaseOrderSummary[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersRefreshing, setOrdersRefreshing] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
 
   const loadAlerts = useCallback(async () => {
     try {
       setAlertsError(null);
-      const data = await getReorderAlerts();
-      setAlerts(data);
+      setAlerts(sortStockAlerts(await getStockAlerts()));
     } catch (err) {
-      setAlertsError(err instanceof Error ? err.message : 'Failed to load reorder alerts');
+      // A failed read is never shown as "nothing low on stock".
+      setAlerts([]);
+      setAlertsError(logisticsErrorMessage(err, 'stock alerts'));
     } finally {
       setAlertsLoading(false);
       setAlertsRefreshing(false);
     }
   }, []);
 
-  const loadShipments = useCallback(async () => {
+  const loadOrders = useCallback(async () => {
     try {
-      setShipmentsError(null);
-      const data = await getShipments();
-      setShipments(data);
+      setOrdersError(null);
+      setOrders(await getPurchaseOrders());
     } catch (err) {
-      setShipmentsError(err instanceof Error ? err.message : 'Failed to load shipments');
+      setOrders([]);
+      setOrdersError(logisticsErrorMessage(err, 'purchase orders'));
     } finally {
-      setShipmentsLoading(false);
-      setShipmentsRefreshing(false);
-    }
-  }, []);
-
-  const loadCosts = useCallback(async () => {
-    try {
-      setCostsError(null);
-      const data = await getCostVariances();
-      setVariances(data.variances);
-      setTotalLandedCost(data.total_landed_cost);
-    } catch (err) {
-      setCostsError(err instanceof Error ? err.message : 'Failed to load cost variances');
-    } finally {
-      setCostsLoading(false);
-      setCostsRefreshing(false);
+      setOrdersLoading(false);
+      setOrdersRefreshing(false);
     }
   }, []);
 
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
-  useEffect(() => { loadShipments(); }, [loadShipments]);
-  useEffect(() => { loadCosts(); }, [loadCosts]);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
 
-  // Urgency summary for header badges
-  const urgentCount = alerts.filter((a) => a.urgency === 'red').length;
-  const delayedCount = shipments.filter((s) => s.delay_days > 0).length;
+  const urgentCount = urgentAlertCount(alerts);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Logistics</Text>
         <View style={styles.alertRow}>
@@ -369,17 +294,9 @@ export default function LogisticsScreen() {
               </Text>
             </View>
           )}
-          {delayedCount > 0 && (
-            <View style={[styles.alertChip, { backgroundColor: COLORS.warningLight }]}>
-              <Text style={[styles.alertChipText, { color: COLORS.warning }]}>
-                {delayedCount} delayed
-              </Text>
-            </View>
-          )}
         </View>
       </View>
 
-      {/* Tab bar */}
       <View style={styles.tabBar}>
         {TABS.map((tab) => (
           <TouchableOpacity
@@ -395,9 +312,8 @@ export default function LogisticsScreen() {
         ))}
       </View>
 
-      {/* Tab content */}
-      {activeTab === 'Reorder' && (
-        <ReorderTab
+      {activeTab === 'Low stock' && (
+        <StockTab
           alerts={alerts}
           loading={alertsLoading}
           refreshing={alertsRefreshing}
@@ -405,23 +321,13 @@ export default function LogisticsScreen() {
           error={alertsError}
         />
       )}
-      {activeTab === 'Shipments' && (
-        <ShipmentsTab
-          shipments={shipments}
-          loading={shipmentsLoading}
-          refreshing={shipmentsRefreshing}
-          onRefresh={() => { setShipmentsRefreshing(true); loadShipments(); }}
-          error={shipmentsError}
-        />
-      )}
-      {activeTab === 'Costs' && (
-        <CostsTab
-          variances={variances}
-          totalLandedCost={totalLandedCost}
-          loading={costsLoading}
-          refreshing={costsRefreshing}
-          onRefresh={() => { setCostsRefreshing(true); loadCosts(); }}
-          error={costsError}
+      {activeTab === 'Purchase orders' && (
+        <OrdersTab
+          orders={orders}
+          loading={ordersLoading}
+          refreshing={ordersRefreshing}
+          onRefresh={() => { setOrdersRefreshing(true); loadOrders(); }}
+          error={ordersError}
         />
       )}
     </SafeAreaView>
@@ -434,14 +340,12 @@ const styles = StyleSheet.create({
   container:        { flex: 1, backgroundColor: COLORS.background },
   centered:         { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  // Header
   header:           { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title:            { fontSize: 22, fontWeight: '800', color: COLORS.text },
   alertRow:         { flexDirection: 'row', gap: 6, marginTop: 4 },
   alertChip:        { borderRadius: 99, paddingHorizontal: 10, paddingVertical: 2 },
   alertChipText:    { fontSize: 12, fontWeight: '700' },
 
-  // Tab bar
   tabBar: {
     flexDirection: 'row',
     marginHorizontal: 16,
@@ -452,27 +356,13 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     overflow: 'hidden',
   },
-  tabItem: {
-    flex: 1,
-    paddingVertical: 9,
-    alignItems: 'center',
-  },
-  tabItemActive: {
-    backgroundColor: COLORS.primary,
-  },
-  tabLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  tabLabelActive: {
-    color: '#fff',
-  },
+  tabItem:          { flex: 1, paddingVertical: 9, alignItems: 'center' },
+  tabItemActive:    { backgroundColor: COLORS.primary },
+  tabLabel:         { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  tabLabelActive:   { color: '#fff' },
 
-  // Tab scroll content
   tabContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 4 },
 
-  // Cards
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
@@ -489,7 +379,6 @@ const styles = StyleSheet.create({
   cardTitle:    { fontSize: 15, fontWeight: '600', color: COLORS.text },
   cardSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
 
-  // Badge
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -500,47 +389,30 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 11, fontWeight: '700' },
 
-  // Stats row
-  statsRow:  { flexDirection: 'row', gap: 8 },
+  statsRow:  { flexDirection: 'row', gap: 8, alignItems: 'center' },
   stat:      { flex: 1 },
   statLabel: { fontSize: 11, color: COLORS.textMuted, marginBottom: 2 },
   statValue: { fontSize: 13, fontWeight: '600', color: COLORS.text },
 
-  // Cost rows
-  costRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
+  detail: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
-  costRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  costPct:    { fontSize: 13, fontWeight: '700', minWidth: 48, textAlign: 'right' },
-  costImpact: { fontSize: 12, color: COLORS.textSecondary, marginLeft: 8 },
-  divider:    { height: 1, backgroundColor: COLORS.border },
+  note: { fontSize: 11, color: COLORS.textSecondary, marginTop: 8 },
 
-  // Summary card (Costs tab)
-  summaryCard: {
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.lg,
-    padding: 16,
-    marginBottom: 12,
-  },
-  summaryLabel:   { fontSize: 12, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
-  summaryValue:   { fontSize: 28, fontWeight: '800', color: '#fff', marginTop: 2 },
-  summaryCaption: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2 },
-
-  // Empty state
   emptyState: { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyText:  { color: COLORS.textMuted, fontSize: 14, textAlign: 'center', maxWidth: 260 },
 
-  // Error
   errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
     backgroundColor: COLORS.dangerLight,
     borderRadius: RADIUS.sm,
     padding: 10,
     marginBottom: 10,
   },
-  errorText: { color: COLORS.danger, fontSize: 13 },
+  errorText: { color: COLORS.danger, fontSize: 13, flex: 1 },
 });

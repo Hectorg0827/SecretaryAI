@@ -1,21 +1,34 @@
 import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
-import { Package, AlertTriangle, XCircle, ShoppingCart, Search, Loader2 } from 'lucide-react';
+import { Package, AlertTriangle, XCircle, ShoppingCart, Search, Loader2, CheckCircle2, TrendingUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, InventoryAlert } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
+import { ForecastPanel } from '../components/inventory/ForecastPanel';
 
 const STATUS_CFG = {
   out_of_stock: { label: 'Out of Stock', icon: XCircle,       border: 'border-l-red-500',    bg: 'bg-red-50',     text: 'text-red-700',    badge: 'bg-red-100 text-red-700'      },
   critical:     { label: 'Critical',     icon: AlertTriangle, border: 'border-l-orange-400', bg: 'bg-orange-50',  text: 'text-orange-700', badge: 'bg-orange-100 text-orange-700'  },
   low:          { label: 'Low',          icon: Package,       border: 'border-l-amber-400',  bg: 'bg-amber-50',   text: 'text-amber-700',  badge: 'bg-amber-100 text-amber-700'    },
+  healthy:      { label: 'In Stock',     icon: CheckCircle2,  border: 'border-l-emerald-400', bg: 'bg-emerald-50', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700' },
 } as const;
 
-const FILTERS = ['all', 'out_of_stock', 'critical', 'low'] as const;
+// GET /api/inventory lists every product, including healthy stock.
+type InventoryItem = Omit<InventoryAlert, 'stock_status'> & {
+  stock_status: InventoryAlert['stock_status'] | 'healthy';
+};
+
+const FILTERS = ['all', 'out_of_stock', 'critical', 'low', 'healthy'] as const;
 type FilterType = typeof FILTERS[number];
 
-function InventoryRow({ alert, onDraftPO, canDraftPO }: { alert: InventoryAlert; onDraftPO: (id: string, name: string) => void; canDraftPO: boolean }) {
-  const cfg  = STATUS_CFG[alert.stock_status];
+function InventoryRow({ alert, onDraftPO, onForecast, canDraftPO, drafting }: {
+  alert: InventoryItem;
+  onDraftPO: (id: string, name: string) => void;
+  onForecast: (id: string, name: string) => void;
+  canDraftPO: boolean;
+  drafting: boolean;
+}) {
+  const cfg  = STATUS_CFG[alert.stock_status] ?? STATUS_CFG.low;
   const Icon = cfg.icon;
 
   return (
@@ -41,25 +54,38 @@ function InventoryRow({ alert, onDraftPO, canDraftPO }: { alert: InventoryAlert;
         {alert.weeks_remaining != null ? `~${alert.weeks_remaining.toFixed(1)} wks` : '—'}
       </td>
       <td className="px-5 py-3.5">
-        {alert.needs_po && canDraftPO ? (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => onDraftPO(alert.item_id, alert.product_name)}
-            className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors font-medium"
+            type="button"
+            onClick={() => onForecast(alert.item_id, alert.product_name)}
+            aria-label={`View demand forecast for ${alert.product_name}`}
+            className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-800 border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 bg-white hover:bg-slate-50 transition-colors font-medium"
           >
-            <ShoppingCart size={11} />
-            Draft PO
+            <TrendingUp size={11} />
+            Forecast
           </button>
-        ) : !alert.needs_po ? (
-          <span className="text-xs text-emerald-600 font-medium">PO exists</span>
-        ) : null}
+          {alert.needs_po && canDraftPO && (
+            <button
+              type="button"
+              onClick={() => onDraftPO(alert.item_id, alert.product_name)}
+              disabled={drafting}
+              className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors font-medium disabled:opacity-50"
+            >
+              <ShoppingCart size={11} />
+              Draft PO
+            </button>
+          )}
+        </div>
       </td>
     </tr>
   );
 }
 
 export function Inventory() {
-  const [items,    setItems]    = useState<InventoryAlert[]>([]);
+  const [items,    setItems]    = useState<InventoryItem[]>([]);
   const [loading,  setLoading]  = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [forecastItem, setForecastItem] = useState<{ id: string; name: string } | null>(null);
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState<FilterType>('all');
   const [drafting, setDrafting] = useState<string | null>(null);
@@ -68,7 +94,11 @@ export function Inventory() {
   useEffect(() => {
     api.inventory.list()
       .then((r) => setItems(r.items ?? []))
-      .catch(() => setItems([]))
+      .catch((err: unknown) => {
+        // A failed read is an outage, never an empty "all healthy" list.
+        setItems([]);
+        setLoadError(err instanceof Error ? err.message : 'Inventory is unavailable right now.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -95,7 +125,7 @@ export function Inventory() {
     [f]: f === 'all' ? items.length : items.filter((a) => a.stock_status === f).length,
   }), {} as Record<string, number>);
 
-  const criticalCount = items.filter((a) => a.stock_status !== 'low').length;
+  const criticalCount = items.filter((a) => a.stock_status === 'critical' || a.stock_status === 'out_of_stock').length;
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -105,7 +135,7 @@ export function Inventory() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Inventory</h1>
             <p className="text-sm text-slate-400 mt-0.5">
-              {items.length} alerts
+              {items.length} products
               {criticalCount > 0 && <span className="text-orange-600 font-medium ml-1">· {criticalCount} critical</span>}
             </p>
           </div>
@@ -133,7 +163,7 @@ export function Inventory() {
                   : 'text-slate-500 hover:bg-slate-100',
               )}
             >
-              {f === 'all' ? 'All' : f.replace('_', ' ')} ({counts[f] ?? 0})
+              {f === 'all' ? 'All' : STATUS_CFG[f].label} ({counts[f] ?? 0})
             </button>
           ))}
         </div>
@@ -145,18 +175,25 @@ export function Inventory() {
           <div className="flex items-center justify-center h-40 text-slate-400 text-sm">
             <Loader2 size={16} className="animate-spin mr-2" /> Loading…
           </div>
+        ) : loadError ? (
+          <div className="p-6">
+            <div role="alert" className="flex gap-2 items-start rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+              <span>Inventory could not be loaded: {loadError}</span>
+            </div>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-400">
             <Package size={24} className="mb-2 opacity-40" />
             <p className="text-sm">
-              {items.length === 0 ? 'All products at healthy stock levels' : 'No items match this filter'}
+              {items.length === 0 ? 'No inventory items found' : 'No items match this filter'}
             </p>
           </div>
         ) : (
           <table className="w-full">
             <thead className="bg-white border-b border-slate-100 sticky top-0">
               <tr>
-                {['Product', 'Status', 'Qty on Hand', 'Est. Runway', 'Action'].map((h) => (
+                {['Product', 'Status', 'Qty on Hand', 'Est. Runway', 'Actions'].map((h) => (
                   <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">
                     {h}
                   </th>
@@ -169,13 +206,23 @@ export function Inventory() {
                   key={a.item_id}
                   alert={a}
                   onDraftPO={draftPO}
+                  onForecast={(id, name) => setForecastItem({ id, name })}
                   canDraftPO={canDraftPO}
+                  drafting={drafting === a.item_id}
                 />
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {forecastItem && (
+        <ForecastPanel
+          itemId={forecastItem.id}
+          productName={forecastItem.name}
+          onClose={() => setForecastItem(null)}
+        />
+      )}
     </div>
   );
 }

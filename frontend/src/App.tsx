@@ -17,6 +17,7 @@ import { Compliance } from './pages/Compliance';
 import { Connectors } from './pages/Connectors';
 import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
+import { Insights } from './pages/Insights';
 import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
@@ -184,6 +185,17 @@ function AppShell() {
               </RoleGuard>
             }
           />
+          {['/insights', '/insights/:slug'].map((path) => (
+            <Route
+              key={path}
+              path={path}
+              element={
+                <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                  <Insights />
+                </RoleGuard>
+              }
+            />
+          ))}
           {/* Catch-all → dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

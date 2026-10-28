@@ -24,7 +24,8 @@ from app.connectors.invoice_integrity import (
     unique_line_id,
 )
 
-QBO_BASE = "https://quickbooks.api.intuit.com/v3/company"
+QBO_PRODUCTION_BASE = "https://quickbooks.api.intuit.com/v3/company"
+QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
 
@@ -37,7 +38,19 @@ class QBOnlineAdapter(QuickBooksAdapter):
         refresh_token: str,
         realm_id: str,
         on_token_refresh=None,
+        environment: str | None = None,
     ):
+        # The sandbox and production REST APIs use different hostnames.
+        # Resolve from validated deployment settings unless a test explicitly
+        # selects an environment; never infer it from a company realm ID.
+        if environment is None:
+            from app.config import get_settings
+            environment = get_settings().intuit_environment
+        if environment not in ("sandbox", "production"):
+            raise ValueError("Unsupported Intuit environment")
+        self._base_url = (
+            QBO_SANDBOX_BASE if environment == "sandbox" else QBO_PRODUCTION_BASE
+        )
         self._client_id = client_id
         self._client_secret = client_secret
         self._access_token = access_token
@@ -81,7 +94,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
 
     async def _post(self, entity: str, payload: dict) -> dict:
         """POST (create) a QBO entity."""
-        url = f"{QBO_BASE}/{self._realm_id}/{entity}"
+        url = f"{self._base_url}/{self._realm_id}/{entity}"
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 url,
@@ -102,7 +115,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
 
     async def _get_entity(self, entity: str, entity_id: str) -> dict:
         """GET a single QBO entity by ID (needed to obtain SyncToken for updates)."""
-        url = f"{QBO_BASE}/{self._realm_id}/{entity}/{entity_id}"
+        url = f"{self._base_url}/{self._realm_id}/{entity}/{entity_id}"
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(
                 url,
@@ -121,7 +134,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
 
     async def _query(self, sql: str) -> dict:
         """Execute a QBO query using Intuit's SQL-like query language."""
-        url = f"{QBO_BASE}/{self._realm_id}/query"
+        url = f"{self._base_url}/{self._realm_id}/query"
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(
                 url,
@@ -391,7 +404,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
             "SyncToken": sync_token,
             "sparse": True,
         }
-        url = f"{QBO_BASE}/{self._realm_id}/invoice"
+        url = f"{self._base_url}/{self._realm_id}/invoice"
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 url,

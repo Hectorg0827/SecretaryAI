@@ -139,6 +139,7 @@ def test_price_check_uses_entered_history():
     assert body["company_id"] == "tenant-a"
     assert body["prices_changed"] is False
     assert body["status"] == "analysis_only"
+    assert body["outcome"] == "suggested_change"
     assert body["suggested_price"] == pytest.approx(10.6122, abs=0.0001)
     assert body["price_changes_observed"] == 3
 
@@ -147,6 +148,8 @@ def test_price_check_without_history_holds_price():
     response = client().post("/api/insights/pricing-suggestions/preview",
                              json=check_body(price_changes=[], competitor_prices=[9.5, 10.5]))
     body = response.json()
+    assert body["outcome"] == "hold"
+    assert body["status"] == "analysis_only"
     assert body["suggested_price"] == 10
     assert body["change_pct"] == 0
     assert "hold price" in body["rationale"]

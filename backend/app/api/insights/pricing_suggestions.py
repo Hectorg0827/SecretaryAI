@@ -229,11 +229,14 @@ async def pricing_preview(
         ).to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="These figures can't be used for a price check") from exc
+    row = _row_from_recommendation(rec, body.target_margin_pct)
+    # "status" is the advisory stamp at the top level, so the result is "outcome".
     return advisory_response({
         "company_id": user["company_id"],
         "product_name": body.product_name,
         "target_margin_pct": body.target_margin_pct,
-        **_row_from_recommendation(rec, body.target_margin_pct),
+        "outcome": row.pop("status"),
+        **row,
         **_elasticity_fields(elasticity),
         "prices_changed": False,
     }, source="user_supplied")

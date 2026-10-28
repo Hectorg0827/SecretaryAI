@@ -10,6 +10,7 @@ type EvidenceClaim = {
   id: string;
   evidence_key: string;
   document_type: string;
+  claimed_sha256?: string | null;
   claimed_amount: string | number | null;
   currency: string | null;
   verification_status: string;
@@ -28,6 +29,13 @@ type EvidenceStatus = { integrity: IntegrityStatus; malware: MalwareStatus };
 type ScanResult = { scan_id: string; scan_status: string; replayed: boolean };
 type ReviewResult = { review_id: string; approved_for_review: boolean; replayed: boolean };
 type ClaimResult = { evidence_id: string; replayed: boolean; verification_status: string };
+type UploadResult = {
+  integrity_check_id?: string;
+  replayed?: boolean;
+  integrity_status?: string;
+  malware_scan_status?: string;
+  bytes_received?: number;
+};
 type ClaimBody = {
   evidence_key: string;
   document_type: string;
@@ -68,6 +76,27 @@ export function evidenceStorageKey(companyId: string, poNumber: string, evidence
   return `${companyId}/purchasing/${pathPart(poNumber)}/${pathPart(evidenceKey)}-${digest.slice(0, 12)}.${extension}`;
 }
 
+function fileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
+/** Check a chosen file before upload; returns a plain-language problem or ''. */
+async function uploadProblem(file: File | null, expectedSha256: string | null | undefined): Promise<string> {
+  if (!file || !EXTENSIONS[file.type]) return 'Choose a PDF, PNG or JPEG file.';
+  if (file.size === 0 || file.size > MAX_BYTES) return 'The file must be between 1 byte and 8 MB.';
+  if (!expectedSha256) return '';
+  let digest: string;
+  try {
+    digest = await sha256Hex(file);
+  } catch {
+    return 'This browser could not read the file.';
+  }
+  return digest === expectedSha256 ? ''
+    : 'This is not the same file whose details were recorded (its fingerprint is different). Choose the original file.';
+}
+
 function scanLabel(status: string): string {
   return status === 'clean' ? 'No virus found' : status === 'infected' ? 'Virus found — do not open' :
     status === 'not_scanned' ? 'Not scanned yet' : status;
@@ -80,6 +109,10 @@ function EvidenceRow({ claim, role, currentUser }: { claim: EvidenceClaim; role:
   const [notice, setNotice] = useState('');
   const scan = useConfirmedWrite<ScanResult>();
   const review = useConfirmedWrite<ReviewResult>();
+  const upload = useConfirmedWrite<UploadResult>();
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadIssue, setUploadIssue] = useState('');
+  const fileInputId = useId();
   const base = `/api/logistics/evidence/${encodeURIComponent(claim.id)}`;
 
   async function loadStatus() {
@@ -110,6 +143,28 @@ function EvidenceRow({ claim, role, currentUser }: { claim: EvidenceClaim; role:
     }
   }
 
+  async function reviewUpload() {
+    const problem = await uploadProblem(uploadFile, claim.claimed_sha256);
+    setUploadIssue(problem);
+    if (!problem) upload.open();
+  }
+
+  async function confirmUpload() {
+    if (!uploadFile) return;
+    const form = new FormData();
+    form.append('file', uploadFile, uploadFile.name);
+    const result = await upload.send(() => api.upload<UploadResult>(`${base}/upload`, form));
+    if (result) {
+      setUploadFile(null);
+      setNotice(result.integrity_status === 'sha256_matched_at_upload'
+        ? `The server stored the file${typeof result.bytes_received === 'number' ? ` (${fileSize(result.bytes_received)})` : ''}`
+          + ` and confirmed it matches the recorded fingerprint${result.replayed ? ' (already recorded earlier)' : ''}.`
+          + ' It has not been scanned for viruses yet.'
+        : 'The server did not confirm the upload. Check the status before trying again.');
+      await loadStatus();
+    }
+  }
+
   async function confirmReview() {
     const result = await review.send(() => api.post<ReviewResult>(`${base}/approve-review`, {}));
     if (result) {
@@ -121,6 +176,8 @@ function EvidenceRow({ claim, role, currentUser }: { claim: EvidenceClaim; role:
   }
 
   const uploaded = status?.integrity.integrity_status === 'sha256_matched_at_upload';
+  const canUpload = roleAllowed(role, PURCHASING_ROLES) && status?.integrity.integrity_status === 'not_checked'
+    && claim.verification_status === 'unverified';
   const scanStatus = status?.malware.scan_status;
   const canScan = roleAllowed(role, PURCHASING_ROLES) && uploaded && scanStatus === 'not_scanned';
   const ownSubmission = Boolean(currentUser) && currentUser === claim.submitted_by;
@@ -146,9 +203,26 @@ function EvidenceRow({ claim, role, currentUser }: { claim: EvidenceClaim; role:
       <div><dt className="text-slate-600">Virus scan</dt><dd>{scanLabel(status.malware.scan_status)}</dd></div>
       <div><dt className="text-slate-600">Independent review</dt><dd>{status.malware.approved_for_review ? 'Reviewed' : 'Not reviewed'}</dd></div>
     </dl>}
-    {status && !uploaded && <p className="text-sm text-slate-600">
-      The file itself has not been uploaded. Uploading files from the web app is not available yet.
-    </p>}
+    {status && !uploaded && <p className="text-sm text-slate-600">The file itself has not been uploaded yet.</p>}
+    {canUpload && !upload.confirming && <form className="flex flex-wrap items-end gap-2" aria-label="Upload the file"
+      onSubmit={(event) => { event.preventDefault(); void reviewUpload(); }}>
+      <Field label="File to upload (the same PDF, PNG or JPEG)" htmlFor={fileInputId}>
+        <input id={fileInputId} type="file" accept="application/pdf,image/png,image/jpeg" className="text-sm"
+          onChange={(event) => { setUploadFile(event.target.files?.[0] ?? null); setUploadIssue(''); }} />
+      </Field>
+      <button type="submit" className={BUTTON_PRIMARY}>Review upload</button>
+    </form>}
+    {uploadIssue && <p role="alert" className="text-sm text-red-700">{uploadIssue}</p>}
+    {upload.confirming && uploadFile && <ConfirmPanel title="Upload this file?" confirmLabel="Upload file"
+      busy={upload.busy} onConfirm={confirmUpload} onCancel={upload.cancel}>
+      <p>
+        <strong>{uploadFile.name}</strong> ({fileSize(uploadFile.size)}) is sent to your company’s private document
+        storage and checked against the fingerprint recorded for <strong>{claim.evidence_key}</strong>.
+      </p>
+      <p>Once stored it cannot be replaced or deleted from here. This step does not scan it for viruses, approve any
+        payment, change costs or stock, or write to QuickBooks.</p>
+    </ConfirmPanel>}
+    {Boolean(upload.error) && <ErrorNote error={upload.error} fallback="The file was not uploaded." />}
     {scanStatus === 'infected' && <WarningNote>The virus scanner flagged this file. Do not open or use it.</WarningNote>}
     {status && scanStatus === 'clean' && !status.malware.approved_for_review && ownSubmission
       && roleAllowed(role, APPROVER_ROLES) && <p className="text-sm text-slate-700">
@@ -317,7 +391,7 @@ export function PurchaseEvidence({ poNumber, poStatus, role, currentUser, compan
       setAdding(false);
       setNotice(result.replayed
         ? 'These document details were already recorded earlier; no duplicate was created.'
-        : 'The server recorded the document details as an unchecked claim.');
+        : 'The server recorded the document details as an unchecked claim. Next, check its status below and upload the file itself.');
       setRevision((value) => value + 1);
     }} />}
   </section>;

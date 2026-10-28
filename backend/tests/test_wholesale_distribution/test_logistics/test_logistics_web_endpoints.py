@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -122,6 +123,29 @@ def test_pipeline_found_cycle_is_labelled_unverified():
     assert body["current_stage"] == "in_transit"
     assert body["stage_verified"] is False
     assert body["authoritative_purchasing_state"] is False
+
+
+@pytest.mark.parametrize("role", ["sales_rep", "viewer"])
+def test_pipeline_rejects_roles_outside_purchasing_before_any_read(role):
+    # sales_rep holds view_inventory but is not a purchasing employee.
+    client, db = _client(role)
+    response = client.get("/api/logistics/pipeline/PO-1")
+    assert response.status_code == 403
+    assert "PO-1" not in response.text
+    db.table.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["owner", "manager", "back_office"])
+def test_pipeline_allows_purchasing_roles_and_reads_only_own_tenant(role):
+    client, db = _client(role)
+    _pipeline_query(db).return_value = SimpleNamespace(data={
+        "po_number": "PO-1", "current_stage": "in_transit",
+    })
+    response = client.get("/api/logistics/pipeline/PO-1")
+    assert response.status_code == 200, response.text
+    assert response.json()["po_number"] == "PO-1"
+    db.table.assert_called_with("procurement_cycles")
+    db.table.return_value.select.return_value.eq.assert_called_with("company_id", "test-tenant")
 
 
 # ─── Warehouse picker ────────────────────────────────────────────────────────

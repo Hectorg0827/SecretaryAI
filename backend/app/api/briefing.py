@@ -3,6 +3,9 @@
 This is the first *partial* v1 briefing endpoint. It does not claim that
 opportunities, actions taken, or real-time provider state were inspected.
 No live connector calls, outbound messages, or action execution occur.
+
+GET /weekly returns the stored weekly leadership report written by
+tasks/weekly_report.py, plus the outcome of its latest run.
 """
 from __future__ import annotations
 
@@ -18,6 +21,9 @@ from app.domain.briefing_contract import (
 )
 from app.domain.briefing_wire import BriefingTodayResponseV1
 from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness, SnapshotReadUnavailable
+from app.scheduler.weekly_report import (
+    WeeklyReportInvalid, WeeklyReportResponseV1, read_weekly_report,
+)
 
 router = APIRouter()
 
@@ -169,4 +175,27 @@ async def get_today_briefing(
         raise HTTPException(
             status_code=503,
             detail="Company briefing source unavailable or stale",
+        ) from exc
+
+
+@router.get("/weekly", response_model=WeeklyReportResponseV1)
+async def get_weekly_report(
+    user: dict = Depends(require_permission("view_financials")),
+    db=Depends(get_db),
+):
+    """Latest stored weekly report for the caller's company; owner/manager only."""
+    if user.get("role") not in ("owner", "manager"):
+        raise HTTPException(status_code=403, detail="Weekly report not authorized")
+    company_id = user.get("company_id", "")
+    if not company_id:
+        raise HTTPException(status_code=403, detail="Invalid company session")
+    try:
+        return read_weekly_report(db, company_id)
+    except SnapshotReadUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Weekly report storage unavailable"
+        ) from exc
+    except WeeklyReportInvalid as exc:
+        raise HTTPException(
+            status_code=503, detail="Weekly report unavailable"
         ) from exc

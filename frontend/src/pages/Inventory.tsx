@@ -21,6 +21,46 @@ type InventoryItem = Omit<InventoryAlert, 'stock_status'> & {
 const FILTERS = ['all', 'out_of_stock', 'critical', 'low', 'healthy'] as const;
 type FilterType = typeof FILTERS[number];
 
+// GET /api/inventory returns one page at a time; 200 is the server's maximum.
+export const INVENTORY_PAGE_SIZE = 200;
+const INVENTORY_CHANGED = 'Inventory changed while it was loading. Please try again.';
+
+type InventoryPage = { items: InventoryItem[]; total: number; offset?: number; limit?: number };
+
+/**
+ * Read every page of GET /api/inventory. Any failed or inconsistent page fails
+ * the whole read, so the page never presents part of the list as all of it.
+ */
+export async function loadAllInventory(
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<InventoryItem[]> {
+  const all: InventoryItem[] = [];
+  const seen = new Set<string>();
+  let expectedTotal: number | null = null;
+  for (;;) {
+    const page = await api.get<InventoryPage>(
+      `/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=${all.length}`,
+    );
+    if (!page || !Array.isArray(page.items) || !Number.isSafeInteger(page.total) || page.total < 0) {
+      throw new Error('The inventory response was incomplete.');
+    }
+    if (expectedTotal === null) expectedTotal = page.total;
+    // A changed total or a repeated product means the list moved between pages.
+    if (page.total !== expectedTotal) throw new Error(INVENTORY_CHANGED);
+    for (const item of page.items) {
+      if (item.item_id) {
+        if (seen.has(item.item_id)) throw new Error(INVENTORY_CHANGED);
+        seen.add(item.item_id);
+      }
+      all.push(item);
+    }
+    if (all.length > expectedTotal) throw new Error(INVENTORY_CHANGED);
+    if (all.length === expectedTotal) return all;
+    if (page.items.length === 0) throw new Error(INVENTORY_CHANGED);
+    onProgress?.(all.length, expectedTotal);
+  }
+}
+
 function InventoryRow({ alert, onDraftPO, onForecast, canDraftPO, drafting }: {
   alert: InventoryItem;
   onDraftPO: (id: string, name: string) => void;
@@ -85,6 +125,8 @@ export function Inventory() {
   const [items,    setItems]    = useState<InventoryItem[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [reload, setReload] = useState(0);
   const [forecastItem, setForecastItem] = useState<{ id: string; name: string } | null>(null);
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState<FilterType>('all');
@@ -92,15 +134,22 @@ export function Inventory() {
   const { canDraftPO } = useAuth();
 
   useEffect(() => {
-    api.inventory.list()
-      .then((r) => setItems(r.items ?? []))
+    let current = true;
+    setLoading(true);
+    setLoadError(null);
+    setProgress(null);
+    loadAllInventory((loaded, total) => { if (current) setProgress({ loaded, total }); })
+      .then((all) => { if (current) setItems(all); })
       .catch((err: unknown) => {
-        // A failed read is an outage, never an empty "all healthy" list.
+        if (!current) return;
+        // A failed read is an outage, never an empty "all healthy" list, and
+        // a partly loaded list is never shown as the whole inventory.
         setItems([]);
-        setLoadError(err instanceof Error ? err.message : 'Inventory is unavailable right now.');
+        setLoadError(err instanceof Error && err.message ? err.message : 'Inventory is unavailable right now.');
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [reload]);
 
   const draftPO = async (id: string, name: string) => {
     setDrafting(id);
@@ -135,8 +184,10 @@ export function Inventory() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Inventory</h1>
             <p className="text-sm text-slate-400 mt-0.5">
-              {items.length} products
-              {criticalCount > 0 && <span className="text-orange-600 font-medium ml-1">· {criticalCount} critical</span>}
+              {loading || loadError ? 'Product count not available yet' : `${items.length} products`}
+              {!loading && !loadError && criticalCount > 0 && (
+                <span className="text-orange-600 font-medium ml-1">· {criticalCount} critical</span>
+              )}
             </p>
           </div>
           <div className="relative">
@@ -163,7 +214,7 @@ export function Inventory() {
                   : 'text-slate-500 hover:bg-slate-100',
               )}
             >
-              {f === 'all' ? 'All' : STATUS_CFG[f].label} ({counts[f] ?? 0})
+              {f === 'all' ? 'All' : STATUS_CFG[f].label}{!loading && !loadError && ` (${counts[f] ?? 0})`}
             </button>
           ))}
         </div>
@@ -172,14 +223,26 @@ export function Inventory() {
       {/* Table */}
       <div className="flex-1 overflow-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-40 text-slate-400 text-sm">
-            <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+          <div role="status" className="flex items-center justify-center h-40 text-slate-400 text-sm">
+            <Loader2 size={16} className="animate-spin mr-2" />
+            {progress
+              ? `Loading products… ${progress.loaded.toLocaleString()} of ${progress.total.toLocaleString()}`
+              : 'Loading…'}
           </div>
         ) : loadError ? (
           <div className="p-6">
             <div role="alert" className="flex gap-2 items-start rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
-              <span>Inventory could not be loaded: {loadError}</span>
+              <div className="space-y-1">
+                <p>Inventory could not be loaded: {loadError}</p>
+                <button
+                  type="button"
+                  onClick={() => setReload((n) => n + 1)}
+                  className="font-medium underline hover:text-red-800"
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           </div>
         ) : filtered.length === 0 ? (

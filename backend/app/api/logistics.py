@@ -1569,6 +1569,9 @@ async def get_pipeline_status(
     Get the current stage and summary for a procurement cycle.
     Data is fetched from the procurement_cycles table.
     """
+    # Same audience as the other purchasing reads: sales reps hold
+    # view_inventory but must not read purchase-order pipelines.
+    _require_purchasing_employee(user)
     if not po_number or len(po_number) > 100:
         raise HTTPException(status_code=422, detail="Invalid PO number")
     try:

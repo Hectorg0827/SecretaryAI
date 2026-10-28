@@ -155,6 +155,49 @@ export interface BriefingTodayResponseV1 {
   snapshot_age_seconds: number;
 }
 
+/** Source figures the weekly report was written from (GET /api/briefing/weekly). */
+export interface WeeklyReportFiguresV1 {
+  sales_this_week: number;
+  invoices_this_week: number;
+  sales_prior_week: number;
+  invoices_prior_week: number;
+  sales_30d: number;
+  accounts_total: number;
+  accounts_slowing: number;
+  accounts_at_risk: number;
+  accounts_dormant: number;
+  accounts_unscored: number;
+  inventory_critical: number;
+  inventory_low: number;
+  inventory_unassessed: number;
+}
+
+export interface WeeklyReportV1 {
+  status: 'ready';
+  report_text: string;
+  /** Calendar dates (YYYY-MM-DD), inclusive */
+  period_start: string;
+  period_end: string;
+  language: string;
+  source_quality: 'partial';
+  figures: WeeklyReportFiguresV1;
+  generated_at: string | null;
+}
+
+export interface WeeklyReportRunV1 {
+  status: 'succeeded' | 'failed';
+  reason: 'source_unavailable' | 'generation_failed' | 'storage_failed' | null;
+  period_start: string;
+  period_end: string;
+  attempted_at: string | null;
+}
+
+/** Latest stored weekly report and the outcome of the latest run; either may be null. */
+export interface WeeklyReportResponseV1 {
+  report: WeeklyReportV1 | null;
+  last_run: WeeklyReportRunV1 | null;
+}
+
 export interface InventoryAlert {
   item_id: string;
   product_name: string;
@@ -341,6 +384,7 @@ export const api = {
 
   briefing: {
     today: () => api.get<BriefingTodayResponseV1>('/api/briefing/today'),
+    weekly: () => api.get<WeeklyReportResponseV1>('/api/briefing/weekly'),
   },
 
   emails: {

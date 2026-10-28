@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -292,6 +292,14 @@ class SeasonalIndexRequest(BaseModel):
         dates = [item.date for item in self.daily_sales]
         if dates != sorted(set(dates)):
             raise ValueError("Sales observations must have unique ascending dates")
+        # The index builder buckets observations by position (day N of the
+        # series), so a skipped calendar day would silently shift every later
+        # week. Require one entry per day; a day without sales is an explicit 0.
+        if (dates[-1] - dates[0]).days + 1 != len(dates):
+            raise ValueError(
+                "Sales history needs one entry for every calendar day with no gaps; "
+                "enter 0 for days without sales"
+            )
         return self
 
 
@@ -385,6 +393,25 @@ def _read_purchasing_rows(query) -> list[dict]:
     except Exception as exc:
         log.error("Purchasing read temporarily unavailable (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Purchasing records unavailable") from exc
+
+
+@router.get("/warehouses")
+async def list_purchasing_warehouses(
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Tenant warehouses a draft PO may target (read-only picker data)."""
+    _require_purchasing_employee(user)
+    rows = _read_purchasing_rows(
+        db.table("stock_warehouses")
+          .select("id,code,name")
+          .eq("company_id", user["company_id"])
+          .order("code")
+          .limit(201)
+    )
+    if len(rows) > 200:
+        raise HTTPException(status_code=503, detail="Warehouse list exceeds supported scope")
+    return {"warehouses": rows, "count": len(rows)}
 
 
 @router.get("/orders")
@@ -1470,19 +1497,37 @@ async def build_seasonal_indices(
     """
     lm = _get_logistics_module(user, db)
 
-    # Convert [{date, units}] → [(date_str, float)]
-    daily_sales = [(d.date.isoformat(), d.units) for d in request.daily_sales]
-    indices = lm.build_seasonal_indices(request.sku, daily_sales)
-
+    # The builder takes the gap-free daily quantities oldest first (validated
+    # above); passing (date, units) pairs made every full-history request fail.
+    first_day = request.daily_sales[0].date
+    day_count = len(request.daily_sales)
+    built = lm.build_seasonal_indices(request.sku, [d.units for d in request.daily_sales])
+    quality = built.get("status")
+    raw = built.get("indices")
+    # Insufficient or all-zero history yields placeholder 1.0 multipliers from
+    # the builder; never present those as a learned seasonal pattern.
+    learned = (
+        quality in ("provisional", "confirmatory", "confident")
+        and isinstance(raw, list) and len(raw) == 52
+    )
+    indices = list(raw) if learned else []
     return {
         "sku": request.sku,
         "status": "analysis_only",
-        "modeled_data_quality": indices.get("status"),
+        "modeled_data_quality": quality,
         "sales_history_verified": False,
         "historical_learning_persisted": False,
-        "data_months": indices.get("data_months"),
-        "index_count": len(indices.get("indices", {})),
-        "indices": indices.get("indices", {}),
+        "days_available": day_count,
+        "min_days_needed": 182,
+        "data_months": round(day_count / 30.44, 1),
+        "index_count": len(indices),
+        "indices": indices,
+        # Weeks are counted from the first sales date, not calendar week 1.
+        "week_alignment": "counted_from_first_sales_date",
+        "week_start_dates": [
+            (first_day + timedelta(days=7 * week)).isoformat()
+            for week in range(len(indices))
+        ],
     }
 
 
@@ -1524,16 +1569,25 @@ async def get_pipeline_status(
     Get the current stage and summary for a procurement cycle.
     Data is fetched from the procurement_cycles table.
     """
-    result = db.table("procurement_cycles") \
-        .select("*") \
-        .eq("company_id", user["company_id"]) \
-        .eq("po_number", po_number) \
-        .maybe_single().execute()
+    if not po_number or len(po_number) > 100:
+        raise HTTPException(status_code=422, detail="Invalid PO number")
+    try:
+        # postgrest maybe_single() returns None (not an empty response) when
+        # no row matches; a missing cycle is a 404, never a server error.
+        result = db.table("procurement_cycles") \
+            .select("*") \
+            .eq("company_id", user["company_id"]) \
+            .eq("po_number", po_number) \
+            .maybe_single().execute()
+    except Exception as exc:
+        log.error("Procurement cycle read unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Procurement cycle records unavailable") from exc
 
-    if not result.data:
-        raise HTTPException(status_code=404, detail=f"Procurement cycle {po_number!r} not found")
-
-    cycle_data = result.data
+    cycle_data = getattr(result, "data", None) if result is not None else None
+    if not cycle_data:
+        raise HTTPException(status_code=404, detail="Procurement cycle not found")
+    if not isinstance(cycle_data, dict):
+        raise HTTPException(status_code=503, detail="Procurement cycle records unavailable")
     return {
         "po_number": cycle_data.get("po_number"),
         "current_stage": cycle_data.get("current_stage"),

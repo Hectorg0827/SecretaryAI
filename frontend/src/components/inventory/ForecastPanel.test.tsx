@@ -141,7 +141,7 @@ describe('inventory page forecast entry point', () => {
 
   it('lists healthy and alert items and opens a product forecast', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (path: string) => {
-      if (path === '/api/inventory') return { items };
+      if (path === '/api/inventory?limit=200&offset=0') return { items, total: items.length, offset: 0, limit: 200 };
       return forecast();
     });
     const page = await mount(<Inventory />);

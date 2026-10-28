@@ -1,21 +1,30 @@
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { Truck, ClipboardList, FileText, Ship, BarChart3 } from 'lucide-react';
+import { Truck, ClipboardList, FileText, Ship, BarChart3, PackageCheck, Warehouse, Undo2, Wrench } from 'lucide-react';
 
 import { ReorderQueue, ReorderItem } from '../components/logistics/ReorderQueue';
 import { PurchasingRecords } from '../components/logistics/PurchasingRecords';
 import { ShipmentTracker, Shipment } from '../components/logistics/ShipmentTracker';
 import { CostAnalysis, CostVarianceRow } from '../components/logistics/CostAnalysis';
+import { PendingReceipts } from '../components/logistics/PendingReceipts';
+import { StockReconciliation } from '../components/logistics/StockReconciliation';
+import { WarehousePreviews } from '../components/logistics/WarehousePreviews';
+import { ReturnPreview } from '../components/logistics/ReturnPreview';
+import { LogisticsTools } from '../components/logistics/LogisticsTools';
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
-type TabId = 'reorder' | 'pos' | 'shipments' | 'costs';
+type TabId = 'reorder' | 'pos' | 'receiving' | 'warehouse' | 'returns' | 'shipments' | 'costs' | 'tools';
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'reorder',   label: 'Reorder Queue',    icon: ClipboardList },
   { id: 'pos',       label: 'Purchase Orders',  icon: FileText      },
+  { id: 'receiving', label: 'Receiving',         icon: PackageCheck  },
+  { id: 'warehouse', label: 'Warehouse',         icon: Warehouse     },
+  { id: 'returns',   label: 'Returns',           icon: Undo2         },
   { id: 'shipments', label: 'Shipments',         icon: Ship          },
   { id: 'costs',     label: 'Cost Analysis',     icon: BarChart3     },
+  { id: 'tools',     label: 'Customs & Seasonality', icon: Wrench    },
 ];
 
 // ── Empty initial state (no mock data) ───────────────────────────────────────
@@ -54,7 +63,7 @@ export function Logistics() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Logistics Manager</h1>
             <p className="text-sm text-slate-600 mt-0.5">
-              Reordering · Purchase orders · Shipments · Cost analysis
+              Reordering · Purchase orders · Receiving · Warehouse · Returns · Shipments · Costs
             </p>
           </div>
 
@@ -126,6 +135,22 @@ export function Logistics() {
           {activeTab === 'pos' && (
             <PurchasingRecords />
           )}
+
+          {activeTab === 'receiving' && (
+            <div className="p-4 sm:p-6 space-y-6">
+              <p className="text-sm text-slate-600">
+                Record a delivery from its purchase order on the Purchase Orders tab. Deliveries then wait here for approval.
+              </p>
+              <PendingReceipts />
+              <StockReconciliation />
+            </div>
+          )}
+
+          {activeTab === 'warehouse' && <WarehousePreviews />}
+
+          {activeTab === 'returns' && <ReturnPreview />}
+
+          {activeTab === 'tools' && <LogisticsTools />}
 
           {activeTab === 'shipments' && (
             <ShipmentTracker

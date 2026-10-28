@@ -96,11 +96,19 @@ FIELD_CLASSIFICATION: dict[str, DataLevel] = {
 
 
 def classify_field(field_name: str) -> DataLevel:
-    """Lookup data classification for a field name (case-insensitive partial match)."""
+    """Lookup data classification for a field name (case-insensitive partial match).
+
+    When several known fields match (e.g. "price" matches both public_price and
+    contract_price) the most sensitive level wins, so a partial match can never
+    downgrade confidential data to public.
+    """
     fl = field_name.lower()
-    for known_field, level in FIELD_CLASSIFICATION.items():
-        if known_field in fl or fl in known_field:
-            return level
+    matches = [
+        level for known_field, level in FIELD_CLASSIFICATION.items()
+        if known_field in fl or fl in known_field
+    ]
+    if matches:
+        return max(matches)
     return DataLevel.INTERNAL  # default: treat unknown as internal
 
 

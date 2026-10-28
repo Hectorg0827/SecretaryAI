@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -66,14 +66,91 @@ def _invoice_subscription_id(invoice: dict) -> Optional[str]:
             subscription = (parent.get("subscription_details") or {}).get("subscription")
     return subscription.get("id") if isinstance(subscription, dict) else subscription
 
-def _get_or_create_stripe_customer(company_id: str, company_email: str, db) -> Optional[str]:
-    """Return existing stripe_customer_id or create a new Stripe customer."""
+# Plain-language, constant client messages. Provider exception text is never
+# echoed to the client or written to logs: it can carry request IDs, customer
+# identifiers or attacker-influenced strings.
+_PAYMENTS_NOT_SET_UP = "Online payment is not set up yet. Nothing was charged."
+_BILLING_RECORDS_UNAVAILABLE = (
+    "Billing records are unavailable right now. Nothing was charged or changed. "
+    "Please try again in a few minutes."
+)
+_CHECKOUT_PROVIDER_FAILED = (
+    "The payment service could not start checkout. Nothing was charged. "
+    "Please try again in a few minutes."
+)
+_PORTAL_PROVIDER_FAILED = (
+    "The payment service could not open the subscription page. Nothing was changed. "
+    "Please try again in a few minutes."
+)
+# A subscription in these states is still billed by Stripe; a second checkout
+# would start a second, parallel subscription and charge the company twice.
+_BILLED_STATUSES = ("active", "trialing", "past_due")
+
+
+def _require_billing_owner(user: dict = Depends(require_permission("manage_billing"))) -> dict:
+    """Payment changes are owner-only.
+
+    ``require_permission`` lets every role holding ``view_all`` (managers too)
+    pass any check, so the owner role is enforced explicitly as well.
+    """
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Only the account owner can manage billing")
+    return user
+
+
+def _token_company_id(user: dict) -> str:
+    """Tenant comes only from the verified token, never from the request body."""
+    company_id = user.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=400, detail="User has no associated company")
+    return company_id
+
+
+def _return_base_url() -> str:
+    """Where Stripe sends the browser back to. Never guess in production."""
+    if settings.frontend_url:
+        return settings.frontend_url.rstrip("/")
+    if settings.debug:
+        return "http://localhost:5173"
+    log.error("FRONTEND_URL is not set; Stripe return URL unavailable")
+    raise HTTPException(status_code=503, detail=_PAYMENTS_NOT_SET_UP)
+
+
+def _read_rows(query) -> list[dict]:
+    try:
+        rows = query.execute().data
+    except Exception as exc:
+        log.error("Billing database read failed")
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE) from exc
+    # Fail closed: an unreadable result is not "no subscription", which would
+    # let a second checkout through.
+    if not isinstance(rows, list):
+        log.error("Billing database returned an unexpected result")
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
+    return rows
+
+
+def _latest_subscription(company_id: str, db) -> Optional[dict]:
+    rows = _read_rows(
+        db.table("company_subscriptions")
+        .select("status,stripe_customer_id,stripe_subscription_id")
+        .eq("company_id", company_id)
+        .order("created_at", desc=True)
+        .limit(1)
+    )
+    return rows[0] if rows else None
+
+
+def _https_url(value) -> Optional[str]:
+    return value if isinstance(value, str) and value.startswith("https://") else None
+
+
+def _get_or_create_stripe_customer(company_id: str, company_email: str, existing_customer_id: Optional[str]) -> Optional[str]:
+    """Return the company's existing Stripe customer or create a new one."""
     if not _stripe_available:
         return None
-
-    result = db.table("company_subscriptions").select("stripe_customer_id").eq("company_id", company_id).execute()
-    if result.data and result.data[0].get("stripe_customer_id"):
-        return result.data[0]["stripe_customer_id"]
+    if existing_customer_id:
+        return existing_customer_id
 
     customer = _stripe.Customer.create(
         email=company_email,
@@ -134,61 +211,71 @@ async def get_subscription(
 @router.post("/checkout")
 async def create_checkout_session(
     body: CheckoutRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(_require_billing_owner),
     db=Depends(get_db),
 ):
     """
-    Create a Stripe Checkout session for the requested plan.
-    Returns checkout_url and session_id.
-    Falls back to a mock response when Stripe is not configured.
+    Create a Stripe Checkout session for the requested plan (owner only).
+    Returns checkout_url and session_id. Nothing is charged here: the owner
+    confirms and pays on Stripe's page, and the subscription is recorded only
+    when Stripe's signed webhook arrives.
     """
-    company_id = user.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="User has no associated company")
+    company_id = _token_company_id(user)
 
     if body.billing_period not in ("monthly", "yearly"):
-        raise HTTPException(status_code=422, detail="billing_period must be 'monthly' or 'yearly'")
+        raise HTTPException(status_code=422, detail="Choose monthly or yearly billing")
 
-    # Fetch the plan
-    plan_result = db.table("subscription_plans").select("*").eq("id", body.plan_id).execute()
-    if not plan_result.data:
-        raise HTTPException(status_code=404, detail=f"Plan '{body.plan_id}' not found")
-    plan = plan_result.data[0]
-
-    # Mock mode — Stripe not configured
+    # No mock checkout URL: a fake link would look like a working payment flow.
     if not _stripe_available:
-        log.warning("Stripe not configured — returning mock checkout URL")
-        return {
-            "checkout_url": f"https://mock-stripe.example.com/checkout?plan={body.plan_id}&period={body.billing_period}",
-            "session_id": "mock_session_id",
-        }
+        log.warning("Stripe not configured; checkout refused")
+        raise HTTPException(status_code=503, detail=_PAYMENTS_NOT_SET_UP)
+
+    plans = _read_rows(
+        db.table("subscription_plans")
+        .select("id,stripe_price_id_monthly,stripe_price_id_yearly")
+        .eq("id", body.plan_id)
+        .limit(1)
+    )
+    if not plans:
+        raise HTTPException(status_code=404, detail="That plan is not available")
+    plan = plans[0]
 
     price_id = _resolve_price_id(plan, body.billing_period)
     if not price_id:
         raise HTTPException(
             status_code=400,
-            detail=f"No Stripe price configured for plan '{body.plan_id}' ({body.billing_period})",
+            detail="This plan cannot be bought online yet for that billing period",
         )
 
-    # Fetch company email for customer lookup/creation
-    company_result = db.table("companies").select("email,name").eq("id", company_id).execute()
-    company_email = ""
-    if company_result.data:
-        company_email = company_result.data[0].get("email", "")
+    current = _latest_subscription(company_id, db)
+    if current and current.get("stripe_subscription_id") and current.get("status") in _BILLED_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This account already has a subscription. Use Manage subscription "
+                "to change the plan or payment details."
+            ),
+        )
 
-    frontend_url = settings.frontend_url or "http://localhost:5173"
+    # Fetch company email for customer creation
+    companies = _read_rows(db.table("companies").select("email").eq("id", company_id).limit(1))
+    company_email = (companies[0].get("email") or "") if companies else ""
+
+    base_url = _return_base_url()
 
     try:
-        customer_id = _get_or_create_stripe_customer(company_id, company_email, db)
+        customer_id = _get_or_create_stripe_customer(
+            company_id, company_email, (current or {}).get("stripe_customer_id"),
+        )
 
         session_kwargs: dict = {
             "mode": "subscription",
             "line_items": [{"price": price_id, "quantity": 1}],
-            "success_url": f"{frontend_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
-            "cancel_url": f"{frontend_url}/billing/cancel",
+            "success_url": f"{base_url}/settings?billing=success",
+            "cancel_url": f"{base_url}/settings?billing=cancelled",
             "metadata": {
                 "company_id": company_id,
-                "plan_id": body.plan_id,
+                "plan_id": plan["id"],
                 "billing_period": body.billing_period,
             },
         }
@@ -196,54 +283,58 @@ async def create_checkout_session(
             session_kwargs["customer"] = customer_id
 
         session = _stripe.checkout.Session.create(**session_kwargs)
-    except _stripe.StripeError as exc:
-        log.error("Stripe checkout session creation failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Stripe error: {exc.user_message or str(exc)}")
+        checkout_url = _https_url(getattr(session, "url", None))
+        session_id = getattr(session, "id", None)
+    except Exception as exc:
+        log.error("Stripe checkout session creation failed")
+        raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED) from exc
 
-    return {"checkout_url": session.url, "session_id": session.id}
+    if not checkout_url:
+        log.error("Stripe checkout session returned no usable URL")
+        raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED)
+
+    return {"checkout_url": checkout_url, "session_id": session_id}
 
 
 @router.post("/portal")
 async def create_portal_session(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(_require_billing_owner),
     db=Depends(get_db),
 ):
     """
-    Create a Stripe Customer Portal session so users can manage their subscription.
-    Returns portal_url.
+    Create a Stripe Customer Portal session so the owner can manage the
+    subscription and payment details on Stripe. Returns portal_url.
     """
-    company_id = user.get("company_id")
-    if not company_id:
-        raise HTTPException(status_code=400, detail="User has no associated company")
+    company_id = _token_company_id(user)
 
     if not _stripe_available:
-        log.warning("Stripe not configured — returning mock portal URL")
-        return {"portal_url": "https://mock-stripe.example.com/portal"}
+        log.warning("Stripe not configured; portal refused")
+        raise HTTPException(status_code=503, detail=_PAYMENTS_NOT_SET_UP)
 
-    sub_result = (
-        db.table("company_subscriptions")
-        .select("stripe_customer_id")
-        .eq("company_id", company_id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if not sub_result.data or not sub_result.data[0].get("stripe_customer_id"):
-        raise HTTPException(status_code=404, detail="No Stripe customer found for this company")
+    current = _latest_subscription(company_id, db)
+    if not current or not current.get("stripe_customer_id"):
+        raise HTTPException(
+            status_code=404,
+            detail="There is no paid subscription to manage yet. Choose a plan to subscribe.",
+        )
 
-    stripe_customer_id = sub_result.data[0]["stripe_customer_id"]
-    frontend_url = settings.frontend_url or "http://localhost:5173"
+    base_url = _return_base_url()
 
     try:
         portal_session = _stripe.billing_portal.Session.create(
-            customer=stripe_customer_id,
-            return_url=f"{frontend_url}/billing",
+            customer=current["stripe_customer_id"],
+            return_url=f"{base_url}/settings?billing=portal",
         )
-    except _stripe.StripeError as exc:
-        log.error("Stripe portal session creation failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Stripe error: {exc.user_message or str(exc)}")
+        portal_url = _https_url(getattr(portal_session, "url", None))
+    except Exception as exc:
+        log.error("Stripe portal session creation failed")
+        raise HTTPException(status_code=502, detail=_PORTAL_PROVIDER_FAILED) from exc
 
-    return {"portal_url": portal_session.url}
+    if not portal_url:
+        log.error("Stripe portal session returned no usable URL")
+        raise HTTPException(status_code=502, detail=_PORTAL_PROVIDER_FAILED)
+
+    return {"portal_url": portal_url}
 
 
 @router.get("/invoices")
@@ -299,7 +390,7 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
     if settings.secretaryai_deployment_env.strip().lower() == "staging" and event.get("livemode") is not False:
         raise HTTPException(status_code=400, detail="Staging accepts only test-mode Stripe events")
 
-    log.info("Stripe webhook received: %s (id=%s)", event_type, stripe_event_id)
+    log.info("Stripe webhook received")
 
     try:
         if event_type == "checkout.session.completed":
@@ -318,10 +409,10 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
             await _handle_subscription_deleted(event_data, stripe_event_id, db)
 
         else:
-            log.debug("Stripe webhook: unhandled event type %s", event_type)
+            log.debug("Stripe webhook: unhandled event type")
 
     except Exception as exc:
-        log.error("Stripe webhook handler error for %s: %s", event_type, exc, exc_info=True)
+        log.error("Stripe webhook handler failed")
         # Acknowledge only successful handling so Stripe retries transient errors.
         raise HTTPException(status_code=500, detail="Webhook processing failed") from exc
 
@@ -394,7 +485,7 @@ async def _handle_invoice_paid(invoice: dict, stripe_event_id: str, db) -> None:
 
     company_id = _company_id_from_customer(stripe_customer_id, db)
     if not company_id:
-        log.warning("invoice.paid: no company found for customer %s", stripe_customer_id)
+        log.warning("invoice.paid: no company found for customer")
         return
 
     # Refresh period dates
@@ -433,7 +524,7 @@ async def _handle_invoice_payment_failed(invoice: dict, stripe_event_id: str, db
 
     company_id = _company_id_from_customer(stripe_customer_id, db)
     if not company_id:
-        log.warning("invoice.payment_failed: no company found for customer %s", stripe_customer_id)
+        log.warning("invoice.payment_failed: no company found for customer")
         return
 
     now = datetime.now(tz=timezone.utc).isoformat()
@@ -459,7 +550,7 @@ async def _handle_subscription_updated(stripe_sub: dict, stripe_event_id: str, d
 
     company_id = _company_id_from_customer(stripe_customer_id, db)
     if not company_id:
-        log.warning("customer.subscription.updated: no company found for customer %s", stripe_customer_id)
+        log.warning("customer.subscription.updated: no company found for customer")
         return
 
     status_map = {
@@ -524,7 +615,7 @@ async def _handle_subscription_deleted(stripe_sub: dict, stripe_event_id: str, d
 
     company_id = _company_id_from_customer(stripe_customer_id, db)
     if not company_id:
-        log.warning("customer.subscription.deleted: no company found for customer %s", stripe_customer_id)
+        log.warning("customer.subscription.deleted: no company found for customer")
         return
 
     now = datetime.now(tz=timezone.utc).isoformat()

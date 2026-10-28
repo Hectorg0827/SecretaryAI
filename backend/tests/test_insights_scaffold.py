@@ -49,8 +49,14 @@ def test_row_value_reads_dicts_and_objects():
 
 
 def test_every_insight_module_is_mounted_under_the_paid_api_prefix():
+    import importlib
+
+    from fastapi.routing import iter_route_contexts
+
     from app.main import app
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    # Included routers stay nested in FastAPI 0.143; walk the full tree.
+    paths = {getattr(ctx, "path", "") for ctx in iter_route_contexts(app.routes)}
     for name in MOUNTED:
-        assert any(p.startswith("/api/insights/") for p in paths), name
+        prefix = "/api/insights" + importlib.import_module(f"app.api.insights.{name}").PREFIX
+        assert any(p == prefix or p.startswith(prefix + "/") for p in paths), name

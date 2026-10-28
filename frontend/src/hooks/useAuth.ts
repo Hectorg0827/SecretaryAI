@@ -14,19 +14,21 @@
 export type Role = 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
 
 // Mirrors backend/app/auth/rbac.py ROLE_PERMISSIONS exactly
-const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
+export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   owner: new Set([
     'view_all', 'manage_users', 'approve_actions', 'manage_billing',
-    'view_financials', 'trigger_actions',
+    'view_financials', 'trigger_actions', 'run_reports', 'draft_purchase_orders',
   ]),
   manager: new Set([
     'view_all', 'approve_actions', 'trigger_actions', 'view_financials',
+    'run_reports', 'draft_purchase_orders',
   ]),
   sales_rep: new Set([
     'view_own_accounts', 'view_inventory',
   ]),
   back_office: new Set([
     'view_inventory', 'view_orders', 'run_reports', 'view_customers',
+    'draft_purchase_orders',
   ]),
   viewer: new Set([
     'view_dashboard',

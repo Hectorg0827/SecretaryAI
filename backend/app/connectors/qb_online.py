@@ -38,14 +38,12 @@ class QBOnlineAdapter(QuickBooksAdapter):
         refresh_token: str,
         realm_id: str,
         on_token_refresh=None,
-        environment: str | None = None,
     ):
-        # The sandbox and production REST APIs use different hostnames.
-        # Resolve from validated deployment settings unless a test explicitly
-        # selects an environment; never infer it from a company realm ID.
-        if environment is None:
-            from app.config import get_settings
-            environment = get_settings().intuit_environment
+        # Never accept a caller-supplied environment override: a staging caller
+        # must not be able to send OAuth-bearing requests to a production API.
+        # The deployment setting is validated at startup and is authoritative.
+        from app.config import get_settings
+        environment = get_settings().intuit_environment
         if environment not in ("sandbox", "production"):
             raise ValueError("Unsupported Intuit environment")
         self._base_url = (

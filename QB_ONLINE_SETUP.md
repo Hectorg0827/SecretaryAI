@@ -242,7 +242,7 @@ from app.config import get_settings
 tail -f logs/app.log
 
 # Verify internet connection
-curl https://quickbooks.api.intuit.com/v3/
+curl -I https://sandbox-quickbooks.api.intuit.com/v3/company/\n# A 401/404 without OAuth can still confirm network reachability.\n# Use https://quickbooks.api.intuit.com/v3/company/ only in production.
 
 # Check credentials in .env
 echo $INTUIT_CLIENT_ID  # Should not be empty

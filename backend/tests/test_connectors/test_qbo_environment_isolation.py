@@ -12,10 +12,10 @@ from app.connectors.qb_online import (
 )
 
 
-def _adapter(environment: str | None = None) -> QBOnlineAdapter:
+def _adapter() -> QBOnlineAdapter:
     return QBOnlineAdapter(
         "test-client", "test-secret", "test-access", "test-refresh",
-        "test-realm", environment=environment,
+        "test-realm",
     )
 
 
@@ -40,13 +40,20 @@ async def test_all_qbo_request_paths_use_the_selected_environment(
             json={"QueryResponse": {"totalCount": 0}, "Item": {"Id": "i1"}},
         )
 
+    from app import config
+
+    monkeypatch.setattr(
+        config,
+        "get_settings",
+        lambda: SimpleNamespace(intuit_environment=environment),
+    )
     transport = httpx.MockTransport(handler)
     real_async_client = httpx.AsyncClient
     monkeypatch.setattr(
         httpx, "AsyncClient",
         lambda **kwargs: real_async_client(transport=transport, **kwargs),
     )
-    qb = _adapter(environment)
+    qb = _adapter()
     await qb._query("SELECT COUNT(*) FROM Customer")
     await qb._get_entity("item", "i1")
     await qb._post("invoice", {"CustomerRef": {"value": "test"}})
@@ -69,6 +76,28 @@ def test_default_qbo_environment_comes_from_deployment_settings(monkeypatch):
 
 
 @pytest.mark.parametrize("invalid", ["", "staging", "SANDBOX", "test"])
-def test_unrecognized_qbo_environment_fails_closed(invalid):
+def test_unrecognized_qbo_environment_fails_closed(monkeypatch, invalid):
+    from app import config
+
+    monkeypatch.setattr(
+        config, "get_settings",
+        lambda: SimpleNamespace(intuit_environment=invalid),
+    )
     with pytest.raises(ValueError, match="Unsupported Intuit environment"):
-        _adapter(invalid)
+        _adapter()
+
+
+def test_runtime_cannot_override_staging_environment(monkeypatch):
+    """Even a caller requesting production cannot bypass validated settings."""
+    from app import config
+
+    monkeypatch.setattr(
+        config, "get_settings",
+        lambda: SimpleNamespace(intuit_environment="sandbox"),
+    )
+    with pytest.raises(TypeError, match="environment"):
+        QBOnlineAdapter(
+            "client", "secret", "access", "refresh", "realm",
+            environment="production",
+        )
+    assert _adapter()._base_url == QBO_SANDBOX_BASE

@@ -156,7 +156,8 @@ Once connected, try these in SecretaryAI:
                        ↓ REST API (OAuth token)
 ┌─────────────────────────────────────────────────────┐
 │ QB Online API                                       │
-│ https://quickbooks.api.intuit.com/v3/company/...   │
+│ Sandbox: sandbox-quickbooks.api.intuit.com      │
+│ Production: quickbooks.api.intuit.com          │
 │ - Fetch customers, invoices, inventory             │
 │ - Create payments, purchase orders                 │
 └─────────────────────────────────────────────────────┘

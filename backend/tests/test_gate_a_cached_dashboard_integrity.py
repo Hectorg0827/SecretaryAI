@@ -130,6 +130,19 @@ async def test_cache_database_outage_fails_before_provider_sync():
     adapter.get_emails.assert_not_awaited()
 
 
+def test_missing_snapshot_with_postgrest_none_result_is_not_an_outage():
+    """postgrest-py 0.16.x returns None for a missing maybe_single row."""
+    query = MagicMock()
+    query.select.return_value = query
+    query.eq.return_value = query
+    query.maybe_single.return_value = query
+    query.execute.return_value = None
+    db = MagicMock()
+    db.table.return_value = query
+
+    assert read_snapshot(db, "tenant-a", "dashboard_summary") is None
+
+
 @pytest.mark.asyncio
 async def test_briefing_cache_outage_is_explicit_503():
     with patch.object(

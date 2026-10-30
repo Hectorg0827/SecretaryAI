@@ -156,7 +156,7 @@ PAID = [
     "/api/chat", "/api/dashboard", "/api/briefing", "/api/accounts", "/api/inventory",
     "/api/actions", "/api/agent", "/api/notifications", "/api/inbox",
     "/api/workflows", "/api/feed", "/api/computer-use", "/api/logistics",
-    "/api/compliance",
+    "/api/compliance", "/api/insights",
 ]
 
 # Free on purpose. Each entry would break something specific if gated.

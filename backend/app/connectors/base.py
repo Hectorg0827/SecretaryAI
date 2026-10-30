@@ -14,7 +14,10 @@ class Customer:
     phone: Optional[str]
     state: Optional[str]
     balance: Decimal
-    total_sales: Decimal
+    # Lifetime/period sales are not part of a QuickBooks customer record.
+    # None means "not observed"; compute sales from invoices instead. Never
+    # fill this from a balance field (money owed is not money sold).
+    total_sales: Optional[Decimal] = None
 
 
 @dataclass

@@ -379,6 +379,10 @@ def read_snapshot(db, company_id: str, report_type: str) -> dict | None:
             .maybe_single()
             .execute()
         )
+        # postgrest-py 0.16.x returns None (rather than a response with
+        # data=None) when maybe_single() finds no matching row.
+        if result is None:
+            return None
         return result.data or None
     except Exception as exc:
         log.error("Failed to read dashboard snapshot")

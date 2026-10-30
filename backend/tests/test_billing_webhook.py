@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -17,10 +17,19 @@ def webhook(monkeypatch):
     app = FastAPI()
     app.include_router(billing.router, prefix="/api/billing")
     db = MagicMock()
+    db.rpc.return_value.execute.return_value.data = {"duplicate": False, "applied": True}
+    db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        {"company_id": "00000000-0000-4000-8000-000000000001"},
+    ]
     app.dependency_overrides[billing.get_db] = lambda: db
     monkeypatch.setattr(billing, "_stripe_available", True)
     monkeypatch.setattr(billing.settings, "stripe_webhook_secret", "whsec_synthetic")
     monkeypatch.setattr(billing.settings, "secretaryai_deployment_env", "staging")
+    monkeypatch.setattr(billing._stripe.Subscription, "retrieve", MagicMock(return_value={
+        "id": "sub_synthetic", "customer": "cus_synthetic", "status": "active",
+        "items": {"data": [{"current_period_start": 1700000000,
+                            "current_period_end": 1702592000}]},
+    }))
     return TestClient(app), db
 
 
@@ -48,11 +57,13 @@ def event(kind="customer.subscription.updated", **changes):
 
 def test_signed_endive_subscription_updates_periods(webhook, monkeypatch):
     client, db = webhook
-    monkeypatch.setattr(billing, "_company_id_from_customer", lambda *args: "company-synthetic")
     assert send(client, event()).status_code == 200
-    update = db.table.return_value.update.call_args.args[0]
-    assert update["current_period_start"] == "2023-11-14T22:13:20+00:00"
-    assert update["current_period_end"] == "2023-12-14T22:13:20+00:00"
+    name, update = db.rpc.call_args.args
+    assert name == "billing_apply_stripe_event"
+    assert update["p_period_start"] == "2023-11-14T22:13:20+00:00"
+    assert update["p_period_end"] == "2023-12-14T22:13:20+00:00"
+    assert update["p_status"] == "active"
+    assert update["p_company_id"] == "00000000-0000-4000-8000-000000000001"
 
 
 @pytest.mark.parametrize("livemode", [True, None])
@@ -69,8 +80,8 @@ def test_bad_signature_rejected_without_database_writes(webhook):
 
 
 def test_processing_failure_is_retried(webhook, monkeypatch):
-    client, _ = webhook
-    monkeypatch.setattr(billing, "_handle_subscription_updated", AsyncMock(side_effect=RuntimeError("unavailable")))
+    client, db = webhook
+    db.rpc.return_value.execute.side_effect = RuntimeError("unavailable")
     response = send(client, event())
     assert response.status_code == 500
     assert response.json() == {"detail": "Webhook processing failed"}
@@ -99,16 +110,42 @@ def test_invoice_parent_discriminator_checked():
     assert billing._invoice_subscription_id({"parent": {"type": "quote_details", "subscription_details": {"subscription": "sub_wrong"}}}) is None
 
 
-def test_event_storage_failure_is_not_silenced():
-    db = MagicMock()
-    db.table.return_value.insert.return_value.execute.side_effect = RuntimeError("database unavailable")
-    with pytest.raises(RuntimeError):
-        billing._record_billing_event(db, "company", "invoice.paid", 1, "evt", {})
+def test_replayed_webhook_is_processed_through_atomic_ledger(webhook):
+    client, db = webhook
+    assert send(client, event()).status_code == 200
+    db.rpc.return_value.execute.return_value.data = {"duplicate": True, "applied": False}
+    assert send(client, event()).status_code == 200
+    assert db.rpc.call_count == 2
+    assert all(c.args[0] == "billing_apply_stripe_event" for c in db.rpc.call_args_list)
 
 
-def test_duplicate_event_violations_are_safe_to_retry():
-    db = MagicMock()
-    error = RuntimeError("duplicate")
-    error.code = "23505"
-    db.table.return_value.insert.return_value.execute.side_effect = error
-    billing._record_billing_event(db, "company", "invoice.paid", 1, "evt", {})
+def test_out_of_order_failure_reconciles_current_stripe_status(webhook):
+    client, db = webhook
+    failing_invoice = event("invoice.payment_failed")
+    failing_invoice["data"]["object"] = {
+        "id": "in_old", "customer": "cus_synthetic", "subscription": "sub_synthetic",
+        "amount_due": 24900,
+    }
+    # Stripe's *current* subscription is active, even though the old invoice
+    # failure is being retried. Never blindly write past_due from the event.
+    assert send(client, failing_invoice).status_code == 200
+    assert db.rpc.call_args.args[1]["p_status"] == "active"
+    assert db.rpc.call_args.args[1]["p_amount_usd"] == 249
+
+
+def test_invoice_that_arrives_before_checkout_requests_retry(webhook):
+    client, db = webhook
+    db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+    invoice = event("invoice.paid")
+    invoice["data"]["object"] = {
+        "id": "in_early", "customer": "cus_synthetic", "subscription": "sub_synthetic",
+    }
+    assert send(client, invoice).status_code == 500
+    db.rpc.assert_not_called()
+
+
+def test_webhook_rejects_inconsistent_stripe_subscription_identity(webhook):
+    client, db = webhook
+    billing._stripe.Subscription.retrieve.return_value["customer"] = "cus_other"
+    assert send(client, event()).status_code == 500
+    db.rpc.assert_not_called()

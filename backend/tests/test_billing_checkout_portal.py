@@ -5,6 +5,8 @@ test can reach Stripe, create a customer or start a real payment.
 """
 import ast
 import logging
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -50,9 +52,44 @@ class FakeDB:
     def __init__(self, **rows):
         self.rows = rows
         self.queries: list[tuple[str, tuple]] = []
+        self.rpc_calls = []
+        self.checkout_attempt = None
+        self.lock = threading.Lock()
 
     def table(self, name):
         return FakeQuery(self, name)
+
+    def rpc(self, name, params):
+        with self.lock:
+            self.rpc_calls.append((name, params))
+            if name == "billing_reserve_checkout":
+                if self.checkout_attempt is None:
+                    self.checkout_attempt = {
+                        "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000001",
+                        "stripe_customer_id": None,
+                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                    }
+                result = dict(self.checkout_attempt)
+            elif name == "billing_finalize_checkout":
+                if self.checkout_attempt and params["p_attempt_id"] == self.checkout_attempt["attempt_id"]:
+                    self.checkout_attempt.update({
+                        "state": "ready", "stripe_session_id": params["p_session_id"],
+                        "checkout_url": params["p_checkout_url"],
+                        "stripe_customer_id": params["p_customer_id"],
+                    })
+                    result = True
+                else:
+                    result = False
+            elif name == "billing_rotate_expired_checkout":
+                result = True
+                self.checkout_attempt = {
+                    "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000002",
+                    "stripe_customer_id": None,
+                    "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                }
+            else:
+                raise AssertionError(f"Unexpected RPC {name}")
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=result))
 
     def companies_queried(self):
         """Every tenant id used to filter a company-scoped table."""
@@ -69,7 +106,8 @@ def fake_stripe():
         Customer=SimpleNamespace(create=MagicMock(return_value={"id": "cus_new"})),
         checkout=SimpleNamespace(Session=SimpleNamespace(create=MagicMock(
             return_value=SimpleNamespace(url="https://checkout.stripe.com/c/pay/cs_test_synthetic",
-                                         id="cs_test_synthetic")))),
+                                         id="cs_test_synthetic")),
+            retrieve=MagicMock(return_value=SimpleNamespace(status="open")))),
         billing_portal=SimpleNamespace(Session=SimpleNamespace(create=MagicMock(
             return_value=SimpleNamespace(url="https://billing.stripe.com/p/session/test_synthetic")))),
     )
@@ -135,7 +173,11 @@ def test_owner_checkout_returns_the_provider_url(stripe):
     assert kwargs["success_url"] == f"{FRONTEND}/settings?billing=success"
     assert kwargs["cancel_url"] == f"{FRONTEND}/settings?billing=cancelled"
     assert kwargs["customer"] == "cus_new"
-    stripe.Customer.create.assert_called_once_with(email="owner@a.example", metadata={"company_id": "tenant-a"})
+    assert kwargs["idempotency_key"] == "secretaryai-checkout-00000000-0000-4000-8000-000000000001"
+    assert kwargs["metadata"]["checkout_attempt_id"] == "00000000-0000-4000-8000-000000000001"
+    stripe.Customer.create.assert_called_once_with(
+        email="owner@a.example", metadata={"company_id": "tenant-a"},
+        idempotency_key="secretaryai-customer-00000000-0000-4000-8000-000000000001")
 
 
 def test_existing_customer_is_reused_for_a_new_subscription(stripe):
@@ -156,9 +198,77 @@ def test_checkout_company_comes_only_from_the_token(stripe):
     assert response.status_code == 200, response.text
     assert stripe.checkout.Session.create.call_args.kwargs["metadata"] == {
         "company_id": "tenant-a", "plan_id": "growth", "billing_period": "monthly",
+        "checkout_attempt_id": "00000000-0000-4000-8000-000000000001",
     }
     assert stripe.Customer.create.call_args.kwargs["metadata"] == {"company_id": "tenant-a"}
     assert db.companies_queried() == {"tenant-a"}
+
+
+def test_repeated_checkout_reuses_verified_open_session_without_another_create(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    first = checkout(client)
+    second = checkout(client)
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    stripe.checkout.Session.create.assert_called_once()
+    stripe.Customer.create.assert_called_once()
+    stripe.checkout.Session.retrieve.assert_called_once_with("cs_test_synthetic")
+
+
+def test_expired_checkout_is_replaced_only_after_stripe_confirms_it(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    assert checkout(client).status_code == 200
+    stripe.checkout.Session.retrieve.return_value = SimpleNamespace(status="expired")
+    assert checkout(client).status_code == 200
+    assert stripe.checkout.Session.create.call_count == 2
+    keys = [call.kwargs["idempotency_key"] for call in stripe.checkout.Session.create.call_args_list]
+    assert len(set(keys)) == 2
+    assert any(name == "billing_rotate_expired_checkout" for name, _ in db.rpc_calls)
+
+
+def test_completed_checkout_is_not_reopened(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    assert checkout(client).status_code == 200
+    stripe.checkout.Session.retrieve.return_value = SimpleNamespace(status="complete")
+    assert checkout(client).status_code == 409
+    stripe.checkout.Session.create.assert_called_once()
+
+
+def test_checkout_fails_closed_when_reservation_rpc_unavailable(stripe, monkeypatch):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    def offline(*_args):
+        raise RuntimeError(LEAK)
+    monkeypatch.setattr(db, "rpc", offline)
+    response = checkout(client_for(db))
+    assert response.status_code == 503
+    assert "LEAKED" not in response.text
+    stripe.Customer.create.assert_not_called()
+    stripe.checkout.Session.create.assert_not_called()
+
+
+def test_old_uncertain_reservation_cannot_outlive_stripe_idempotency_window(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    db.checkout_attempt = {
+        "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000001",
+        "created_at": (datetime.now(tz=timezone.utc) - timedelta(hours=21)).isoformat(),
+    }
+    response = checkout(client_for(db))
+    assert response.status_code == 409
+    stripe.Customer.create.assert_not_called()
+    stripe.checkout.Session.create.assert_not_called()
+
+
+def test_concurrent_checkout_uses_only_one_stable_idempotency_key(stripe):
+    from concurrent.futures import ThreadPoolExecutor
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(pool.map(lambda _: checkout(client_for(db)), range(4)))
+    assert all(r.status_code in (200, 409) for r in responses)
+    keys = {call.kwargs["idempotency_key"] for call in stripe.checkout.Session.create.call_args_list}
+    assert len(keys) == 1, "Simultaneous requests must use one Stripe idempotency key"
 
 
 @pytest.mark.parametrize("status", ["active", "trialing", "past_due"])

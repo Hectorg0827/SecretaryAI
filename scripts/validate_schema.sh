@@ -45,8 +45,10 @@ echo '✓ Legacy module security checks passed.'
 
 echo '── validating legacy billing/compliance migrations in disposable PostgreSQL'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250325000001_billing.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261030013756_stripe_billing_safety.sql
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250325000003_compliance.sql
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_billing_compliance_security.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_stripe_billing_safety.sql
 echo '✓ Billing and compliance schema RLS checks passed.'
 
 echo '── validating internal browser, ingestion and computer-use queues'

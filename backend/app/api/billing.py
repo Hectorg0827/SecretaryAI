@@ -1,7 +1,8 @@
 """Billing and subscription management API."""
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -145,7 +146,9 @@ def _https_url(value) -> Optional[str]:
     return value if isinstance(value, str) and value.startswith("https://") else None
 
 
-def _get_or_create_stripe_customer(company_id: str, company_email: str, existing_customer_id: Optional[str]) -> Optional[str]:
+def _get_or_create_stripe_customer(
+    company_id: str, company_email: str, existing_customer_id: Optional[str], attempt_id: str,
+) -> Optional[str]:
     """Return the company's existing Stripe customer or create a new one."""
     if not _stripe_available:
         return None
@@ -155,8 +158,22 @@ def _get_or_create_stripe_customer(company_id: str, company_email: str, existing
     customer = _stripe.Customer.create(
         email=company_email,
         metadata={"company_id": company_id},
+        idempotency_key=f"secretaryai-customer-{attempt_id}",
     )
     return customer["id"]
+
+
+def _billing_rpc(db, name: str, params: dict) -> dict | bool:
+    """Call the atomic, service-role-only billing functions; fail closed if absent."""
+    try:
+        result = db.rpc(name, params).execute().data
+    except Exception as exc:
+        log.error("Atomic billing database operation failed")
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE) from exc
+    if isinstance(result, bool) or isinstance(result, dict):
+        return result
+    log.error("Atomic billing database returned an unexpected result")
+    raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
 
 
 def _resolve_price_id(plan: dict, billing_period: str) -> Optional[str]:
@@ -258,6 +275,51 @@ async def create_checkout_session(
             ),
         )
 
+    reservation = _billing_rpc(db, "billing_reserve_checkout", {
+        "p_company_id": company_id, "p_plan_id": plan["id"],
+        "p_billing_period": body.billing_period,
+    })
+    if not isinstance(reservation, dict):
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
+    if reservation.get("state") in ("subscribed", "completed"):
+        raise HTTPException(status_code=409, detail="This account already has a subscription. Use Manage subscription.")
+    if reservation.get("state") == "different_plan":
+        raise HTTPException(status_code=409, detail="Finish or cancel the existing checkout before choosing another plan.")
+    if reservation.get("state") == "ready":
+        previous_id = reservation.get("stripe_session_id")
+        try:
+            previous = _stripe.checkout.Session.retrieve(previous_id)
+            previous_status = getattr(previous, "status", None)
+        except Exception as exc:
+            log.error("Stripe checkout verification failed")
+            raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED) from exc
+        if previous_status == "open" and _https_url(reservation.get("checkout_url")):
+            return {"checkout_url": reservation["checkout_url"], "session_id": previous_id}
+        if previous_status != "expired":
+            raise HTTPException(status_code=409, detail="A checkout is already being processed. Please try again shortly.")
+        rotated = _billing_rpc(db, "billing_rotate_expired_checkout", {
+            "p_company_id": company_id, "p_session_id": previous_id,
+        })
+        if rotated is not True:
+            raise HTTPException(status_code=409, detail="Checkout changed while you were trying again. Please retry.")
+        reservation = _billing_rpc(db, "billing_reserve_checkout", {
+            "p_company_id": company_id, "p_plan_id": plan["id"],
+            "p_billing_period": body.billing_period,
+        })
+    if not isinstance(reservation, dict) or reservation.get("state") != "reserved":
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
+    try:
+        attempt_id = str(UUID(reservation["attempt_id"]))
+        reserved_at = datetime.fromisoformat(reservation["created_at"].replace("Z", "+00:00"))
+        if reserved_at.tzinfo is None or reserved_at > datetime.now(tz=timezone.utc):
+            raise ValueError("Invalid checkout reservation time")
+    except (TypeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE) from exc
+    if datetime.now(tz=timezone.utc) - reserved_at >= timedelta(hours=20):
+        # Stripe may forget idempotency keys after 24 hours. An uncertain older
+        # attempt must be reconciled manually, not retried into another session.
+        raise HTTPException(status_code=409, detail="Checkout requires support review before another payment can begin.")
+
     # Fetch company email for customer creation
     companies = _read_rows(db.table("companies").select("email").eq("id", company_id).limit(1))
     company_email = (companies[0].get("email") or "") if companies else ""
@@ -266,7 +328,9 @@ async def create_checkout_session(
 
     try:
         customer_id = _get_or_create_stripe_customer(
-            company_id, company_email, (current or {}).get("stripe_customer_id"),
+            company_id, company_email,
+            reservation.get("stripe_customer_id") or (current or {}).get("stripe_customer_id"),
+            attempt_id,
         )
 
         session_kwargs: dict = {
@@ -278,7 +342,9 @@ async def create_checkout_session(
                 "company_id": company_id,
                 "plan_id": plan["id"],
                 "billing_period": body.billing_period,
+                "checkout_attempt_id": attempt_id,
             },
+            "idempotency_key": f"secretaryai-checkout-{attempt_id}",
         }
         if customer_id:
             session_kwargs["customer"] = customer_id
@@ -290,9 +356,17 @@ async def create_checkout_session(
         log.error("Stripe checkout session creation failed")
         raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED) from exc
 
-    if not checkout_url:
+    if not checkout_url or not isinstance(session_id, str) or not session_id:
         log.error("Stripe checkout session returned no usable URL")
         raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED)
+
+    finalized = _billing_rpc(db, "billing_finalize_checkout", {
+        "p_company_id": company_id, "p_attempt_id": attempt_id,
+        "p_customer_id": customer_id, "p_session_id": session_id,
+        "p_checkout_url": checkout_url,
+    })
+    if finalized is not True:
+        raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
 
     return {"checkout_url": checkout_url, "session_id": session_id}
 
@@ -395,23 +469,11 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
     log.info("Stripe webhook received")
 
     try:
-        if event_type == "checkout.session.completed":
-            await _handle_checkout_completed(event_data, stripe_event_id, db)
-
-        elif event_type == "invoice.paid":
-            await _handle_invoice_paid(event_data, stripe_event_id, db)
-
-        elif event_type == "invoice.payment_failed":
-            await _handle_invoice_payment_failed(event_data, stripe_event_id, db)
-
-        elif event_type == "customer.subscription.updated":
-            await _handle_subscription_updated(event_data, stripe_event_id, db)
-
-        elif event_type == "customer.subscription.deleted":
-            await _handle_subscription_deleted(event_data, stripe_event_id, db)
-
-        else:
-            log.debug("Stripe webhook: unhandled event type")
+        if event_type in (
+            "checkout.session.completed", "invoice.paid", "invoice.payment_failed",
+            "customer.subscription.updated", "customer.subscription.deleted",
+        ):
+            _reconcile_billing_event(event_type, event_data, stripe_event_id, db)
 
     except Exception as exc:
         log.error("Stripe webhook handler failed")
@@ -421,223 +483,90 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
     return {"received": True}
 
 
-# ── Webhook event handlers ─────────────────────────────────────────────────────
+def _reconcile_billing_event(event_type: str, obj: dict, stripe_event_id: str, db) -> None:
+    """Retrieve Stripe's present state, then atomically apply it and ledger the event.
 
-async def _handle_checkout_completed(session: dict, stripe_event_id: str, db) -> None:
-    """Activate or create a subscription after a successful checkout."""
-    metadata = session.get("metadata") or {}
-    company_id = metadata.get("company_id")
-    plan_id = metadata.get("plan_id")
-    stripe_subscription_id = session.get("subscription")
-    stripe_customer_id = session.get("customer")
-
-    if not company_id or not plan_id:
-        log.warning("checkout.session.completed missing company_id or plan_id in metadata")
-        return
-
-    # Retrieve full subscription from Stripe to get period dates
-    period_start = None
-    period_end = None
-    if stripe_subscription_id and _stripe_available:
-        stripe_sub = _stripe.Subscription.retrieve(stripe_subscription_id)
-        period_start, period_end = _subscription_period(stripe_sub)
-
-    now = datetime.now(tz=timezone.utc).isoformat()
-
-    # Upsert company_subscriptions row
-    existing = (
-        db.table("company_subscriptions")
-        .select("id")
-        .eq("company_id", company_id)
-        .execute()
-    )
-    sub_payload = {
-        "company_id": company_id,
-        "plan_id": plan_id,
-        "status": "active",
-        "stripe_customer_id": stripe_customer_id,
-        "stripe_subscription_id": stripe_subscription_id,
-        "current_period_start": period_start,
-        "current_period_end": period_end,
-        "cancel_at_period_end": False,
-        "updated_at": now,
-    }
-
-    if existing.data:
-        db.table("company_subscriptions").update(sub_payload).eq("company_id", company_id).execute()
+    Out-of-order invoices must never override a newer Stripe subscription state.
+    The database RPC serializes each company and rejects stale provider snapshots.
+    """
+    checkout = event_type == "checkout.session.completed"
+    if checkout:
+        metadata = obj.get("metadata") or {}
+        company_id, plan_id = metadata.get("company_id"), metadata.get("plan_id")
+        subscription_id = obj.get("subscription")
+        customer_id = obj.get("customer")
+        if not company_id or not plan_id or not subscription_id or not customer_id:
+            raise ValueError("Checkout missing mandatory Stripe identifiers")
+        attempt_id = metadata.get("checkout_attempt_id")
+        if attempt_id is not None:
+            attempt_id = str(UUID(attempt_id))
     else:
-        sub_payload["created_at"] = now
-        db.table("company_subscriptions").insert(sub_payload).execute()
+        plan_id = None
+        subscription_id = (
+            _invoice_subscription_id(obj) if event_type.startswith("invoice.") else obj.get("id")
+        )
+        customer_id = obj.get("customer")
+        if not subscription_id:
+            # A one-off invoice is not a SecretaryAI subscription event.
+            if event_type.startswith("invoice."):
+                return
+            raise ValueError("Subscription webhook missing a subscription ID")
+        company_id = _company_id_from_customer(customer_id, db)
+        if not company_id:
+            # Stripe may deliver invoice.paid before checkout.session.completed.
+            # Force a retry; never acknowledge and silently discard a payment.
+            raise ValueError("Webhook arrived before company subscription association")
 
-    _record_billing_event(
-        db=db,
-        company_id=company_id,
-        event_type="checkout.session.completed",
-        amount_usd=None,
-        stripe_event_id=stripe_event_id,
-        metadata={"plan_id": plan_id, "stripe_subscription_id": stripe_subscription_id},
-    )
-
-
-async def _handle_invoice_paid(invoice: dict, stripe_event_id: str, db) -> None:
-    """Record a successful payment and refresh subscription period."""
-    stripe_customer_id = invoice.get("customer")
-    stripe_subscription_id = _invoice_subscription_id(invoice)
-    amount_paid = (invoice.get("amount_paid") or 0) / 100  # cents → dollars
-
-    company_id = _company_id_from_customer(stripe_customer_id, db)
-    if not company_id:
-        log.warning("invoice.paid: no company found for customer")
-        return
-
-    # Refresh period dates
-    period_start = None
-    period_end = None
-    lines = invoice.get("lines", {}).get("data", [])
-    if lines:
-        period_start = datetime.fromtimestamp(lines[0]["period"]["start"], tz=timezone.utc).isoformat()
-        period_end = datetime.fromtimestamp(lines[0]["period"]["end"], tz=timezone.utc).isoformat()
-
-    now = datetime.now(tz=timezone.utc).isoformat()
-    db.table("company_subscriptions").update({
-        "status": "active",
-        "current_period_start": period_start,
-        "current_period_end": period_end,
-        "updated_at": now,
-    }).eq("company_id", company_id).execute()
-
-    _record_billing_event(
-        db=db,
-        company_id=company_id,
-        event_type="invoice.paid",
-        amount_usd=amount_paid,
-        stripe_event_id=stripe_event_id,
-        metadata={
-            "stripe_invoice_id": invoice.get("id"),
-            "stripe_subscription_id": stripe_subscription_id,
-        },
-    )
-
-
-async def _handle_invoice_payment_failed(invoice: dict, stripe_event_id: str, db) -> None:
-    """Mark subscription as past_due on payment failure."""
-    stripe_customer_id = invoice.get("customer")
-    amount_due = (invoice.get("amount_due") or 0) / 100
-
-    company_id = _company_id_from_customer(stripe_customer_id, db)
-    if not company_id:
-        log.warning("invoice.payment_failed: no company found for customer")
-        return
-
-    now = datetime.now(tz=timezone.utc).isoformat()
-    db.table("company_subscriptions").update({
-        "status": "past_due",
-        "updated_at": now,
-    }).eq("company_id", company_id).execute()
-
-    _record_billing_event(
-        db=db,
-        company_id=company_id,
-        event_type="invoice.payment_failed",
-        amount_usd=amount_due,
-        stripe_event_id=stripe_event_id,
-        metadata={"stripe_invoice_id": invoice.get("id")},
-    )
-
-
-async def _handle_subscription_updated(stripe_sub: dict, stripe_event_id: str, db) -> None:
-    """Sync subscription status/plan changes from Stripe."""
-    stripe_customer_id = stripe_sub.get("customer")
-    stripe_subscription_id = stripe_sub.get("id")
-
-    company_id = _company_id_from_customer(stripe_customer_id, db)
-    if not company_id:
-        log.warning("customer.subscription.updated: no company found for customer")
-        return
+    requested_at = datetime.now(tz=timezone.utc).isoformat()
+    stripe_sub = _stripe.Subscription.retrieve(subscription_id)
+    if stripe_sub.get("customer") != customer_id or stripe_sub.get("id") != subscription_id:
+        raise ValueError("Stripe subscription identity mismatch")
 
     status_map = {
-        "active": "active",
-        "past_due": "past_due",
-        "canceled": "canceled",
-        "trialing": "trialing",
-        "incomplete": "past_due",
-        "incomplete_expired": "canceled",
-        "unpaid": "past_due",
-        "paused": "past_due",
+        "active": "active", "past_due": "past_due", "canceled": "canceled",
+        "trialing": "trialing", "incomplete": "past_due",
+        "incomplete_expired": "canceled", "unpaid": "past_due", "paused": "past_due",
     }
-    new_status = status_map.get(stripe_sub.get("status", ""), "past_due")
+    if stripe_sub.get("status") not in status_map:
+        raise ValueError("Unknown Stripe subscription status")
+    status = status_map[stripe_sub["status"]]
     period_start, period_end = _subscription_period(stripe_sub)
-    trial_end = None
-    if stripe_sub.get("trial_end"):
-        trial_end = datetime.fromtimestamp(stripe_sub["trial_end"], tz=timezone.utc).isoformat()
-
-    cancel_at_period_end = stripe_sub.get("cancel_at_period_end", False)
-
-    # Attempt to identify plan from price metadata
-    plan_id = None
-    items_data = stripe_sub.get("items", {}).get("data", [])
-    if items_data:
-        price_id = items_data[0].get("price", {}).get("id")
-        if price_id:
-            plan_monthly = db.table("subscription_plans").select("id").eq("stripe_price_id_monthly", price_id).execute()
-            plan_yearly = db.table("subscription_plans").select("id").eq("stripe_price_id_yearly", price_id).execute()
-            if plan_monthly.data:
-                plan_id = plan_monthly.data[0]["id"]
-            elif plan_yearly.data:
-                plan_id = plan_yearly.data[0]["id"]
-
-    now = datetime.now(tz=timezone.utc).isoformat()
-    update_payload: dict = {
-        "status": new_status,
-        "stripe_subscription_id": stripe_subscription_id,
-        "current_period_start": period_start,
-        "current_period_end": period_end,
-        "trial_end": trial_end,
-        "cancel_at_period_end": cancel_at_period_end,
-        "updated_at": now,
-    }
-    if plan_id:
-        update_payload["plan_id"] = plan_id
-
-    db.table("company_subscriptions").update(update_payload).eq("company_id", company_id).execute()
-
-    _record_billing_event(
-        db=db,
-        company_id=company_id,
-        event_type="customer.subscription.updated",
-        amount_usd=None,
-        stripe_event_id=stripe_event_id,
-        metadata={"new_status": new_status, "cancel_at_period_end": cancel_at_period_end},
+    trial_end = (
+        datetime.fromtimestamp(stripe_sub["trial_end"], tz=timezone.utc).isoformat()
+        if stripe_sub.get("trial_end") else None
     )
 
+    # Price metadata is authoritative for customer portal plan changes.
+    items = (stripe_sub.get("items") or {}).get("data") or []
+    if len(items) == 1:
+        price = (items[0].get("price") or {}).get("id")
+        if price:
+            for field in ("stripe_price_id_monthly", "stripe_price_id_yearly"):
+                matches = _read_rows(db.table("subscription_plans").select("id").eq(field, price).limit(1))
+                if matches:
+                    plan_id = matches[0]["id"]
+                    break
+    amount_usd = None
+    if event_type.startswith("invoice."):
+        amount_key = "amount_paid" if event_type == "invoice.paid" else "amount_due"
+        amount_usd = (obj.get(amount_key) or 0) / 100
+    result = _billing_rpc(db, "billing_apply_stripe_event", {
+        "p_company_id": company_id, "p_event_id": stripe_event_id,
+        "p_event_type": event_type, "p_customer_id": customer_id,
+        "p_subscription_id": subscription_id, "p_plan_id": plan_id,
+        "p_status": status, "p_period_start": period_start,
+        "p_period_end": period_end, "p_trial_end": trial_end,
+        "p_cancel_at_period_end": bool(stripe_sub.get("cancel_at_period_end", False)),
+        "p_amount_usd": amount_usd,
+        "p_metadata": {"stripe_subscription_id": subscription_id,
+                       "stripe_invoice_id": obj.get("id") if event_type.startswith("invoice.") else None},
+        "p_retrieved_at": requested_at,
+        "p_checkout_session_id": obj.get("id") if checkout else None,
+        "p_checkout_attempt_id": attempt_id if checkout else None,
+    })
+    if not isinstance(result, dict) or not isinstance(result.get("duplicate"), bool):
+        raise ValueError("Invalid atomic billing response")
 
-async def _handle_subscription_deleted(stripe_sub: dict, stripe_event_id: str, db) -> None:
-    """Mark subscription as canceled when Stripe deletes it."""
-    stripe_customer_id = stripe_sub.get("customer")
-
-    company_id = _company_id_from_customer(stripe_customer_id, db)
-    if not company_id:
-        log.warning("customer.subscription.deleted: no company found for customer")
-        return
-
-    now = datetime.now(tz=timezone.utc).isoformat()
-    db.table("company_subscriptions").update({
-        "status": "canceled",
-        "cancel_at_period_end": False,
-        "updated_at": now,
-    }).eq("company_id", company_id).execute()
-
-    _record_billing_event(
-        db=db,
-        company_id=company_id,
-        event_type="customer.subscription.deleted",
-        amount_usd=None,
-        stripe_event_id=stripe_event_id,
-        metadata={},
-    )
-
-
-# ── Utility helpers ────────────────────────────────────────────────────────────
 
 def _company_id_from_customer(stripe_customer_id: Optional[str], db) -> Optional[str]:
     """Look up company_id from a Stripe customer ID in company_subscriptions."""
@@ -653,29 +582,3 @@ def _company_id_from_customer(stripe_customer_id: Optional[str], db) -> Optional
     if result.data:
         return result.data[0]["company_id"]
     return None
-
-
-def _record_billing_event(
-    db,
-    company_id: str,
-    event_type: str,
-    amount_usd: Optional[float],
-    stripe_event_id: Optional[str],
-    metadata: dict,
-) -> None:
-    """Insert a billing_events row. Silently ignores duplicate stripe_event_id."""
-    try:
-        row: dict = {
-            "company_id": company_id,
-            "event_type": event_type,
-            "amount_usd": amount_usd,
-            "stripe_event_id": stripe_event_id,
-            "metadata": metadata,
-            "created_at": datetime.now(tz=timezone.utc).isoformat(),
-        }
-        db.table("billing_events").insert(row).execute()
-    except Exception as exc:
-        if getattr(exc, "code", None) == "23505":
-            log.debug("billing_events insert skipped (duplicate Stripe event)")
-            return
-        raise

@@ -385,7 +385,8 @@ def main() -> None:
                 finally:
                     inbox_context.close()
 
-                # Setup and billing are read-only, source-aware and scoped to owners.
+                # Setup is read-only and source-aware; billing is scoped to owners and
+                # opening it must not start a checkout or portal session.
                 billing_paths: list[str] = []
                 setup_context = _context(browser, "owner", 390, requests_seen=billing_paths)
                 try:
@@ -396,8 +397,6 @@ def main() -> None:
                     assert page.get_by_role("button", name="Save Changes").count() == 0
                     page.get_by_role("button", name="Billing").click()
                     page.get_by_text("Synthetic QA Plan").wait_for()
-                    page.get_by_text("Read-only account billing", exact=False).wait_for()
-                    assert page.get_by_role("button", name="Checkout").count() == 0
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                     assert all(path not in billing_paths for path in ("/api/billing/checkout", "/api/billing/portal"))
                 finally:

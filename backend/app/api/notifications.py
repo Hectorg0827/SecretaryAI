@@ -100,8 +100,11 @@ async def send_push_notifications(
 ) -> None:
     """
     Fire-and-forget push notification to all devices of the given users.
-    If user_ids is None, sends to all users in the company.
+    If user_ids is None, sends to all users in the company. An empty list
+    means nobody: it must never widen into a company-wide broadcast.
     """
+    if user_ids is not None and not user_ids:
+        return
     query = db.table("device_push_tokens").select("token").eq("company_id", company_id)
     if user_ids:
         query = query.in_("user_id", user_ids)
@@ -130,3 +133,42 @@ async def send_push_notifications(
             )
     except Exception as exc:
         log.warning("Push notification delivery failed: %s", exc)
+
+
+# Roles that run the business: owners and managers ("view_all" in rbac.py).
+LEADERSHIP_ROLES = ("owner", "manager")
+
+
+async def send_push_to_company_leaders(
+    db,
+    company_id: str,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+) -> bool:
+    """
+    Push only to the company's active owners and managers.
+
+    Returns False when the company has no active owner or manager, so nobody
+    was addressed; it never falls back to every user in the company.
+    """
+    result = (
+        db.table("users")
+        .select("id")
+        .eq("company_id", company_id)
+        .in_("role", list(LEADERSHIP_ROLES))
+        .eq("is_active", True)
+        .execute()
+    )
+    user_ids = [row["id"] for row in (result.data or []) if row.get("id")]
+    if not user_ids:
+        return False
+    await send_push_notifications(
+        db=db,
+        company_id=company_id,
+        title=title,
+        body=body,
+        data=data,
+        user_ids=user_ids,
+    )
+    return True

@@ -5,7 +5,7 @@ import {
   Check, AlertTriangle, Loader2, X, ExternalLink, Copy,
 } from 'lucide-react';
 import { api, IntegrationsResponse } from '../lib/api';
-import { BillingStatus } from '../components/BillingStatus';
+import { BillingStatus, type BillingReturn } from '../components/BillingStatus';
 import { useAuth } from '../hooks/useAuth';
 import toast from 'react-hot-toast';
 
@@ -460,12 +460,27 @@ function IntegrationRow({
   );
 }
 
+/** Where Stripe sent the owner back from (?billing=success|cancelled|portal). */
+function readBillingReturn(): BillingReturn | null {
+  const value = new URLSearchParams(window.location.search).get('billing');
+  return value === 'success' || value === 'cancelled' || value === 'portal' ? value : null;
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function Settings() {
   const { role } = useAuth();
   const sections = role === 'owner' ? SECTIONS : SECTIONS.filter((section) => section.id !== 'billing');
-  const [active, setActive] = useState('integrations');
+  const [billingReturn] = useState(readBillingReturn);
+  const [active, setActive] = useState(() => (billingReturn && role === 'owner' ? 'billing' : 'integrations'));
+
+  // Drop the Stripe return marker so a reload does not repeat the notice.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('billing')) return;
+    const clean = new URL(window.location.href);
+    clean.searchParams.delete('billing');
+    window.history.replaceState({}, '', clean.toString());
+  }, []);
 
   // Integration state
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
@@ -712,7 +727,7 @@ export function Settings() {
           )}
           {active === 'billing' && role === 'owner' && (
             <div className="rounded-xl border border-slate-200 bg-white px-5">
-              <BillingStatus />
+              <BillingStatus returnStatus={billingReturn} />
             </div>
           )}
         </div>

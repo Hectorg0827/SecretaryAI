@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
+# sync_checks.status only allows healthy/warning/broken/unknown; an
+# unmapped value makes the insert fail and the result is silently lost.
+_DB_STATUS = {"healthy": "healthy", "warning": "warning", "critical": "broken", "error": "broken"}
+
 
 async def run_sync_check(company_id: str, adapter, db) -> dict:
     """
@@ -35,9 +39,10 @@ async def run_sync_check(company_id: str, adapter, db) -> dict:
             for item in qb_inventory
         ]
         results["checks_run"] += 1
-    except Exception as e:
-        log.error("Sync check: QB inventory fetch failed: %s", e)
+    except Exception:
+        log.error("Sync check: QB inventory fetch failed")
         results["status"] = "error"
+        _persist(db, company_id, results)
         return results
 
     # Get warehouse data (Computer Use if needed)
@@ -58,21 +63,24 @@ async def run_sync_check(company_id: str, adapter, db) -> dict:
             results["discrepancies"] = summary["discrepancies"]
             results["status"] = summary["status"]
             results["checks_run"] += 1
-    except Exception as e:
-        log.warning("Sync check: warehouse reconciliation skipped: %s", e)
+    except Exception:
+        log.warning("Sync check: warehouse reconciliation skipped")
 
-    # Persist sync check result to DB
+    _persist(db, company_id, results)
+    return results
+
+
+def _persist(db, company_id: str, results: dict) -> None:
+    """Store the result; failed checks are recorded too, so they stay visible."""
     try:
         record = {
             "company_id": company_id,
             "check_type": "inventory_reconciliation",
-            "status": results["status"],
+            "status": _DB_STATUS.get(results["status"], "unknown"),
             "details": results,
             "checked_at": results["checked_at"],
         }
         if hasattr(db, "table"):
             db.table("sync_checks").insert(record).execute()
-    except Exception as e:
-        log.error("Sync check: failed to write result to DB: %s", e)
-
-    return results
+    except Exception:
+        log.error("Sync check: failed to write result to DB")

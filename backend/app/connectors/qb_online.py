@@ -215,7 +215,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
             phone=raw.get("PrimaryPhone", {}).get("FreeFormNumber"),
             state=billing.get("CountrySubDivisionCode"),
             balance=Decimal(str(raw.get("Balance", 0))),
-            total_sales=Decimal(str(raw.get("BalanceWithJobs", 0))),
+            # BalanceWithJobs is the open balance including sub-customers,
+            # not sales. QBO customer records carry no sales total.
+            total_sales=None,
         )
 
     def _normalize_invoice(self, raw: dict) -> Invoice:

@@ -181,7 +181,9 @@ class Settings(BaseSettings):
                     "Staging API requires email delivery and pilot workers disabled. "
                     "Pilot execution must use the separate controlled release procedure."
                 )
-            if self.billing_enabled and self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):
+            # Even in deliberately free staging, a stray live key must never
+            # become usable by an exposed checkout endpoint.
+            if self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):
                 errors.append("Staging billing requires a Stripe test-mode secret key.")
 
         # If QBO integration is partially configured, require all three fields

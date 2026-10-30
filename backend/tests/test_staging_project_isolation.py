@@ -41,6 +41,12 @@ def test_staging_pooler_and_isolated_project_match():
     assert valid_staging().secretaryai_expected_supabase_project_ref == STAGING_REF
 
 
+def test_free_staging_still_rejects_live_stripe_key():
+    with pytest.raises(ValidationError) as err:
+        valid_staging(billing_enabled=False, stripe_secret_key="sk_live_synthetic_not_valid")
+    assert "test-mode" in str(err.value)
+
+
 def test_staging_direct_postgres_connection_is_supported():
     settings = valid_staging(
         database_url=f"postgresql://postgres:synthetic@db.{STAGING_REF}.supabase.co:5432/postgres"

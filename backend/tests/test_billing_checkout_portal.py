@@ -332,6 +332,18 @@ def test_checkout_without_stripe_configured_fails_instead_of_faking_a_url(stripe
     assert "mock" not in response.text
 
 
+@pytest.mark.parametrize("path", ["/api/billing/checkout", "/api/billing/portal"])
+def test_billing_disabled_refuses_payment_even_with_stripe_key(stripe, monkeypatch, path):
+    monkeypatch.setattr(billing.settings, "billing_enabled", False)
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    response = client_for(db).post(path, json={"plan_id": "growth", "billing_period": "monthly"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == billing._PAYMENTS_NOT_SET_UP
+    stripe.Customer.create.assert_not_called()
+    stripe.checkout.Session.create.assert_not_called()
+    stripe.billing_portal.Session.create.assert_not_called()
+
+
 def test_checkout_without_a_return_url_in_production_fails_closed(stripe, monkeypatch):
     monkeypatch.setattr(billing.settings, "frontend_url", "")
     monkeypatch.setattr(billing.settings, "debug", False)

@@ -37,7 +37,8 @@ begin
     p_period_end => '2026-11-01T00:00:00Z', p_trial_end => null,
     p_cancel_at_period_end => false, p_amount_usd => null,
     p_metadata => '{}'::jsonb, p_retrieved_at => '2026-10-02T10:00:00Z',
-    p_checkout_session_id => 'cs_test', p_checkout_attempt_id => attempt);
+    p_checkout_session_id => 'cs_test', p_checkout_attempt_id => attempt,
+    p_object_id => 'cs_test');
   if output->>'applied' != 'true' then raise exception 'Checkout not applied'; end if;
   output := public.billing_apply_stripe_event(
     p_company_id => c, p_event_id => 'evt_checkout',
@@ -46,7 +47,8 @@ begin
     p_status => 'past_due', p_period_start => null, p_period_end => null,
     p_trial_end => null, p_cancel_at_period_end => false, p_amount_usd => null,
     p_metadata => '{}'::jsonb, p_retrieved_at => '2026-10-03T10:00:00Z',
-    p_checkout_session_id => 'cs_test', p_checkout_attempt_id => attempt);
+    p_checkout_session_id => 'cs_test', p_checkout_attempt_id => attempt,
+    p_object_id => 'cs_test');
   if output->>'duplicate' != 'true' then raise exception 'Replay not deduplicated'; end if;
 
   output := public.billing_apply_stripe_event(
@@ -54,7 +56,19 @@ begin
     p_customer_id => 'cus_test', p_subscription_id => 'sub_test', p_plan_id => null,
     p_status => 'active', p_period_start => null, p_period_end => null,
     p_trial_end => null, p_cancel_at_period_end => false, p_amount_usd => 99,
-    p_metadata => '{}'::jsonb, p_retrieved_at => '2026-10-04T10:00:00Z');
+    p_metadata => '{}'::jsonb, p_retrieved_at => '2026-10-04T10:00:00Z',
+    p_object_id => 'in_one');
+  output := public.billing_apply_stripe_event(
+    p_company_id => c, p_event_id => 'evt_paid_different_stripe_event_id',
+    p_event_type => 'invoice.paid', p_customer_id => 'cus_test',
+    p_subscription_id => 'sub_test', p_plan_id => null,
+    p_status => 'active', p_period_start => null, p_period_end => null,
+    p_trial_end => null, p_cancel_at_period_end => false, p_amount_usd => 99,
+    p_metadata => '{}'::jsonb, p_retrieved_at => '2026-10-05T10:00:00Z',
+    p_object_id => 'in_one');
+  if output->>'duplicate_object' != 'true' then
+    raise exception 'Second Event ID for paid invoice was counted twice';
+  end if;
   output := public.billing_apply_stripe_event(
     p_company_id => c, p_event_id => 'evt_old_failure',
     p_event_type => 'invoice.payment_failed', p_customer_id => 'cus_test',
@@ -88,7 +102,7 @@ begin
     'billing_reserve_checkout(uuid,text,text)',
     'billing_finalize_checkout(uuid,uuid,text,text,text)',
     'billing_rotate_expired_checkout(uuid,text)',
-    'billing_apply_stripe_event(uuid,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,boolean,numeric,jsonb,timestamptz,text,uuid)'
+    'billing_apply_stripe_event(uuid,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,boolean,numeric,jsonb,timestamptz,text,uuid,text)'
   ] loop
     if has_function_privilege('anon', 'public.' || fname, 'EXECUTE')
       or has_function_privilege('authenticated', 'public.' || fname, 'EXECUTE')

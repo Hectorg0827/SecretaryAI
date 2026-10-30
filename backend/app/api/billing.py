@@ -240,6 +240,9 @@ async def create_checkout_session(
     """
     company_id = _token_company_id(user)
 
+    if not settings.billing_enabled:
+        raise HTTPException(status_code=503, detail=_PAYMENTS_NOT_SET_UP)
+
     if body.billing_period not in ("monthly", "yearly"):
         raise HTTPException(status_code=422, detail="Choose monthly or yearly billing")
 
@@ -381,6 +384,9 @@ async def create_portal_session(
     subscription and payment details on Stripe. Returns portal_url.
     """
     company_id = _token_company_id(user)
+
+    if not settings.billing_enabled:
+        raise HTTPException(status_code=503, detail=_PAYMENTS_NOT_SET_UP)
 
     if not _stripe_available:
         log.warning("Stripe not configured; portal refused")
@@ -550,6 +556,11 @@ def _reconcile_billing_event(event_type: str, obj: dict, stripe_event_id: str, d
     if event_type.startswith("invoice."):
         amount_key = "amount_paid" if event_type == "invoice.paid" else "amount_due"
         amount_usd = (obj.get(amount_key) or 0) / 100
+    financial_object_id = obj.get("id") if event_type in (
+        "invoice.paid", "checkout.session.completed",
+    ) else None
+    if event_type in ("invoice.paid", "checkout.session.completed") and not financial_object_id:
+        raise ValueError("Financial webhook missing Stripe object ID")
     result = _billing_rpc(db, "billing_apply_stripe_event", {
         "p_company_id": company_id, "p_event_id": stripe_event_id,
         "p_event_type": event_type, "p_customer_id": customer_id,
@@ -563,6 +574,7 @@ def _reconcile_billing_event(event_type: str, obj: dict, stripe_event_id: str, d
         "p_retrieved_at": requested_at,
         "p_checkout_session_id": obj.get("id") if checkout else None,
         "p_checkout_attempt_id": attempt_id if checkout else None,
+        "p_object_id": financial_object_id,
     })
     if not isinstance(result, dict) or not isinstance(result.get("duplicate"), bool):
         raise ValueError("Invalid atomic billing response")

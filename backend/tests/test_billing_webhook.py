@@ -133,6 +133,42 @@ def test_out_of_order_failure_reconciles_current_stripe_status(webhook):
     assert db.rpc.call_args.args[1]["p_amount_usd"] == 249
 
 
+def test_paid_invoice_passes_business_object_id_for_atomic_deduplication(webhook):
+    client, db = webhook
+    paid_invoice = event("invoice.paid")
+    paid_invoice["data"]["object"] = {
+        "id": "in_unique", "customer": "cus_synthetic", "subscription": "sub_synthetic",
+        "amount_paid": 24900,
+    }
+    assert send(client, paid_invoice).status_code == 200
+    assert db.rpc.call_args.args[1]["p_object_id"] == "in_unique"
+
+
+def test_checkout_session_passes_business_object_id_for_atomic_deduplication(webhook):
+    client, db = webhook
+    completed = event("checkout.session.completed")
+    completed["data"]["object"] = {
+        "id": "cs_unique", "customer": "cus_synthetic", "subscription": "sub_synthetic",
+        "metadata": {"company_id": "00000000-0000-4000-8000-000000000001",
+                     "plan_id": "growth", "checkout_attempt_id": "00000000-0000-4000-8000-000000000002"},
+    }
+    assert send(client, completed).status_code == 200
+    params = db.rpc.call_args.args[1]
+    assert params["p_object_id"] == params["p_checkout_session_id"] == "cs_unique"
+    assert params["p_checkout_attempt_id"] == "00000000-0000-4000-8000-000000000002"
+
+
+def test_missing_invoice_id_is_retried_not_silently_ledgered(webhook):
+    client, db = webhook
+    paid_invoice = event("invoice.paid")
+    paid_invoice["data"]["object"] = {
+        "customer": "cus_synthetic", "subscription": "sub_synthetic",
+        "amount_paid": 24900,
+    }
+    assert send(client, paid_invoice).status_code == 500
+    db.rpc.assert_not_called()
+
+
 def test_invoice_that_arrives_before_checkout_requests_retry(webhook):
     client, db = webhook
     db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []

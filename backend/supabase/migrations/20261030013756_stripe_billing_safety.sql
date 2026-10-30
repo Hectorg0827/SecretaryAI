@@ -1,6 +1,7 @@
 -- SecretaryAI: atomic subscription writes and one Stripe Checkout per company.
 -- Apply only after checking the company_subscriptions duplicate preflight below.
 -- All functions run as the backend service_role, never as an end user.
+begin;
 
 do $$
 begin
@@ -17,6 +18,19 @@ create unique index if not exists company_subscriptions_one_row_per_company
 
 alter table public.company_subscriptions
   add column if not exists last_stripe_synced_at timestamptz;
+
+-- Stripe can create two distinct event IDs for the same invoice payment.
+-- Backfill known legacy invoice IDs before enforcing object-level uniqueness.
+alter table public.billing_events
+  add column if not exists stripe_object_id text;
+update public.billing_events
+  set stripe_object_id = metadata->>'stripe_invoice_id'
+where event_type = 'invoice.paid' and stripe_object_id is null
+  and nullif(metadata->>'stripe_invoice_id', '') is not null;
+create unique index if not exists billing_unique_paid_invoice_or_checkout
+  on public.billing_events (event_type, stripe_object_id)
+  where event_type in ('invoice.paid', 'checkout.session.completed')
+    and stripe_object_id is not null;
 
 create table if not exists public.stripe_checkout_attempts (
   company_id uuid primary key references public.companies(id) on delete cascade,
@@ -122,10 +136,12 @@ create or replace function public.billing_apply_stripe_event(
   p_status text, p_period_start timestamptz, p_period_end timestamptz,
   p_trial_end timestamptz, p_cancel_at_period_end boolean,
   p_amount_usd numeric, p_metadata jsonb, p_retrieved_at timestamptz,
-  p_checkout_session_id text default null, p_checkout_attempt_id uuid default null
+  p_checkout_session_id text default null, p_checkout_attempt_id uuid default null,
+  p_object_id text default null
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare s public.company_subscriptions%rowtype;
 declare a public.stripe_checkout_attempts%rowtype;
+declare previous_company uuid;
 begin
   if p_event_id is null or length(p_event_id) = 0 or p_subscription_id is null
      or p_customer_id is null or p_retrieved_at is null
@@ -138,6 +154,20 @@ begin
   if not found then raise exception 'Unknown billing company'; end if;
   if exists (select 1 from public.billing_events where stripe_event_id = p_event_id) then
     return jsonb_build_object('duplicate', true, 'applied', false);
+  end if;
+  if p_event_type in ('invoice.paid', 'checkout.session.completed') then
+    if nullif(p_object_id, '') is null then
+      raise exception 'Missing Stripe financial object ID';
+    end if;
+    select company_id into previous_company from public.billing_events
+      where event_type = p_event_type and stripe_object_id = p_object_id;
+    if found then
+      if previous_company != p_company_id then
+        raise exception 'Stripe financial object attributed to different company';
+      end if;
+      return jsonb_build_object('duplicate', true, 'applied', false,
+        'duplicate_object', true);
+    end if;
   end if;
   select * into s from public.company_subscriptions
     where company_id = p_company_id for update;
@@ -176,8 +206,9 @@ begin
   end if;
 
   insert into public.billing_events
-    (company_id, event_type, amount_usd, stripe_event_id, metadata)
-  values (p_company_id, p_event_type, p_amount_usd, p_event_id, coalesce(p_metadata, '{}'::jsonb));
+    (company_id, event_type, amount_usd, stripe_event_id, stripe_object_id, metadata)
+  values (p_company_id, p_event_type, p_amount_usd, p_event_id,
+    p_object_id, coalesce(p_metadata, '{}'::jsonb));
 
   if s.last_stripe_synced_at is null or p_retrieved_at >= s.last_stripe_synced_at then
     update public.company_subscriptions set
@@ -198,11 +229,12 @@ revoke all on function public.billing_reserve_checkout(uuid, text, text) from pu
 revoke all on function public.billing_finalize_checkout(uuid, uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.billing_rotate_expired_checkout(uuid, text) from public, anon, authenticated;
 revoke all on function public.billing_apply_stripe_event(uuid, text, text, text, text, text, text,
- timestamptz, timestamptz, timestamptz, boolean, numeric, jsonb, timestamptz, text, uuid)
+ timestamptz, timestamptz, timestamptz, boolean, numeric, jsonb, timestamptz, text, uuid, text)
  from public, anon, authenticated;
 grant execute on function public.billing_reserve_checkout(uuid, text, text) to service_role;
 grant execute on function public.billing_finalize_checkout(uuid, uuid, text, text, text) to service_role;
 grant execute on function public.billing_rotate_expired_checkout(uuid, text) to service_role;
 grant execute on function public.billing_apply_stripe_event(uuid, text, text, text, text, text, text,
- timestamptz, timestamptz, timestamptz, boolean, numeric, jsonb, timestamptz, text, uuid)
+ timestamptz, timestamptz, timestamptz, boolean, numeric, jsonb, timestamptz, text, uuid, text)
  to service_role;
+commit;

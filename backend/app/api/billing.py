@@ -286,22 +286,33 @@ async def create_checkout_session(
         raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
     if reservation.get("state") in ("subscribed", "completed"):
         raise HTTPException(status_code=409, detail="This account already has a subscription. Use Manage subscription.")
-    if reservation.get("state") == "different_plan":
-        raise HTTPException(status_code=409, detail="Finish or cancel the existing checkout before choosing another plan.")
-    if reservation.get("state") == "ready":
+    changing_plan = reservation.get("state") == "different_plan"
+    if changing_plan:
+        # A conflicting checkout is inspected separately; the reservation RPC
+        # deliberately does not replace any in-flight Stripe idempotency key.
+        conflict = _billing_rpc(db, "billing_get_checkout_conflict", {
+            "p_company_id": company_id,
+        })
+        if not isinstance(conflict, dict) or conflict.get("state") != "ready":
+            raise HTTPException(status_code=409, detail="Finish or cancel the existing checkout before choosing another plan.")
+        reservation = {**reservation, "stripe_session_id": conflict.get("stripe_session_id")}
+    if reservation.get("state") == "ready" or changing_plan:
         previous_id = reservation.get("stripe_session_id")
+        if not isinstance(previous_id, str) or not previous_id:
+            raise HTTPException(status_code=503, detail=_BILLING_RECORDS_UNAVAILABLE)
         try:
             previous = _stripe.checkout.Session.retrieve(previous_id)
             previous_status = getattr(previous, "status", None)
         except Exception as exc:
             log.error("Stripe checkout verification failed")
             raise HTTPException(status_code=502, detail=_CHECKOUT_PROVIDER_FAILED) from exc
-        if previous_status == "open" and _https_url(reservation.get("checkout_url")):
+        if not changing_plan and previous_status == "open" and _https_url(reservation.get("checkout_url")):
             return {"checkout_url": reservation["checkout_url"], "session_id": previous_id}
         if previous_status != "expired":
             raise HTTPException(status_code=409, detail="A checkout is already being processed. Please try again shortly.")
-        rotated = _billing_rpc(db, "billing_rotate_expired_checkout", {
+        rotated = _billing_rpc(db, "billing_rotate_expired_checkout_plan", {
             "p_company_id": company_id, "p_session_id": previous_id,
+            "p_plan_id": plan["id"], "p_billing_period": body.billing_period,
         })
         if rotated is not True:
             raise HTTPException(status_code=409, detail="Checkout changed while you were trying again. Please retry.")

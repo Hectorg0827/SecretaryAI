@@ -66,10 +66,21 @@ class FakeDB:
                 if self.checkout_attempt is None:
                     self.checkout_attempt = {
                         "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000001",
-                        "stripe_customer_id": None,
+                        "stripe_customer_id": None, "plan_id": params["p_plan_id"],
+                        "billing_period": params["p_billing_period"],
                         "created_at": datetime.now(tz=timezone.utc).isoformat(),
                     }
-                result = dict(self.checkout_attempt)
+                if (self.checkout_attempt.get("plan_id", params["p_plan_id"]) != params["p_plan_id"]
+                        or self.checkout_attempt.get("billing_period", params["p_billing_period"])
+                        != params["p_billing_period"]):
+                    result = {"state": "different_plan"}
+                else:
+                    result = dict(self.checkout_attempt)
+            elif name == "billing_get_checkout_conflict":
+                result = {
+                    "state": self.checkout_attempt["state"],
+                    "stripe_session_id": self.checkout_attempt.get("stripe_session_id"),
+                }
             elif name == "billing_finalize_checkout":
                 if self.checkout_attempt and params["p_attempt_id"] == self.checkout_attempt["attempt_id"]:
                     self.checkout_attempt.update({
@@ -80,13 +91,19 @@ class FakeDB:
                     result = True
                 else:
                     result = False
-            elif name == "billing_rotate_expired_checkout":
-                result = True
-                self.checkout_attempt = {
-                    "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000002",
-                    "stripe_customer_id": None,
-                    "created_at": datetime.now(tz=timezone.utc).isoformat(),
-                }
+            elif name == "billing_rotate_expired_checkout_plan":
+                result = bool(
+                    self.checkout_attempt and self.checkout_attempt["state"] == "ready"
+                    and self.checkout_attempt["stripe_session_id"] == params["p_session_id"]
+                )
+                if result:
+                    self.checkout_attempt.update({
+                        "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000002",
+                        "plan_id": params["p_plan_id"],
+                        "billing_period": params["p_billing_period"],
+                        "stripe_session_id": None, "checkout_url": None,
+                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                    })
             else:
                 raise AssertionError(f"Unexpected RPC {name}")
         return SimpleNamespace(execute=lambda: SimpleNamespace(data=result))
@@ -225,7 +242,55 @@ def test_expired_checkout_is_replaced_only_after_stripe_confirms_it(stripe):
     assert stripe.checkout.Session.create.call_count == 2
     keys = [call.kwargs["idempotency_key"] for call in stripe.checkout.Session.create.call_args_list]
     assert len(set(keys)) == 2
-    assert any(name == "billing_rotate_expired_checkout" for name, _ in db.rpc_calls)
+    assert any(name == "billing_rotate_expired_checkout_plan" for name, _ in db.rpc_calls)
+
+
+def test_expired_checkout_allows_different_billing_period_after_verification(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    assert checkout(client).status_code == 200
+    stripe.checkout.Session.retrieve.return_value = SimpleNamespace(status="expired")
+    switched = checkout(client, billing_period="yearly")
+    assert switched.status_code == 200, switched.text
+    assert stripe.checkout.Session.create.call_count == 2
+    assert stripe.checkout.Session.create.call_args.kwargs["line_items"] == [
+        {"price": "price_year", "quantity": 1},
+    ]
+    assert db.checkout_attempt["billing_period"] == "yearly"
+
+
+def test_open_checkout_cannot_be_changed_to_another_period(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    assert checkout(client).status_code == 200
+    blocked = checkout(client, billing_period="yearly")
+    assert blocked.status_code == 409
+    stripe.checkout.Session.create.assert_called_once()
+    assert not any(name == "billing_rotate_expired_checkout_plan" for name, _ in db.rpc_calls)
+
+
+def test_checkout_plan_change_fails_closed_when_stripe_cannot_verify_expiration(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    client = client_for(db)
+    assert checkout(client).status_code == 200
+    stripe.checkout.Session.retrieve.side_effect = RuntimeError("provider unavailable")
+    response = checkout(client, billing_period="yearly")
+    assert response.status_code == 502
+    stripe.checkout.Session.create.assert_called_once()
+    assert not any(name == "billing_rotate_expired_checkout_plan" for name, _ in db.rpc_calls)
+
+
+def test_uncertain_reserved_checkout_does_not_change_plan(stripe):
+    db = FakeDB(subscription_plans=[PLAN], company_subscriptions=[], companies=[])
+    db.checkout_attempt = {
+        "state": "reserved", "attempt_id": "00000000-0000-4000-8000-000000000001",
+        "plan_id": "growth", "billing_period": "monthly",
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+    blocked = checkout(client_for(db), billing_period="yearly")
+    assert blocked.status_code == 409
+    stripe.checkout.Session.retrieve.assert_not_called()
+    stripe.checkout.Session.create.assert_not_called()
 
 
 def test_completed_checkout_is_not_reopened(stripe):

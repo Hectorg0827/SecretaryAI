@@ -1,16 +1,44 @@
 """Inventory API — real QB + warehouse data."""
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_adapter
 from app.auth.rbac import require_permission
-from app.intelligence.inventory_monitor import evaluate_inventory
+from app.intelligence.inventory_monitor import InventoryStatus, evaluate_inventory
 from app.intelligence.demand_forecasting import forecast_product
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _inventory_status(item: dict) -> InventoryStatus:
+    """Keep missing velocity distinct from a measured zero and retain fractions."""
+    try:
+        qty = Decimal(str(item.get("total_qty")))
+        if not qty.is_finite() or qty < 0:
+            raise ValueError
+        rate = None
+        if item.get("weekly_sell_rate_observed") is True:
+            rate = Decimal(str(item.get("weekly_sell_rate")))
+            if not rate.is_finite() or rate < 0:
+                raise ValueError
+    except (InvalidOperation, TypeError, ValueError):
+        raise HTTPException(status_code=503, detail="Inventory measurement unavailable") from None
+    status = evaluate_inventory(
+        item_id=item.get("qb_id", ""),
+        product_name=item.get("product_name", ""),
+        warehouse_1_qty=qty,
+        warehouse_2_qty=0,
+        weekly_sell_rate=rate if rate is not None else Decimal(0),
+    )
+    if rate is None and qty > 0:
+        status.status = "unassessed"
+        status.needs_po = False
+        status.weeks_remaining = None
+        status.message = "Sales rate unavailable; stock coverage has not been assessed."
+    return status
 
 
 def _build_alert_dict(item: dict, status) -> dict:
@@ -23,7 +51,7 @@ def _build_alert_dict(item: dict, status) -> dict:
         "item_id":        item.get("qb_id", ""),          # was missing
         "product_name":   item.get("product_name", ""),
         "total_qty":      item.get("total_qty", 0),
-        "weeks_remaining": status.weeks_remaining,
+        "weeks_remaining": float(status.weeks_remaining) if status.weeks_remaining is not None else None,
         "stock_status":   status.status,                   # was `status`
         "needs_po":       status.status in ("critical", "out_of_stock"),
     }
@@ -45,16 +73,7 @@ async def list_inventory(
     results = []
 
     for item in inventory:
-        sell_rate = Decimal(str(item.get("weekly_sell_rate", 0)))
-        status = evaluate_inventory(
-            item_id=item.get("qb_id", ""),
-            product_name=item.get("product_name", ""),
-            # total_qty is reconciled by the adapter; QB and warehouse
-            # readings may represent overlapping physical inventory.
-            warehouse_1_qty=int(item.get("total_qty", item.get("qb_qty", 0))),
-            warehouse_2_qty=0,
-            weekly_sell_rate=sell_rate,
-        )
+        status = _inventory_status(item)
 
         entry = {
             "item_id":        item.get("qb_id"),            # frontend expects item_id
@@ -66,8 +85,9 @@ async def list_inventory(
             "reorder_point":  item.get("reorder_point"),
             "unit_price":     item.get("unit_price", 0),
             "purchase_cost":  item.get("purchase_cost", 0),
+            "weekly_sell_rate_observed": item.get("weekly_sell_rate_observed") is True,
             "stock_status":   status.status,               # was `status`
-            "weeks_remaining": status.weeks_remaining,
+            "weeks_remaining": float(status.weeks_remaining) if status.weeks_remaining is not None else None,
             "needs_po":       status.status in ("critical", "out_of_stock"),
             "source":         item.get("source", "qb"),
             "quantity_source": item.get("quantity_source", "quickbooks"),
@@ -90,23 +110,17 @@ async def get_inventory_alerts(
     """Returns only items with low or critical stock status."""
     inventory = await adapter.get_inventory_merged()
     alerts = []
+    unassessed = 0
 
     for item in inventory:
-        sell_rate = Decimal(str(item.get("weekly_sell_rate", 0)))
-        status = evaluate_inventory(
-            item_id=item.get("qb_id", ""),
-            product_name=item.get("product_name", ""),
-            # total_qty is reconciled by the adapter; QB and warehouse
-            # readings may represent overlapping physical inventory.
-            warehouse_1_qty=int(item.get("total_qty", item.get("qb_qty", 0))),
-            warehouse_2_qty=0,
-            weekly_sell_rate=sell_rate,
-        )
+        status = _inventory_status(item)
 
+        if status.status == "unassessed":
+            unassessed += 1
         if status.status in ("critical", "low", "out_of_stock"):
             alerts.append(_build_alert_dict(item, status))
 
-    return {"alerts": alerts, "count": len(alerts)}
+    return {"alerts": alerts, "count": len(alerts), "unassessed_count": unassessed}
 
 
 @router.get("/{item_id}/forecast")

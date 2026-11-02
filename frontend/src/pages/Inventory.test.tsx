@@ -31,7 +31,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-type Status = 'healthy' | 'low' | 'critical' | 'out_of_stock';
+type Status = 'unassessed' | 'healthy' | 'low' | 'critical' | 'out_of_stock';
 
 function product(n: number, stock_status: Status = 'healthy') {
   return {
@@ -160,4 +160,17 @@ describe('inventory page loads every product', () => {
     expect(page.querySelector('[role="alert"]')?.textContent).toContain('The inventory response was incomplete.');
     expect(page.textContent).not.toContain('1 products');
   });
+});
+
+
+it('shows missing sales velocity as not assessed and filters it separately', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    items: [{ ...product(1, 'unassessed'), weeks_remaining: null }, product(2)], total: 2,
+  });
+  const page = await mount(<Inventory />);
+  expect(filterButton(page, 'Not Assessed')?.textContent).toBe('Not Assessed (1)');
+  expect(filterButton(page, 'In Stock')?.textContent).toBe('In Stock (1)');
+  await act(async () => { filterButton(page, 'Not Assessed')?.click(); });
+  expect(page.querySelectorAll('tbody tr')).toHaveLength(1);
+  expect(page.querySelector('tbody')?.textContent).toContain('Synthetic Product 1');
 });

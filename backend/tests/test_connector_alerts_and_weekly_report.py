@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -142,9 +143,12 @@ def expo_capture(fail=False):
             if fail:
                 raise RuntimeError("expo down" + FORGED)
             sent.append({"url": url, "messages": json})
-            return MagicMock(status_code=200)
+            return httpx.Response(200, request=httpx.Request("POST", url),
+                                  json={"data": [{"status": "ok", "id": f"ticket-{i}"}
+                                                 for i in range(len(json))]})
 
-    with patch("app.api.notifications.httpx.AsyncClient", _Client):
+    with patch("app.api.notifications.httpx.AsyncClient", _Client), \
+            patch("app.api.notifications.get_settings", return_value=MagicMock(secretaryai_push_delivery_enabled=True)):
         yield sent
 
 
@@ -262,7 +266,7 @@ def test_connector_that_reconnected_since_the_read_is_not_reported():
         return original_update(query, row)
 
     with patch.object(_Query, "update", heartbeat_first), \
-            patch("app.api.notifications.send_push_notifications", new=AsyncMock()) as push:
+            patch("app.api.notifications.send_push_notifications", new=AsyncMock(return_value=True)) as push:
         now = datetime.now(timezone.utc)
         count = connector_health._mark_stale(db, now.isoformat(), now)
     assert db.queries[0][0] == "connector_registrations"  # the stale read found it
@@ -326,7 +330,7 @@ def run_for(company, db, *, dashboard=DASHBOARD, writer_text="Revenue rose to $1
     writer = AsyncMock(return_value=writer_text)
     with patch.object(weekly, "compute_dashboard_payload", new=payload), \
             patch.object(weekly_task, "generate_weekly_report", new=writer), \
-            patch("app.api.notifications.send_push_notifications", new=AsyncMock()) as push:
+            patch("app.api.notifications.send_push_notifications", new=AsyncMock(return_value=True)) as push:
         outcome = weekly_task.run_company_weekly_report(
             company, db=db, adapter_factory=lambda _c: adapter, today=SUNDAY,
         )
@@ -595,3 +599,80 @@ def test_alert_and_report_modules_log_only_constant_events(module_path):
                 and func.value.id == "log"):
             assert len(call.args) == 1 and not call.keywords, f"{module_path}:{call.lineno}"
             assert isinstance(call.args[0], ast.Constant), f"{module_path}:{call.lineno}"
+
+@pytest.mark.parametrize("mark,status,age", [
+    (connector_health._mark_stale, "connected", 180),
+    (connector_health._mark_errored, "stale", 3600),
+])
+def test_fresh_heartbeat_between_read_and_write_prevents_transition(mark, status, age):
+    db = stale_db({"id": "r1", "company_id": "co-a", "connector_type": "qb_online", "connector_id": "x"})
+    reg = db.tables["connector_registrations"][0]
+    reg.update(status=status, last_heartbeat="2020-01-01T00:00:00+00:00")
+    now = datetime.now(timezone.utc)
+    original_update = _Query.update
+
+    def heartbeat_first(query, row):
+        reg["last_heartbeat"] = now.isoformat()
+        return original_update(query, row)
+
+    with patch.object(_Query, "update", heartbeat_first), patch.object(connector_health, "_notify_stale") as push:
+        assert mark(db, (now - timedelta(seconds=age)).isoformat(), now) == 0
+    assert reg["status"] == status
+    push.assert_not_called()
+
+
+@pytest.mark.parametrize("status,payload", [
+    (503, {}),
+    (200, {"data": [{"status": "error", "message": FORGED}]}),
+    (200, {"data": [{"status": "ok"}]}),
+    (200, {"data": []}),
+    (200, {"data": [{"status": "ok", "id": "ticket"}], "errors": [{"message": FORGED}]}),
+    (200, []),
+])
+def test_push_rejection_is_not_reported_as_acceptance(status, payload, caplog):
+    import asyncio
+    from app.api.notifications import send_push_to_company_leaders
+    db = FakeDB(users=USERS, device_push_tokens=TOKENS[:1])
+    response = httpx.Response(status, json=payload, request=httpx.Request("POST", "https://example.test"))
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.post.return_value = response
+    with patch("app.api.notifications.httpx.AsyncClient", return_value=client), \
+            patch("app.api.notifications.get_settings", return_value=MagicMock(secretaryai_push_delivery_enabled=True)), \
+            caplog.at_level(logging.WARNING):
+        assert asyncio.run(send_push_to_company_leaders(db, "co-a", "t", "b")) is False
+    assert not any("FORGED" in r.getMessage() for r in caplog.records)
+
+
+def test_push_batches_and_requires_actual_recipients():
+    import asyncio
+    from app.api.notifications import send_push_notifications
+    tokens = [{"company_id": "co-a", "token": f"ExponentPushToken[{i}]"} for i in range(205)]
+    with expo_capture() as sent:
+        assert asyncio.run(send_push_notifications(FakeDB(device_push_tokens=tokens), "co-a", "t", "b")) is True
+        assert asyncio.run(send_push_notifications(FakeDB(), "co-a", "t", "b")) is False
+    assert [len(batch["messages"]) for batch in sent] == [100, 100, 5]
+
+
+def test_disabled_push_never_reads_tokens_or_calls_provider():
+    import asyncio
+    from app.api.notifications import send_push_notifications
+    db = FakeDB(device_push_tokens=TOKENS)
+    with patch("app.api.notifications.get_settings", return_value=MagicMock(secretaryai_push_delivery_enabled=False)), \
+            patch("app.api.notifications.httpx.AsyncClient") as client:
+        assert asyncio.run(send_push_notifications(db, "co-a", "t", "b")) is False
+    assert db.queries == []
+    client.assert_not_called()
+
+
+def test_registration_storage_failure_returns_unavailable(caplog):
+    import asyncio
+    from fastapi import HTTPException
+    from app.api.notifications import RegisterTokenRequest, register_push_token
+    db = FakeDB()
+    db.down.add("device_push_tokens")
+    with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as error:
+        asyncio.run(register_push_token(RegisterTokenRequest(token="ExponentPushToken[test]", platform="ios"),
+                                       user={"sub": "owner-a", "company_id": "co-a"}, db=db))
+    assert error.value.status_code == 503
+    assert not any("FORGED" in r.getMessage() for r in caplog.records)

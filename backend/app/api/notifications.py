@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import get_db
+from app.config import get_settings
 from app.auth.rbac import get_current_user
 
 log = logging.getLogger(__name__)
@@ -71,9 +72,9 @@ async def register_push_token(
             },
             on_conflict="company_id,user_id,token",
         ).execute()
-    except Exception as exc:
-        log.warning("Failed to store push token: %s", exc)
-        # Non-fatal — app still works without notifications
+    except Exception:
+        log.warning("Failed to store push token")
+        raise HTTPException(status_code=503, detail="Notification registration unavailable") from None
     return {"registered": True}
 
 
@@ -84,7 +85,7 @@ async def unregister_push_token(
     db=Depends(get_db),
 ):
     """Remove a device push token (call on logout)."""
-    db.table("device_push_tokens").delete().eq("user_id", user["sub"]).eq("token", token).execute()
+    db.table("device_push_tokens").delete().eq("company_id", user["company_id"]).eq("user_id", user["sub"]).eq("token", token).execute()
     return {"unregistered": True}
 
 
@@ -97,21 +98,24 @@ async def send_push_notifications(
     body: str,
     data: Optional[dict] = None,
     user_ids: Optional[list[str]] = None,
-) -> None:
+) -> bool:
     """
-    Fire-and-forget push notification to all devices of the given users.
+    Return True only when Expo accepts every addressed message.
+    Acceptance is not proof of delivery to a device.
     If user_ids is None, sends to all users in the company. An empty list
     means nobody: it must never widen into a company-wide broadcast.
     """
+    if not get_settings().secretaryai_push_delivery_enabled:
+        return False
     if user_ids is not None and not user_ids:
-        return
+        return False
     query = db.table("device_push_tokens").select("token").eq("company_id", company_id)
     if user_ids:
         query = query.in_("user_id", user_ids)
     result = query.execute()
     tokens = [row["token"] for row in (result.data or [])]
     if not tokens:
-        return
+        return False
 
     messages = [
         {
@@ -124,15 +128,39 @@ async def send_push_notifications(
         for token in tokens
     ]
 
+    accepted = True
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                EXPO_PUSH_URL,
-                json=messages,
-                headers={"Accept": "application/json", "Content-Type": "application/json"},
-            )
-    except Exception as exc:
-        log.warning("Push notification delivery failed: %s", exc)
+            for offset in range(0, len(messages), 100):
+                batch = messages[offset:offset + 100]
+                response = await client.post(
+                    EXPO_PUSH_URL,
+                    json=batch,
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                tickets = payload.get("data") if isinstance(payload, dict) else None
+                if (
+                    not isinstance(tickets, list)
+                    or len(tickets) != len(batch)
+                    or payload.get("errors")
+                    or any(
+                        not isinstance(ticket, dict)
+                        or ticket.get("status") != "ok"
+                        or not isinstance(ticket.get("id"), str)
+                        or not ticket["id"]
+                        for ticket in tickets
+                    )
+                ):
+                    accepted = False
+        if not accepted:
+            log.warning("Push service did not accept all notifications")
+        return accepted
+    except Exception:
+        # Provider errors may contain device tokens or message text.
+        log.warning("Push notification submission failed")
+        return False
 
 
 # Roles that run the business: owners and managers ("view_all" in rbac.py).
@@ -149,8 +177,9 @@ async def send_push_to_company_leaders(
     """
     Push only to the company's active owners and managers.
 
-    Returns False when the company has no active owner or manager, so nobody
-    was addressed; it never falls back to every user in the company.
+    Returns True only when Expo accepts every addressed message. Disabled
+    delivery, absent leaders/devices or rejected submissions return False.
+    Never falls back to every user in the company.
     """
     result = (
         db.table("users")
@@ -163,7 +192,7 @@ async def send_push_to_company_leaders(
     user_ids = [row["id"] for row in (result.data or []) if row.get("id")]
     if not user_ids:
         return False
-    await send_push_notifications(
+    return await send_push_notifications(
         db=db,
         company_id=company_id,
         title=title,
@@ -171,4 +200,3 @@ async def send_push_to_company_leaders(
         data=data,
         user_ids=user_ids,
     )
-    return True

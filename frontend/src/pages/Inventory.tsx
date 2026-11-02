@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ForecastPanel } from '../components/inventory/ForecastPanel';
 
 const STATUS_CFG = {
+  unassessed: { label: 'Not Assessed', icon: AlertTriangle, border: 'border-l-slate-400', bg: 'bg-slate-50', text: 'text-slate-700', badge: 'bg-slate-100 text-slate-700' },
   out_of_stock: { label: 'Out of Stock', icon: XCircle,       border: 'border-l-red-500',    bg: 'bg-red-50',     text: 'text-red-700',    badge: 'bg-red-100 text-red-700'      },
   critical:     { label: 'Critical',     icon: AlertTriangle, border: 'border-l-orange-400', bg: 'bg-orange-50',  text: 'text-orange-700', badge: 'bg-orange-100 text-orange-700'  },
   low:          { label: 'Low',          icon: Package,       border: 'border-l-amber-400',  bg: 'bg-amber-50',   text: 'text-amber-700',  badge: 'bg-amber-100 text-amber-700'    },
@@ -15,10 +16,10 @@ const STATUS_CFG = {
 
 // GET /api/inventory lists every product, including healthy stock.
 type InventoryItem = Omit<InventoryAlert, 'stock_status'> & {
-  stock_status: InventoryAlert['stock_status'] | 'healthy';
+  stock_status: InventoryAlert['stock_status'] | 'healthy' | 'unassessed';
 };
 
-const FILTERS = ['all', 'out_of_stock', 'critical', 'low', 'healthy'] as const;
+const FILTERS = ['all', 'out_of_stock', 'critical', 'low', 'healthy', 'unassessed'] as const;
 type FilterType = typeof FILTERS[number];
 
 // GET /api/inventory returns one page at a time; 200 is the server's maximum.

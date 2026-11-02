@@ -125,6 +125,7 @@ def _mark_stale(db, stale_cutoff: str, now: datetime) -> int:
                 .eq("id", reg["id"])
                 .eq("company_id", reg["company_id"])
                 .eq("status", "connected")
+                .lt("last_heartbeat", stale_cutoff)
                 .execute()
             )
         except Exception:
@@ -171,6 +172,7 @@ def _mark_errored(db, error_cutoff: str, now: datetime) -> int:
                 .eq("id", reg["id"])
                 .eq("company_id", reg["company_id"])
                 .eq("status", "stale")
+                .lt("last_heartbeat", error_cutoff)
                 .execute()
             )
         except Exception:

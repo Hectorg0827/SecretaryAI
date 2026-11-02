@@ -108,8 +108,13 @@ def test_ages_balances_and_orders_collections_by_oldest_overdue(client):
 
     assert body["aging_status"] == "partial_aging"
     assert "missing_due_date" in body["exceptions"]
-    assert body["total_owed"] == 2800.0
-    assert body["overdue_total"] == 1600.0
+    assert "invoice_rows_skipped" in body["exceptions"]
+    assert "unaged_customer_balances" in body["exceptions"]
+    assert body["coverage_complete"] is False
+    assert body["total_owed"] is None
+    assert body["overdue_total"] is None
+    assert body["known_aged_total"] == 2800.0
+    assert body["known_overdue_total"] == 1600.0
     assert body["buckets"] == {
         "current": 1000.0, "days_1_30": 300.0, "days_31_60": 800.0,
         "days_61_90": 500.0, "days_91_plus": 0.0, "unaged": 200.0,
@@ -162,7 +167,10 @@ def test_duplicated_invoice_id_moves_the_customer_to_not_aged(client):
         invoice("b1", "QB2", "Bayside Grocers", "800.00", "800.00", -40),
     ]))
     body = client.get(URL + "?currency=USD", headers=auth("manager")).json()
-    assert body["total_owed"] == 800.0
+    assert body["total_owed"] is None
+    assert body["known_aged_total"] == 800.0
+    assert body["aging_status"] == "partial_aging"
+    assert body["coverage_complete"] is False
     assert body["rows_skipped"] == 2
     assert [a["name"] for a in body["accounts"]] == ["Bayside Grocers"]
     assert "Acme Corp" in {c["name"] for c in body["not_aged"]}
@@ -174,9 +182,24 @@ def test_unreadable_invoice_without_a_customer_is_counted_not_hidden(client):
         invoice("x1", "", "", "300.00", "300.00", -10),
     ]))
     body = client.get(URL + "?currency=USD", headers=auth("owner")).json()
-    assert body["total_owed"] == 800.0
+    assert body["total_owed"] is None
+    assert body["known_aged_total"] == 800.0
+    assert "invoice_rows_unattributed" in body["exceptions"]
+    assert body["aging_status"] == "partial_aging"
     assert body["rows_skipped"] == 1
     assert body["rows_unattributed"] == 1
+
+
+def test_complete_invoice_coverage_is_required_before_claiming_a_total(client):
+    use(FakeAdapter(customers=[customer("QB1", "Acme Corp", "700.00")], invoices=[
+        invoice("a1", "QB1", "Acme Corp", "700.00", "700.00", -10),
+    ]))
+    body = client.get(URL + "?currency=USD", headers=auth("owner")).json()
+    assert body["aging_status"] == "available_unreconciled"
+    assert body["coverage_complete"] is True
+    assert body["total_owed"] == body["known_aged_total"] == 700.0
+    assert body["overdue_total"] == body["known_overdue_total"] == 700.0
+    assert body["exceptions"] == []
 
 
 @pytest.mark.parametrize("role", ["back_office", "sales_rep", "viewer"])

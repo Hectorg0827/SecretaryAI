@@ -41,9 +41,12 @@ function response(currency: string): ReceivablesResponse {
     as_of: '2026-10-28',
     currency,
     aging_status: 'partial_aging',
-    exceptions: ['missing_due_date'],
-    total_owed: 2800,
-    overdue_total: 1600,
+    exceptions: ['missing_due_date', 'invoice_rows_skipped', 'invoice_rows_unattributed'],
+    coverage_complete: false,
+    total_owed: null,
+    overdue_total: null,
+    known_aged_total: 2800,
+    known_overdue_total: 1600,
     buckets: { current: 1000, days_1_30: 300, days_31_60: 800, days_61_90: 500, days_91_plus: 0, unaged: 200 },
     open_invoice_count: 5,
     accounts_total: 3,
@@ -117,6 +120,8 @@ describe('receivables insight', () => {
     expect(get).toHaveBeenCalledWith('/api/insights/receivables?currency=USD');
     const text = page.textContent ?? '';
     expect(text).toContain('Analysis only.');
+    expect(text).toContain('Overall total unknown');
+    expect(text).toContain('Aged invoice subset');
     expect(text).toContain('$2,800.00');
     expect(text).toContain('$1,600.00');
     expect(text).toContain('61–90 days overdue');
@@ -134,6 +139,18 @@ describe('receivables insight', () => {
     expect([...rows].map((row) => row.querySelector('td')?.textContent)).toEqual([
       'Acme Corp', expect.stringContaining('Corner Deli'),
     ]);
+  });
+
+  it('labels an actually complete invoice snapshot as the overall total', async () => {
+    localStorage.setItem(CURRENCY_KEY, 'USD');
+    vi.spyOn(api, 'get').mockResolvedValue({
+      ...response('USD'), coverage_complete: true,
+      exceptions: [], rows_skipped: 0, rows_unattributed: 0, not_aged: [],
+      total_owed: 2800, overdue_total: 1600,
+    });
+    const page = await render();
+    expect(page.textContent).toContain('Total owed to you');
+    expect(page.textContent).not.toContain('Overall total unknown');
   });
 
   it('shows no totals when the aging could not be worked out', async () => {

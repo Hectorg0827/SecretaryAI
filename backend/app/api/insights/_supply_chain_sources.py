@@ -14,7 +14,11 @@ from typing import Any, Optional
 
 from app.api.insights._common import row_value
 
-CLOSED_INVOICE_STATUSES = frozenset({"void", "voided", "cancelled", "canceled", "refunded"})
+# Only posted or paid invoices represent realized demand. Draft/deleted rows
+# must never inflate purchasing suggestions or customer activity.
+CLOSED_INVOICE_STATUSES = frozenset({
+    "void", "voided", "cancelled", "canceled", "refunded", "deleted", "draft",
+})
 OPEN_PO_STATUSES = frozenset({"approved", "partially_received"})
 # Most recent purchase orders read from the purchasing ledger per request.
 MAX_LEDGER_ORDERS = 200

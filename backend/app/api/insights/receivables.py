@@ -241,12 +241,27 @@ async def receivables(
     not_aged.sort(key=lambda c: c["name"].casefold())
 
     buckets = report["buckets"]
+    known_aged_total = _money(report["total_open"])
+    known_overdue_total = _money(sum((buckets[b] for b in OVERDUE), Decimal("0")))
+    coverage_issues = []
+    if rows_skipped:
+        coverage_issues.append("invoice_rows_skipped")
+    if rows_unattributed:
+        coverage_issues.append("invoice_rows_unattributed")
+    if not_aged:
+        coverage_issues.append("unaged_customer_balances")
+    coverage_complete = not coverage_issues
     return advisory_response({
         **base,
-        "aging_status": report["status"],
-        "exceptions": report["exceptions"],
-        "total_owed": _money(report["total_open"]),
-        "overdue_total": _money(sum((buckets[b] for b in OVERDUE), Decimal("0"))),
+        "aging_status": report["status"] if coverage_complete else "partial_aging",
+        "exceptions": list(dict.fromkeys([*report["exceptions"], *coverage_issues])),
+        # Null means the overall figure cannot be established from this source.
+        # The UI may separately show the verified subset with an explicit label.
+        "total_owed": known_aged_total if coverage_complete else None,
+        "overdue_total": known_overdue_total if coverage_complete else None,
+        "known_aged_total": known_aged_total,
+        "known_overdue_total": known_overdue_total,
+        "coverage_complete": coverage_complete,
         "buckets": {b: _money(v) for b, v in buckets.items()},
         "open_invoice_count": report["invoice_count"],
         "accounts_total": len(accounts),

@@ -45,6 +45,9 @@ export interface ReceivablesResponse extends AdvisoryFields {
   exceptions: string[];
   total_owed: number | null;
   overdue_total: number | null;
+  known_aged_total?: number | null;
+  known_overdue_total?: number | null;
+  coverage_complete?: boolean;
   buckets: Record<Bucket, number> | null;
   open_invoice_count?: number;
   accounts_total?: number;
@@ -79,6 +82,9 @@ const EXCEPTION_TEXT: Record<string, string> = {
   history_not_exhaustive: 'older open invoices may be missing',
   snapshot_date_mismatch: 'the QuickBooks data is from a different day',
   source_stale: 'the QuickBooks data is out of date',
+  invoice_rows_skipped: 'some invoice rows could not be read',
+  invoice_rows_unattributed: 'some invoices could not be assigned to a customer',
+  unaged_customer_balances: 'some customer balances could not be aged',
 };
 
 function readSavedCurrency(): string | null {
@@ -150,21 +156,30 @@ function ReceivablesView({ data, currency }: { data: ReceivablesResponse; curren
   const notDue = accounts.filter((a) => !a.priority);
   const notAged = data.not_aged ?? [];
   const over60 = buckets.days_61_90 + buckets.days_91_plus;
+  const coverageComplete = data.coverage_complete === true;
 
   return (
     <div className="space-y-5">
+      {!coverageComplete && (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Overall total unknown: some invoices or customer balances could not be aged. The amounts below cover
+          only the verified invoice subset, not everything customers may owe.
+        </div>
+      )}
       {(data.rows_unattributed ?? 0) > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {data.rows_unattributed} invoice(s) could not be read and had no customer attached. They are not in the
-          totals below, so the real amount owed may be higher.
+          {data.rows_unattributed} invoice(s) could not be read and had no customer attached. They are excluded
+          from the verified subset below.
         </div>
       )}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         {[
-          ['Total owed to you', data.total_owed],
-          ['Overdue', data.overdue_total],
-          ['Not yet due', buckets.current],
-          ['More than 60 days overdue', over60],
+          [coverageComplete ? 'Total owed to you' : 'Aged invoice subset',
+            coverageComplete ? data.total_owed : data.known_aged_total],
+          [coverageComplete ? 'Overdue' : 'Overdue in subset',
+            coverageComplete ? data.overdue_total : data.known_overdue_total],
+          [coverageComplete ? 'Not yet due' : 'Not yet due in subset', buckets.current],
+          [coverageComplete ? 'More than 60 days overdue' : 'Over 60 days in subset', over60],
         ].map(([label, value]) => (
           <div key={label as string} className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-xl font-bold text-slate-900">{money(value as number | null)}</div>
@@ -174,7 +189,9 @@ function ReceivablesView({ data, currency }: { data: ReceivablesResponse; curren
       </div>
 
       <section aria-label="How overdue" className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-slate-800 mb-3">How overdue the money is</h2>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">
+          {coverageComplete ? 'How overdue the money is' : 'How overdue the verified invoice subset is'}
+        </h2>
         <dl className="grid gap-2 grid-cols-2 sm:grid-cols-6">
           {BUCKET_LABELS.map(([bucket, label]) => (
             <div key={bucket}>
@@ -270,7 +287,10 @@ function ReceivablesView({ data, currency }: { data: ReceivablesResponse; curren
           </p>
         )}
         {data.truncated && <p>Only the first customers in each list are shown.</p>}
-        <p>Totals come from open invoices in QuickBooks. They are not reconciled to payments or your general ledger.</p>
+        <p>
+          {coverageComplete ? 'Totals come' : 'Verified-subset amounts come'} from open invoices in QuickBooks.
+          They are not reconciled to payments or your general ledger.
+        </p>
       </div>
     </div>
   );

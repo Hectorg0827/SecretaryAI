@@ -1,21 +1,40 @@
 import { useEffect, useState } from 'react';
 import {
   X, TrendingUp, TrendingDown, AlertTriangle, Clock,
-  Mail, FileText, StickyNote, DollarSign, Calendar,
-  Phone, Building2, ChevronRight, ExternalLink
+  Mail, StickyNote, DollarSign, Calendar, Building2,
 } from 'lucide-react';
 import { InlineAssistant } from '../layout/InlineAssistant';
 import { api, Account } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
 
-interface Order {
+/** One invoice from GET /api/accounts/{id}/orders. */
+export interface AccountOrder {
   id: string;
-  invoice_number?: string;
   invoice_date: string;
+  due_date: string | null;
   total_amount: number;
-  status?: string;
-  items?: { name: string; qty: number; price: number }[];
+  balance_due: number | null;
+  status: string;
 }
+
+export interface AccountOrdersResponse {
+  account_id: string;
+  orders: AccountOrder[];
+  count: number;
+  total: number;
+  truncated: boolean;
+  history_window_days: number;
+  unmatched_invoices: number;
+}
+
+type OrdersState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; data: AccountOrdersResponse };
+
+// The account response says whether an average was observed; a missing
+// average must not be shown as $0.
+type AccountWithQuality = Account & { avg_order_value_observed?: boolean };
 
 interface Props {
   account: Account | null;
@@ -32,44 +51,132 @@ const HEALTH_CONFIG = {
 
 type Tab = 'overview' | 'orders' | 'notes';
 
+const fmt = (n?: number | null) =>
+  n != null ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
+
+const fmtMoney = (n?: number | null) =>
+  n != null ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+
+/** Date-only strings (YYYY-MM-DD) are calendar days, not UTC midnight. */
+function fmtDate(d?: string | null): string {
+  if (!d) return '—';
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  const parsed = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(d);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function isOrdersResponse(data: unknown): data is AccountOrdersResponse {
+  const body = data as Partial<AccountOrdersResponse> | null;
+  return !!body && Array.isArray(body.orders) && typeof body.total === 'number'
+    && typeof body.history_window_days === 'number';
+}
+
+/** Invoices for one account. A failed read is shown as an error, never as "no orders". */
+export function AccountOrders({ accountId }: { accountId: string }) {
+  const [state, setState] = useState<OrdersState>({ status: 'loading' });
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    setState({ status: 'loading' });
+    api.get<AccountOrdersResponse>(`/api/accounts/${encodeURIComponent(accountId)}/orders`)
+      .then((data) => {
+        if (!isOrdersResponse(data)) throw new Error('The order history response was incomplete.');
+        if (current) setState({ status: 'ready', data });
+      })
+      .catch((err: unknown) => {
+        if (!current) return;
+        const message = err instanceof Error && err.message ? err.message : 'The server did not answer.';
+        setState({ status: 'error', message });
+      });
+    return () => { current = false; };
+  }, [accountId, reload]);
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" role="status" aria-label="Loading orders">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 space-y-2">
+        <p className="flex items-start gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>Orders could not be loaded: {state.message}</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => setReload((n) => n + 1)}
+          className="font-medium text-red-700 underline hover:text-red-800"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const { orders, total, truncated, history_window_days: days, unmatched_invoices: unmatched } = state.data;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500">
+        {total === 0
+          ? `No invoices for this account in the last ${days} days.`
+          : truncated
+            ? `Showing the newest ${orders.length} of ${total} invoices from the last ${days} days.`
+            : `${total} invoice${total === 1 ? '' : 's'} from the last ${days} days.`}
+      </p>
+      {unmatched > 0 && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          {unmatched} invoice{unmatched === 1 ? ' has' : 's have'} no customer attached in QuickBooks, so this list may be missing some orders.
+        </p>
+      )}
+      {orders.map((o) => (
+        <div key={o.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors">
+          <div>
+            <p className="text-xs font-medium text-slate-700">QuickBooks ref {o.id}</p>
+            <p className="text-xs text-slate-400">{fmtDate(o.invoice_date)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold text-slate-800">{fmtMoney(o.total_amount)}</p>
+            {o.status && <p className="text-xs text-slate-400 capitalize">{o.status}</p>}
+            {o.status === 'open' && o.balance_due != null && (
+              <p className="text-xs text-slate-500">{fmtMoney(o.balance_due)} still owed</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AccountDetail({ account, onClose }: Props) {
   const { canTriggerActions } = useAuth();
   const [tab, setTab]         = useState<Tab>('overview');
-  const [orders, setOrders]   = useState<Order[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
   const [note, setNote]       = useState('');
   const [notes, setNotes]     = useState<{ id: string; text: string; created_at: string }[]>([]);
   const [savingNote, setSavingNote] = useState(false);
   const [draftingEmail, setDraftingEmail] = useState(false);
 
-  useEffect(() => {
-    if (!account) return;
-    setTab('overview');
-    setOrders([]);
-    setNotes([]);
-  }, [account?.id]);
+  const accountId = account?.id;
 
   useEffect(() => {
-    if (tab === 'orders' && account && orders.length === 0) {
-      loadOrders();
-    }
+    setTab('overview');
+    setNotes([]);
+  }, [accountId]);
+
+  useEffect(() => {
     if (tab === 'notes' && account) {
       loadNotes();
     }
   }, [tab, account]);
-
-  const loadOrders = async () => {
-    if (!account) return;
-    setOrdersLoading(true);
-    try {
-      const res = await api.get<{ orders: Order[] }>(`/api/accounts/${account.id}/orders`);
-      setOrders(res.orders ?? []);
-    } catch {
-      setOrders([]);
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
 
   const loadNotes = async () => {
     try {
@@ -113,11 +220,7 @@ export function AccountDetail({ account, onClose }: Props) {
   const health = HEALTH_CONFIG[account.health_status] ?? HEALTH_CONFIG.unknown;
   const { Icon: HealthIcon } = health;
 
-  const fmt = (n?: number) =>
-    n != null ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
-
-  const fmtDate = (d?: string | null) =>
-    d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const avgOrderObserved = (account as AccountWithQuality).avg_order_value_observed !== false;
 
   return (
     <div className="flex flex-col h-full bg-white border-l border-slate-200 overflow-hidden">
@@ -153,7 +256,7 @@ export function AccountDetail({ account, onClose }: Props) {
       <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
         {[
           { label: 'Balance',    value: fmt(account.current_balance),  Icon: DollarSign },
-          { label: 'Avg Order',  value: fmt(account.avg_order_value),   Icon: TrendingUp },
+          { label: 'Avg Order',  value: avgOrderObserved ? fmt(account.avg_order_value) : '—', Icon: TrendingUp },
           { label: 'Last Order', value: fmtDate(account.last_order_date), Icon: Calendar  },
         ].map(({ label, value, Icon }) => (
           <div key={label} className="px-4 py-3 text-center">
@@ -246,34 +349,7 @@ export function AccountDetail({ account, onClose }: Props) {
         {/* Orders tab */}
         {tab === 'orders' && (
           <div className="p-4">
-            {ordersLoading ? (
-              <div className="space-y-2">
-                {[...Array(4)].map((_, i) => (
-                  <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
-                ))}
-              </div>
-            ) : orders.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-8">No orders found</p>
-            ) : (
-              <div className="space-y-2">
-                {orders.map((o) => (
-                  <div key={o.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors">
-                    <div>
-                      <p className="text-xs font-medium text-slate-700">
-                        {o.invoice_number ?? o.id.slice(0, 8)}
-                      </p>
-                      <p className="text-xs text-slate-400">{fmtDate(o.invoice_date)}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-semibold text-slate-800">{fmt(o.total_amount)}</p>
-                      {o.status && (
-                        <p className="text-xs text-slate-400 capitalize">{o.status}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <AccountOrders key={account.id} accountId={account.id} />
           </div>
         )}
 
@@ -326,7 +402,7 @@ export function AccountDetail({ account, onClose }: Props) {
               health_score:  account.health_score,
               last_order:    account.last_order_date,
               balance:       account.current_balance,
-              avg_order:     account.avg_order_value,
+              avg_order:     avgOrderObserved ? account.avg_order_value : null,
             },
           }}
           initialSuggestion={

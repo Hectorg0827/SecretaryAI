@@ -1,5 +1,6 @@
 """Inventory forecasting must use verified invoice history, not fabricated sales."""
 from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -128,3 +129,39 @@ async def test_qb_and_warehouse_overlap_is_not_double_counted():
     )
     assert unrelated["total_qty"] == 100
     assert unrelated["source"] == "qb"
+
+@pytest.mark.parametrize("observed,rate,qty,expected", [
+    (False, 0, 120, "unassessed"),
+    (False, None, 120, "unassessed"),
+    (False, 0, 0, "out_of_stock"),
+    (True, 0, 120, "healthy"),
+    (True, 10, 15, "critical"),
+    (True, 0.1, 0.5, "healthy"),
+])
+def test_inventory_status_requires_observed_velocity(observed, rate, qty, expected):
+    from app.api.inventory import _inventory_status
+    status = _inventory_status({"total_qty": qty, "weekly_sell_rate": rate,
+                                "weekly_sell_rate_observed": observed})
+    assert status.status == expected
+    assert status.total_qty == Decimal(str(qty))
+    if not observed:
+        assert status.weeks_remaining is None
+
+
+@pytest.mark.asyncio
+async def test_inventory_list_and_alerts_expose_unassessed_stock():
+    from app.api.inventory import list_inventory, get_inventory_alerts
+    adapter = _adapter([], weekly_sell_rate=0, weekly_sell_rate_observed=False)
+    result = await list_inventory(limit=50, offset=0, status_filter=None, user={}, adapter=adapter)
+    assert result["items"][0]["stock_status"] == "unassessed"
+    assert result["items"][0]["weeks_remaining"] is None
+    alerts = await get_inventory_alerts(user={}, adapter=adapter)
+    assert alerts == {"alerts": [], "count": 0, "unassessed_count": 1}
+
+
+@pytest.mark.parametrize("qty,rate", [(None, 10), ("NaN", 10), (-1, 10), (10, "Infinity"), (10, -1)])
+def test_invalid_inventory_measurement_fails_closed(qty, rate):
+    from app.api.inventory import _inventory_status
+    with pytest.raises(HTTPException) as error:
+        _inventory_status({"total_qty": qty, "weekly_sell_rate": rate, "weekly_sell_rate_observed": True})
+    assert error.value.status_code == 503

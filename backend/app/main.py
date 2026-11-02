@@ -308,6 +308,8 @@ from app.api import logistics as logistics_router
 app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"],  dependencies=_PAID)
 from app.api import compliance as compliance_router
 app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"], dependencies=_PAID)
+from app.api import insights as insights_router
+app.include_router(insights_router.router,     prefix="/api/insights",       tags=["insights"],   dependencies=_PAID)
 # connectors is NOT gated at the router level: /heartbeat, /tasks, /task-result,
 # /sync-status and /error authenticate with a *connector* token via
 # get_connector_identity, not a user JWT. A router-wide user-subscription check

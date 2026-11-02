@@ -10,6 +10,7 @@ import { PendingApprovals } from '../components/dashboard/PendingApprovals';
 import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel';
 import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
 import { MorningBriefing } from '../components/dashboard/MorningBriefing';
+import { WeeklyReport } from '../components/dashboard/WeeklyReport';
 import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
@@ -130,8 +131,9 @@ export function Dashboard() {
           Account totals unavailable for this session. Missing totals are not zero.
         </div>}
         {(role === 'owner' || role === 'manager') && (
-          <div className="mb-5">
+          <div className="mb-5 space-y-5">
             <MorningBriefing />
+            <WeeklyReport />
           </div>
         )}
         {hasLeftColumn ? (

@@ -125,7 +125,9 @@ class QBDesktopAdapter(QuickBooksAdapter):
             phone=raw.get("phone"),
             state=raw.get("billingAddress", {}).get("state"),
             balance=Decimal(str(raw.get("balance", 0))),
-            total_sales=Decimal(str(raw.get("totalBalance", 0))),
+            # totalBalance is the open balance including sub-customers
+            # (jobs), not sales. Conductor customers carry no sales total.
+            total_sales=None,
         )
 
     def _normalize_invoice(self, raw: dict) -> Invoice:

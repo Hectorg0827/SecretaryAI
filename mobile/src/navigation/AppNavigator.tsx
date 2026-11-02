@@ -38,6 +38,8 @@ export default function AppNavigator() {
   // portfolio screens closed until the record-scope contract is verified.
   const canAccessAccounts = isLeader || role === 'back_office';
   const canAccessInventory = canChat || role === 'back_office';
+  // Back office runs purchasing and receiving; approvals stay owner/manager.
+  const canAccessLogistics = isLeader || role === 'back_office';
 
   return (
     <Tab.Navigator
@@ -59,7 +61,7 @@ export default function AppNavigator() {
       {isLeader && <Tab.Screen name="Reports" component={ReportsScreen} />}
       {canAccessAccounts && <Tab.Screen name="Accounts" component={AccountsStack} options={{ headerShown: false }} />}
       {canAccessInventory && <Tab.Screen name="Inventory" component={InventoryScreen} />}
-      {isLeader && <Tab.Screen name="Logistics" component={LogisticsScreen} />}
+      {canAccessLogistics && <Tab.Screen name="Logistics" component={LogisticsScreen} />}
       {isLeader && <Tab.Screen name="Compliance" component={ComplianceScreen} />}
       {isLeader && <Tab.Screen name="Approvals" component={ApprovalsScreen} />}
     </Tab.Navigator>

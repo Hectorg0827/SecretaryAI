@@ -163,7 +163,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):
-        log.warning("ValueError at %s: %s", request.url, exc)
+        log.warning("ValueError while handling request")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"error": "bad_request", "message": str(exc)},
@@ -178,7 +178,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def generic_error_handler(request: Request, exc: Exception):
-        log.error("Unhandled error at %s: %s", request.url, exc, exc_info=True)
+        log.error("Unhandled error while handling request", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={

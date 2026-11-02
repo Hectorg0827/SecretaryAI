@@ -263,3 +263,117 @@ async def get_account(
         "trend_30d":      trend,
         "recent_invoices": recent_invoices,
     }
+
+
+ORDER_HISTORY_DAYS = 365
+_ACCOUNT_ROLES = ("owner", "manager", "sales_rep", "back_office")
+
+
+def _order_row(invoice) -> dict:
+    """One invoice as shown on the account's Orders tab; invalid data raises."""
+    row = _invoice_row(invoice)
+
+    raw_due = _field(invoice, "due_date")
+    if raw_due is None or raw_due == "":
+        due_date = None
+    elif isinstance(raw_due, date) and not isinstance(raw_due, datetime):
+        due_date = raw_due.isoformat()
+    elif isinstance(raw_due, str):
+        try:
+            due_date = date.fromisoformat(raw_due).isoformat()
+        except ValueError as exc:
+            raise ValueError("Account invoice has invalid due date") from exc
+    else:
+        raise ValueError("Account invoice has invalid due date")
+
+    # Unknown open balance stays unknown; it is never shown as $0 owed.
+    raw_balance = _field(invoice, "balance")
+    balance_due = None
+    if raw_balance is not None:
+        balance_due = _response_money(
+            _finite_amount(raw_balance, field="Invoice balance"), field="Invoice balance",
+        )
+
+    return {
+        "id": row["id"],
+        "invoice_date": row["date"],
+        "due_date": due_date,
+        "total_amount": row["total"],
+        "balance_due": balance_due,
+        "status": row["status"],
+    }
+
+
+@router.get("/{account_id}/orders")
+async def get_account_orders(
+    account_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(get_current_user),
+    adapter=Depends(get_adapter),
+):
+    """Invoices billed to one account in the last 365 days, newest first.
+
+    Same access as account detail: owner/manager/back office, and a sales rep
+    only for an account assigned to them. Tenant scope comes from the adapter
+    built for ``user["company_id"]``. A failed or unreadable source is an
+    outage (503), never an empty order list.
+    """
+    role = user.get("role", "viewer")
+    if role not in _ACCOUNT_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized to view accounts")
+
+    try:
+        customers = await adapter.get_all_customers()
+    except Exception as exc:
+        log.warning("Account orders: customer source read failed")
+        raise HTTPException(
+            status_code=503, detail="Customer records are unavailable right now",
+        ) from exc
+    customer = next(
+        (c for c in customers if _field(c, "qb_id", "") == account_id),
+        None,
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if role == "sales_rep" and not _owned_by_sales_rep(customer, user):
+        raise HTTPException(status_code=403, detail="Account is not assigned to this sales representative")
+
+    try:
+        invoices = await adapter.get_orders_last_n_days(ORDER_HISTORY_DAYS)
+    except Exception as exc:
+        log.warning("Account orders: invoice source read failed")
+        raise HTTPException(
+            status_code=503, detail="Order history is unavailable right now",
+        ) from exc
+
+    rows: list[dict] = []
+    unmatched = 0
+    try:
+        for invoice in invoices:
+            customer_id = _field(invoice, "customer_id")
+            if not isinstance(customer_id, str) or not customer_id.strip():
+                # Could belong to this account; reported, never silently dropped.
+                unmatched += 1
+                continue
+            if customer_id.strip() == account_id:
+                rows.append(_order_row(invoice))
+        if len({row["id"] for row in rows}) != len(rows):
+            raise ValueError("Account invoices have duplicate source ids")
+    except (ValueError, TypeError, ArithmeticError) as exc:
+        log.warning("Account orders: invoice data unreadable")
+        raise HTTPException(
+            status_code=503,
+            detail="Order history for this account could not be read completely",
+        ) from exc
+
+    # Provider enumeration order is not a chronological business contract.
+    rows.sort(key=lambda row: (row["invoice_date"], row["id"]), reverse=True)
+    return {
+        "account_id": account_id,
+        "orders": rows[:limit],
+        "count": min(len(rows), limit),
+        "total": len(rows),
+        "truncated": len(rows) > limit,
+        "history_window_days": ORDER_HISTORY_DAYS,
+        "unmatched_invoices": unmatched,
+    }

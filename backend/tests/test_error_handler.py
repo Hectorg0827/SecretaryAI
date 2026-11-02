@@ -14,7 +14,9 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from decimal import Decimal
+
+from pydantic import BaseModel, Field, field_validator
 
 
 def _make_app():
@@ -29,6 +31,20 @@ def _make_app():
     @app.post("/validate")
     def validate_item(item: Item):
         return item
+
+    class Priced(BaseModel):
+        price: Decimal = Field(gt=0)
+
+        @field_validator("price")
+        @classmethod
+        def whole_cents(cls, value):
+            if value != value.quantize(Decimal("0.01")):
+                raise ValueError("price must be whole cents")
+            return value
+
+    @app.post("/priced")
+    def priced(item: Priced):
+        return {"ok": True}
 
     @app.get("/value-error")
     def raise_value():
@@ -65,6 +81,13 @@ class TestErrorHandlers:
         assert body["error"] == "validation_error"
         assert "detail" in body
         assert body["message"] == "Request validation failed"
+
+    @pytest.mark.parametrize("price", ["0", "1.234"])
+    def test_validation_errors_with_decimal_or_exception_context_are_422(self, price):
+        # Decimal limits and validator exceptions used to crash the JSON encoder.
+        resp = self.client.post("/priced", json={"price": price})
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "validation_error"
 
     def test_value_error_returns_400(self):
         resp = self.client.get("/value-error")

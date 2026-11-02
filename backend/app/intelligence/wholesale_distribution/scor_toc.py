@@ -33,6 +33,7 @@ ToC 5 Focusing Steps (automated)
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from dataclasses import dataclass, field
 from enum import Enum
@@ -514,7 +515,10 @@ class SCORToCEngine:
             return ConstraintType.CARRIER_CAPACITY
         if "customs" in name_lower or "import" in name_lower or "border" in name_lower:
             return ConstraintType.CUSTOMS_CLEARANCE
-        if "cash" in name_lower or "payment" in name_lower or "ar" in name_lower:
+        # "ar" must be a whole word: as a substring it matches "staging area",
+        # "clearance" or "quarantine" and mislabels them as cash-flow constraints.
+        if ("cash" in name_lower or "payment" in name_lower or "receivable" in name_lower
+                or re.search(r"\bar\b", name_lower)):
             return ConstraintType.CASH_FLOW
         if "forecast" in name_lower or "plan" in name_lower or "demand" in name_lower:
             return ConstraintType.DEMAND_PLANNING

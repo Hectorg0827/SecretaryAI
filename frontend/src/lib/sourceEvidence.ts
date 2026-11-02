@@ -1,4 +1,4 @@
-import type { BriefingEntryV1, BriefingSectionV1, BriefingTodayResponseV1, DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, PriorityEmail, SalesSummary } from './api';
+import type { BriefingEntryV1, BriefingSectionV1, BriefingTodayResponseV1, DashboardSummary, Draft, FeedEvent, FollowUpNote, InventoryAlert, PriorityEmail, SalesSummary, WeeklyReportFiguresV1, WeeklyReportResponseV1 } from './api';
 
 export const BRIEFING_SECTIONS: readonly BriefingSectionV1[] = [
   'red_alerts', 'yellow_alerts', 'opportunities', 'scoreboard', 'todays_priorities', 'actions_taken',
@@ -262,4 +262,43 @@ export function verifiedWorkflowRuns(value: unknown): { workflows: DashboardWork
     && count(run.total_steps) && run.total_steps > 0
     && (run.current_step as number) <= (run.total_steps as number))) return null;
   return { workflows: value.workflows as DashboardWorkflowRun[] };
+}
+
+const WEEKLY_FIGURES: readonly (keyof WeeklyReportFiguresV1)[] = [
+  'sales_this_week', 'invoices_this_week', 'sales_prior_week', 'invoices_prior_week', 'sales_30d',
+  'accounts_total', 'accounts_slowing', 'accounts_at_risk', 'accounts_dormant', 'accounts_unscored',
+  'inventory_critical', 'inventory_low', 'inventory_unassessed',
+];
+const WEEKLY_AMOUNTS = new Set(['sales_this_week', 'sales_prior_week', 'sales_30d']);
+
+/** Weekly report read: a malformed report or run record is unavailable, never shown. */
+export function verifiedWeeklyReport(value: unknown): WeeklyReportResponseV1 | null {
+  if (!record(value) || !exactFields(value, ['report', 'last_run'])) return null;
+  const { report, last_run: run } = value;
+  if (report !== null) {
+    if (!record(report) || !exactFields(report, [
+      'status', 'report_text', 'period_start', 'period_end', 'language',
+      'source_quality', 'figures', 'generated_at',
+    ])) return null;
+    if (report.status !== 'ready' || !nonempty(report.report_text)
+      || !calendarDate(report.period_start) || !calendarDate(report.period_end)
+      || report.period_start > report.period_end || !nonempty(report.language)
+      || report.source_quality !== 'partial'
+      || (report.generated_at !== null && !awareTimestamp(report.generated_at))) return null;
+    const figures = report.figures;
+    if (!record(figures) || !exactFields(figures, WEEKLY_FIGURES)) return null;
+    const figuresValid = WEEKLY_FIGURES.every((key) => (WEEKLY_AMOUNTS.has(key)
+      ? typeof figures[key] === 'number' && Number.isFinite(figures[key])
+      : count(figures[key])));
+    if (!figuresValid) return null;
+  }
+  if (run !== null) {
+    if (!record(run) || !exactFields(run, ['status', 'reason', 'period_start', 'period_end', 'attempted_at'])) return null;
+    if (!['succeeded', 'failed'].includes(String(run.status))
+      || (run.reason !== null && !['source_unavailable', 'generation_failed', 'storage_failed'].includes(String(run.reason)))
+      || (run.status === 'failed' && run.reason === null)
+      || !calendarDate(run.period_start) || !calendarDate(run.period_end)
+      || (run.attempted_at !== null && !awareTimestamp(run.attempted_at))) return null;
+  }
+  return value as unknown as WeeklyReportResponseV1;
 }

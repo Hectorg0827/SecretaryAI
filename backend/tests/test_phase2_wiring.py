@@ -415,3 +415,31 @@ class TestRegistrationSeed:
         with patch("app.domain.policy.PolicyEngine.seed_defaults", new_callable=AsyncMock) as mock_seed:
             await _seed_company_defaults("company-1", db)
             mock_seed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_registration_does_not_write_unknown_feature_flag(self):
+        from app.api.auth import _seed_company_defaults
+
+        db = MagicMock()
+        db.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+        await _seed_company_defaults("company-1", db)
+
+        first_upsert = db.table.return_value.upsert.call_args_list[0][0][0]
+        assert "api_auto_sync" not in first_upsert
+        assert first_upsert["computer_use_enabled"] is False
+
+    @pytest.mark.asyncio
+    async def test_default_policy_seeding_recovers_from_partial_setup(self):
+        from app.domain.policy import PolicyEngine
+
+        db = MagicMock()
+        db.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"rule_name": "allow_all_reads"}
+        ]
+        await PolicyEngine(company_id="company-1", db=db).seed_defaults()
+
+        inserted = [args[0][0]["rule_name"] for args in db.table.return_value.insert.call_args_list]
+        assert "allow_all_reads" not in inserted
+        assert len(inserted) == 4
+        assert "deny_computer_use_commits" in inserted
+        db.table.return_value.upsert.assert_called_once()

@@ -105,6 +105,41 @@ async def test_registration_writes_staging_user_columns():
     assert response["company_id"] == "synthetic-tenant"
 
 
+@pytest.mark.asyncio
+async def test_registration_rejects_partial_safety_setup_before_creating_owner():
+    db = MagicMock()
+    users_table = MagicMock()
+    companies_table = MagicMock()
+    db.table.side_effect = lambda name: {
+        "users": users_table,
+        "companies": companies_table,
+    }[name]
+    users_table.select.return_value.eq.return_value.execute.return_value.data = []
+    companies_table.insert.return_value.execute.return_value.data = [
+        {"id": "synthetic-tenant"},
+    ]
+
+    with patch("supabase.create_client", return_value=db), \
+         patch.object(auth, "hash_password", return_value="synthetic-hash"), \
+         patch.object(auth, "_seed_company_defaults", new_callable=AsyncMock,
+                      side_effect=RuntimeError("policy database error")):
+        with pytest.raises(HTTPException) as caught:
+            await auth.register(
+                auth.RegisterRequest(
+                    company_name="Synthetic Company", email="owner@example.test",
+                    password="aaaaaaaa1",
+                ),
+                _=None,
+            )
+
+    assert caught.value.status_code == 503
+    assert "policy database error" not in caught.value.detail
+    users_table.insert.assert_not_called()
+    companies_table.delete.return_value.eq.assert_called_once_with(
+        "id", "synthetic-tenant"
+    )
+
+
 @pytest.mark.parametrize("module_path", [
     "app/api/dashboard.py",
     "app/domain/policy.py",

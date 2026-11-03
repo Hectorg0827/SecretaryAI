@@ -646,6 +646,20 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
 
     company_id = company_result.data[0]["id"]
 
+    # A user account must never become active with partial safety defaults.
+    # Seed before the owner record; if setup fails, clean up the orphan company.
+    try:
+        await _seed_company_defaults(company_id, db)
+    except Exception:
+        log.error("Registration safety defaults could not be initialized")
+        try:
+            db.table("companies").delete().eq("id", company_id).execute()
+        except Exception:
+            log.error("Registration orphan company cleanup failed")
+        raise HTTPException(
+            status_code=503, detail="Account safety setup unavailable; please try again"
+        ) from None
+
     # Create user
     user_payload: dict = {
         "email": body.email,
@@ -677,12 +691,6 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         raise HTTPException(status_code=500, detail="Failed to create user")
 
     user = user_result.data[0]
-
-    # Seed per-company defaults (non-fatal — log and continue if fails)
-    try:
-        await _seed_company_defaults(company_id, db)
-    except Exception as exc:
-        log.warning("Failed to seed company defaults for %s (non-fatal): %s", company_id, exc)
 
     token = create_access_token({
         "sub": user["id"],
@@ -724,7 +732,6 @@ async def _seed_company_defaults(company_id: str, db) -> None:
             "computer_use_enabled": False,
             "browser_auto_enabled": True,
             "require_approval_above": "500.00",
-            "api_auto_sync": True,
             "file_ingestion_enabled": True,
         },
         on_conflict="company_id",

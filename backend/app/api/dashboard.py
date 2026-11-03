@@ -319,7 +319,13 @@ async def list_emails(
     adapter=Depends(get_adapter),
 ):
     query = "is:unread" if unread_only else "in:inbox"
-    raw = await adapter.get_emails(query=query, max_results=limit)
+    try:
+        raw = await adapter.get_emails(query=query, max_results=limit)
+    except HTTPException:
+        raise
+    except Exception:
+        log.warning("Dashboard email source unavailable")
+        raise HTTPException(status_code=503, detail="Email source unavailable") from None
 
     if not raw:
         return {"emails": []}

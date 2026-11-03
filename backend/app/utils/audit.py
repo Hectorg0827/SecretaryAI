@@ -56,10 +56,16 @@ def write_audit_event(
             "id": event_id,
             "company_id": company_id,
             "event_type": event_type,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "description": event_type.replace("_", " "),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
         }
         if actor_id is not None:
             row["actor_id"] = actor_id
+            try:
+                row["user_id"] = str(uuid.UUID(str(actor_id)))
+            except (ValueError, AttributeError, TypeError):
+                # Background/system actors are not UUID users.
+                pass
         if action_class is not None:
             row["action_class"] = action_class
         if capability is not None:

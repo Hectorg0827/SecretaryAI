@@ -66,6 +66,19 @@ class TestAuditWriter:
         assert inserted["policy_rule_id"] == "rule-99"
         assert inserted["approved_by"] == "owner-1"
         assert inserted["metadata"]["draft_id"] == "d1"
+        assert inserted["description"] == "policy blocked"
+        assert "occurred_at" in inserted
+        assert "created_at" not in inserted
+
+    def test_uuid_actor_is_recorded_as_canonical_user_id(self):
+        from app.utils.audit import write_audit_event
+        db = self._make_db()
+        user_id = "00000000-0000-4000-8000-000000000001"
+        write_audit_event(db, company_id="c1", event_type="user_login", actor_id=user_id)
+        inserted = db.table.return_value.insert.call_args[0][0]
+        assert inserted["user_id"] == user_id
+        assert inserted["actor_id"] == user_id
+
 
     def test_write_non_fatal_on_db_error(self):
         """DB failure must not raise — returns None."""

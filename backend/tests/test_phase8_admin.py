@@ -141,6 +141,21 @@ class TestAuditLog:
         assert result["page_size"] == 5
 
     @pytest.mark.asyncio
+    async def test_canonical_audit_timestamp_is_mapped_for_ui(self):
+        from app.api.admin import get_audit_log
+        db = _make_db()
+        _setup_paginated(
+            db,
+            [{"id": "ev-1", "event_type": "user_login", "occurred_at": "2026-11-03T00:00:00Z"}],
+            total=1,
+        )
+        result = await get_audit_log(page=1, page_size=50, user=_make_user(), db=db)
+        assert result["events"][0]["created_at"] == "2026-11-03T00:00:00Z"
+        db.table.return_value.select.return_value.eq.return_value.order.assert_called_with(
+            "occurred_at", desc=True
+        )
+
+    @pytest.mark.asyncio
     async def test_pagination_math(self):
         from app.api.admin import get_audit_log
         db = _make_db()

@@ -49,7 +49,7 @@ async def get_audit_log(
       event_type — exact match on event_type column
       actor_id   — exact match on actor_id column
       since      — only events created_at >= since (ISO 8601)
-      until      — only events created_at <= until (ISO 8601)
+      until      — only events occurred_at <= until (ISO 8601)
     """
     _require_admin(user)
     company_id = user["company_id"]
@@ -60,16 +60,16 @@ async def get_audit_log(
             db.table("audit_events")
             .select("*", count="exact")
             .eq("company_id", company_id)
-            .order("created_at", desc=True)
+            .order("occurred_at", desc=True)
         )
         if event_type:
             q = q.eq("event_type", event_type)
         if actor_id:
             q = q.eq("actor_id", actor_id)
         if since:
-            q = q.gte("created_at", since)
+            q = q.gte("occurred_at", since)
         if until:
-            q = q.lte("created_at", until)
+            q = q.lte("occurred_at", until)
 
         result = q.range(offset, offset + page_size - 1).execute()
     except Exception as exc:
@@ -77,7 +77,10 @@ async def get_audit_log(
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     total = result.count or 0
-    events = result.data or []
+    events = [
+        {**event, "created_at": event.get("occurred_at", event.get("created_at"))}
+        for event in (result.data or [])
+    ]
 
     return {
         "events": events,
@@ -229,7 +232,7 @@ def _audit_count(db, company_id: str, since: str) -> int:
             db.table("audit_events")
             .select("id", count="exact")
             .eq("company_id", company_id)
-            .gte("created_at", since)
+            .gte("occurred_at", since)
             .execute()
         )
         return result.count or 0

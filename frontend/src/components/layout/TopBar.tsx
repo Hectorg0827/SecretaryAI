@@ -51,7 +51,7 @@ export function TopBar() {
         <span className="ml-2 text-sm text-slate-400">{formatDate()}</span>
       </div>
 
-      {/* Agent status pill */}
+      {/* Desktop sync status pill */}
       <div className="flex items-center gap-3">
         <button
           onClick={refresh}
@@ -62,12 +62,12 @@ export function TopBar() {
         </button>
 
         {agent === null ? (
-          <span className="text-xs text-slate-400">Agent not configured</span>
+          <span className="text-xs text-slate-400">Desktop sync not configured</span>
         ) : agent.connected ? (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <PlatformIcon platform={agent.platform} />
-            <span>Agent connected</span>
+            <span>Desktop sync connected</span>
             {agent.agent_version && (
               <span className="opacity-60 ml-0.5">v{agent.agent_version}</span>
             )}
@@ -75,7 +75,7 @@ export function TopBar() {
         ) : (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-500 text-xs font-medium">
             <WifiOff size={11} />
-            <span>Agent offline</span>
+            <span>Desktop sync offline</span>
           </div>
         )}
       </div>

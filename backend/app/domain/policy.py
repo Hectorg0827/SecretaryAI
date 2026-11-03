@@ -111,32 +111,31 @@ class PolicyEngine:
         """
         Insert the standard default policy rules for a new company.
         Call this during company registration.
-        Idempotent — skips if rules already exist.
+        Idempotent — resumes any incomplete seed and preserves existing rules.
+        A failed insert is surfaced so registration can report setup failures.
         """
         existing = (
             self._db.table("policy_rules")
-            .select("id")
+            .select("rule_name")
             .eq("company_id", self.company_id)
             .execute()
         )
-        if existing.data:
-            return  # Already seeded
+        rows = existing.data if isinstance(existing.data, list) else []
+        existing_names = {
+            row["rule_name"] for row in rows
+            if isinstance(row, dict) and isinstance(row.get("rule_name"), str)
+        }
 
-        defaults = _default_rules(self.company_id)
-        for rule in defaults:
-            try:
+        for rule in _default_rules(self.company_id):
+            if rule["rule_name"] not in existing_names:
                 self._db.table("policy_rules").insert(rule).execute()
-            except Exception as exc:
-                log.warning("Failed to seed default policy rule")
 
-        # Seed company_features with safe defaults
-        try:
-            self._db.table("company_features").upsert(
-                {"company_id": self.company_id},
-                on_conflict="company_id",
-            ).execute()
-        except Exception as exc:
-            log.warning("Failed to seed company_features defaults")
+        # Create the feature row if missing without overriding tenant choices.
+        self._db.table("company_features").upsert(
+            {"company_id": self.company_id},
+            on_conflict="company_id",
+            ignore_duplicates=True,
+        ).execute()
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

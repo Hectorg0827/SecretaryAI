@@ -237,7 +237,6 @@ class QBOnlineAdapter(QuickBooksAdapter):
             "DescriptionOnly", "GroupLineDetail",
         }
         for line in raw_lines:
-            line_id = unique_line_id(line, seen_line_ids, "QBO", key="Id")
             kind = line.get("DetailType")
             if kind in non_sales_types:
                 # Invoice total includes tax/discount/subtotal adjustments;
@@ -247,6 +246,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
                 continue
             if kind != "SalesItemLineDetail":
                 raise ValueError("QBO invoice line has unknown or missing DetailType")
+            # QBO-generated subtotal/discount/description lines can omit Id;
+            # sold-item identities still must be present and unique.
+            line_id = unique_line_id(line, seen_line_ids, "QBO", key="Id")
             detail = line.get("SalesItemLineDetail")
             if not isinstance(detail, dict):
                 raise ValueError("QBO invoice line missing SalesItemLineDetail")

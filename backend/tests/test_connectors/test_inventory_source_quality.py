@@ -150,7 +150,7 @@ async def test_zero_sales_rate_is_observed_only_if_database_has_a_row():
     adapter = _adapter()
     db = MagicMock()
     db.table().select().eq().execute.return_value.data = [
-        {"qb_id": "item-1", "weekly_sell_rate": 0}
+        {"qb_item_id": "item-1", "weekly_sell_rate": 0}
     ]
     adapter._db = db
     item = (await adapter.get_inventory_merged())[0]

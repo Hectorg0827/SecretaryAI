@@ -58,6 +58,7 @@ def _build_alert_dict(item: dict, status) -> dict:
 
 
 @router.get("/")
+@router.get("", include_in_schema=False)
 async def list_inventory(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),

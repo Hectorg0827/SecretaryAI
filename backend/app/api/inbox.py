@@ -120,7 +120,7 @@ async def get_inbox_feed(
         try:
             res = (
                 db.table("inventory")
-                .select("item_id, product_name, stock_status, qty_on_hand, weeks_remaining")
+                .select("id, qb_item_id, product_name, stock_status, total_qty, weeks_remaining")
                 .eq("company_id", company_id)
                 .in_("stock_status", ["out_of_stock", "critical", "low"])
                 .order("weeks_remaining", desc=False)
@@ -136,8 +136,9 @@ async def get_inbox_feed(
                     "low"
                 )
                 weeks_txt = f"{weeks:.1f}w remaining" if weeks is not None else "qty unknown"
+                source_item_id = str(item.get("qb_item_id") or item["id"])
                 items.append(InboxItem(
-                    id=f"alert:inv:{item['item_id']}",
+                    id=f"alert:inv:{source_item_id}",
                     type="alert",
                     priority=priority,
                     title=item.get("product_name", "Unknown product"),
@@ -145,10 +146,10 @@ async def get_inbox_feed(
                     timestamp=now_iso,
                     is_read=(status == "low"),
                     payload={
-                        "item_id":       item["item_id"],
+                        "item_id":       source_item_id,
                         "product_name":  item.get("product_name"),
                         "stock_status":  status,
-                        "qty_on_hand":   item.get("qty_on_hand"),
+                        "qty_on_hand":   item.get("total_qty"),
                         "weeks_remaining": weeks,
                     },
                 ))

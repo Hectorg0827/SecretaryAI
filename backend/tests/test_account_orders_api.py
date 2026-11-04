@@ -88,6 +88,21 @@ def use(adapters: dict, tenants: list | None = None):
     app.dependency_overrides[get_adapter] = override
 
 
+def test_root_list_routes_accept_both_slash_forms_without_redirect(client):
+    adapter = FakeAdapter()
+
+    async def empty_inventory():
+        return []
+
+    adapter.get_inventory_merged = empty_inventory
+    use({"tenant-a": adapter})
+    for path, key in (("/api/accounts", "accounts"), ("/api/accounts/", "accounts"),
+                      ("/api/inventory", "items"), ("/api/inventory/", "items")):
+        response = client.get(path, headers=auth("owner"), follow_redirects=False)
+        assert response.status_code == 200, (path, response.status_code, response.text)
+        assert key in response.json()
+
+
 def test_owner_sees_only_this_accounts_invoices_newest_first(client):
     adapter = FakeAdapter()
     tenants: list = []

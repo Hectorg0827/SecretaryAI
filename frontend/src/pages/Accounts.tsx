@@ -60,17 +60,38 @@ function AccountRow({ account, onClick }: { account: Account; onClick: () => voi
 export function Accounts() {
   const [accounts, setAccounts]           = useState<Account[]>([]);
   const [loading,  setLoading]            = useState(true);
+  const [loadError, setLoadError]          = useState(false);
+  const [reload, setReload]               = useState(0);
+  const [total, setTotal]                 = useState<number | null>(null);
   const [search,   setSearch]             = useState('');
   const [selectedAccount, setSelected]    = useState<Account | null>(null);
   const [params, setParams]               = useSearchParams();
   const filter = (params.get('filter') ?? 'all') as typeof FILTERS[number];
 
   useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setLoadError(false);
     api.accounts.list()
-      .then((r) => setAccounts(r.accounts ?? []))
-      .catch(() => setAccounts([]))
-      .finally(() => setLoading(false));
-  }, []);
+      .then((r) => {
+        if (!r || !Array.isArray(r.accounts) || !Number.isSafeInteger(r.total) || r.total < r.accounts.length) {
+          throw new Error('Incomplete account list');
+        }
+        if (current) {
+          setAccounts(r.accounts);
+          setTotal(r.total);
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setAccounts([]);
+          setTotal(null);
+          setLoadError(true);
+        }
+      })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [reload]);
 
   const filtered = accounts.filter((a) => {
     const matchFilter = filter === 'all' || a.health_status === filter;
@@ -91,7 +112,7 @@ export function Accounts() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Accounts</h1>
-            <p className="text-sm text-slate-400 mt-0.5">{accounts.length} total accounts</p>
+            <p className="text-sm text-slate-400 mt-0.5">{loading ? "Loading accounts…" : loadError ? "Account count unavailable" : `${total ?? accounts.length} total accounts${total !== null && total > accounts.length ? ` (showing first ${accounts.length})` : ""}`}</p>
           </div>
           {/* Search */}
           <div className="relative">
@@ -128,6 +149,11 @@ export function Accounts() {
       <div className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Loading…</div>
+        ) : loadError ? (
+          <div role="alert" className="flex flex-col items-center justify-center h-40 gap-3 text-sm text-slate-600">
+            <p>Accounts could not be loaded. Please try again.</p>
+            <button type="button" onClick={() => setReload((n) => n + 1)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100">Try again</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-400">
             <Users size={24} className="mb-2 opacity-40" />

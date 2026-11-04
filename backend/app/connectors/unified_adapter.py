@@ -320,14 +320,14 @@ class UnifiedDataAdapter:
         if self._db:
             try:
                 company_id = self._config.get("id")
-                result = self._db.table("inventory").select("qb_id,weekly_sell_rate").eq(
+                result = self._db.table("inventory").select("qb_item_id,weekly_sell_rate").eq(
                     "company_id", company_id
                 ).execute()
                 for row in (result.data or []):
-                    if row.get("qb_id") and row.get("weekly_sell_rate") is not None:
+                    if row.get("qb_item_id") and row.get("weekly_sell_rate") is not None:
                         value = float(row["weekly_sell_rate"])
                         if 0 <= value < float("inf"):
-                            sell_rate_by_qb_id[row["qb_id"]] = value
+                            sell_rate_by_qb_id[str(row["qb_item_id"])] = value
             except Exception:
                 sell_rate_source_status = "unavailable"
 

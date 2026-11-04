@@ -163,6 +163,7 @@ def _to_account_dict(customer, orders: list[dict], last_order_str: str | None) -
 
 
 @router.get("/")
+@router.get("", include_in_schema=False)
 async def list_accounts(
     limit: int = Query(50, ge=1, le=200),
     user: dict = Depends(get_current_user),

@@ -48,7 +48,7 @@ function product(n: number, stock_status: Status = 'healthy') {
 function catalog(total: number, statusOf: (n: number) => Status = () => 'healthy') {
   const all = Array.from({ length: total }, (_, i) => product(i + 1, statusOf(i + 1)));
   return (path: string) => {
-    const match = /^\/api\/inventory\?limit=(\d+)&offset=(\d+)$/.exec(path);
+    const match = /^\/api\/inventory\/\?limit=(\d+)&offset=(\d+)$/.exec(path);
     if (!match) throw new Error(`Unexpected GET ${path}`);
     const limit = Number(match[1]);
     const offset = Number(match[2]);
@@ -71,9 +71,9 @@ describe('inventory page loads every product', () => {
     const page = await mount(<Inventory />);
 
     expect(urls(get)).toEqual([
-      `/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=0`,
-      `/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=200`,
-      `/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=400`,
+      `/api/inventory/?limit=${INVENTORY_PAGE_SIZE}&offset=0`,
+      `/api/inventory/?limit=${INVENTORY_PAGE_SIZE}&offset=200`,
+      `/api/inventory/?limit=${INVENTORY_PAGE_SIZE}&offset=400`,
     ]);
     const text = page.textContent ?? '';
     expect(text).toContain('450 products');
@@ -88,7 +88,7 @@ describe('inventory page loads every product', () => {
   it('makes a single request when everything fits on one page', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (path: string) => catalog(3)(path));
     const page = await mount(<Inventory />);
-    expect(urls(get)).toEqual([`/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=0`]);
+    expect(urls(get)).toEqual([`/api/inventory/?limit=${INVENTORY_PAGE_SIZE}&offset=0`]);
     expect(page.textContent).toContain('3 products');
   });
 

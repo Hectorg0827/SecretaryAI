@@ -149,6 +149,44 @@ def test_inventory_status_requires_observed_velocity(observed, rate, qty, expect
 
 
 @pytest.mark.asyncio
+async def test_merge_reads_actual_staging_inventory_qb_item_id_column():
+    from app.connectors.base import InventoryItem
+    from app.connectors.unified_adapter import UnifiedDataAdapter
+
+    class Query:
+        fields = None
+
+        def select(self, fields):
+            self.fields = fields
+            return self
+
+        def eq(self, column, value):
+            assert (column, value) == ("company_id", "test-company")
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data=[{"qb_item_id": "QB-1", "weekly_sell_rate": 3}])
+
+    query = Query()
+    adapter = object.__new__(UnifiedDataAdapter)
+    adapter._config = {"id": "test-company", "inventory_quantity_policy": "qb_authoritative"}
+    adapter._db = SimpleNamespace(table=lambda name: query if name == "inventory" else None)
+    adapter.get_inventory_qb = AsyncMock(return_value=[
+        InventoryItem(
+            id="item-1", qb_id="QB-1", name="Malta", sku="MALT-1",
+            quantity_on_hand=Decimal("100"), unit_price=Decimal("10"),
+            purchase_cost=Decimal("6"), reorder_point=Decimal("20"),
+        )
+    ])
+    adapter._get_router = lambda: SimpleNamespace(route=AsyncMock(side_effect=RuntimeError("No warehouse source")))
+
+    merged = await adapter.get_inventory_merged()
+    assert query.fields == "qb_item_id,weekly_sell_rate"
+    assert merged[0]["weekly_sell_rate"] == 3
+    assert merged[0]["weekly_sell_rate_observed"] is True
+
+
+@pytest.mark.asyncio
 async def test_inventory_list_and_alerts_expose_unassessed_stock():
     from app.api.inventory import list_inventory, get_inventory_alerts
     adapter = _adapter([], weekly_sell_rate=0, weekly_sell_rate_observed=False)

@@ -126,6 +126,23 @@ def test_qbo_explicit_non_sales_tax_line_is_not_mistaken_for_sold_item():
     assert invoice.total == Decimal("27.00")
 
 
+
+def test_qbo_provider_generated_subtotal_without_line_id_is_not_sold_inventory():
+    # Intuit's recurring-transaction example includes an ID-less subtotal
+    # line; it must not block a valid invoice or count as inventory sold.
+    subtotal = {"DetailType": "SubTotalLineDetail", "Amount": "25.00", "SubTotalLineDetail": {}}
+    invoice = qbo()._normalize_invoice(qbo_invoice(Line=[qbo_line(), subtotal]))
+    assert invoice.total == Decimal("25.00")
+    assert invoice.balance == Decimal("20.00")
+    assert len(invoice.line_items) == 1
+    assert invoice.line_items[0]["line_id"] == "line-1"
+
+
+def test_qbo_idless_subtotal_still_rejects_invalid_observed_money():
+    subtotal = {"DetailType": "SubTotalLineDetail", "Amount": "NaN"}
+    with pytest.raises(ValueError, match="line"):
+        qbo()._normalize_invoice(qbo_invoice(Line=[qbo_line(), subtotal]))
+
 def test_qbo_corrupt_observed_tax_adjustment_cannot_pass_unnoticed():
     tax_line = {"Id": "tax-1", "DetailType": "TaxLineDetail", "Amount": "NaN"}
     with pytest.raises(ValueError, match="line"):

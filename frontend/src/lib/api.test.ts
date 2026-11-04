@@ -57,6 +57,13 @@ describe('api client 401 → refresh flow', () => {
 });
 
 describe('hosted API errors and session boundaries', () => {
+  it('uses a direct, canonical accounts list URL without relying on HTTP redirects', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { accounts: [], total: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.accounts.list()).resolves.toEqual({ accounts: [], total: 0 });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/accounts/');
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

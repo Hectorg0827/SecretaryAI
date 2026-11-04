@@ -411,7 +411,7 @@ export const api = {
   },
 
   accounts: {
-    list: () => api.get<{ accounts: Account[] }>('/api/accounts'),
+    list: () => api.get<{ accounts: Account[]; total: number }>('/api/accounts/'),
   },
 
   inventory: {

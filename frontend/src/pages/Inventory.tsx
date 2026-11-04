@@ -40,7 +40,7 @@ export async function loadAllInventory(
   let expectedTotal: number | null = null;
   for (;;) {
     const page = await api.get<InventoryPage>(
-      `/api/inventory?limit=${INVENTORY_PAGE_SIZE}&offset=${all.length}`,
+      `/api/inventory/?limit=${INVENTORY_PAGE_SIZE}&offset=${all.length}`,
     );
     if (!page || !Array.isArray(page.items) || !Number.isSafeInteger(page.total) || page.total < 0) {
       throw new Error('The inventory response was incomplete.');

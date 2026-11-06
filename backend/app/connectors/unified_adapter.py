@@ -117,7 +117,6 @@ class UnifiedDataAdapter:
     ) -> None:
         """Durably persist rotating tokens or fail the refresh as incomplete."""
         import logging
-        from datetime import datetime, timezone
         log = logging.getLogger(__name__)
 
         company_id = self._config.get("id")
@@ -127,19 +126,21 @@ class UnifiedDataAdapter:
         try:
             from supabase import create_client
             from app.config import get_settings
-            from app.utils.encryption import encrypt
+            from app.utils.qbo_token_store import persist_rotated_qbo_tokens
 
             settings = get_settings()
             db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-            result = db.table("companies").update({
-                "qbo_access_token": encrypt(access_token, settings.secret_key),
-                "qbo_refresh_token": encrypt(refresh_token, settings.secret_key),
-                "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
-                "qbo_token_expires_at": expires_at.isoformat(),
-            }).eq("id", company_id).execute()
-            if not getattr(result, "data", None):
-                raise RuntimeError("QBO token persistence matched no company")
+            encrypted_refresh = persist_rotated_qbo_tokens(
+                db,
+                company_id=company_id,
+                expected_refresh_ciphertext=self._config.get("_qbo_expected_refresh_ciphertext"),
+                realm_id=self._config.get("qbo_realm_id"),
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_in=expires_in,
+                secret_key=settings.secret_key,
+            )
+            self._config["_qbo_expected_refresh_ciphertext"] = encrypted_refresh
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
             log.error("Failed to persist refreshed QBO tokens for company %s", company_id)

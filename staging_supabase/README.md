@@ -15,6 +15,11 @@ The `patches/` directory records additive changes applied to staging **after** t
 
 - `20261106030845_qbo_token_refresh_timestamp.sql`: the nullable QuickBooks OAuth refresh timestamp was applied to the staging project via an authenticated, staging-only SQL connector on November 6, 2026 and verified. The patch is idempotent. Do not replay it against production or assume its presence elsewhere.
 
+The same additive schema contract is also recorded as a **new, forward-only**
+repository migration at `supabase/migrations/20261106030900_qbo_token_refresh_timestamp.sql`
+for any separately approved future environment rollout. No historical baseline
+file was modified; neither migration is an authorization to change production.
+
 Before making a future change to the migration system, reconcile these recorded patches, staging schema state, and the CLI migration plan explicitly; never infer remote schema parity from the baseline manifest alone.
 
 ## Staging history reconciliation — October 25, 2026

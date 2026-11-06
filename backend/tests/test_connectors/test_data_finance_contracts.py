@@ -72,9 +72,12 @@ async def test_qbo_rotated_tokens_require_company_scope():
 @pytest.mark.asyncio
 async def test_qbo_token_persistence_failure_is_not_silently_accepted(caplog):
     adapter = UnifiedDataAdapter.__new__(UnifiedDataAdapter)
-    adapter._config = {"id": "tenant-fixture"}
+    adapter._config = {"id": "tenant-fixture", "_qbo_expected_refresh_ciphertext": "original-encrypted-refresh"}
     db = MagicMock()
-    db.table().update().eq().execute.side_effect = RuntimeError("fixture storage unavailable")
+    query = db.table().update()
+    query.eq.return_value = query
+    query.select.return_value = query
+    query.execute.side_effect = RuntimeError("fixture storage unavailable")
     settings = SimpleNamespace(supabase_url="https://test.invalid", supabase_service_role_key="fixture-key",
                                secret_key="fixture-encryption-key")
     with patch("supabase.create_client", return_value=db), \
@@ -89,9 +92,12 @@ async def test_qbo_token_persistence_failure_is_not_silently_accepted(caplog):
 @pytest.mark.asyncio
 async def test_qbo_refresh_rejects_update_that_matched_no_company():
     adapter = UnifiedDataAdapter.__new__(UnifiedDataAdapter)
-    adapter._config = {"id": "tenant-fixture"}
+    adapter._config = {"id": "tenant-fixture", "_qbo_expected_refresh_ciphertext": "original-encrypted-refresh"}
     db = MagicMock()
-    db.table().update().eq().execute.return_value = SimpleNamespace(data=[])
+    query = db.table().update()
+    query.eq.return_value = query
+    query.select.return_value = query
+    query.execute.return_value = SimpleNamespace(data=[])
     settings = SimpleNamespace(supabase_url="https://test.invalid", supabase_service_role_key="fixture-key",
                                secret_key="fixture-encryption-key")
     with patch("supabase.create_client", return_value=db), \

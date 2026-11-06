@@ -88,6 +88,11 @@ jobs:
     name: Web browser responsive acceptance (3 engines)
     needs: frontend
     runs-on: ubuntu-latest
+    # The matching official image includes all three browsers and OS packages.
+    # Installing 173 Ubuntu packages from the hosted runner's slow apt mirror
+    # previously exhausted this job's 20-minute timeout before tests could run.
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.48.0-noble
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -107,10 +112,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install isolated Chromium test runner
+      - name: Verify preinstalled Chromium Firefox and WebKit
         run: |
           python -m pip install playwright==1.48.0
-          python -m playwright install --with-deps chromium firefox webkit
+          python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              for browser in (p.chromium, p.firefox, p.webkit):
+                  executable = Path(browser.executable_path)
+                  assert executable.is_file(), f"Missing preinstalled {browser.name}: {executable}"
+                  print(f"READY: {browser.name}")
+          PY
       - name: Install pinned axe-core in isolated audit directory
         shell: bash
         run: |

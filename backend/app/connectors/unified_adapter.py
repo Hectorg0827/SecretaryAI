@@ -132,12 +132,14 @@ class UnifiedDataAdapter:
             settings = get_settings()
             db = create_client(settings.supabase_url, settings.supabase_service_role_key)
             expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-            db.table("companies").update({
+            result = db.table("companies").update({
                 "qbo_access_token": encrypt(access_token, settings.secret_key),
                 "qbo_refresh_token": encrypt(refresh_token, settings.secret_key),
                 "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
                 "qbo_token_expires_at": expires_at.isoformat(),
             }).eq("id", company_id).execute()
+            if not getattr(result, "data", None):
+                raise RuntimeError("QBO token persistence matched no company")
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
             log.error("Failed to persist refreshed QBO tokens for company %s", company_id)

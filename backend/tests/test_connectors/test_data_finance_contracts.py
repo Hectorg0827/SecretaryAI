@@ -87,6 +87,21 @@ async def test_qbo_token_persistence_failure_is_not_silently_accepted(caplog):
 
 
 @pytest.mark.asyncio
+async def test_qbo_refresh_rejects_update_that_matched_no_company():
+    adapter = UnifiedDataAdapter.__new__(UnifiedDataAdapter)
+    adapter._config = {"id": "tenant-fixture"}
+    db = MagicMock()
+    db.table().update().eq().execute.return_value = SimpleNamespace(data=[])
+    settings = SimpleNamespace(supabase_url="https://test.invalid", supabase_service_role_key="fixture-key",
+                               secret_key="fixture-encryption-key")
+    with patch("supabase.create_client", return_value=db), \
+         patch("app.config.get_settings", return_value=settings), \
+         patch("app.utils.encryption.encrypt", side_effect=lambda value, _: "encrypted"):
+        with pytest.raises(RuntimeError, match="could not be persisted"):
+            await adapter._persist_qbo_tokens("fixture-access", "fixture-refresh")
+
+
+@pytest.mark.asyncio
 async def test_outlook_read_failure_is_not_reported_as_empty_mailbox():
     outlook = OutlookConnector("tenant", "client", "secret", "token", "refresh")
     outlook._get_headers = AsyncMock(side_effect=httpx.ConnectError("fixture disconnect"))

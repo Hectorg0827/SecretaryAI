@@ -9,6 +9,14 @@ Project ref: `xerktvdgjvjozvckjyfp`. This root contains exactly 33 byte-preserve
 
 `manifest.json` maps each file to its original audited source path and SHA-256. The content copies are Git blobs, not regenerated SQL. Run `python3 scripts/check_staging_migration_bundle.py` from the repository root to verify bytes and mappings without a network call.
 
+## Staging-only post-baseline patches
+
+The `patches/` directory records additive changes applied to staging **after** the immutable 33-file baseline was reconciled. These SQL files are **not** part of the audited migration bundle, are **not** automatically applied by Supabase CLI `db push`, and do not alter its migration-history metadata.
+
+- `20261106030845_qbo_token_refresh_timestamp.sql`: the nullable QuickBooks OAuth refresh timestamp was applied to the staging project via an authenticated, staging-only SQL connector on November 6, 2026 and verified. The patch is idempotent. Do not replay it against production or assume its presence elsewhere.
+
+Before making a future change to the migration system, reconcile these recorded patches, staging schema state, and the CLI migration plan explicitly; never infer remote schema parity from the baseline manifest alone.
+
 ## Staging history reconciliation — October 25, 2026
 
 The five baseline migrations (`20240101000000`, `20240601000000`, `20240901000000`, `20261017000000`, `20261017010000`) were audited against staging: 19 expected tables, checked columns, functions and triggers all existed; 60/60 public tables retained RLS; zero company rows existed. The remote history matched the 28 other manifest versions exactly before repair.

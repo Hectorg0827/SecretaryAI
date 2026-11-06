@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException
 
 from app.api.deps import get_db
 from app.auth.rbac import get_current_user
+from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,13 @@ def require_active_subscription():
         company_id = user.get("company_id")
         if not company_id:
             raise HTTPException(status_code=400, detail="User has no associated company")
+
+        # A few connector endpoints use this dependency directly rather than
+        # relying on main.py's conditional router-level paywall. Respect the
+        # same switch in both places: pilot/staging mode cannot charge users,
+        # so it must not block an otherwise authenticated request with 402.
+        if not get_settings().billing_enabled:
+            return {"status": "billing_disabled"}
 
         result = (
             db.table("company_subscriptions")

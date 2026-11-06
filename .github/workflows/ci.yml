@@ -124,6 +124,13 @@ jobs:
                   assert executable.is_file(), f"Missing preinstalled {browser.name}: {executable}"
                   print(f"READY: {browser.name}")
           PY
+      - name: Match disposable container home ownership for Firefox
+        # GitHub mounts /github/home owned by pwuser while this job runs as
+        # root. Firefox refuses to start in a mismatched-owner home directory.
+        # This changes only the temporary CI container's home directory owner.
+        run: |
+          test -d /github/home
+          chown root:root /github/home
       - name: Install pinned axe-core in isolated audit directory
         shell: bash
         run: |

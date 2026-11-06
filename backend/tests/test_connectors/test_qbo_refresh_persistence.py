@@ -1,6 +1,7 @@
 """Fixture-only QBO rotation checks (never contact Intuit or Supabase)."""
 
 from datetime import datetime, timedelta, timezone
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,9 @@ import httpx
 import pytest
 from postgrest import SyncPostgrestClient
 
-from app.api.auth import qbo_callback
+from app.api.auth import (
+    _qbo_clear_connection, _qbo_start_state, qbo_callback, qbo_disconnect,
+)
 from app.connectors.qb_online import QBOnlineAdapter
 from app.connectors.unified_adapter import UnifiedDataAdapter
 from app.utils.qbo_token_store import persist_rotated_qbo_tokens
@@ -81,7 +84,7 @@ def test_rotated_tokens_really_reject_no_match_with_installed_postgrest_builder(
 async def test_qbo_reconnect_callback_persists_with_installed_postgrest_builder():
     db, sent, respond = _offline_postgrest([{"id": "tenant-1"}])
     fresh = {"access_token": "fixture-access", "refresh_token": "fixture-refresh", "expires_in": 3600}
-    with patch("app.api.auth._state_pop", return_value="tenant-1"), \
+    with patch("app.api.auth._state_pop", return_value=json.dumps({"company_id": "tenant-1", "version": None})), \
          patch("app.api.auth.exchange_code_for_tokens", new_callable=AsyncMock, return_value=fresh), \
          patch("supabase.create_client", return_value=db), \
          patch("app.api.auth.encrypt", side_effect=lambda value, _: f"encrypted:{value}"), \
@@ -91,6 +94,59 @@ async def test_qbo_reconnect_callback_persists_with_installed_postgrest_builder(
     assert result.headers["location"].endswith("/settings?qbo=connected")
     assert sent[0][2]["headers"]["Prefer"] == "return=representation"
     assert sent[0][2]["json"]["qbo_token_refreshed_at"]
+    assert sent[0][2]["params"]["qbo_token_refreshed_at"] == "is.null"
+
+
+@pytest.mark.asyncio
+async def test_pending_qbo_callback_cannot_undo_a_disconnect():
+    # PostgreSQL's actual version guard produces zero rows after a disconnect
+    # changes qbo_token_refreshed_at; the callback must not claim success.
+    db, sent, respond = _offline_postgrest([])
+    fresh = {"access_token": "fixture-access", "refresh_token": "fixture-refresh"}
+    state = json.dumps({"company_id": "tenant-1", "version": "2026-11-06T10:00:00+00:00"})
+    with patch("app.api.auth._state_pop", return_value=state), \
+         patch("app.api.auth.exchange_code_for_tokens", new_callable=AsyncMock, return_value=fresh), \
+         patch("supabase.create_client", return_value=db), \
+         patch("app.api.auth.encrypt", side_effect=lambda value, _: f"encrypted:{value}"), \
+         patch.object(db.session, "request", side_effect=respond):
+        response = await qbo_callback(code="fixture-code", state="fixture-state", realm_id="realm-1")
+    assert response.headers["location"].endswith("/settings?qbo=error&reason=db_write")
+    assert len(sent) == 1
+    assert sent[0][2]["params"]["qbo_token_refreshed_at"] == "eq.2026-11-06T10:00:00+00:00"
+
+
+def test_qbo_disconnect_changes_generation_and_clears_credentials():
+    db, sent, respond = _offline_postgrest([{"id": "tenant-1"}])
+    with patch("supabase.create_client", return_value=db), \
+         patch.object(db.session, "request", side_effect=respond):
+        _qbo_clear_connection("tenant-1")
+    fields = sent[0][2]["json"]
+    assert fields["qb_connection_status"] == "disconnected"
+    assert fields["qbo_refresh_token"] is None
+    assert datetime.fromisoformat(fields["qbo_token_refreshed_at"]).tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_qbo_consent_state_captures_current_connection_generation():
+    with patch("app.api.auth._qbo_generation", return_value="2026-11-06T10:00:00+00:00"), \
+         patch("app.api.auth._state_set") as store:
+        state = await _qbo_start_state("tenant-1")
+    assert state
+    assert store.call_args.args[0] == state
+    assert json.loads(store.call_args.args[1]) == {
+        "company_id": "tenant-1", "version": "2026-11-06T10:00:00+00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_qbo_disconnect_revokes_intuit_token_not_the_jwt():
+    with patch("app.api.auth._qbo_read_refresh", return_value="encrypted-refresh"), \
+         patch("app.utils.encryption.decrypt", return_value="fixture-refresh"), \
+         patch("app.api.auth.revoke_qbo_token", new_callable=AsyncMock) as revoke, \
+         patch("app.api.auth._qbo_clear_connection") as clear:
+        assert await qbo_disconnect(user={"company_id": "tenant-1"}) == {"status": "disconnected"}
+    revoke.assert_awaited_once_with("fixture-refresh")
+    clear.assert_called_once_with("tenant-1")
 
 
 def test_qbo_rotation_requires_original_ciphertext_and_current_company_row():

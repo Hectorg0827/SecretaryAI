@@ -9,6 +9,20 @@ from datetime import datetime, timedelta, timezone
 
 from app.utils.encryption import encrypt
 
+_QBO_DB_TIMEOUT_SECONDS = 10
+
+
+def create_qbo_client(settings):
+    """Give synchronous QBO DB operations a bounded PostgREST timeout."""
+    from supabase import create_client
+    from supabase.lib.client_options import ClientOptions
+
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        options=ClientOptions(postgrest_client_timeout=_QBO_DB_TIMEOUT_SECONDS),
+    )
+
 
 def persist_rotated_qbo_tokens(
     db,

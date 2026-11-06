@@ -64,6 +64,15 @@ def _check(rows, user=USER):
 # ── Behaviour: who gets in ────────────────────────────────────────────────────
 
 class TestSubscriptionDecision:
+    def test_billing_disabled_skips_subscription_lookup(self):
+        """Staging connector routes must not 402 while billing is disabled."""
+        db = _sub_db([])
+        with patch("app.middleware.subscription_guard.get_settings") as settings:
+            settings.return_value.billing_enabled = False
+            result = require_active_subscription()(user=USER, db=db)
+        assert result["status"] == "billing_disabled"
+        db.table.assert_not_called()
+
     def test_no_subscription_row_is_refused(self):
         """A brand-new signup that never paid. This is the case that was free."""
         with pytest.raises(Exception) as exc:

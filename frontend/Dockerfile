@@ -20,8 +20,11 @@ FROM nginx:1.27-alpine AS runner
 
 # nginx config with API proxy
 ENV PORT=80 API_UPSTREAM=http://api:8000
-# Official nginx entrypoint expands only these deployment variables.
-ENV NGINX_ENVSUBST_FILTER="^(PORT|API_UPSTREAM)$"
+# Read the runtime DNS servers from /etc/resolv.conf, which is important on
+# Railway where a private service's IP can change after a backend redeploy.
+ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
+# Keep nginx variables ($request_uri, $proxy_host, etc.) intact in the template.
+ENV NGINX_ENVSUBST_FILTER="^(PORT|API_UPSTREAM|NGINX_LOCAL_RESOLVERS)$"
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 # Built static files

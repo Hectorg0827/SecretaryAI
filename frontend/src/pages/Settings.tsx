@@ -416,11 +416,13 @@ interface IntegrationRowProps {
   onConnect: () => void;
   onDisconnect: () => void;
   connectLabel?: string;
+  reconnectLabel?: string;
   canManage: boolean;
 }
 
-function IntegrationRow({
-  label, description, connected, loading, onConnect, onDisconnect, connectLabel = 'Connect', canManage,
+export function IntegrationRow({
+  label, description, connected, loading, onConnect, onDisconnect,
+  connectLabel = 'Connect', reconnectLabel, canManage,
 }: IntegrationRowProps) {
   return (
     <div className="flex flex-wrap items-center gap-4 py-4 border-b border-slate-100 last:border-0">
@@ -442,12 +444,22 @@ function IntegrationRow({
       {loading ? null : !canManage ? (
         <span className="text-xs text-slate-500">Owner permission required</span>
       ) : connected ? (
-        <button
-          onClick={onDisconnect}
-          className="text-xs text-red-500 hover:text-red-600 font-medium border border-red-100 rounded-lg px-2.5 py-1.5 bg-red-50 hover:bg-red-100 transition-colors flex-shrink-0"
-        >
-          Disconnect
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {reconnectLabel && (
+            <button
+              onClick={onConnect}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors"
+            >
+              {reconnectLabel} <ExternalLink size={11} />
+            </button>
+          )}
+          <button
+            onClick={onDisconnect}
+            className="text-xs text-red-500 hover:text-red-600 font-medium border border-red-100 rounded-lg px-2.5 py-1.5 bg-red-50 hover:bg-red-100 transition-colors flex-shrink-0"
+          >
+            Disconnect
+          </button>
+        </div>
       ) : (
         <button
           onClick={onConnect}
@@ -663,12 +675,13 @@ export function Settings() {
                 {/* QB Online */}
                 <IntegrationRow
                   label="QuickBooks Online"
-                  description="Cloud-based accounting sync — invoices, payments, and customers via OAuth"
+                  description="Cloud accounting sync — reconnect if saved authorization no longer reads data"
                   connected={integrations?.quickbooks_online.connected ?? false}
                   loading={integLoading || !!actionLoading['qbo']}
                   onConnect={connectQBO}
                   onDisconnect={disconnectQBO}
                   connectLabel="Connect with Intuit"
+                  reconnectLabel="Reconnect"
                   canManage={role === 'owner'}
                 />
 

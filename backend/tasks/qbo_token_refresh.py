@@ -36,7 +36,7 @@ def refresh_expiring_tokens(self):
     # Only look at companies with an active QBO connection and tracked expiry
     result = (
         db.table("companies")
-        .select("id, name, qbo_access_token, qbo_refresh_token, qbo_token_expires_at")
+        .select("id, name, qbo_realm_id, qbo_access_token, qbo_refresh_token, qbo_token_expires_at")
         .eq("qb_connection_status", "connected")
         .not_.is_("qbo_token_expires_at", "null")
         .execute()
@@ -47,7 +47,8 @@ def refresh_expiring_tokens(self):
 
     summary = {"checked": len(companies), "refreshed": 0, "errors": 0, "skipped": 0}
 
-    from app.utils.encryption import decrypt, encrypt
+    from app.utils.encryption import decrypt
+    from app.utils.qbo_token_store import persist_rotated_qbo_tokens
     from app.auth.oauth import refresh_qbo_token
     from app.config import get_settings
 
@@ -72,16 +73,16 @@ def refresh_expiring_tokens(self):
             raw_refresh = decrypt(company["qbo_refresh_token"], settings.secret_key)
             new_tokens = asyncio.run(refresh_qbo_token(raw_refresh))
 
-            new_expires_at = (
-                datetime.now(timezone.utc)
-                + timedelta(seconds=new_tokens.get("expires_in", 3600))
-            ).isoformat()
-
-            db.table("companies").update({
-                "qbo_access_token":     encrypt(new_tokens["access_token"], settings.secret_key),
-                "qbo_refresh_token":    encrypt(new_tokens["refresh_token"], settings.secret_key),
-                "qbo_token_expires_at": new_expires_at,
-            }).eq("id", company["id"]).execute()
+            persist_rotated_qbo_tokens(
+                db,
+                company_id=company["id"],
+                expected_refresh_ciphertext=company["qbo_refresh_token"],
+                realm_id=company.get("qbo_realm_id"),
+                access_token=new_tokens["access_token"],
+                refresh_token=new_tokens["refresh_token"],
+                expires_in=new_tokens.get("expires_in", 3600),
+                secret_key=settings.secret_key,
+            )
 
             summary["refreshed"] += 1
             log.info(

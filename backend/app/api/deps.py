@@ -59,6 +59,7 @@ def get_adapter(
     if cfg.get("qbo_access_token"):
         cfg["qbo_access_token"] = decrypt(cfg["qbo_access_token"], settings.secret_key)
     if cfg.get("qbo_refresh_token"):
+        cfg["_qbo_expected_refresh_ciphertext"] = cfg["qbo_refresh_token"]
         cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
     if cfg.get("google_access_token"):
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)

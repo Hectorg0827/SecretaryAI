@@ -73,15 +73,14 @@ class QBOnlineAdapter(QuickBooksAdapter):
             )
             response.raise_for_status()
             tokens = response.json()
-            self._access_token = tokens["access_token"]
-            self._refresh_token = tokens["refresh_token"]
-
             if self._on_token_refresh:
                 await self._on_token_refresh(
-                    access_token=self._access_token,
-                    refresh_token=self._refresh_token,
+                    access_token=tokens["access_token"],
+                    refresh_token=tokens["refresh_token"],
                     expires_in=tokens.get("expires_in", 3600),
                 )
+            self._access_token = tokens["access_token"]
+            self._refresh_token = tokens["refresh_token"]
 
     def _headers(self) -> dict:
         return {

@@ -114,7 +114,7 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
     """
     import asyncio
     from datetime import datetime, timezone, timedelta
-    from app.utils.encryption import encrypt
+    from app.utils.qbo_token_store import persist_rotated_qbo_tokens
 
     expires_at_str = company.get("qbo_token_expires_at")
     if not expires_at_str:
@@ -138,22 +138,25 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
         from app.auth.oauth import refresh_qbo_token
         new_tokens = asyncio.run(refresh_qbo_token(refresh_token))
 
-        new_expires_at = (
-            datetime.now(timezone.utc) + timedelta(seconds=new_tokens.get("expires_in", 3600))
-        ).isoformat()
-
+        new_ciphertext = persist_rotated_qbo_tokens(
+            db,
+            company_id=company["id"],
+            expected_refresh_ciphertext=company["qbo_refresh_token"],
+            realm_id=company.get("qbo_realm_id"),
+            access_token=new_tokens["access_token"],
+            refresh_token=new_tokens["refresh_token"],
+            expires_in=new_tokens.get("expires_in", 3600),
+            secret_key=settings.secret_key,
+        )
+        # Only expose the new credentials to this task after durable storage.
         cfg["qbo_access_token"] = new_tokens["access_token"]
         cfg["qbo_refresh_token"] = new_tokens["refresh_token"]
-
-        db.table("companies").update({
-            "qbo_access_token":    encrypt(new_tokens["access_token"], settings.secret_key),
-            "qbo_refresh_token":   encrypt(new_tokens["refresh_token"], settings.secret_key),
-            "qbo_token_expires_at": new_expires_at,
-        }).eq("id", company["id"]).execute()
+        cfg["_qbo_expected_refresh_ciphertext"] = new_ciphertext
 
         log.info("QBO access token refreshed for company %s", company["id"])
     except Exception as exc:
         log.warning("QBO token refresh failed for company %s: %s", company["id"], exc)
+        raise RuntimeError("QBO proactive token refresh failed") from exc
 
 
 def build_adapter(company: dict) -> UnifiedDataAdapter:
@@ -165,6 +168,7 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
     if cfg.get("qbo_access_token"):
         cfg["qbo_access_token"] = decrypt(cfg["qbo_access_token"], settings.secret_key)
     if cfg.get("qbo_refresh_token"):
+        cfg["_qbo_expected_refresh_ciphertext"] = cfg["qbo_refresh_token"]
         cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
     if cfg.get("google_access_token"):
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)

@@ -139,15 +139,18 @@ async def qbo_callback(
     try:
         from supabase import create_client
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        db.table("companies").update({
+        result = db.table("companies").update({
             "qb_type": "online",
             "qb_connection_status": "connected",
             "qbo_realm_id": realm_id,
             "qbo_access_token": encrypted_access,
             "qbo_refresh_token": encrypted_refresh,
             "qbo_connected_at": datetime.now(timezone.utc).isoformat(),
+            "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
             "qbo_token_expires_at": expires_at,
-        }).eq("id", company_id).execute()
+        }).eq("id", company_id).select("id").execute()
+        if not getattr(result, "data", None):
+            raise RuntimeError("QBO connection matched no company")
         log.info("QBO tokens stored for company %s (realm %s)", company_id, realm_id)
     except Exception as exc:
         log.error("Failed to store QBO tokens for company %s: %s", company_id, exc)

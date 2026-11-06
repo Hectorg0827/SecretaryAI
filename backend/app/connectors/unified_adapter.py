@@ -124,22 +124,29 @@ class UnifiedDataAdapter:
             raise RuntimeError("Cannot persist QBO token refresh without a company identifier")
 
         try:
-            from supabase import create_client
+            from starlette.concurrency import run_in_threadpool
             from app.config import get_settings
-            from app.utils.qbo_token_store import persist_rotated_qbo_tokens
+            from app.utils.qbo_token_store import create_qbo_client, persist_rotated_qbo_tokens
 
             settings = get_settings()
-            db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-            encrypted_refresh = persist_rotated_qbo_tokens(
-                db,
-                company_id=company_id,
-                expected_refresh_ciphertext=self._config.get("_qbo_expected_refresh_ciphertext"),
-                realm_id=self._config.get("qbo_realm_id"),
-                access_token=access_token,
-                refresh_token=refresh_token,
-                expires_in=expires_in,
-                secret_key=settings.secret_key,
-            )
+            expected = self._config.get("_qbo_expected_refresh_ciphertext")
+            realm_id = self._config.get("qbo_realm_id")
+
+            def persist() -> str:
+                # Supabase's pinned client is synchronous: keep it off the
+                # async worker's event loop and bound by the QBO DB timeout.
+                return persist_rotated_qbo_tokens(
+                    create_qbo_client(settings),
+                    company_id=company_id,
+                    expected_refresh_ciphertext=expected,
+                    realm_id=realm_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expires_in=expires_in,
+                    secret_key=settings.secret_key,
+                )
+
+            encrypted_refresh = await run_in_threadpool(persist)
             self._config["_qbo_expected_refresh_ciphertext"] = encrypted_refresh
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:

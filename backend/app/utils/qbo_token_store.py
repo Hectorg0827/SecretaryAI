@@ -9,6 +9,20 @@ from datetime import datetime, timedelta, timezone
 
 from app.utils.encryption import encrypt
 
+_QBO_DB_TIMEOUT_SECONDS = 10
+
+
+def create_qbo_client(settings):
+    """Give synchronous QBO DB operations a bounded PostgREST timeout."""
+    from supabase import create_client
+    from supabase.lib.client_options import ClientOptions
+
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        options=ClientOptions(postgrest_client_timeout=_QBO_DB_TIMEOUT_SECONDS),
+    )
+
 
 def persist_rotated_qbo_tokens(
     db,
@@ -49,9 +63,10 @@ def persist_rotated_qbo_tokens(
     if realm_id:
         query = query.eq("qbo_realm_id", realm_id)
 
-    # Supabase/PostgREST UPDATE otherwise defaults to return=minimal, making
-    # result.data empty *even when the UPDATE succeeded*.
-    result = query.select("id").execute()
+    # Pinned supabase-py / postgrest-py returns updated rows by default.
+    # SyncFilterRequestBuilder has no .select() method after .update();
+    # calling it aborts persistence, including a successful OAuth reconnect.
+    result = query.execute()
     if not getattr(result, "data", None):
         raise RuntimeError("QBO token persistence matched no current connected company")
     return encrypted_refresh

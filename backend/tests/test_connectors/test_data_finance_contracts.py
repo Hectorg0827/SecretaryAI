@@ -76,7 +76,6 @@ async def test_qbo_token_persistence_failure_is_not_silently_accepted(caplog):
     db = MagicMock()
     query = db.table().update()
     query.eq.return_value = query
-    query.select.return_value = query
     query.execute.side_effect = RuntimeError("fixture storage unavailable")
     settings = SimpleNamespace(supabase_url="https://test.invalid", supabase_service_role_key="fixture-key",
                                secret_key="fixture-encryption-key")
@@ -96,7 +95,6 @@ async def test_qbo_refresh_rejects_update_that_matched_no_company():
     db = MagicMock()
     query = db.table().update()
     query.eq.return_value = query
-    query.select.return_value = query
     query.execute.return_value = SimpleNamespace(data=[])
     settings = SimpleNamespace(supabase_url="https://test.invalid", supabase_service_role_key="fixture-key",
                                secret_key="fixture-encryption-key")

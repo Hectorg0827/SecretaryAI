@@ -13,16 +13,18 @@ DELETE /auth/2fa/disable     → verify code, disable 2FA in DB
 """
 import secrets
 import logging
+import json
 from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, field_validator
 import re
 
 from app.auth.oauth import (
-    build_authorization_url, exchange_code_for_tokens, revoke_token,
+    build_authorization_url, exchange_code_for_tokens, revoke_token as revoke_qbo_token,
     build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
 )
 from app.auth.jwt import (
@@ -32,6 +34,7 @@ from app.auth.jwt import (
 from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
+from app.utils.qbo_token_store import create_qbo_client
 from app.utils.rate_limiter import login_limiter, login_email_limiter, require_rate_limit
 
 log = logging.getLogger(__name__)
@@ -76,11 +79,94 @@ def _state_pop(state: str) -> str | None:
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
 
+def _qbo_db():
+    """Keep synchronous PostgREST requests bounded when used by QBO flows."""
+    return create_qbo_client(settings)
+
+
+def _qbo_generation(company_id: str) -> str | None:
+    result = (
+        _qbo_db().table("companies")
+        .select("qbo_token_refreshed_at")
+        .eq("id", company_id)
+        .execute()
+    )
+    if not getattr(result, "data", None):
+        raise RuntimeError("QBO connection has no company")
+    return result.data[0].get("qbo_token_refreshed_at")
+
+
+async def _qbo_start_state(company_id: str) -> str:
+    """Bind this one-use consent state to the current DB connection version."""
+    try:
+        version = await run_in_threadpool(_qbo_generation, company_id)
+    except Exception:
+        log.error("QBO consent could not load the connection version")
+        raise HTTPException(status_code=503, detail="QBO connection temporarily unavailable") from None
+
+    state = secrets.token_urlsafe(32)
+    _state_set(state, json.dumps({"company_id": company_id, "version": version}))
+    return state
+
+
+def _qbo_callback_state(state: str) -> tuple[str, str | None]:
+    raw = _state_pop(state)
+    try:
+        value = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        value = None
+    if not isinstance(value, dict) or not isinstance(value.get("company_id"), str) \
+            or not value["company_id"] or "version" not in value:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    version = value["version"]
+    if version is not None and not isinstance(version, str):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    return value["company_id"], version
+
+
+def _qbo_store_connection(company_id: str, version: str | None, realm_id: str,
+                          encrypted_access: str, encrypted_refresh: str,
+                          expires_at: str) -> None:
+    """A disconnect or newer token write invalidates a pending OAuth callback."""
+    now = datetime.now(timezone.utc).isoformat()
+    query = _qbo_db().table("companies").update({
+        "qb_type": "online",
+        "qb_connection_status": "connected",
+        "qbo_realm_id": realm_id,
+        "qbo_access_token": encrypted_access,
+        "qbo_refresh_token": encrypted_refresh,
+        "qbo_connected_at": now,
+        "qbo_token_refreshed_at": now,
+        "qbo_token_expires_at": expires_at,
+    }).eq("id", company_id)
+    query = query.is_("qbo_token_refreshed_at", "null") if version is None else \
+        query.eq("qbo_token_refreshed_at", version)
+    result = query.execute()
+    if not getattr(result, "data", None):
+        raise RuntimeError("QBO consent is stale or matched no company")
+
+
+def _qbo_read_refresh(company_id: str) -> str | None:
+    result = _qbo_db().table("companies").select("qbo_refresh_token").eq("id", company_id).execute()
+    return result.data[0].get("qbo_refresh_token") if result.data else None
+
+
+def _qbo_clear_connection(company_id: str) -> None:
+    result = _qbo_db().table("companies").update({
+        "qb_connection_status": "disconnected",
+        "qbo_access_token": None,
+        "qbo_refresh_token": None,
+        "qbo_realm_id": None,
+        # A timestamp change fences any callback started before disconnect.
+        "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", company_id).execute()
+    if not getattr(result, "data", None):
+        raise RuntimeError("QBO disconnect matched no company")
+
 @router.get("/qbo/connect-url")
 async def qbo_connect_url(user: dict = Depends(get_current_user)):
     """Return the QBO OAuth consent URL as JSON (frontend handles the redirect)."""
-    state = secrets.token_urlsafe(32)
-    _state_set(state, user["company_id"])
+    state = await _qbo_start_state(user["company_id"])
     url = build_authorization_url(state)
     return {"url": url}
 
@@ -88,8 +174,7 @@ async def qbo_connect_url(user: dict = Depends(get_current_user)):
 @router.get("/qbo/connect")
 async def qbo_connect(user: dict = Depends(get_current_user)):
     """Initiate QBO OAuth 2.0 — redirect to Intuit consent screen."""
-    state = secrets.token_urlsafe(32)
-    _state_set(state, user["company_id"])
+    state = await _qbo_start_state(user["company_id"])
     url = build_authorization_url(state)
     return RedirectResponse(url=url)
 
@@ -112,9 +197,7 @@ async def qbo_callback(
         log.warning("QBO OAuth error: %s", error)
         return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason={error}")
 
-    company_id = _state_pop(state)
-    if not company_id:
-        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    company_id, version = _qbo_callback_state(state)
 
     if not code or not realm_id:
         raise HTTPException(status_code=400, detail="Missing code or realmId from Intuit")
@@ -135,22 +218,12 @@ async def qbo_callback(
         datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
     ).isoformat()
 
-    # Persist to Supabase (service-role key bypasses RLS)
+    # Persist with an atomic version guard; a disconnect invalidates old consent.
     try:
-        from supabase import create_client
-        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        result = db.table("companies").update({
-            "qb_type": "online",
-            "qb_connection_status": "connected",
-            "qbo_realm_id": realm_id,
-            "qbo_access_token": encrypted_access,
-            "qbo_refresh_token": encrypted_refresh,
-            "qbo_connected_at": datetime.now(timezone.utc).isoformat(),
-            "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
-            "qbo_token_expires_at": expires_at,
-        }).eq("id", company_id).select("id").execute()
-        if not getattr(result, "data", None):
-            raise RuntimeError("QBO connection matched no company")
+        await run_in_threadpool(
+            _qbo_store_connection, company_id, version, realm_id,
+            encrypted_access, encrypted_refresh, expires_at,
+        )
         log.info("QBO tokens stored for company %s (realm %s)", company_id, realm_id)
     except Exception as exc:
         log.error("Failed to store QBO tokens for company %s: %s", company_id, exc)
@@ -165,22 +238,12 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
     company_id = user["company_id"]
 
     try:
-        from supabase import create_client
         from app.utils.encryption import decrypt
-        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        result = db.table("companies").select("qbo_refresh_token").eq("id", company_id).execute()
-        company = result.data[0] if result.data else {}
-
-        if company.get("qbo_refresh_token"):
-            token = decrypt(company["qbo_refresh_token"], settings.secret_key)
-            await revoke_token(token)
-
-        db.table("companies").update({
-            "qb_connection_status": "disconnected",
-            "qbo_access_token": None,
-            "qbo_refresh_token": None,
-            "qbo_realm_id": None,
-        }).eq("id", company_id).execute()
+        encrypted_token = await run_in_threadpool(_qbo_read_refresh, company_id)
+        if encrypted_token:
+            token = decrypt(encrypted_token, settings.secret_key)
+            await revoke_qbo_token(token)
+        await run_in_threadpool(_qbo_clear_connection, company_id)
     except Exception as exc:
         log.error("QBO disconnect failed for %s: %s", company_id, exc)
         raise HTTPException(status_code=500, detail="Failed to disconnect QuickBooks")

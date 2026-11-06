@@ -148,7 +148,7 @@ async def qbo_callback(
             "qbo_connected_at": datetime.now(timezone.utc).isoformat(),
             "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
             "qbo_token_expires_at": expires_at,
-        }).eq("id", company_id).select("id").execute()
+        }).eq("id", company_id).execute()
         if not getattr(result, "data", None):
             raise RuntimeError("QBO connection matched no company")
         log.info("QBO tokens stored for company %s (realm %s)", company_id, realm_id)

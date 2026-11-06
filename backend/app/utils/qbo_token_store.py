@@ -49,9 +49,10 @@ def persist_rotated_qbo_tokens(
     if realm_id:
         query = query.eq("qbo_realm_id", realm_id)
 
-    # Supabase/PostgREST UPDATE otherwise defaults to return=minimal, making
-    # result.data empty *even when the UPDATE succeeded*.
-    result = query.select("id").execute()
+    # Pinned supabase-py / postgrest-py returns updated rows by default.
+    # SyncFilterRequestBuilder has no .select() method after .update();
+    # calling it aborts persistence, including a successful OAuth reconnect.
+    result = query.execute()
     if not getattr(result, "data", None):
         raise RuntimeError("QBO token persistence matched no current connected company")
     return encrypted_refresh

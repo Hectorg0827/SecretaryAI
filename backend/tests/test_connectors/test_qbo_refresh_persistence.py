@@ -6,8 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from postgrest import SyncPostgrestClient
 
+from app.api.auth import qbo_callback
 from app.connectors.qb_online import QBOnlineAdapter
 from app.connectors.unified_adapter import UnifiedDataAdapter
 from app.utils.qbo_token_store import persist_rotated_qbo_tokens
@@ -19,7 +22,6 @@ def _db_with_updated_ids(ids):
     db = MagicMock()
     query = db.table.return_value.update.return_value
     query.eq.return_value = query
-    query.select.return_value = query
     query.execute.return_value = SimpleNamespace(data=ids)
     return db
 
@@ -39,6 +41,58 @@ def _rotate(db, **overrides):
         return persist_rotated_qbo_tokens(db, **kwargs)
 
 
+def _offline_postgrest(updated_rows):
+    """Use the real pinned PostgREST request builder without network access."""
+    db = SyncPostgrestClient("https://fixture.invalid/rest/v1")
+    sent = []
+
+    def respond(method, path, **options):
+        sent.append((method, path, options))
+        return httpx.Response(
+            200,
+            json=updated_rows,
+            request=httpx.Request("PATCH", "https://fixture.invalid/rest/v1/companies"),
+        )
+
+    return db, sent, respond
+
+
+def test_rotated_tokens_really_persist_using_installed_postgrest_builder():
+    db, sent, respond = _offline_postgrest([{"id": "tenant-1"}])
+    with patch.object(db.session, "request", side_effect=respond):
+        assert _rotate(db) == "encrypted:new-refresh"
+    assert len(sent) == 1
+    method, path, options = sent[0]
+    assert str(method).upper().endswith("PATCH")
+    assert path == "/companies"
+    assert options["headers"]["Prefer"] == "return=representation"
+    assert options["params"]["id"] == "eq.tenant-1"
+    assert options["params"]["qbo_refresh_token"] == "eq.old-encrypted-refresh"
+
+
+def test_rotated_tokens_really_reject_no_match_with_installed_postgrest_builder():
+    db, _sent, respond = _offline_postgrest([])
+    with patch.object(db.session, "request", side_effect=respond):
+        with pytest.raises(RuntimeError, match="matched no current connected company"):
+            _rotate(db)
+
+
+@pytest.mark.asyncio
+async def test_qbo_reconnect_callback_persists_with_installed_postgrest_builder():
+    db, sent, respond = _offline_postgrest([{"id": "tenant-1"}])
+    fresh = {"access_token": "fixture-access", "refresh_token": "fixture-refresh", "expires_in": 3600}
+    with patch("app.api.auth._state_pop", return_value="tenant-1"), \
+         patch("app.api.auth.exchange_code_for_tokens", new_callable=AsyncMock, return_value=fresh), \
+         patch("supabase.create_client", return_value=db), \
+         patch("app.api.auth.encrypt", side_effect=lambda value, _: f"encrypted:{value}"), \
+         patch.object(db.session, "request", side_effect=respond):
+        result = await qbo_callback(code="fixture-code", state="fixture-state", realm_id="realm-1")
+    assert result.status_code == 307
+    assert result.headers["location"].endswith("/settings?qbo=connected")
+    assert sent[0][2]["headers"]["Prefer"] == "return=representation"
+    assert sent[0][2]["json"]["qbo_token_refreshed_at"]
+
+
 def test_qbo_rotation_requires_original_ciphertext_and_current_company_row():
     db = _db_with_updated_ids([{"id": "tenant-1"}])
     assert _rotate(db) == "encrypted:new-refresh"
@@ -49,7 +103,7 @@ def test_qbo_rotation_requires_original_ciphertext_and_current_company_row():
     assert ("qbo_realm_id", "realm-1") in [c.args for c in query.eq.call_args_list]
     assert ("qb_connection_status", "connected") in [c.args for c in query.eq.call_args_list]
     assert ("qb_type", "online") in [c.args for c in query.eq.call_args_list]
-    query.select.assert_called_once_with("id")
+    query.select.assert_not_called()
 
     persisted = db.table.return_value.update.call_args.args[0]
     assert persisted["qbo_access_token"] == "encrypted:new-access"

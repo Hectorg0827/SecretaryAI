@@ -6,6 +6,7 @@ export interface DashboardSummary {
     slowing: number;
     at_risk: number;
     dormant: number;
+    unknown: number;
   } | null;
   inventory_alerts: InventoryAlert[];
   pending_actions: number | null;

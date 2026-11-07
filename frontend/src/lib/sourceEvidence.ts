@@ -114,6 +114,8 @@ function inventoryAlert(value: unknown): value is InventoryAlert {
 }
 
 function accountCounts(value: unknown): value is NonNullable<DashboardSummary['accounts']> {
+  // v2 policy requires an explicit unknown count; an old cache must not
+  // present only scored accounts as if they were the entire customer base.
   return record(value) && count(value.healthy) && count(value.slowing)
     && count(value.at_risk) && count(value.dormant) && count(value.unknown);
 }

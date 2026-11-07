@@ -20,10 +20,13 @@ describe('dashboard health classifications', () => {
           </MemoryRouter>,
         );
       });
-      expect(container.textContent).toContain('Account Health29');
-      expect(container.textContent).toContain('Unknown10');
-      expect(container.textContent).toContain('At Risk0');
-      expect(container.textContent).not.toContain('At Risk10');
+      expect(container.querySelector('h2')?.nextElementSibling?.textContent).toBe('29');
+      const countFor = (label: string) => {
+        const button = [...container.querySelectorAll('button')].find((node) => node.textContent?.includes(label));
+        return button?.querySelector('span.font-bold')?.textContent;
+      };
+      expect(countFor('Unknown')).toBe('10');
+      expect(countFor('At Risk')).toBe('0');
     } finally {
       await act(async () => root.unmount());
       container.remove();

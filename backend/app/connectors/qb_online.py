@@ -219,6 +219,23 @@ class QBOnlineAdapter(QuickBooksAdapter):
             total_sales=None,
         )
 
+    @staticmethod
+    def _invoice_status(raw: dict, total: Decimal, balance: Decimal) -> str:
+        """Preserve Intuit's void signal before deriving payment status.
+
+        The QBO void operation retains an active invoice, zeros its amounts,
+        and prepends "Voided" to PrivateNote (Intuit Invoice API reference).
+        Zero-valued non-void invoices must not be mislabeled as void.
+        """
+        note = raw.get("PrivateNote")
+        if (
+            total == 0 and balance == 0
+            and isinstance(note, str)
+            and note.lstrip().casefold().startswith("voided")
+        ):
+            return "void"
+        return "open" if balance > 0 else "paid"
+
     def _normalize_invoice(self, raw: dict) -> Invoice:
         # Missing financial source fields cannot be interpreted as paid/zero.
         for required in ("Id", "TxnDate", "TotalAmt", "Balance"):
@@ -272,7 +289,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
             due_date=date.fromisoformat(raw["DueDate"]) if raw.get("DueDate") else None,
             total=total,
             balance=balance,
-            status="open" if balance > 0 else "paid",
+            status=self._invoice_status(raw, total, balance),
             line_items=line_items,
         )
 
@@ -306,7 +323,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
             id=invoice_id, qb_id=invoice_id,
             customer_id=customer_id, customer_name=customer_ref.get("name") or "",
             date=issued, due_date=due, total=total, balance=balance,
-            status="open" if balance > 0 else "paid",
+            status=self._invoice_status(raw, total, balance),
             line_items=[],  # Not loaded by this explicitly header-only method.
             line_items_observed=False,
         )

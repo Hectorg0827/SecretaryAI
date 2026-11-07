@@ -87,24 +87,41 @@ def _invoice_date(row) -> date:
     raise ValueError("Invoice missing transaction date")
 
 
-def _billable_invoice_rows(invoices) -> list[dict]:
+def _billable_invoice_rows(invoices, *, customer_ids: set[str] | None = None) -> list[dict]:
     """Normalize observed invoice headers and exclude void/draft documents.
 
     The Accounts API and dashboard must count the same billed history.
     Identity duplication and malformed source values still fail closed.
     """
-    from app.intelligence.sales_analytics import filter_billable_invoices
+    from app.intelligence.sales_analytics import (
+        _EXCLUDED_INVOICE_STATUSES,
+        filter_billable_invoices,
+    )
 
-    return filter_billable_invoices([
-        {
-            "id": _row_value(inv, "qb_id") or _row_value(inv, "id"),
-            "customer_id": _row_value(inv, "customer_id"),
+    rows = []
+    for inv in invoices:
+        customer_id = _row_value(inv, "customer_id")
+        if customer_ids is not None and customer_id not in customer_ids:
+            # An inactive or unrelated customer's history cannot affect the
+            # health score of this verified active-customer set.
+            continue
+        status = _row_value(inv, "status")
+        if str(status or "").strip().casefold() in _EXCLUDED_INVOICE_STATUSES:
+            # A void/draft document is not billed history; malformed line
+            # headers on it must not void a legitimate billed-only report.
+            continue
+        invoice_id = _row_value(inv, "qb_id") or _row_value(inv, "id")
+        if not isinstance(invoice_id, str) or not invoice_id.strip():
+            raise ValueError("Dashboard invoice missing source identifier")
+        rows.append({
+            "id": invoice_id.strip(),
+            "customer_id": customer_id,
+            "customer_name": _row_value(inv, "customer_name", ""),
             "date": _invoice_date(inv),
             "total": _invoice_amount(inv),
-            "status": _row_value(inv, "status"),
-        }
-        for inv in invoices
-    ])
+            "status": status,
+        })
+    return filter_billable_invoices(rows)
 
 
 async def compute_dashboard_payload(adapter) -> dict:
@@ -125,7 +142,15 @@ async def compute_dashboard_payload(adapter) -> dict:
     # ── Account health ────────────────────────────────────────────────────
     try:
         customers = await adapter.get_all_customers()
-        invoices_yr = _billable_invoice_rows(await read_invoice_summaries(adapter, 365))
+        active_customer_ids = {
+            _row_value(customer, "qb_id") or _row_value(customer, "external_id")
+            for customer in customers
+        }
+        if None in active_customer_ids or "" in active_customer_ids:
+            raise ValueError("Customer missing external identifier")
+        invoices_yr = _billable_invoice_rows(
+            await read_invoice_summaries(adapter, 365), customer_ids=active_customer_ids,
+        )
 
         by_customer: dict[str, list] = {}
         for inv in invoices_yr:

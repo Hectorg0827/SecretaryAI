@@ -66,6 +66,17 @@ def test_header_only_rejects_invalid_financial_amounts(invalid):
         qb._normalize_invoice_summary(raw)
 
 
+def test_qbo_void_marker_is_preserved_in_header_and_full_invoice_readers():
+    qb = _online()
+    raw = _provider_invoice()
+    raw.update({"TotalAmt": "0", "Balance": "0",
+                "PrivateNote": "Voided by QuickBooks on request", "Line": []})
+    assert qb._normalize_invoice_summary(raw).status == "void"
+    assert qb._normalize_invoice(raw).status == "void"
+    raw["PrivateNote"] = "Ordinary customer note"
+    assert qb._normalize_invoice_summary(raw).status == "paid"
+
+
 @pytest.mark.asyncio
 async def test_account_and_sales_routes_use_headers_but_product_detail_stays_strict():
     qb = _online()
@@ -93,3 +104,32 @@ async def test_legacy_adapter_uses_existing_strict_reader():
     adapter.get_orders_last_n_days.return_value = []
     assert await read_invoice_summaries(adapter, 365) == []
     adapter.get_orders_last_n_days.assert_awaited_once_with(365)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_chart_and_prior_period_ignore_void_draft_and_cancelled_invoices():
+    from datetime import timedelta
+    from app.connectors.base import Invoice
+
+    def invoice(ref, amount, status, days_ago):
+        return Invoice(
+            id=ref, qb_id=ref, customer_id="customer-1", customer_name="Example",
+            date=date.today() - timedelta(days=days_ago), due_date=None,
+            total=Decimal(str(amount)), balance=Decimal("0"),
+            status=status, line_items=[],
+        )
+
+    current = [invoice("paid", 40, "paid", 1),
+               invoice("voided", 10000, "void", 1),
+               invoice("draft", 500, "draft", 2)]
+    previous = [invoice("prior", 20, "paid", 40),
+                invoice("prior-cancel", 1000, "cancelled", 42)]
+    adapter = AsyncMock()
+    adapter.get_orders_last_n_days.side_effect = [current, current + previous]
+    result = await get_sales_data(days=30, user={"role": "owner"}, adapter=adapter)
+    assert result["total_revenue"] == 40
+    assert result["order_count"] == 1
+    assert result["avg_order_value"] == 40
+    assert result["vs_prior_period_pct"] == 100.0
+    assert sum(day["order_count"] for day in result["chart_data"]) == 1
+    assert sum(day["revenue"] for day in result["chart_data"]) == 40

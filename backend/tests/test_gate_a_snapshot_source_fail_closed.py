@@ -64,6 +64,8 @@ async def test_void_invoices_do_not_inflate_sales_or_mark_unknown_account_at_ris
     adapter.customers = [
         Customer(id="one", qb_id="QB-ONE", name="Test", email=None,
                  phone=None, state="NY", balance=Decimal("0"), total_sales=None),
+        Customer(id="two", qb_id="QB-TWO", name="Voids only", email=None,
+                 phone=None, state="NY", balance=Decimal("0"), total_sales=None),
     ]
     adapter.invoices = [
         Invoice(id="real", qb_id="real", customer_id="QB-ONE", customer_name="Test",
@@ -72,12 +74,39 @@ async def test_void_invoices_do_not_inflate_sales_or_mark_unknown_account_at_ris
         Invoice(id="void", qb_id="void", customer_id="QB-ONE", customer_name="Test",
                 date=date.today(), due_date=None, total=Decimal("1000"),
                 balance=Decimal("0"), status="void", line_items=[]),
+        Invoice(id="void-only", qb_id="void-only", customer_id="QB-TWO",
+                customer_name="Voids only", date=date.today(), due_date=None,
+                total=Decimal("500"), balance=Decimal("0"), status="void",
+                line_items=[]),
     ]
     result = await compute_dashboard_payload(adapter)
     assert result["sales_30d"] == 20
-    assert result["accounts"]["total"] == 1
-    # Observed billed history is present; voided orders never contribute.
-    assert result["accounts"]["unknown"] == 0
+    assert result["accounts"]["total"] == 2
+    # The void-only customer has no verified billed history and remains unknown.
+    assert result["accounts"]["unknown"] == 1
+    assert result["accounts"]["at_risk"] == 0
+
+
+def test_snapshot_invoice_normalizer_ignores_noncontributing_records_and_requires_ids():
+    from datetime import date
+    from app.scheduler.dashboard_snapshot import _billable_invoice_rows
+
+    valid = {"id": "inv-1", "customer_id": "C1", "date": date.today(),
+             "total": "25", "status": "paid"}
+    discarded_void = {"id": "void-1", "customer_id": "C1", "status": "void",
+                      "total": "NaN", "date": None}
+    unrelated = {"id": "other", "customer_id": "C2", "status": "paid",
+                 "total": None, "date": None}
+    assert _billable_invoice_rows([valid, discarded_void, unrelated], customer_ids={"C1"}) == [{
+        "id": "inv-1", "customer_id": "C1", "customer_name": "",
+        "date": date.today(), "total": 25.0, "status": "paid",
+    }]
+
+    with pytest.raises(ValueError, match="identifier"):
+        _billable_invoice_rows([{"customer_id": "C1", "date": date.today(),
+                                 "total": "1", "status": "open"}])
+    with pytest.raises(ValueError, match="duplicate"):
+        _billable_invoice_rows([valid, dict(valid)])
 
 
 @pytest.mark.asyncio

@@ -125,7 +125,7 @@ def _respond(route, *, summary_error: bool = False, summary_malformed: bool = Fa
             "snapshot_age_seconds": 60.0,
         },
         "/api/dashboard/summary": {
-            "accounts": {"healthy": 8, "slowing": 2, "at_risk": 1, "dormant": 1},
+            "accounts": {"healthy": 8, "slowing": 2, "at_risk": 1, "dormant": 1, "unknown": 0},
             "inventory_alerts": [{"item_id": "synthetic-sku", "product_name": "QA sample",
                                   "stock_status": "critical", "total_qty": 0, "weeks_remaining": 0, "needs_po": True}],
             "pending_actions": 1, "unread_emails": 0, "generated_at": SYNTHETIC_TIME, "cached": True,
@@ -239,6 +239,8 @@ def main() -> None:
                         page.get_by_text("Partial briefing — not a complete daily digest", exact=False).wait_for()
                         page.get_by_role("region", name="3 · Opportunities").get_by_text("not covered", exact=False).wait_for()
                         page.get_by_role("region", name="6 · Actions & failures").get_by_text("No verified execution receipts", exact=False).wait_for()
+                        page.get_by_role("heading", name="Account Health").wait_for()
+                        page.get_by_role("button", name="Unknown 0 0%").wait_for()
                         assert page.get_by_role("region", name="3 · Opportunities").get_by_text("Synthetic opportunity (QA only)").count() == 0
                         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
                     finally:

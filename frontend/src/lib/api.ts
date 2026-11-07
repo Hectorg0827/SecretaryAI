@@ -111,7 +111,7 @@ export interface FeedEvent {
 }
 
 export interface DashboardSummary {
-  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number } | null;
+  accounts: { healthy: number; slowing: number; at_risk: number; dormant: number; unknown: number } | null;
   inventory_alerts: InventoryAlert[];
   pending_actions: number | null;
   unread_emails: number | null;

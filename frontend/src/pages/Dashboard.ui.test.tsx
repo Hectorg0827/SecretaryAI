@@ -28,7 +28,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 const validSummary = (unreadEmails: unknown = 3) => ({
-  accounts: { healthy: 1, slowing: 0, at_risk: 0, dormant: 0 },
+  accounts: { healthy: 1, slowing: 0, at_risk: 0, dormant: 0, unknown: 0 },
   inventory_alerts: [], pending_actions: 0, unread_emails: unreadEmails,
   generated_at: '2026-10-26T12:00:00Z',
 });

@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+import React from 'react';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, AlertTriangle, Clock, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Clock, ChevronRight, HelpCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader } from '../ui/Card';
 
-interface Summary { healthy: number; slowing: number; at_risk: number; dormant: number; }
+interface Summary { healthy: number; slowing: number; at_risk: number; dormant: number; unknown: number; }
 
 const STATUS_CFG = {
   healthy: { label: 'Healthy',  icon: TrendingUp,    bar: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50' },
   slowing: { label: 'Slowing',  icon: TrendingDown,  bar: 'bg-amber-400',   text: 'text-amber-700',   bg: 'bg-amber-50'  },
   at_risk: { label: 'At Risk',  icon: AlertTriangle, bar: 'bg-orange-500',  text: 'text-orange-700',  bg: 'bg-orange-50' },
   dormant: { label: 'Dormant',  icon: Clock,         bar: 'bg-red-500',     text: 'text-red-700',     bg: 'bg-red-50'    },
+  unknown: { label: 'Unknown',  icon: HelpCircle,    bar: 'bg-slate-300',   text: 'text-slate-600',   bg: 'bg-slate-100'  },
 } as const;
 
 export function AccountHealthPanel({ summary }: { summary: Summary }) {

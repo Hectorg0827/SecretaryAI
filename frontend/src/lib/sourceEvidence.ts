@@ -115,7 +115,7 @@ function inventoryAlert(value: unknown): value is InventoryAlert {
 
 function accountCounts(value: unknown): value is NonNullable<DashboardSummary['accounts']> {
   return record(value) && count(value.healthy) && count(value.slowing)
-    && count(value.at_risk) && count(value.dormant);
+    && count(value.at_risk) && count(value.dormant) && count(value.unknown);
 }
 
 export function verifiedDashboardSummary(value: unknown): DashboardSummary | null {
@@ -133,6 +133,7 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
     accounts: accounts === null ? null : {
       healthy: accounts.healthy, slowing: accounts.slowing,
       at_risk: accounts.at_risk, dormant: accounts.dormant,
+      unknown: accounts.unknown,
     },
     inventory_alerts: value.inventory_alerts.map((item: InventoryAlert) => ({
       item_id: item.item_id,

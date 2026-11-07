@@ -14,7 +14,7 @@ const HEALTH_CFG = {
   unknown: { label: 'Unknown', icon: Users,            color: 'text-slate-500',   bg: 'bg-slate-50'   },
 } as const;
 
-const FILTERS = ['all', 'healthy', 'slowing', 'at_risk', 'dormant'] as const;
+const FILTERS = ['all', 'healthy', 'slowing', 'at_risk', 'dormant', 'unknown'] as const;
 
 function fmt(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;

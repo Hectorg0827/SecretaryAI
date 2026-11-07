@@ -7,7 +7,7 @@ import {
 } from './sourceEvidence';
 
 const validSummary = () => ({
-  accounts: { healthy: 5, slowing: 2, at_risk: 1, dormant: 0 },
+  accounts: { healthy: 5, slowing: 2, at_risk: 1, dormant: 0, unknown: 3 },
   inventory_alerts: [{ item_id: 'fixture-sku', product_name: 'Synthetic item', stock_status: 'low', total_qty: 4, weeks_remaining: 2, needs_po: false }],
   pending_actions: 2,
   unread_emails: 1,
@@ -18,7 +18,7 @@ const validSummary = () => ({
 describe('presentation source-evidence guards (synthetic fixtures only)', () => {
   it('accepts a properly structured summary with source timestamp', () => {
     expect(verifiedDashboardSummary(validSummary())).toMatchObject({
-      accounts: { at_risk: 1 }, pending_actions: 2, cached: true,
+      accounts: { at_risk: 1, unknown: 3 }, pending_actions: 2, cached: true,
       inventory_alerts: [{ product_name: 'Synthetic item' }],
     });
   });
@@ -26,6 +26,7 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
   it('rejects incomplete account counts and malformed inventory instead of inventing zeros', () => {
     expect(verifiedDashboardSummary({ ...validSummary(), accounts: { healthy: 0 } })).toBeNull();
     expect(verifiedDashboardSummary({ ...validSummary(), accounts: { healthy: 5, slowing: -1, at_risk: 0, dormant: 0 } })).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), accounts: { healthy: 5, slowing: 2, at_risk: 1, dormant: 0 } })).toBeNull();
     expect(verifiedDashboardSummary({ ...validSummary(), inventory_alerts: null })).toBeNull();
     expect(verifiedDashboardSummary({ ...validSummary(), inventory_alerts: [{ stock_status: 'critical' }] })).toBeNull();
   });

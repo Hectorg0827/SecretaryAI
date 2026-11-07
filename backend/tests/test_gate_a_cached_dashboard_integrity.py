@@ -23,6 +23,7 @@ def valid_payload():
         },
         "inventory_alerts": [{"item_id": "synthetic-1", "stock_status": "low"}],
         "sales_30d": 0,
+        "scoring_policy_version": 2,
         "source_quality": "partial",
         "source_read_status": "completed",
     }

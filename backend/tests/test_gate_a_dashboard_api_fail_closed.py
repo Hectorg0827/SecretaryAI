@@ -19,6 +19,7 @@ async def test_missing_inbox_and_approval_sources_are_unknown_not_zero():
             "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0, "total": 1},
             "inventory_alerts": [],
             "sales_30d": 300,
+            "scoring_policy_version": 2,
             "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",
@@ -49,6 +50,65 @@ async def test_initial_dashboard_source_failure_returns_503_without_writing_snap
             )
     assert exc.value.status_code == 503
     write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_old_scoring_policy_is_recomputed_for_authorized_owner():
+    old = {
+        "payload": {
+            "accounts": {"healthy": 0, "slowing": 0, "at_risk": 1,
+                         "dormant": 0, "total": 1},
+            "inventory_alerts": [], "sales_30d": 0,
+            "source_quality": "partial", "source_read_status": "completed",
+        },
+        "generated_at": "2026-11-06T10:00:00Z",
+    }
+    corrected = {
+        "scoring_policy_version": 2,
+        "accounts": {"healthy": 0, "slowing": 0, "at_risk": 0,
+                     "dormant": 0, "unknown": 1, "total": 1},
+        "inventory_alerts": [], "sales_30d": 0,
+        "source_quality": "partial", "source_read_status": "completed",
+    }
+    adapter = AsyncMock()
+    adapter.get_emails.return_value = []
+    with patch("app.api.dashboard.read_snapshot", return_value=old), \
+         patch("app.api.dashboard.compute_dashboard_payload",
+               new=AsyncMock(return_value=corrected)) as compute, \
+         patch("app.api.dashboard.store_snapshot") as save:
+        result = await get_dashboard_summary(
+            user={"company_id": "tenant-fixture", "role": "owner"},
+            adapter=adapter, db=MagicMock(),
+        )
+    compute.assert_awaited_once_with(adapter)
+    save.assert_called_once()
+    assert result["accounts"]["unknown"] == 1
+    assert result["accounts"]["at_risk"] == 0
+
+
+@pytest.mark.asyncio
+async def test_old_scoring_policy_does_not_let_viewer_trigger_qbo_reads():
+    old = {
+        "payload": {
+            "accounts": {"healthy": 0, "slowing": 0, "at_risk": 1,
+                         "dormant": 0, "total": 1},
+            "inventory_alerts": [], "sales_30d": 0,
+            "source_quality": "partial", "source_read_status": "completed",
+        },
+        "generated_at": "2026-11-06T10:00:00Z",
+    }
+    adapter = AsyncMock()
+    with patch("app.api.dashboard.read_snapshot", return_value=old), \
+         patch("app.api.dashboard.compute_dashboard_payload", new=AsyncMock()) as compute, \
+         patch("app.api.dashboard.store_snapshot") as save:
+        with pytest.raises(HTTPException) as error:
+            await get_dashboard_summary(
+                user={"company_id": "tenant-fixture", "role": "viewer"},
+                adapter=adapter, db=MagicMock(),
+            )
+    assert error.value.status_code == 503
+    compute.assert_not_awaited()
+    save.assert_not_called()
 
 
 
@@ -134,6 +194,7 @@ async def test_company_wide_account_aggregates_respect_server_side_rbac(
             },
             "inventory_alerts": [{"item_id": "fixture", "stock_status": "critical"}],
             "sales_30d": 2000,
+            "scoring_policy_version": 2,
             "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",
@@ -180,6 +241,7 @@ async def test_dashboard_does_not_fetch_inbox_or_approvals_for_unauthorized_role
             "accounts": {"healthy": 0, "slowing": 0, "at_risk": 0,
                          "dormant": 0, "total": 0},
             "inventory_alerts": [], "sales_30d": 0,
+            "scoring_policy_version": 2,
             "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",
@@ -235,6 +297,7 @@ async def test_unassessed_inventory_count_follows_inventory_rbac(role, sees_inve
         "payload": {
             "accounts": {"healthy": 1, "slowing": 0, "at_risk": 0, "dormant": 0, "total": 1},
             "inventory_alerts": [], "inventory_unassessed": 3, "sales_30d": 0,
+            "scoring_policy_version": 2,
             "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",

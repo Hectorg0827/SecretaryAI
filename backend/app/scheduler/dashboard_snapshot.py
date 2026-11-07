@@ -19,6 +19,10 @@ from math import isfinite
 
 log = logging.getLogger(__name__)
 
+# Snapshot scoring changed: unobserved 365-day history is UNKNOWN, not risk.
+# A persisted v1 snapshot must be recomputed before it can be trusted.
+DASHBOARD_SCORING_POLICY_VERSION = 2
+
 
 class SnapshotPersistenceUnavailable(RuntimeError):
     """A computed snapshot could not be stored durably."""
@@ -250,6 +254,7 @@ async def compute_dashboard_payload(adapter) -> dict:
         raise SnapshotSourceUnavailable("sales_30d") from exc
 
     return {
+        "scoring_policy_version": DASHBOARD_SCORING_POLICY_VERSION,
         "source_quality": "partial",  # underlying provider lineage not yet verified
         "source_read_status": "completed",  # required top-level reads succeeded
         "accounts": {

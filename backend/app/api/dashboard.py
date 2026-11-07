@@ -106,6 +106,15 @@ async def get_dashboard_summary(
             raise HTTPException(
                 status_code=503, detail="Dashboard snapshot is incomplete or invalid"
             ) from exc
+        from app.scheduler.dashboard_snapshot import DASHBOARD_SCORING_POLICY_VERSION
+        if cached_payload.get("scoring_policy_version") != DASHBOARD_SCORING_POLICY_VERSION:
+            # The old scorer misclassified no observed order history as risk.
+            # Refuse to present stale-risk labels; a role with run_reports may
+            # rebuild this derived snapshot, but viewers cannot trigger reads.
+            log.info("Dashboard summary: scoring policy changed; recomputing snapshot")
+            snap = None
+
+    if snap:
         cached = True
         log.debug("Dashboard summary served from cache")
     else:

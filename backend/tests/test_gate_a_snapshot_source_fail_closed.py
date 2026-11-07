@@ -39,6 +39,69 @@ async def test_verified_empty_business_is_legitimately_zero():
 
 
 @pytest.mark.asyncio
+async def test_accounts_without_billed_history_are_unknown_not_at_risk():
+    from decimal import Decimal
+    from app.connectors.base import Customer
+
+    adapter = CompleteReader()
+    adapter.customers = [
+        Customer(id="one", qb_id="QB-ONE", name="No observed orders", email=None,
+                 phone=None, state="NY", balance=Decimal("0"), total_sales=None),
+    ]
+    result = await compute_dashboard_payload(adapter)
+    assert result["accounts"]["unknown"] == 1
+    assert result["accounts"]["at_risk"] == 0
+    assert result["accounts"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_void_invoices_do_not_inflate_sales_or_mark_unknown_account_at_risk():
+    from datetime import date
+    from decimal import Decimal
+    from app.connectors.base import Customer, Invoice
+
+    adapter = CompleteReader()
+    adapter.customers = [
+        Customer(id="one", qb_id="QB-ONE", name="Test", email=None,
+                 phone=None, state="NY", balance=Decimal("0"), total_sales=None),
+    ]
+    adapter.invoices = [
+        Invoice(id="real", qb_id="real", customer_id="QB-ONE", customer_name="Test",
+                date=date.today(), due_date=None, total=Decimal("20"),
+                balance=Decimal("0"), status="open", line_items=[]),
+        Invoice(id="void", qb_id="void", customer_id="QB-ONE", customer_name="Test",
+                date=date.today(), due_date=None, total=Decimal("1000"),
+                balance=Decimal("0"), status="void", line_items=[]),
+    ]
+    result = await compute_dashboard_payload(adapter)
+    assert result["sales_30d"] == 20
+    assert result["accounts"]["total"] == 1
+    # Observed billed history is present; voided orders never contribute.
+    assert result["accounts"]["unknown"] == 0
+
+
+@pytest.mark.asyncio
+async def test_credit_balance_does_not_become_verified_account_risk():
+    from datetime import date
+    from decimal import Decimal
+    from app.connectors.base import Customer, Invoice
+
+    adapter = CompleteReader()
+    adapter.customers = [
+        Customer(id="one", qb_id="QB-ONE", name="Credit customer", email=None,
+                 phone=None, state="NY", balance=Decimal("-5"), total_sales=None),
+    ]
+    adapter.invoices = [
+        Invoice(id="real", qb_id="real", customer_id="QB-ONE", customer_name="Credit customer",
+                date=date.today(), due_date=None, total=Decimal("20"),
+                balance=Decimal("0"), status="open", line_items=[]),
+    ]
+    result = await compute_dashboard_payload(adapter)
+    assert result["accounts"]["unknown"] == 1
+    assert result["accounts"]["at_risk"] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("broken_method, expected_source", [
     ("get_all_customers", "account_health"),
     ("get_inventory_merged", "inventory"),

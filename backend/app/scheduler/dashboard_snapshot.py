@@ -83,6 +83,26 @@ def _invoice_date(row) -> date:
     raise ValueError("Invoice missing transaction date")
 
 
+def _billable_invoice_rows(invoices) -> list[dict]:
+    """Normalize observed invoice headers and exclude void/draft documents.
+
+    The Accounts API and dashboard must count the same billed history.
+    Identity duplication and malformed source values still fail closed.
+    """
+    from app.intelligence.sales_analytics import filter_billable_invoices
+
+    return filter_billable_invoices([
+        {
+            "id": _row_value(inv, "qb_id") or _row_value(inv, "id"),
+            "customer_id": _row_value(inv, "customer_id"),
+            "date": _invoice_date(inv),
+            "total": _invoice_amount(inv),
+            "status": _row_value(inv, "status"),
+        }
+        for inv in invoices
+    ])
+
+
 async def compute_dashboard_payload(adapter) -> dict:
     """
     Pull data from QB/warehouse, score accounts and evaluate inventory.
@@ -101,16 +121,16 @@ async def compute_dashboard_payload(adapter) -> dict:
     # ── Account health ────────────────────────────────────────────────────
     try:
         customers = await adapter.get_all_customers()
-        invoices_yr = await read_invoice_summaries(adapter, 365)
+        invoices_yr = _billable_invoice_rows(await read_invoice_summaries(adapter, 365))
 
         by_customer: dict[str, list] = {}
         for inv in invoices_yr:
-            cid = _row_value(inv, "customer_id")
+            cid = inv["customer_id"]
             if not cid:
                 raise ValueError("Invoice missing customer_id")
             by_customer.setdefault(cid, []).append({
-                "date": _invoice_date(inv),
-                "total": _invoice_amount(inv),
+                "date": inv["date"],
+                "total": inv["total"],
             })
 
         for customer in customers:
@@ -125,13 +145,22 @@ async def compute_dashboard_payload(adapter) -> dict:
                 balance = _row_value(customer, "balance")
                 if balance is None or isinstance(balance, bool):
                     raise ValueError("Customer balance was not observed")
+                balance = Decimal(str(balance))
+                if not balance.is_finite():
+                    raise ValueError("Customer balance must be finite")
+                # A 365-day window with no billed orders does not establish
+                # customer dormancy or risk. Credit balances likewise need AR
+                # reconciliation; these policies match the Accounts API.
+                if not orders or balance < 0:
+                    health_counts["unknown"] += 1
+                    continue
                 health = score_account(
                     account_id=cid,
                     account_name=_row_value(customer, "name", ""),
                     last_order_date=last_order,
                     avg_order_cycle_days=None,
                     order_history=orders,
-                    current_balance=Decimal(str(balance)),
+                    current_balance=balance,
                 )
             except (ValueError, ArithmeticError):
                 # One unscorable account (unobserved, malformed or credit
@@ -209,9 +238,9 @@ async def compute_dashboard_payload(adapter) -> dict:
 
     # ── 30-day sales ──────────────────────────────────────────────────────
     try:
-        invoices_30 = await read_invoice_summaries(adapter, 30)
+        invoices_30 = _billable_invoice_rows(await read_invoice_summaries(adapter, 30))
         sales_30d = sum(
-            _invoice_amount(inv)
+            inv["total"]
             for inv in invoices_30
         )
         if not isfinite(sales_30d):

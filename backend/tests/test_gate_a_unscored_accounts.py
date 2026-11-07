@@ -4,7 +4,7 @@ The data-finance contract rejects credit, missing and malformed balances in
 score_account. The snapshot must keep scoring the other accounts, and both
 cached-snapshot readers must accept the unknown bucket in the total.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -22,14 +22,15 @@ SCORED = ("healthy", "slowing", "at_risk", "dormant")
 
 
 class Reader:
-    def __init__(self, customers):
+    def __init__(self, customers, invoices=None):
         self.customers = customers
+        self.invoices = invoices if invoices is not None else []
 
     async def get_all_customers(self):
         return self.customers
 
     async def get_orders_last_n_days(self, days):
-        return []
+        return self.invoices
 
     async def get_inventory_merged(self):
         return []
@@ -43,7 +44,10 @@ async def test_unobserved_or_malformed_balances_are_unknown_not_zero():
         {"qb_id": "null", "name": "Null", "balance": None},
         {"qb_id": "text", "name": "Text", "balance": "N/A"},
         {"qb_id": "nan", "name": "NaN", "balance": Decimal("NaN")},
-    ]))
+    ], invoices=[SimpleNamespace(
+        id="inv-ok", qb_id="inv-ok", customer_id="ok", date=date.today(),
+        total=Decimal("10"), status="open",
+    )]))
     accounts = payload["accounts"]
 
     assert accounts["unknown"] == 4
@@ -67,7 +71,10 @@ async def test_account_rejected_by_scoring_contract_does_not_void_others(monkeyp
     payload = await compute_dashboard_payload(Reader([
         SimpleNamespace(qb_id="credit", name="Credit", balance=Decimal("-12.50")),
         SimpleNamespace(qb_id="ordinary", name="Ordinary", balance=Decimal("0")),
-    ]))
+    ], invoices=[SimpleNamespace(
+        id="inv-ordinary", qb_id="inv-ordinary", customer_id="ordinary",
+        date=date.today(), total=Decimal("10"), status="open",
+    )]))
     accounts = payload["accounts"]
 
     assert accounts["unknown"] == 1

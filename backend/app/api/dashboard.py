@@ -33,6 +33,7 @@ from app.scheduler.dashboard_snapshot import (
     _invoice_amount,
     _invoice_date,
     _row_value,
+    _billable_invoice_rows,
 )
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,15 @@ async def get_dashboard_summary(
             raise HTTPException(
                 status_code=503, detail="Dashboard snapshot is incomplete or invalid"
             ) from exc
+        from app.scheduler.dashboard_snapshot import DASHBOARD_SCORING_POLICY_VERSION
+        if cached_payload.get("scoring_policy_version") != DASHBOARD_SCORING_POLICY_VERSION:
+            # The old scorer misclassified no observed order history as risk.
+            # Refuse to present stale-risk labels; a role with run_reports may
+            # rebuild this derived snapshot, but viewers cannot trigger reads.
+            log.info("Dashboard summary: scoring policy changed; recomputing snapshot")
+            snap = None
+
+    if snap:
         cached = True
         log.debug("Dashboard summary served from cache")
     else:
@@ -479,7 +489,7 @@ async def get_sales_data(
     today = date.today()
 
     try:
-        invoices = await read_invoice_summaries(adapter, days)
+        invoices = _billable_invoice_rows(await read_invoice_summaries(adapter, days))
     except Exception as exc:
         log.error("Sales data fetch failed")
         raise HTTPException(
@@ -532,7 +542,9 @@ async def get_sales_data(
     vs_prior_pct = 0.0
     try:
         cutoff_str = (today - timedelta(days=days)).isoformat()
-        prior_invoices = await read_invoice_summaries(adapter, days * 2)
+        prior_invoices = _billable_invoice_rows(
+            await read_invoice_summaries(adapter, days * 2)
+        )
         prior_total = 0.0
         for inv in prior_invoices:
             d = _invoice_date(inv).isoformat()

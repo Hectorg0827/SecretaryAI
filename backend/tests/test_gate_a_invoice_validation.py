@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.dashboard import get_sales_data
+from app.connectors.base import Customer
 from app.scheduler.dashboard_snapshot import (
     SnapshotSourceUnavailable, _invoice_amount, compute_dashboard_payload,
 )
@@ -36,9 +37,13 @@ def test_invoice_amount_preserves_legitimate_zero_and_credit_values(valid):
 async def test_snapshot_rejects_invalid_current_period_invoice(invalid):
     class Synthetic:
         async def get_all_customers(self):
-            return []
+            return [Customer(
+                id="qb-a", qb_id="qb-a", name="Active customer",
+                email=None, phone=None, state=None, balance=Decimal("0"),
+            )]
         async def get_orders_last_n_days(self, days):
-            return [{"customer_id": "qb-a", "date": date.today(), "total": invalid}]
+            return [{"id": "invoice-invalid", "customer_id": "qb-a",
+                     "date": date.today(), "total": invalid}]
         async def get_inventory_merged(self):
             return []
     with pytest.raises(SnapshotSourceUnavailable) as error:

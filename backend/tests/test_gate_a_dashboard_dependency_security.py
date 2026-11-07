@@ -28,6 +28,7 @@ def _snapshot():
                 "dormant": 0, "total": 1,
             },
             "inventory_alerts": [], "sales_30d": 3.5,
+            "scoring_policy_version": 2,
             "source_quality": "partial", "source_read_status": "completed",
         },
         "generated_at": "2026-10-26T12:00:00Z",

@@ -208,6 +208,21 @@ class UnifiedDataAdapter:
         date_from = date_to - timedelta(days=days)
         return await self._qb.get_invoices(date_from, date_to)
 
+    async def get_invoice_summaries_last_n_days(self, days: int = 30) -> list[Invoice]:
+        """Read financial invoice headers when line-level detail is unnecessary.
+
+        QBO validates date, identity, amount and balance independently from
+        product line detail. Desktop still uses its existing strict source.
+        """
+        if not self._qb:
+            raise RuntimeError("No QB connector configured")
+        date_to = date.today()
+        date_from = date_to - timedelta(days=days)
+        if isinstance(self._qb, QBOnlineAdapter):
+            return await self._qb.get_invoice_summaries(date_from, date_to)
+        return await self._qb.get_invoices(date_from, date_to)
+
+
     async def get_inventory_qb(self) -> list[InventoryItem]:
         if not self._qb:
             raise RuntimeError("No QB connector configured")
@@ -523,6 +538,14 @@ class UnifiedDataAdapter:
         if self._shiptrack:
             results["shiptrack"] = False  # carrier configuration does not establish connectivity
         return results
+
+
+async def read_invoice_summaries(adapter, days: int) -> list[Invoice]:
+    """Use header-only reads where supported; keep existing test/legacy adapters."""
+    summary_method = getattr(type(adapter), "get_invoice_summaries_last_n_days", None)
+    if summary_method is not None:
+        return await summary_method(adapter, days)
+    return await adapter.get_orders_last_n_days(days)
 
 
 class _NoopDB:

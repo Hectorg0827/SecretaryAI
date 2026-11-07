@@ -127,6 +127,7 @@ def test_owner_sees_only_this_accounts_invoices_newest_first(client):
         "total_amount": 100.0,
         "balance_due": 40.0,
         "status": "open",
+        "line_items_observed": True,
     }
     # Voided documents stay visible with their status rather than vanishing.
     assert body["orders"][1]["status"] == "void"
@@ -217,6 +218,15 @@ def test_unknown_balance_stays_unknown_not_zero(client):
     response = client.get("/api/accounts/QB1/orders", headers=auth("owner"))
     assert response.status_code == 200, response.text
     assert response.json()["orders"][0]["balance_due"] is None
+
+
+def test_header_only_order_retains_unobserved_item_provenance(client):
+    header = invoice("summary-1", "QB1")
+    header.line_items_observed = False
+    use({"tenant-a": FakeAdapter(invoices=[header])})
+    response = client.get("/api/accounts/QB1/orders", headers=auth("owner"))
+    assert response.status_code == 200, response.text
+    assert response.json()["orders"][0]["line_items_observed"] is False
 
 
 def test_invoices_without_a_customer_are_counted_not_hidden(client):

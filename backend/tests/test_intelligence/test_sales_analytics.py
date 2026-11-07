@@ -35,6 +35,34 @@ def test_trend_comparison_returns_change_pct():
     result = compute_trend_comparison(invoices, days=30)
     assert "change_pct" in result
     assert result["trend"] in ("up", "down", "flat")
+    assert result["current"]["top_products_observed"] is True
+
+
+def test_header_only_invoice_does_not_invent_empty_product_ranking():
+    invoices = [
+        {"id": "header", "order_date": "2026-11-02", "total_amount": 100,
+         "line_items_observed": False, "items": []},
+        {"id": "full", "order_date": "2026-11-03", "total_amount": 80,
+         "line_items_observed": True,
+         "items": [{"name": "Product A", "quantity": 2, "amount": 80}]},
+    ]
+    result = compute_trend_comparison(invoices, days=30, today=date(2026, 11, 6))
+    assert result["current"]["revenue"] == 180
+    assert result["current"]["orders"] == 2
+    assert result["current"]["top_products"] is None
+    assert result["current"]["top_products_observed"] is False
+
+
+def test_prior_header_only_invoice_does_not_hide_current_observed_products():
+    invoices = [
+        {"id": "prior", "order_date": "2026-10-01", "total_amount": 100,
+         "line_items_observed": False, "items": []},
+        {"id": "current", "order_date": "2026-11-03", "total_amount": 80,
+         "items": [{"name": "Product A", "quantity": 2, "amount": 80}]},
+    ]
+    result = compute_trend_comparison(invoices, days=30, today=date(2026, 11, 6))
+    assert result["current"]["top_products_observed"] is True
+    assert result["current"]["top_products"][0]["name"] == "Product A"
 
 
 def test_account_velocity_avg_gap():

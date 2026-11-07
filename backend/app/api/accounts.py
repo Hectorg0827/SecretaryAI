@@ -304,6 +304,7 @@ def _order_row(invoice) -> dict:
         "total_amount": row["total"],
         "balance_due": balance_due,
         "status": row["status"],
+        "line_items_observed": row["line_items_observed"],
     }
 
 

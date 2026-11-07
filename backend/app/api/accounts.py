@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_adapter
+from app.connectors.unified_adapter import read_invoice_summaries
 from app.auth.rbac import get_current_user, require_permission
 from app.intelligence.account_health import score_account
 from app.intelligence.sales_analytics import (
@@ -106,6 +107,7 @@ def _invoice_row(invoice) -> dict:
         "total_amount": amount,
         "status": status or "",
         "items": items,
+        "line_items_observed": _field(invoice, "line_items_observed", True),
     }
 
 
@@ -185,7 +187,7 @@ async def list_accounts(
     customers = await adapter.get_all_customers()
     if role == "sales_rep":
         customers = [customer for customer in customers if _owned_by_sales_rep(customer, user)]
-    invoices = await adapter.get_orders_last_n_days(365)
+    invoices = await read_invoice_summaries(adapter, 365)
 
     # Normalize and check duplicate source identities before calculating any
     # account metric. Only verified owned accounts contribute to a rep's view.
@@ -238,7 +240,7 @@ async def get_account(
     if role == "sales_rep" and not _owned_by_sales_rep(customer, user):
         raise HTTPException(status_code=403, detail="Account is not assigned to this sales representative")
 
-    invoices = await adapter.get_orders_last_n_days(365)
+    invoices = await read_invoice_summaries(adapter, 365)
     account_invoices = [
         inv for inv in invoices
         if _field(inv, "customer_id", "") == account_id
@@ -302,6 +304,7 @@ def _order_row(invoice) -> dict:
         "total_amount": row["total"],
         "balance_due": balance_due,
         "status": row["status"],
+        "line_items_observed": row["line_items_observed"],
     }
 
 
@@ -340,7 +343,7 @@ async def get_account_orders(
         raise HTTPException(status_code=403, detail="Account is not assigned to this sales representative")
 
     try:
-        invoices = await adapter.get_orders_last_n_days(ORDER_HISTORY_DAYS)
+        invoices = await read_invoice_summaries(adapter, ORDER_HISTORY_DAYS)
     except Exception as exc:
         log.warning("Account orders: invoice source read failed")
         raise HTTPException(

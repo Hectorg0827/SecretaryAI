@@ -91,6 +91,7 @@ async def compute_dashboard_payload(adapter) -> dict:
     """
     from app.intelligence.account_health import score_account
     from app.intelligence.inventory_monitor import evaluate_inventory
+    from app.connectors.unified_adapter import read_invoice_summaries
 
     health_counts: Counter = Counter()
     inventory_alerts: list[dict] = []
@@ -100,7 +101,7 @@ async def compute_dashboard_payload(adapter) -> dict:
     # ── Account health ────────────────────────────────────────────────────
     try:
         customers = await adapter.get_all_customers()
-        invoices_yr = await adapter.get_orders_last_n_days(365)
+        invoices_yr = await read_invoice_summaries(adapter, 365)
 
         by_customer: dict[str, list] = {}
         for inv in invoices_yr:
@@ -208,7 +209,7 @@ async def compute_dashboard_payload(adapter) -> dict:
 
     # ── 30-day sales ──────────────────────────────────────────────────────
     try:
-        invoices_30 = await adapter.get_orders_last_n_days(30)
+        invoices_30 = await read_invoice_summaries(adapter, 30)
         sales_30d = sum(
             _invoice_amount(inv)
             for inv in invoices_30

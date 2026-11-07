@@ -276,6 +276,41 @@ class QBOnlineAdapter(QuickBooksAdapter):
             line_items=line_items,
         )
 
+    def _normalize_invoice_summary(self, raw: dict) -> Invoice:
+        """Validate invoice *headers* for account and revenue summaries.
+
+        QBO's Line collection may contain incomplete item-level projections or
+        unsupported line types. Those must still fail full item-level reads,
+        but they do not invalidate a separately observed QBO invoice total.
+        Never manufacture a missing header, customer, or financial amount.
+        """
+        for required in ("Id", "TxnDate", "TotalAmt", "Balance"):
+            if not isinstance(raw.get(required), (str, int, float, Decimal)) or raw[required] == "":
+                raise ValueError(f"QBO invoice summary missing {required}")
+        invoice_id = raw["Id"]
+        if not isinstance(invoice_id, str) or not invoice_id.strip():
+            raise ValueError("QBO invoice summary has invalid Id")
+        customer_ref = raw.get("CustomerRef")
+        customer_id = customer_ref.get("value") if isinstance(customer_ref, dict) else None
+        if not isinstance(customer_id, str) or not customer_id.strip():
+            raise ValueError("QBO invoice summary missing CustomerRef.value")
+        try:
+            issued = date.fromisoformat(raw["TxnDate"])
+            due = date.fromisoformat(raw["DueDate"]) if raw.get("DueDate") else None
+        except (TypeError, ValueError) as exc:
+            raise ValueError("QBO invoice summary has invalid date") from exc
+        total = decimal_field(raw["TotalAmt"], "QBO summary TotalAmt")
+        balance = decimal_field(raw["Balance"], "QBO summary Balance")
+        invoice_balance(total, balance, "QBO summary Balance")
+        return Invoice(
+            id=invoice_id, qb_id=invoice_id,
+            customer_id=customer_id, customer_name=customer_ref.get("name") or "",
+            date=issued, due_date=due, total=total, balance=balance,
+            status="open" if balance > 0 else "paid",
+            line_items=[],  # Not loaded by this explicitly header-only method.
+            line_items_observed=False,
+        )
+
     def _normalize_inventory_item(self, raw: dict) -> InventoryItem:
         if raw.get("QtyOnHand") is None or raw.get("QtyOnHand") == "":
             raise ValueError("QBO inventory missing quantity_on_hand QtyOnHand")
@@ -321,6 +356,12 @@ class QBOnlineAdapter(QuickBooksAdapter):
         where = f"TxnDate >= '{date_from.isoformat()}' AND TxnDate <= '{date_to.isoformat()}'"
         raw = await self._query_all("Invoice", where)
         return [self._normalize_invoice(i) for i in raw]
+
+    async def get_invoice_summaries(self, date_from: date, date_to: date) -> list[Invoice]:
+        """Read verified invoice headers without implying item-line completeness."""
+        where = f"TxnDate >= '{date_from.isoformat()}' AND TxnDate <= '{date_to.isoformat()}'"
+        raw = await self._query_all("Invoice", where)
+        return [self._normalize_invoice_summary(i) for i in raw]
 
     async def get_inventory(self) -> list[InventoryItem]:
         raw = await self._query_all("Item", "Type = 'Inventory'")

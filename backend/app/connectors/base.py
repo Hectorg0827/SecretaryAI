@@ -32,6 +32,7 @@ class Invoice:
     balance: Decimal
     status: str
     line_items: list[dict]
+    line_items_observed: bool = True
 
 
 @dataclass

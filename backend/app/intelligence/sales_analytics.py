@@ -155,6 +155,14 @@ def compute_trend_comparison(
     current = compute_period_sales(valid_invoices, current_start, current_end)
     prior = compute_period_sales(valid_invoices, prior_start, prior_end)
 
+    # Header-only QBO summaries establish invoice totals but cannot establish
+    # a product ranking. An empty product list would falsely claim observation.
+    current_items_observed = all(
+        inv.get("line_items_observed", True) is True
+        for inv in valid_invoices
+        if current_start <= _parse_date(inv.get("order_date", "")) <= current_end
+    )
+
     if prior.total_revenue > 0:
         pct_change = float(
             (current.total_revenue - prior.total_revenue) / prior.total_revenue * 100
@@ -167,7 +175,8 @@ def compute_trend_comparison(
             "revenue": float(current.total_revenue),
             "orders": current.order_count,
             "avg_order": float(current.avg_order_value),
-            "top_products": current.top_products,
+            "top_products": current.top_products if current_items_observed else None,
+            "top_products_observed": current_items_observed,
             "top_accounts": current.top_accounts,
         },
         "prior": {

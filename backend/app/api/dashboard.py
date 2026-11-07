@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_adapter, get_db
+from app.connectors.unified_adapter import read_invoice_summaries
 from app.auth.rbac import get_current_user, require_permission, ROLE_PERMISSIONS
 from app.intelligence.account_health import score_account
 from app.intelligence.inventory_monitor import evaluate_inventory
@@ -478,7 +479,7 @@ async def get_sales_data(
     today = date.today()
 
     try:
-        invoices = await adapter.get_orders_last_n_days(days)
+        invoices = await read_invoice_summaries(adapter, days)
     except Exception as exc:
         log.error("Sales data fetch failed")
         raise HTTPException(
@@ -531,7 +532,7 @@ async def get_sales_data(
     vs_prior_pct = 0.0
     try:
         cutoff_str = (today - timedelta(days=days)).isoformat()
-        prior_invoices = await adapter.get_orders_last_n_days(days * 2)
+        prior_invoices = await read_invoice_summaries(adapter, days * 2)
         prior_total = 0.0
         for inv in prior_invoices:
             d = _invoice_date(inv).isoformat()

@@ -417,9 +417,11 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
         for item in alerts
     ):
         raise SnapshotDataInvalid("Dashboard inventory alerts invalid")
-    # Absent from snapshots written before unassessed items were counted.
-    unassessed = payload.get("inventory_unassessed", 0)
-    if type(unassessed) is not int or unassessed < 0:
+    # Absent from legacy snapshots: coverage is unknown, not assessed at zero.
+    unassessed = payload.get("inventory_unassessed")
+    if "inventory_unassessed" in payload and (
+        type(unassessed) is not int or unassessed < 0
+    ):
         raise SnapshotDataInvalid("Dashboard inventory coverage invalid")
     return payload
 

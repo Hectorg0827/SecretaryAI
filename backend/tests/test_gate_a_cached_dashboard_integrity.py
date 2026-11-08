@@ -58,6 +58,34 @@ def test_dashboard_cache_rejects_corruption(mutation):
         validate_dashboard_cached_payload(payload)
 
 
+@pytest.mark.parametrize("invalid", [None, True, -1, 1.5, "0"])
+def test_dashboard_cache_rejects_invalid_inventory_coverage(invalid):
+    payload = valid_payload()
+    payload["inventory_unassessed"] = invalid
+    with pytest.raises(SnapshotDataInvalid, match="inventory coverage"):
+        validate_dashboard_cached_payload(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reported_count", [None, 0, 3])
+async def test_cached_inventory_coverage_distinguishes_legacy_unknown_from_zero(reported_count):
+    payload = valid_payload()
+    if reported_count is not None:
+        payload["inventory_unassessed"] = reported_count
+    # Legacy snapshots predate the inventory coverage field. The API must
+    # preserve unknown as null so the UI cannot claim full assessment.
+    assert validate_dashboard_cached_payload(payload) is payload
+    adapter = AsyncMock()
+    adapter.get_emails.return_value = []
+    with patch.object(dashboard, "read_snapshot", return_value=stored(payload)):
+        response = await dashboard.get_dashboard_summary(
+            user={"company_id": "tenant-a", "sub": "owner-a", "role": "owner"},
+            adapter=adapter, db=MagicMock(),
+        )
+    assert response["cached"] is True
+    assert response["inventory_unassessed"] == reported_count
+
+
 @pytest.mark.asyncio
 async def test_malformed_cached_snapshot_fails_without_new_source_reads():
     adapter = AsyncMock()

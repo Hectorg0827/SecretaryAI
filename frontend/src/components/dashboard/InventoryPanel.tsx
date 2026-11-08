@@ -42,7 +42,7 @@ function AlertRow({ alert, onDraftPO }: { alert: InventoryAlert; onDraftPO: (id:
   );
 }
 
-export function InventoryPanel({ alerts }: { alerts: InventoryAlert[] }) {
+export function InventoryPanel({ alerts, unassessedCount }: { alerts: InventoryAlert[]; unassessedCount: number | null }) {
   const navigate = useNavigate();
   const [drafting, setDrafting] = useState<string | null>(null);
 
@@ -76,9 +76,9 @@ export function InventoryPanel({ alerts }: { alerts: InventoryAlert[] }) {
       />
 
       {alerts.length === 0 ? (
-        <div className="flex items-center gap-2 px-5 py-4 text-sm text-emerald-600 font-medium">
-          <Package size={16} className="text-emerald-500" />
-          All products at healthy levels
+        <div className="flex items-center gap-2 px-5 py-4 text-sm text-slate-600 font-medium">
+          <Package size={16} className="text-slate-500" />
+          No low-stock alerts reported
         </div>
       ) : (
         <div className="divide-y divide-slate-50">
@@ -99,6 +99,15 @@ export function InventoryPanel({ alerts }: { alerts: InventoryAlert[] }) {
           )}
         </div>
       )}
+      {unassessedCount === null ? (
+        <p role="status" className="px-5 pb-4 text-xs text-amber-700">
+          Inventory assessment coverage unavailable. No alerts does not mean all stock is healthy.
+        </p>
+      ) : unassessedCount > 0 ? (
+        <p role="status" className="px-5 pb-4 text-xs text-amber-700">
+          {unassessedCount} product{unassessedCount === 1 ? '' : 's'} not assessed — sales rates are unavailable.
+        </p>
+      ) : null}
     </Card>
   );
 }

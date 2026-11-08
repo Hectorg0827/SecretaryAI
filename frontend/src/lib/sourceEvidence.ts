@@ -145,6 +145,7 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
       stock_status: item.stock_status,
       needs_po: item.needs_po === true,
     })),
+    inventory_unassessed: count(value.inventory_unassessed) ? value.inventory_unassessed : null,
     pending_actions: pendingActions,
     unread_emails: unreadEmails,
     generated_at: generatedAt,

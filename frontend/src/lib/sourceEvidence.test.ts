@@ -9,6 +9,7 @@ import {
 const validSummary = () => ({
   accounts: { healthy: 5, slowing: 2, at_risk: 1, dormant: 0, unknown: 3 },
   inventory_alerts: [{ item_id: 'fixture-sku', product_name: 'Synthetic item', stock_status: 'low', total_qty: 4, weeks_remaining: 2, needs_po: false }],
+  inventory_unassessed: 4,
   pending_actions: 2,
   unread_emails: 1,
   generated_at: '2026-10-26T12:00:00Z',
@@ -19,7 +20,7 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
   it('accepts a properly structured summary with source timestamp', () => {
     expect(verifiedDashboardSummary(validSummary())).toMatchObject({
       accounts: { at_risk: 1, unknown: 3 }, pending_actions: 2, cached: true,
-      inventory_alerts: [{ product_name: 'Synthetic item' }],
+      inventory_alerts: [{ product_name: 'Synthetic item' }], inventory_unassessed: 4,
     });
   });
 
@@ -43,6 +44,9 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
       generated_at: 'not-a-date', cached: 'false',
     });
     expect(result).toMatchObject({ pending_actions: null, unread_emails: null, generated_at: null, cached: false });
+    expect(verifiedDashboardSummary({ ...validSummary(), inventory_unassessed: -1 })?.inventory_unassessed).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), inventory_unassessed: undefined })?.inventory_unassessed).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), inventory_unassessed: 0 })?.inventory_unassessed).toBe(0);
   });
 
   it('accepts a verified empty approval array but rejects malformed responses', () => {

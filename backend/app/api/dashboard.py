@@ -194,7 +194,7 @@ async def get_dashboard_summary(
         "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
         # In-stock items not assessed because their sell rate was never measured
         "inventory_unassessed": (
-            cached_payload.get("inventory_unassessed", 0)
+            cached_payload.get("inventory_unassessed")
             if ("view_inventory" in perms or has_view_all) else None
         ),
         # Financial figures visible to owner + manager only

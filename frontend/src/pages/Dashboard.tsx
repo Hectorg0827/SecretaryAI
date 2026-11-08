@@ -156,7 +156,7 @@ export function Dashboard() {
                 <>
                   {summary && showAccountHealth && accounts && <AccountHealthPanel summary={accounts} />}
                   <ProactiveFeed />
-                  {summary && showInventory     && <InventoryPanel alerts={alerts} />}
+                  {summary && showInventory     && <InventoryPanel alerts={alerts} unassessedCount={summary.inventory_unassessed} />}
                   {showApprovals     && <PendingApprovals />}
                   {showApprovals     && <WorkflowStatusPanel />}
                   {showNotes         && <FollowUpNotes />}
@@ -175,7 +175,7 @@ export function Dashboard() {
             ) : (
               <>
                 {summary && showAccountHealth && accounts && <AccountHealthPanel summary={accounts} />}
-                {summary && showInventory     && <InventoryPanel alerts={alerts} />}
+                {summary && showInventory     && <InventoryPanel alerts={alerts} unassessedCount={summary.inventory_unassessed} />}
                 {showNotes         && <FollowUpNotes />}
               </>
             )}

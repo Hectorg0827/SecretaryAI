@@ -113,6 +113,8 @@ export interface FeedEvent {
 export interface DashboardSummary {
   accounts: { healthy: number; slowing: number; at_risk: number; dormant: number; unknown: number } | null;
   inventory_alerts: InventoryAlert[];
+  /** Products with stock on hand but no verified sell rate; null means coverage is unknown or access is masked. */
+  inventory_unassessed: number | null;
   pending_actions: number | null;
   unread_emails: number | null;
   /** ISO timestamp of when the QB-derived data was last computed by the scheduler */

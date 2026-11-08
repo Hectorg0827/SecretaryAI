@@ -320,6 +320,8 @@ app.include_router(connectors_router.router,   prefix="/api/connectors",     tag
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 from app.api import admin as admin_router
 app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
+from app.api import team as team_router
+app.include_router(team_router.router,          prefix="/api/team",           tags=["team"])
 
 register_error_handlers(app)
 

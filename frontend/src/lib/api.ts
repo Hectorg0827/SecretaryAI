@@ -5,7 +5,8 @@
  */
 
 // Both Vite dev and the deployed web server proxy these same-origin routes.
-const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+// Exported for the Lola transport (Workstream 4).
+export const API_BASE: string = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 function getToken(): string | null {
   return localStorage.getItem('secretary_token');

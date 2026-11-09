@@ -20,6 +20,8 @@ import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
 import { Insights } from './pages/Insights';
 import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
+import { LolaDock } from './lola/components/LolaDock';
+import { CommandCenter } from './lola/components/CommandCenter';
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {
@@ -92,7 +94,7 @@ function AppShell() {
         >
           <Menu size={20} aria-hidden="true" />
         </button>
-        <span className="font-semibold text-slate-900">SecretaryAI</span>
+        <span className="font-semibold text-slate-900">Lion BI</span>
       </header>
       <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -111,6 +113,14 @@ function AppShell() {
             element={
               <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
                 <Work />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/lola"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <CommandCenter />
               </RoleGuard>
             }
           />
@@ -203,6 +213,8 @@ function AppShell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      {/* Lola is reachable from every page (Workstream 4). */}
+      <LolaDock />
     </div>
   );
 }
@@ -229,6 +241,7 @@ export function App() {
 
       <Toaster
         position="bottom-right"
+        containerStyle={{ bottom: 96 }}
         toastOptions={{ style: { fontSize: '13px', borderRadius: '10px' } }}
       />
     </BrowserRouter>

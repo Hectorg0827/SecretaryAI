@@ -1,0 +1,329 @@
+{
+  "run_at": "2026-11-09T21:22:07.343Z",
+  "base_url": "http://localhost:5173",
+  "transport": "demo (scripted, same contract; backend stubbed to 503)",
+  "passed": 18,
+  "failed": 0,
+  "latency_ms": {
+    "first_feedback_p50": 31,
+    "first_feedback_p95": 41,
+    "complete_p50": 2126,
+    "complete_p95": 2994,
+    "samples": [
+      {
+        "workflow": "ar-collection",
+        "vp": "desktop",
+        "firstMs": 32,
+        "totalMs": 2069
+      },
+      {
+        "workflow": "sales-investigation",
+        "vp": "desktop",
+        "firstMs": 26,
+        "totalMs": 2993
+      },
+      {
+        "workflow": "container-inquiry",
+        "vp": "desktop",
+        "firstMs": 31,
+        "totalMs": 2238
+      },
+      {
+        "workflow": "warehouse-exception",
+        "vp": "desktop",
+        "firstMs": 41,
+        "totalMs": 2019
+      },
+      {
+        "workflow": "voice-correction",
+        "vp": "desktop",
+        "firstMs": null,
+        "totalMs": 2126
+      },
+      {
+        "workflow": "ar-collection",
+        "vp": "mobile",
+        "firstMs": 26,
+        "totalMs": 2066
+      },
+      {
+        "workflow": "sales-investigation",
+        "vp": "mobile",
+        "firstMs": 22,
+        "totalMs": 2994
+      },
+      {
+        "workflow": "container-inquiry",
+        "vp": "mobile",
+        "firstMs": 26,
+        "totalMs": 2237
+      },
+      {
+        "workflow": "warehouse-exception",
+        "vp": "mobile",
+        "firstMs": 35,
+        "totalMs": 2018
+      },
+      {
+        "workflow": "voice-correction",
+        "vp": "mobile",
+        "firstMs": null,
+        "totalMs": 2120
+      }
+    ]
+  },
+  "accessibility": [
+    {
+      "viewport": "desktop",
+      "role": "owner",
+      "page": "/lola",
+      "violations": []
+    },
+    {
+      "viewport": "desktop",
+      "role": "owner",
+      "page": "/ (panel)",
+      "violations": []
+    },
+    {
+      "viewport": "desktop",
+      "role": "sales_rep",
+      "page": "/lola",
+      "violations": []
+    },
+    {
+      "viewport": "mobile",
+      "role": "owner",
+      "page": "/lola",
+      "violations": []
+    },
+    {
+      "viewport": "mobile",
+      "role": "owner",
+      "page": "/ (panel)",
+      "violations": []
+    },
+    {
+      "viewport": "mobile",
+      "role": "sales_rep",
+      "page": "/lola",
+      "violations": []
+    }
+  ],
+  "results": [
+    {
+      "id": "owner-daily-briefing",
+      "title": "Owner daily briefing",
+      "role": "owner",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 7001,
+      "detail": {
+        "sections": 9
+      }
+    },
+    {
+      "id": "ar-collection",
+      "title": "AR collection workflow + verified execution",
+      "role": "owner",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 4339,
+      "detail": {}
+    },
+    {
+      "id": "sales-investigation",
+      "title": "Sales performance investigation",
+      "role": "manager",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 3571,
+      "detail": {}
+    },
+    {
+      "id": "container-inquiry",
+      "title": "Container and delivery inquiry (sales rep)",
+      "role": "sales_rep",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 2766,
+      "detail": {}
+    },
+    {
+      "id": "warehouse-exception",
+      "title": "Warehouse receiving exception",
+      "role": "back_office",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 4669,
+      "detail": {
+        "sections": [
+          "morning_briefing",
+          "department_priorities",
+          "logistics_exceptions",
+          "next_actions",
+          "recent_tasks"
+        ]
+      }
+    },
+    {
+      "id": "permission-denial",
+      "title": "Permission denial",
+      "role": "sales_rep",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 2054,
+      "detail": {
+        "sections": [
+          "morning_briefing",
+          "department_priorities",
+          "next_actions",
+          "recent_tasks"
+        ]
+      }
+    },
+    {
+      "id": "connector-outage",
+      "title": "Connector outage",
+      "role": "owner",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 2430,
+      "detail": {
+        "orbStatus": "Needs your attention"
+      }
+    },
+    {
+      "id": "voice-interruption",
+      "title": "Voice: turn-taking, barge-in, correction",
+      "role": "owner",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 3014,
+      "detail": {
+        "statuses": [
+          "interrupted",
+          "complete"
+        ]
+      }
+    },
+    {
+      "id": "keyboard-and-reduced-motion",
+      "title": "Keyboard access + reduced motion",
+      "role": "manager",
+      "viewport": "desktop",
+      "pass": true,
+      "ms": 1432,
+      "detail": {
+        "orbAnimation": "none"
+      }
+    },
+    {
+      "id": "owner-daily-briefing",
+      "title": "Owner daily briefing",
+      "role": "owner",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 4828,
+      "detail": {
+        "sections": 9
+      }
+    },
+    {
+      "id": "ar-collection",
+      "title": "AR collection workflow + verified execution",
+      "role": "owner",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 4320,
+      "detail": {}
+    },
+    {
+      "id": "sales-investigation",
+      "title": "Sales performance investigation",
+      "role": "manager",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 3492,
+      "detail": {}
+    },
+    {
+      "id": "container-inquiry",
+      "title": "Container and delivery inquiry (sales rep)",
+      "role": "sales_rep",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 2715,
+      "detail": {}
+    },
+    {
+      "id": "warehouse-exception",
+      "title": "Warehouse receiving exception",
+      "role": "back_office",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 4778,
+      "detail": {
+        "sections": [
+          "morning_briefing",
+          "department_priorities",
+          "logistics_exceptions",
+          "next_actions",
+          "recent_tasks"
+        ]
+      }
+    },
+    {
+      "id": "permission-denial",
+      "title": "Permission denial",
+      "role": "sales_rep",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 1906,
+      "detail": {
+        "sections": [
+          "morning_briefing",
+          "department_priorities",
+          "next_actions",
+          "recent_tasks"
+        ]
+      }
+    },
+    {
+      "id": "connector-outage",
+      "title": "Connector outage",
+      "role": "owner",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 2276,
+      "detail": {
+        "orbStatus": "Needs your attention"
+      }
+    },
+    {
+      "id": "voice-interruption",
+      "title": "Voice: turn-taking, barge-in, correction",
+      "role": "owner",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 3026,
+      "detail": {
+        "statuses": [
+          "interrupted",
+          "complete"
+        ]
+      }
+    },
+    {
+      "id": "keyboard-and-reduced-motion",
+      "title": "Keyboard access + reduced motion",
+      "role": "manager",
+      "viewport": "mobile",
+      "pass": true,
+      "ms": 1350,
+      "detail": {
+        "orbAnimation": "none"
+      }
+    }
+  ]
+}

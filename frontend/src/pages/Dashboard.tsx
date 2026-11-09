@@ -11,7 +11,6 @@ import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel
 import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
 import { MorningBriefing } from '../components/dashboard/MorningBriefing';
 import { WeeklyReport } from '../components/dashboard/WeeklyReport';
-import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
@@ -23,7 +22,7 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError]   = useState(false);
   const summaryRequest = useRef(0);
-  const { role, hasPermission, canApprove, canAccessChat } = useAuth();
+  const { role, hasPermission, canApprove } = useAuth();
 
   const loadSummary = useCallback(async () => {
     const requestId = ++summaryRequest.current;
@@ -184,7 +183,6 @@ export function Dashboard() {
       </div>
 
       {/* Floating live chat drawer — hidden for viewer */}
-      {canAccessChat && <ChatDrawer />}
     </div>
   );
 }

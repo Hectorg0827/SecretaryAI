@@ -11,6 +11,22 @@
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
   --shadow-card-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
 
+  /* Lola — executive palette (navy / charcoal / refined gold), from Workstream 4 */
+  --color-lola-ink: #070B14;
+  --color-lola-navy: #0B1324;
+  --color-lola-deep: #101A30;
+  --color-lola-panel: #131C2E;
+  --color-lola-line: #24304A;
+  --color-lola-mute: #8C97AD;
+  --color-lola-text: #E8ECF4;
+  --color-lola-gold: #D6A84E;
+  --color-lola-amber: #F0C674;
+  --color-lola-glow: #FFE2A3;
+  --color-lola-danger: #E07A6B;
+  --color-lola-ok: #6FCF97;
+  --shadow-lola: 0 24px 60px -20px rgb(3 7 18 / 0.65), 0 0 0 1px rgb(214 168 78 / 0.10);
+  --shadow-lola-orb: 0 10px 30px -6px rgb(214 168 78 / 0.45), 0 0 0 1px rgb(214 168 78 / 0.25);
+
   --animate-fade-in: fadeIn 0.15s ease-out;
   --animate-slide-down: slideDown 0.2s ease-out;
 }

@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 _TTL_SECONDS = 48 * 60 * 60
 _REDIS_PREFIX = "secretaryai_manager_invite:"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_INVITATION_SUBJECT = "Lion BI staging — Manager invitation"
 
 
 def _staging_settings():
@@ -119,11 +120,13 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
 
     body = (
         f"Hello {full_name},\n\n"
-        "You have been invited to join SecretaryAI staging as a Manager. "
+        "You have been invited to join Lion Business Intelligence (Lion BI) "
+        "staging as a Manager. "
         "To accept, open this link and choose your own password:\n\n"
         f"{link}\n\n"
         "This invitation expires in 48 hours and can be used only once. "
-        "If you did not expect it, you can ignore this message.\n"
+        "If you did not expect it, you can ignore this message.\n\n"
+        "Lola\nYour AI business assistant at Lion BI\n"
     )
 
     # This account already has a Resend API key in its staging environment.
@@ -138,7 +141,7 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
                 json={
                     "from": settings.from_email,
                     "to": [email],
-                    "subject": "SecretaryAI staging — Manager invitation",
+                    "subject": _INVITATION_SUBJECT,
                     "text": body,
                 },
                 timeout=10.0,
@@ -156,7 +159,7 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
         try:
             resp = SendGridAPIClient(api_key=settings.sendgrid_api_key).send(
                 Mail(from_email=settings.from_email, to_emails=email,
-                     subject="SecretaryAI staging — Manager invitation", plain_text_content=body)
+                     subject=_INVITATION_SUBJECT, plain_text_content=body)
             )
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError("Email provider rejected invitation")

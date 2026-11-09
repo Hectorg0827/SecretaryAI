@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:demo": "VITE_LOLA_MOCK=1 vite",
+    "e2e:lola": "node e2e/acceptance.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -23,12 +25,16 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
+    "axe-core": "^4.10.2",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "happy-dom": "^20.11.1",

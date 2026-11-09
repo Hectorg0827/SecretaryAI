@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Sparkles } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
@@ -15,12 +15,12 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
+  { to: '/lola',      label: 'Lola',      icon: Sparkles,       exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
   { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
   { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/connectors', label: 'Connectors', icon: Server,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
@@ -65,11 +65,11 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
         <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center shadow-sm">
           <Zap size={14} className="text-white" />
         </div>
-        <span className="font-bold text-white tracking-tight">SecretaryAI</span>
+        <span className="font-bold text-white tracking-tight">Lion BI</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {visibleItems.map(({ to, label, icon: Icon, exact, badge }) => {
           const badgeCount = badge === 'inbox' ? (inboxUnread || unreadCount) : 0;
           return (

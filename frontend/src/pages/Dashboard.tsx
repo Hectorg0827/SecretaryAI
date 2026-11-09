@@ -9,7 +9,6 @@ import { InventoryPanel } from '../components/dashboard/InventoryPanel';
 import { PendingApprovals } from '../components/dashboard/PendingApprovals';
 import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel';
 import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
-import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
@@ -18,7 +17,7 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
   const [summary, setSummary]       = useState<DashboardSummary | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { hasPermission, canApprove, canAccessChat } = useAuth();
+  const { hasPermission, canApprove } = useAuth();
 
   const loadSummary = () => {
     setLoading(true);
@@ -155,7 +154,6 @@ export function Dashboard({ onUnreadChange }: { onUnreadChange?: (n: number) => 
       </div>
 
       {/* Floating live chat drawer — hidden for viewer */}
-      {canAccessChat && <ChatDrawer />}
     </div>
   );
 }

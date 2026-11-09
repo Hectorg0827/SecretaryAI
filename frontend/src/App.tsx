@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
@@ -17,6 +18,8 @@ import { Connectors } from './pages/Connectors';
 import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
 import { useAuth, Role } from './hooks/useAuth';
+import { LolaDock } from './lola/components/LolaDock';
+import { CommandCenter } from './lola/components/CommandCenter';
 
 /** Guard: redirects to /login if no JWT is stored. */
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -43,11 +46,31 @@ function RoleGuard({ roles, children }: { roles: Role[]; children: React.ReactNo
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
-      <Sidebar unreadCount={unreadCount} />
-      <main className="flex-1 overflow-hidden">
+    <div className="flex h-[100dvh] bg-slate-50 overflow-hidden">
+      {/* Desktop sidebar */}
+      <div className="hidden md:flex">
+        <Sidebar unreadCount={unreadCount} />
+      </div>
+      {/* Mobile navigation drawer */}
+      {navOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden" role="dialog" aria-label="Navigation" onKeyDown={(e) => e.key === 'Escape' && setNavOpen(false)}>
+          <Sidebar unreadCount={unreadCount} />
+          <button type="button" aria-label="Close navigation" className="flex-1 bg-black/40" onClick={() => setNavOpen(false)} />
+        </div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-3 border-b border-slate-800 bg-slate-900 px-3 py-2 text-white md:hidden">
+          <button type="button" aria-label="Open navigation" aria-expanded={navOpen} onClick={() => setNavOpen(true)} className="rounded-lg p-2 hover:bg-slate-800">
+            <Menu size={18} />
+          </button>
+          <span className="font-bold tracking-tight">Lion BI</span>
+        </div>
+      <main className="min-h-0 flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<Dashboard onUnreadChange={setUnreadCount} />} />
           <Route
@@ -63,6 +86,14 @@ function AppShell() {
             element={
               <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
                 <Work />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/lola"
+            element={
+              <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <CommandCenter />
               </RoleGuard>
             }
           />
@@ -142,6 +173,8 @@ function AppShell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      </div>
+      <LolaDock />
     </div>
   );
 }
@@ -167,6 +200,7 @@ export function App() {
 
       <Toaster
         position="bottom-right"
+        containerStyle={{ bottom: 96 }}
         toastOptions={{ style: { fontSize: '13px', borderRadius: '10px' } }}
       />
     </BrowserRouter>

@@ -4,7 +4,7 @@
  * All requests are authenticated via JWT Bearer token.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+export const API_BASE: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 function getToken(): string | null {
   return localStorage.getItem('secretary_token');

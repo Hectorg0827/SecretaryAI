@@ -1,0 +1,2001 @@
+{
+  "contract_version": "1.0.0",
+  "models": {
+    "ActionProposal": {
+      "$defs": {
+        "BusinessEntity": {
+          "additionalProperties": false,
+          "description": "A business object Lola recognised in the conversation (only if authorised).",
+          "properties": {
+            "department": {
+              "$ref": "#/$defs/Department",
+              "default": "general"
+            },
+            "display_name": {
+              "title": "Display Name",
+              "type": "string"
+            },
+            "entity_id": {
+              "title": "Entity Id",
+              "type": "string"
+            },
+            "entity_type": {
+              "$ref": "#/$defs/EntityType"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "match_confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Match Confidence",
+              "type": "integer"
+            },
+            "sensitivity": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            }
+          },
+          "required": [
+            "entity_type",
+            "entity_id",
+            "display_name"
+          ],
+          "title": "BusinessEntity",
+          "type": "object"
+        },
+        "Department": {
+          "enum": [
+            "executive",
+            "sales",
+            "finance",
+            "operations",
+            "purchasing",
+            "hr",
+            "compliance",
+            "general"
+          ],
+          "title": "Department",
+          "type": "string"
+        },
+        "EntityType": {
+          "enum": [
+            "customer",
+            "product",
+            "vendor",
+            "employee",
+            "purchase_order",
+            "invoice",
+            "territory",
+            "department"
+          ],
+          "title": "EntityType",
+          "type": "string"
+        },
+        "EvidenceRef": {
+          "additionalProperties": false,
+          "description": "Where a fact came from. Every stated fact must point at one of these.",
+          "properties": {
+            "confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Confidence",
+              "type": "integer"
+            },
+            "data_path": {
+              "default": "api",
+              "description": "api | browser | file | computer_use | cache",
+              "title": "Data Path",
+              "type": "string"
+            },
+            "fetched_at": {
+              "format": "date-time",
+              "title": "Fetched At",
+              "type": "string"
+            },
+            "is_stale": {
+              "default": false,
+              "title": "Is Stale",
+              "type": "boolean"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source-system identifier, if any",
+              "title": "Record Id"
+            },
+            "record_type": {
+              "description": "e.g. customer, invoice, inventory_item",
+              "title": "Record Type",
+              "type": "string"
+            },
+            "source_system": {
+              "description": "e.g. quickbooks_online, supabase.accounts, lola_memory",
+              "title": "Source System",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_system",
+            "record_type"
+          ],
+          "title": "EvidenceRef",
+          "type": "object"
+        },
+        "PermissionDecision": {
+          "additionalProperties": false,
+          "description": "The outcome of a server-side authorisation check.",
+          "properties": {
+            "action": {
+              "description": "read | draft | approve | execute | remember | delegate",
+              "title": "Action",
+              "type": "string"
+            },
+            "allowed": {
+              "title": "Allowed",
+              "type": "boolean"
+            },
+            "basis": {
+              "description": "Which grants applied, e.g. role:manager, reports_to, territory:West, delegation:<id>",
+              "items": {
+                "type": "string"
+              },
+              "title": "Basis",
+              "type": "array"
+            },
+            "evaluated_at": {
+              "format": "date-time",
+              "title": "Evaluated At",
+              "type": "string"
+            },
+            "policy_version": {
+              "default": "1.0.0",
+              "title": "Policy Version",
+              "type": "string"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            },
+            "redacted_fields": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Redacted Fields",
+              "type": "array"
+            },
+            "resource_type": {
+              "$ref": "#/$defs/ResourceType"
+            },
+            "scope": {
+              "default": "none",
+              "description": "company | department | team | own | delegated | none",
+              "title": "Scope",
+              "type": "string"
+            },
+            "sensitivity_ceiling": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            }
+          },
+          "required": [
+            "allowed",
+            "resource_type",
+            "action",
+            "reason"
+          ],
+          "title": "PermissionDecision",
+          "type": "object"
+        },
+        "ResourceType": {
+          "description": "What kind of business data a permission decision is about.",
+          "enum": [
+            "customer_account",
+            "sales",
+            "receivables",
+            "inventory",
+            "inventory_cost",
+            "purchasing",
+            "financials",
+            "hr",
+            "payroll",
+            "memory",
+            "action"
+          ],
+          "title": "ResourceType",
+          "type": "string"
+        },
+        "RiskTier": {
+          "description": "Governance tier of an action Lola can propose.",
+          "enum": [
+            "read_only",
+            "draft",
+            "approval_required",
+            "routine_automation",
+            "high_risk",
+            "prohibited"
+          ],
+          "title": "RiskTier",
+          "type": "string"
+        },
+        "Sensitivity": {
+          "description": "Data classification. Ordered: each level includes the ones before it.",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "An action Lola has prepared. Creating one never causes a side effect.",
+      "properties": {
+        "action_type": {
+          "title": "Action Type",
+          "type": "string"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount"
+        },
+        "approval_roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approval Roles",
+          "type": "array"
+        },
+        "authorization": {
+          "$ref": "#/$defs/PermissionDecision"
+        },
+        "company_id": {
+          "title": "Company Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BusinessEntity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "idempotency_key": {
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "payload": {
+          "title": "Payload",
+          "type": "object"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "requested_by": {
+          "title": "Requested By",
+          "type": "string"
+        },
+        "requires_independent_approval": {
+          "default": false,
+          "title": "Requires Independent Approval",
+          "type": "boolean"
+        },
+        "risk_tier": {
+          "$ref": "#/$defs/RiskTier"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "action_type",
+        "risk_tier",
+        "title",
+        "description",
+        "requested_by",
+        "company_id",
+        "idempotency_key",
+        "authorization"
+      ],
+      "title": "ActionProposal",
+      "type": "object"
+    },
+    "ActionReceipt": {
+      "$defs": {
+        "LolaStatus": {
+          "description": "Explicit outcome state shared by responses, tool results and actions.",
+          "enum": [
+            "answered",
+            "partial",
+            "unavailable",
+            "denied",
+            "draft",
+            "pending_approval",
+            "approved",
+            "executing",
+            "completed",
+            "failed",
+            "rejected",
+            "needs_reconciliation"
+          ],
+          "title": "LolaStatus",
+          "type": "string"
+        },
+        "RiskTier": {
+          "description": "Governance tier of an action Lola can propose.",
+          "enum": [
+            "read_only",
+            "draft",
+            "approval_required",
+            "routine_automation",
+            "high_risk",
+            "prohibited"
+          ],
+          "title": "RiskTier",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Durable record of an action's lifecycle. The source of truth for 'did it happen?'.",
+      "properties": {
+        "action_type": {
+          "title": "Action Type",
+          "type": "string"
+        },
+        "approved_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved By"
+        },
+        "company_id": {
+          "title": "Company Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "draft_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Draft Id"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Id"
+        },
+        "external_reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Reference"
+        },
+        "history": {
+          "items": {
+            "type": "object"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "idempotency_key": {
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "receipt_id": {
+          "title": "Receipt Id",
+          "type": "string"
+        },
+        "requested_by": {
+          "title": "Requested By",
+          "type": "string"
+        },
+        "risk_tier": {
+          "$ref": "#/$defs/RiskTier"
+        },
+        "status": {
+          "$ref": "#/$defs/LolaStatus"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "verified": {
+          "default": false,
+          "description": "True ONLY when the executor confirmed the side effect (e.g. provider id)",
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "proposal_id",
+        "company_id",
+        "action_type",
+        "risk_tier",
+        "status",
+        "idempotency_key",
+        "requested_by"
+      ],
+      "title": "ActionReceipt",
+      "type": "object"
+    },
+    "BusinessEntity": {
+      "$defs": {
+        "Department": {
+          "enum": [
+            "executive",
+            "sales",
+            "finance",
+            "operations",
+            "purchasing",
+            "hr",
+            "compliance",
+            "general"
+          ],
+          "title": "Department",
+          "type": "string"
+        },
+        "EntityType": {
+          "enum": [
+            "customer",
+            "product",
+            "vendor",
+            "employee",
+            "purchase_order",
+            "invoice",
+            "territory",
+            "department"
+          ],
+          "title": "EntityType",
+          "type": "string"
+        },
+        "EvidenceRef": {
+          "additionalProperties": false,
+          "description": "Where a fact came from. Every stated fact must point at one of these.",
+          "properties": {
+            "confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Confidence",
+              "type": "integer"
+            },
+            "data_path": {
+              "default": "api",
+              "description": "api | browser | file | computer_use | cache",
+              "title": "Data Path",
+              "type": "string"
+            },
+            "fetched_at": {
+              "format": "date-time",
+              "title": "Fetched At",
+              "type": "string"
+            },
+            "is_stale": {
+              "default": false,
+              "title": "Is Stale",
+              "type": "boolean"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source-system identifier, if any",
+              "title": "Record Id"
+            },
+            "record_type": {
+              "description": "e.g. customer, invoice, inventory_item",
+              "title": "Record Type",
+              "type": "string"
+            },
+            "source_system": {
+              "description": "e.g. quickbooks_online, supabase.accounts, lola_memory",
+              "title": "Source System",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_system",
+            "record_type"
+          ],
+          "title": "EvidenceRef",
+          "type": "object"
+        },
+        "Sensitivity": {
+          "description": "Data classification. Ordered: each level includes the ones before it.",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A business object Lola recognised in the conversation (only if authorised).",
+      "properties": {
+        "department": {
+          "$ref": "#/$defs/Department",
+          "default": "general"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "entity_id": {
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "entity_type": {
+          "$ref": "#/$defs/EntityType"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "match_confidence": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Match Confidence",
+          "type": "integer"
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/Sensitivity",
+          "default": "internal"
+        }
+      },
+      "required": [
+        "entity_type",
+        "entity_id",
+        "display_name"
+      ],
+      "title": "BusinessEntity",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "description": "Where a fact came from. Every stated fact must point at one of these.",
+      "properties": {
+        "confidence": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "integer"
+        },
+        "data_path": {
+          "default": "api",
+          "description": "api | browser | file | computer_use | cache",
+          "title": "Data Path",
+          "type": "string"
+        },
+        "fetched_at": {
+          "format": "date-time",
+          "title": "Fetched At",
+          "type": "string"
+        },
+        "is_stale": {
+          "default": false,
+          "title": "Is Stale",
+          "type": "boolean"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Source-system identifier, if any",
+          "title": "Record Id"
+        },
+        "record_type": {
+          "description": "e.g. customer, invoice, inventory_item",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "source_system": {
+          "description": "e.g. quickbooks_online, supabase.accounts, lola_memory",
+          "title": "Source System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_system",
+        "record_type"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "LolaContext": {
+      "$defs": {
+        "Department": {
+          "enum": [
+            "executive",
+            "sales",
+            "finance",
+            "operations",
+            "purchasing",
+            "hr",
+            "compliance",
+            "general"
+          ],
+          "title": "Department",
+          "type": "string"
+        },
+        "OrgLevel": {
+          "enum": [
+            "executive",
+            "department_manager",
+            "employee"
+          ],
+          "title": "OrgLevel",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Server-built identity + authority context for one request.\n\nConsumers NEVER construct this from client input: it is derived from the\nverified session token and re-read from the database on every request, so\na stale or forged role in a token cannot widen access.",
+      "properties": {
+        "action_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Limit"
+        },
+        "active_delegation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Delegation Ids",
+          "type": "array"
+        },
+        "built_at": {
+          "format": "date-time",
+          "title": "Built At",
+          "type": "string"
+        },
+        "channel": {
+          "default": "chat",
+          "title": "Channel",
+          "type": "string"
+        },
+        "company_id": {
+          "title": "Company Id",
+          "type": "string"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "department": {
+          "$ref": "#/$defs/Department"
+        },
+        "financial_clearance": {
+          "default": false,
+          "title": "Financial Clearance",
+          "type": "boolean"
+        },
+        "hr_clearance": {
+          "default": false,
+          "title": "Hr Clearance",
+          "type": "boolean"
+        },
+        "org_level": {
+          "$ref": "#/$defs/OrgLevel"
+        },
+        "org_profile_available": {
+          "default": true,
+          "title": "Org Profile Available",
+          "type": "boolean"
+        },
+        "reports": {
+          "description": "user ids in this user's reporting tree",
+          "items": {
+            "type": "string"
+          },
+          "title": "Reports",
+          "type": "array"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "territories": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Territories",
+          "type": "array"
+        },
+        "user_id": {
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "company_id",
+        "user_id",
+        "role",
+        "org_level",
+        "department",
+        "conversation_id",
+        "request_id"
+      ],
+      "title": "LolaContext",
+      "type": "object"
+    },
+    "LolaRequest": {
+      "additionalProperties": false,
+      "description": "What a client (web, desktop, mobile, voice) sends to Lola.",
+      "properties": {
+        "allow_actions": {
+          "default": true,
+          "description": "False = answer only, never draft actions",
+          "title": "Allow Actions",
+          "type": "boolean"
+        },
+        "channel": {
+          "default": "chat",
+          "pattern": "^(chat|voice|mobile|desktop|api)$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "client_request_id": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Client idempotency key. Re-sending the same id never duplicates an action.",
+          "title": "Client Request Id"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "message": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "LolaRequest",
+      "type": "object"
+    },
+    "LolaResponse": {
+      "$defs": {
+        "ActionProposal": {
+          "additionalProperties": false,
+          "description": "An action Lola has prepared. Creating one never causes a side effect.",
+          "properties": {
+            "action_type": {
+              "title": "Action Type",
+              "type": "string"
+            },
+            "amount": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Amount"
+            },
+            "approval_roles": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Approval Roles",
+              "type": "array"
+            },
+            "authorization": {
+              "$ref": "#/$defs/PermissionDecision"
+            },
+            "company_id": {
+              "title": "Company Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "description": {
+              "title": "Description",
+              "type": "string"
+            },
+            "entity": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BusinessEntity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "idempotency_key": {
+              "title": "Idempotency Key",
+              "type": "string"
+            },
+            "payload": {
+              "title": "Payload",
+              "type": "object"
+            },
+            "proposal_id": {
+              "title": "Proposal Id",
+              "type": "string"
+            },
+            "requested_by": {
+              "title": "Requested By",
+              "type": "string"
+            },
+            "requires_independent_approval": {
+              "default": false,
+              "title": "Requires Independent Approval",
+              "type": "boolean"
+            },
+            "risk_tier": {
+              "$ref": "#/$defs/RiskTier"
+            },
+            "title": {
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id",
+            "action_type",
+            "risk_tier",
+            "title",
+            "description",
+            "requested_by",
+            "company_id",
+            "idempotency_key",
+            "authorization"
+          ],
+          "title": "ActionProposal",
+          "type": "object"
+        },
+        "ActionReceipt": {
+          "additionalProperties": false,
+          "description": "Durable record of an action's lifecycle. The source of truth for 'did it happen?'.",
+          "properties": {
+            "action_type": {
+              "title": "Action Type",
+              "type": "string"
+            },
+            "approved_by": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Approved By"
+            },
+            "company_id": {
+              "title": "Company Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "draft_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Draft Id"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "execution_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Execution Id"
+            },
+            "external_reference": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Reference"
+            },
+            "history": {
+              "items": {
+                "type": "object"
+              },
+              "title": "History",
+              "type": "array"
+            },
+            "idempotency_key": {
+              "title": "Idempotency Key",
+              "type": "string"
+            },
+            "proposal_id": {
+              "title": "Proposal Id",
+              "type": "string"
+            },
+            "receipt_id": {
+              "title": "Receipt Id",
+              "type": "string"
+            },
+            "requested_by": {
+              "title": "Requested By",
+              "type": "string"
+            },
+            "risk_tier": {
+              "$ref": "#/$defs/RiskTier"
+            },
+            "status": {
+              "$ref": "#/$defs/LolaStatus"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            },
+            "verified": {
+              "default": false,
+              "description": "True ONLY when the executor confirmed the side effect (e.g. provider id)",
+              "title": "Verified",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "receipt_id",
+            "proposal_id",
+            "company_id",
+            "action_type",
+            "risk_tier",
+            "status",
+            "idempotency_key",
+            "requested_by"
+          ],
+          "title": "ActionReceipt",
+          "type": "object"
+        },
+        "BusinessEntity": {
+          "additionalProperties": false,
+          "description": "A business object Lola recognised in the conversation (only if authorised).",
+          "properties": {
+            "department": {
+              "$ref": "#/$defs/Department",
+              "default": "general"
+            },
+            "display_name": {
+              "title": "Display Name",
+              "type": "string"
+            },
+            "entity_id": {
+              "title": "Entity Id",
+              "type": "string"
+            },
+            "entity_type": {
+              "$ref": "#/$defs/EntityType"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "match_confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Match Confidence",
+              "type": "integer"
+            },
+            "sensitivity": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            }
+          },
+          "required": [
+            "entity_type",
+            "entity_id",
+            "display_name"
+          ],
+          "title": "BusinessEntity",
+          "type": "object"
+        },
+        "Department": {
+          "enum": [
+            "executive",
+            "sales",
+            "finance",
+            "operations",
+            "purchasing",
+            "hr",
+            "compliance",
+            "general"
+          ],
+          "title": "Department",
+          "type": "string"
+        },
+        "EntityType": {
+          "enum": [
+            "customer",
+            "product",
+            "vendor",
+            "employee",
+            "purchase_order",
+            "invoice",
+            "territory",
+            "department"
+          ],
+          "title": "EntityType",
+          "type": "string"
+        },
+        "EvidenceRef": {
+          "additionalProperties": false,
+          "description": "Where a fact came from. Every stated fact must point at one of these.",
+          "properties": {
+            "confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Confidence",
+              "type": "integer"
+            },
+            "data_path": {
+              "default": "api",
+              "description": "api | browser | file | computer_use | cache",
+              "title": "Data Path",
+              "type": "string"
+            },
+            "fetched_at": {
+              "format": "date-time",
+              "title": "Fetched At",
+              "type": "string"
+            },
+            "is_stale": {
+              "default": false,
+              "title": "Is Stale",
+              "type": "boolean"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source-system identifier, if any",
+              "title": "Record Id"
+            },
+            "record_type": {
+              "description": "e.g. customer, invoice, inventory_item",
+              "title": "Record Type",
+              "type": "string"
+            },
+            "source_system": {
+              "description": "e.g. quickbooks_online, supabase.accounts, lola_memory",
+              "title": "Source System",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_system",
+            "record_type"
+          ],
+          "title": "EvidenceRef",
+          "type": "object"
+        },
+        "LolaStatus": {
+          "description": "Explicit outcome state shared by responses, tool results and actions.",
+          "enum": [
+            "answered",
+            "partial",
+            "unavailable",
+            "denied",
+            "draft",
+            "pending_approval",
+            "approved",
+            "executing",
+            "completed",
+            "failed",
+            "rejected",
+            "needs_reconciliation"
+          ],
+          "title": "LolaStatus",
+          "type": "string"
+        },
+        "PermissionDecision": {
+          "additionalProperties": false,
+          "description": "The outcome of a server-side authorisation check.",
+          "properties": {
+            "action": {
+              "description": "read | draft | approve | execute | remember | delegate",
+              "title": "Action",
+              "type": "string"
+            },
+            "allowed": {
+              "title": "Allowed",
+              "type": "boolean"
+            },
+            "basis": {
+              "description": "Which grants applied, e.g. role:manager, reports_to, territory:West, delegation:<id>",
+              "items": {
+                "type": "string"
+              },
+              "title": "Basis",
+              "type": "array"
+            },
+            "evaluated_at": {
+              "format": "date-time",
+              "title": "Evaluated At",
+              "type": "string"
+            },
+            "policy_version": {
+              "default": "1.0.0",
+              "title": "Policy Version",
+              "type": "string"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            },
+            "redacted_fields": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Redacted Fields",
+              "type": "array"
+            },
+            "resource_type": {
+              "$ref": "#/$defs/ResourceType"
+            },
+            "scope": {
+              "default": "none",
+              "description": "company | department | team | own | delegated | none",
+              "title": "Scope",
+              "type": "string"
+            },
+            "sensitivity_ceiling": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            }
+          },
+          "required": [
+            "allowed",
+            "resource_type",
+            "action",
+            "reason"
+          ],
+          "title": "PermissionDecision",
+          "type": "object"
+        },
+        "ResourceType": {
+          "description": "What kind of business data a permission decision is about.",
+          "enum": [
+            "customer_account",
+            "sales",
+            "receivables",
+            "inventory",
+            "inventory_cost",
+            "purchasing",
+            "financials",
+            "hr",
+            "payroll",
+            "memory",
+            "action"
+          ],
+          "title": "ResourceType",
+          "type": "string"
+        },
+        "RiskTier": {
+          "description": "Governance tier of an action Lola can propose.",
+          "enum": [
+            "read_only",
+            "draft",
+            "approval_required",
+            "routine_automation",
+            "high_risk",
+            "prohibited"
+          ],
+          "title": "RiskTier",
+          "type": "string"
+        },
+        "Sensitivity": {
+          "description": "Data classification. Ordered: each level includes the ones before it.",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        },
+        "ToolResult": {
+          "additionalProperties": false,
+          "description": "Structured return value of every Lola tool (department capability).",
+          "properties": {
+            "authorization": {
+              "$ref": "#/$defs/PermissionDecision"
+            },
+            "data": {
+              "default": null,
+              "title": "Data"
+            },
+            "department": {
+              "$ref": "#/$defs/Department"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/EvidenceRef"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "finished_at": {
+              "format": "date-time",
+              "title": "Finished At",
+              "type": "string"
+            },
+            "sensitivity": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/LolaStatus"
+            },
+            "summary": {
+              "description": "One-line, user-safe description of the outcome",
+              "title": "Summary",
+              "type": "string"
+            },
+            "tool": {
+              "title": "Tool",
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Warnings",
+              "type": "array"
+            }
+          },
+          "required": [
+            "tool",
+            "department",
+            "status",
+            "summary",
+            "authorization"
+          ],
+          "title": "ToolResult",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "What Lola returns. Voice clients should speak ``speech`` (already redacted).",
+      "properties": {
+        "answer": {
+          "title": "Answer",
+          "type": "string"
+        },
+        "contract_version": {
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/BusinessEntity"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "intents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Intents",
+          "type": "array"
+        },
+        "memory_used": {
+          "default": 0,
+          "title": "Memory Used",
+          "type": "integer"
+        },
+        "proposals": {
+          "items": {
+            "$ref": "#/$defs/ActionProposal"
+          },
+          "title": "Proposals",
+          "type": "array"
+        },
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/ActionReceipt"
+          },
+          "title": "Receipts",
+          "type": "array"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "speech": {
+          "description": "Short, voice-safe version of the answer",
+          "title": "Speech",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/LolaStatus"
+        },
+        "tool_results": {
+          "items": {
+            "$ref": "#/$defs/ToolResult"
+          },
+          "title": "Tool Results",
+          "type": "array"
+        },
+        "withheld": {
+          "description": "User-safe notes about what was not shown and why (never the hidden content)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Withheld",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "conversation_id",
+        "status",
+        "answer",
+        "speech"
+      ],
+      "title": "LolaResponse",
+      "type": "object"
+    },
+    "PermissionDecision": {
+      "$defs": {
+        "ResourceType": {
+          "description": "What kind of business data a permission decision is about.",
+          "enum": [
+            "customer_account",
+            "sales",
+            "receivables",
+            "inventory",
+            "inventory_cost",
+            "purchasing",
+            "financials",
+            "hr",
+            "payroll",
+            "memory",
+            "action"
+          ],
+          "title": "ResourceType",
+          "type": "string"
+        },
+        "Sensitivity": {
+          "description": "Data classification. Ordered: each level includes the ones before it.",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The outcome of a server-side authorisation check.",
+      "properties": {
+        "action": {
+          "description": "read | draft | approve | execute | remember | delegate",
+          "title": "Action",
+          "type": "string"
+        },
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "basis": {
+          "description": "Which grants applied, e.g. role:manager, reports_to, territory:West, delegation:<id>",
+          "items": {
+            "type": "string"
+          },
+          "title": "Basis",
+          "type": "array"
+        },
+        "evaluated_at": {
+          "format": "date-time",
+          "title": "Evaluated At",
+          "type": "string"
+        },
+        "policy_version": {
+          "default": "1.0.0",
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "redacted_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Redacted Fields",
+          "type": "array"
+        },
+        "resource_type": {
+          "$ref": "#/$defs/ResourceType"
+        },
+        "scope": {
+          "default": "none",
+          "description": "company | department | team | own | delegated | none",
+          "title": "Scope",
+          "type": "string"
+        },
+        "sensitivity_ceiling": {
+          "$ref": "#/$defs/Sensitivity",
+          "default": "internal"
+        }
+      },
+      "required": [
+        "allowed",
+        "resource_type",
+        "action",
+        "reason"
+      ],
+      "title": "PermissionDecision",
+      "type": "object"
+    },
+    "ToolResult": {
+      "$defs": {
+        "Department": {
+          "enum": [
+            "executive",
+            "sales",
+            "finance",
+            "operations",
+            "purchasing",
+            "hr",
+            "compliance",
+            "general"
+          ],
+          "title": "Department",
+          "type": "string"
+        },
+        "EvidenceRef": {
+          "additionalProperties": false,
+          "description": "Where a fact came from. Every stated fact must point at one of these.",
+          "properties": {
+            "confidence": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Confidence",
+              "type": "integer"
+            },
+            "data_path": {
+              "default": "api",
+              "description": "api | browser | file | computer_use | cache",
+              "title": "Data Path",
+              "type": "string"
+            },
+            "fetched_at": {
+              "format": "date-time",
+              "title": "Fetched At",
+              "type": "string"
+            },
+            "is_stale": {
+              "default": false,
+              "title": "Is Stale",
+              "type": "boolean"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source-system identifier, if any",
+              "title": "Record Id"
+            },
+            "record_type": {
+              "description": "e.g. customer, invoice, inventory_item",
+              "title": "Record Type",
+              "type": "string"
+            },
+            "source_system": {
+              "description": "e.g. quickbooks_online, supabase.accounts, lola_memory",
+              "title": "Source System",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_system",
+            "record_type"
+          ],
+          "title": "EvidenceRef",
+          "type": "object"
+        },
+        "LolaStatus": {
+          "description": "Explicit outcome state shared by responses, tool results and actions.",
+          "enum": [
+            "answered",
+            "partial",
+            "unavailable",
+            "denied",
+            "draft",
+            "pending_approval",
+            "approved",
+            "executing",
+            "completed",
+            "failed",
+            "rejected",
+            "needs_reconciliation"
+          ],
+          "title": "LolaStatus",
+          "type": "string"
+        },
+        "PermissionDecision": {
+          "additionalProperties": false,
+          "description": "The outcome of a server-side authorisation check.",
+          "properties": {
+            "action": {
+              "description": "read | draft | approve | execute | remember | delegate",
+              "title": "Action",
+              "type": "string"
+            },
+            "allowed": {
+              "title": "Allowed",
+              "type": "boolean"
+            },
+            "basis": {
+              "description": "Which grants applied, e.g. role:manager, reports_to, territory:West, delegation:<id>",
+              "items": {
+                "type": "string"
+              },
+              "title": "Basis",
+              "type": "array"
+            },
+            "evaluated_at": {
+              "format": "date-time",
+              "title": "Evaluated At",
+              "type": "string"
+            },
+            "policy_version": {
+              "default": "1.0.0",
+              "title": "Policy Version",
+              "type": "string"
+            },
+            "reason": {
+              "title": "Reason",
+              "type": "string"
+            },
+            "redacted_fields": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Redacted Fields",
+              "type": "array"
+            },
+            "resource_type": {
+              "$ref": "#/$defs/ResourceType"
+            },
+            "scope": {
+              "default": "none",
+              "description": "company | department | team | own | delegated | none",
+              "title": "Scope",
+              "type": "string"
+            },
+            "sensitivity_ceiling": {
+              "$ref": "#/$defs/Sensitivity",
+              "default": "internal"
+            }
+          },
+          "required": [
+            "allowed",
+            "resource_type",
+            "action",
+            "reason"
+          ],
+          "title": "PermissionDecision",
+          "type": "object"
+        },
+        "ResourceType": {
+          "description": "What kind of business data a permission decision is about.",
+          "enum": [
+            "customer_account",
+            "sales",
+            "receivables",
+            "inventory",
+            "inventory_cost",
+            "purchasing",
+            "financials",
+            "hr",
+            "payroll",
+            "memory",
+            "action"
+          ],
+          "title": "ResourceType",
+          "type": "string"
+        },
+        "Sensitivity": {
+          "description": "Data classification. Ordered: each level includes the ones before it.",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Structured return value of every Lola tool (department capability).",
+      "properties": {
+        "authorization": {
+          "$ref": "#/$defs/PermissionDecision"
+        },
+        "data": {
+          "default": null,
+          "title": "Data"
+        },
+        "department": {
+          "$ref": "#/$defs/Department"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "finished_at": {
+          "format": "date-time",
+          "title": "Finished At",
+          "type": "string"
+        },
+        "sensitivity": {
+          "$ref": "#/$defs/Sensitivity",
+          "default": "internal"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/LolaStatus"
+        },
+        "summary": {
+          "description": "One-line, user-safe description of the outcome",
+          "title": "Summary",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tool",
+        "department",
+        "status",
+        "summary",
+        "authorization"
+      ],
+      "title": "ToolResult",
+      "type": "object"
+    }
+  }
+}

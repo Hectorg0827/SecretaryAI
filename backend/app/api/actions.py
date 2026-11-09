@@ -17,6 +17,8 @@ from app.auth.rbac import get_current_user, require_permission
 from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine
+from app.lola.authorization import AuthorizationUnavailable
+from app.lola.governance import check_lola_approval, record_lola_review, visible_lola_drafts
 from app.utils.audit import write_audit_event
 from app.workflows.execution_gateway import (
     ExecutionDatabaseUnavailable, PostgresDurableGateway,
@@ -86,6 +88,9 @@ async def list_pending_actions(
     company_id = user["company_id"]
     queue = ApprovalQueue(db)
     drafts = await queue.get_pending(company_id)
+    # Lola drafts carry account names and instructions: only show them to
+    # reviewers whose team/records they concern (legacy drafts unchanged).
+    drafts = visible_lola_drafts(db, user, drafts)
     return {"drafts": drafts, "company_id": company_id}
 
 
@@ -127,6 +132,20 @@ async def approve_draft(
     # approval must NOT re-send the email / re-dispatch the PO.
     if draft.get("status") != "pending":
         return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
+
+    # Lola-originated drafts carry their governance metadata. Enforce
+    # separation of duties (high-risk → independent leadership approver),
+    # approval limits, record-level access for the approver, and re-validate
+    # the REQUESTER's current permissions (stale-permission defence).
+    # Drafts that did not come from Lola are unaffected (returns None).
+    try:
+        lola_decision = check_lola_approval(db, draft, user)
+    except AuthorizationUnavailable:
+        raise HTTPException(
+            status_code=503, detail="Approval authorization unavailable; nothing was approved"
+        ) from None
+    if lola_decision is not None and not lola_decision.allowed:
+        raise HTTPException(status_code=403, detail=lola_decision.reason)
 
     # Policy gate: enforce the tenant PolicyEngine BEFORE approving/executing, so
     # a human approval can't push an action past a hard ceiling (e.g. an amount
@@ -191,6 +210,7 @@ async def approve_draft(
                 detail="Durable approval was not queued; no action executed",
             )
 
+        record_lola_review(db, draft, user["sub"], approved=True)
         write_audit_event(
             db, company_id=user["company_id"],
             event_type="draft_approved", actor_id=user["sub"],
@@ -242,6 +262,7 @@ async def reject_draft(
         company_id=user["company_id"],
         reason=body.reason,
     )
+    record_lola_review(db, draft, user["sub"], approved=False)
 
     write_audit_event(
         db,

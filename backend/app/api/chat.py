@@ -57,7 +57,7 @@ class ChatMessage(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _load_history(db, conversation_id: str, company_id: str) -> list[dict]:
+def _load_history(db, conversation_id: str, company_id: str, user_id: str) -> list[dict]:
     """Load conversation history from Supabase, most recent turns first.
 
     Scoped to the caller's tenant: conversation_id is client-supplied, so
@@ -69,6 +69,10 @@ def _load_history(db, conversation_id: str, company_id: str) -> list[dict]:
         .select("role, content")
         .eq("conversation_id", conversation_id)
         .eq("company_id", company_id)
+        # Same tenant is not enough: a colleague's conversation id must not
+        # pull their history (and whatever they were allowed to see) into
+        # this user's model context.
+        .eq("user_id", user_id)
         .order("created_at", desc=False)
         .limit(MAX_HISTORY_TURNS * 2)  # each turn = 2 rows (user + assistant)
         .execute()
@@ -314,8 +318,25 @@ async def send_message(
     user_id = user.get("sub", user.get("user_id", ""))
     conversation_id = request.conversation_id or str(uuid.uuid4())
 
+    # 0. Lion BI record-level scope. The legacy pipeline below reads whole-
+    #    company customer and invoice lists; for anyone who is not company-wide
+    #    (e.g. a sales rep) filter those reads to the accounts they may see.
+    #    The role is re-read from the database, not trusted from the token.
+    from app.lola.authorization import (
+        AuthorizationDenied, AuthorizationUnavailable, Authorizer, build_principal,
+    )
+    from app.lola.scoped_adapter import scope_adapter
+    try:
+        lola_auth = Authorizer(build_principal(db, company_id, user_id), db)
+    except AuthorizationDenied:
+        raise HTTPException(status_code=403, detail="Your account is not active for this company")
+    except AuthorizationUnavailable:
+        raise HTTPException(status_code=503, detail="Authorization temporarily unavailable")
+    company_wide = lola_auth.account_scope().company_wide
+    adapter = scope_adapter(adapter, lola_auth)
+
     # 1. Load + trim conversation history
-    history = _load_history(db, conversation_id, company_id)
+    history = _load_history(db, conversation_id, company_id, user_id)
     history = _trim_history(history)
 
     # 2. Classify intent
@@ -339,7 +360,10 @@ async def send_message(
     recent_summaries = load_recent_summaries(db, company_id, user_id)
     # Try to detect account names in message for targeted memory lookup
     account_names = _detect_account_names(request.message, history)
-    account_mem = load_account_memory(db, company_id, account_names)
+    # account_memory is shared company-wide and keyed only by name, so it is
+    # injected only for company-wide principals (Lola memory is the scoped
+    # replacement — see app/lola/memory.py).
+    account_mem = load_account_memory(db, company_id, account_names) if company_wide else ""
 
     if recent_summaries or account_mem:
         memory_context = ""
@@ -373,7 +397,7 @@ async def send_message(
                     history + [{"role": "user", "content": request.message},
                                {"role": "assistant", "content": assistant_text_captured}]
                 ))
-            for name in account_names:
+            for name in (account_names if company_wide else []):
                 if name:
                     extract_and_save_memory(db, company_id, name, assistant_text_captured)
         except Exception:

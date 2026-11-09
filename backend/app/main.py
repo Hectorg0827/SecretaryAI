@@ -320,6 +320,10 @@ app.include_router(connectors_router.router,   prefix="/api/connectors",     tag
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 from app.api import admin as admin_router
 app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
+# Lola — Lion BI's central intelligence. Paid, like chat: it is the
+# conversational surface over every paid module.
+from app.api import lola as lola_router
+app.include_router(lola_router.router,         prefix="/api/lola",           tags=["lola"],       dependencies=_PAID)
 from app.api import team as team_router
 app.include_router(team_router.router,          prefix="/api/team",           tags=["team"])
 

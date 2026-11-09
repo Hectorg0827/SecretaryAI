@@ -125,3 +125,9 @@ echo '✓ Trigger search paths are pinned.'
 echo '── verifying V1–V5 installed baseline without history mutation'
 psql -v ON_ERROR_STOP=1 -f scripts/verify_staging_schema_baseline.sql
 echo '✓ V1–V5 baseline verified.'
+
+echo '── applying Lion BI / Lola core tables (Workstream 1)'
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261109120000_lola_core.sql
+echo '── testing Lola tenant keys, receipt guards and browser-role isolation'
+psql -v ON_ERROR_STOP=1 -f scripts/test_lola_core.sql
+echo '✓ Lola core table checks passed.'

@@ -24,10 +24,16 @@ class ApprovalQueue:
         created_by: str = "ai",
         workflow_run_id: Optional[str] = None,
         expires_hours: int = 48,
+        draft_id: Optional[str] = None,
     ) -> str:
-        """Add a draft to the approval queue. Returns the draft ID."""
+        """Add a draft to the approval queue. Returns the draft ID.
+
+        ``draft_id`` lets an idempotent caller (Lola's governed actions) fix
+        the identifier up front, so a retry after a crash can detect the
+        draft it already created instead of queuing a duplicate.
+        """
         from datetime import timedelta
-        draft_id = str(uuid.uuid4())
+        draft_id = draft_id or str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         record = {
             "id": draft_id,

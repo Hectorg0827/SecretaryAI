@@ -165,7 +165,7 @@ PAID = [
     "/api/chat", "/api/dashboard", "/api/briefing", "/api/accounts", "/api/inventory",
     "/api/actions", "/api/agent", "/api/notifications", "/api/inbox",
     "/api/workflows", "/api/feed", "/api/computer-use", "/api/logistics",
-    "/api/compliance", "/api/insights",
+    "/api/compliance", "/api/insights", "/api/lola",
 ]
 
 # Free on purpose. Each entry would break something specific if gated.
@@ -177,6 +177,10 @@ FREE = {
     "/webhooks": "Stripe and Intuit call these and hold no user JWT",
     "/api/admin": "internal; protected by RBAC, not by subscription",
     "/api/docs": "X-Docs-Key-gated API reference, not a customer feature",
+    "/api/team": (
+        "staging-only owner→Manager invitations and one-time activation; an "
+        "invited Manager must be able to accept before any subscription check"
+    ),
     "/api/connectors": (
         "not gated at the router level because the agent authenticates with a "
         "connector token, not a user JWT; its user-facing endpoints are gated "

@@ -37,7 +37,7 @@ async def run_staging_email_pilot(
     token = claim["claim_token"]
 
     try:
-        await send_approved_email_via_provider(
+        sent = await send_approved_email_via_provider(
             adapter, to=claim["recipient"],
             subject=claim["subject"], body=claim["body"],
         )
@@ -53,8 +53,12 @@ async def run_staging_email_pilot(
         ) from exc
 
     try:
+        message_id = str((sent or {}).get("provider_message_id") or "").strip()
         finished = await gateway.finish(
-            company_id, execution_id, token, "completed"
+            company_id, execution_id, token,
+            "completed" if message_id else "needs_reconciliation",
+            external_reference=f"email:{message_id}"[:500] if message_id else None,
+            error_code=None if message_id else "missing_provider_reference",
         )
     except Exception as exc:
         raise ExecutionReconciliationRequired(
@@ -63,5 +67,9 @@ async def run_staging_email_pilot(
     if not finished:
         raise ExecutionReconciliationRequired(
             "Provider accepted mail but the claim is no longer valid"
+        )
+    if not message_id:
+        raise ExecutionReconciliationRequired(
+            "Provider accepted mail without a message id; verify before relying on it"
         )
     return ExecutionReceipt(execution_id, "completed", True)

@@ -89,14 +89,26 @@ class QBOnlineAdapter(QuickBooksAdapter):
             "Content-Type": "application/json",
         }
 
-    async def _post(self, entity: str, payload: dict) -> dict:
-        """POST (create) a QBO entity."""
+    @property
+    def is_sandbox(self) -> bool:
+        """True when this connector talks to an Intuit sandbox company."""
+        return self._base_url == QBO_SANDBOX_BASE
+
+    async def _post(self, entity: str, payload: dict, request_id: Optional[str] = None) -> dict:
+        """POST (create) a QBO entity.
+
+        ``request_id`` is Intuit's idempotency key: a retried create with the
+        same requestid returns the original entity instead of a duplicate.
+        """
         url = f"{self._base_url}/{self._realm_id}/{entity}"
+        params = {"minorversion": "70"}
+        if request_id:
+            params["requestid"] = request_id[:50]
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 url,
                 json=payload,
-                params={"minorversion": "70"},
+                params=params,
                 headers=self._headers(),
             )
             if response.status_code == 401:
@@ -104,7 +116,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
                 response = await client.post(
                     url,
                     json=payload,
-                    params={"minorversion": "70"},
+                    params=params,
                     headers=self._headers(),
                 )
             response.raise_for_status()
@@ -417,8 +429,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
         line_items: list[dict],
         ship_date: Optional[date] = None,
         memo: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> PurchaseOrder:
-        """Create a PurchaseOrder in QBO."""
+        """Create a PurchaseOrder in QBO (idempotent when ``request_id`` is given)."""
         qbo_lines = []
         for i, item in enumerate(line_items):
             line: dict = {
@@ -445,7 +458,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
         if memo:
             payload["Memo"] = memo
 
-        data = await self._post("purchaseorder", payload)
+        data = await self._post("purchaseorder", payload, request_id=request_id)
         raw = data.get("PurchaseOrder", data)
         return self._normalize_purchase_order(raw)
 

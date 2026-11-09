@@ -75,18 +75,21 @@ class ActionSpecDef:
     capability: str
     needs_customer: bool = False
     resource: ResourceType = ResourceType.ACTION
+    # action_type stored on the approval-queue draft. Executable drafts use the
+    # durable path's type ("email_reply", "purchase_order").
+    queue_action_type: Optional[str] = None
 
 
 CATALOG: dict[str, ActionSpecDef] = {
     "draft_customer_email": ActionSpecDef(
         "draft_customer_email", RiskTier.APPROVAL_REQUIRED, "Draft customer email",
         ("trigger_actions", "view_own_accounts"), ActionClass.COMMIT, "email", needs_customer=True,
-        resource=ResourceType.CUSTOMER_ACCOUNT,
+        resource=ResourceType.CUSTOMER_ACCOUNT, queue_action_type="email_reply",
     ),
     "draft_purchase_order": ActionSpecDef(
         "draft_purchase_order", RiskTier.APPROVAL_REQUIRED, "Draft purchase order",
         ("draft_purchase_orders",), ActionClass.COMMIT, "purchase_orders",
-        resource=ResourceType.PURCHASING,
+        resource=ResourceType.PURCHASING, queue_action_type="purchase_order",
     ),
     "generate_internal_report": ActionSpecDef(
         "generate_internal_report", RiskTier.ROUTINE_AUTOMATION, "Generate internal report",
@@ -291,6 +294,7 @@ class GovernedActionService:
         description: str = "",
         client_request_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        adapter: Any = None,
     ) -> ProposalOutcome:
         spec = None if is_prohibited(action_type) else CATALOG[action_type]
         if spec is None:
@@ -322,6 +326,20 @@ class GovernedActionService:
             existing = await self._resume_if_incomplete(existing, spec)
             return ProposalOutcome(LolaStatus(existing["status"]), "This request was already received",
                                    decision, receipt=receipt_from_row(existing), duplicate=True)
+
+        # Turn the request into an executable draft (real recipient / PO lines).
+        from app.lola.drafting import DraftIncomplete, compose_customer_email, compose_purchase_order
+        try:
+            if action_type == "draft_customer_email":
+                payload = await compose_customer_email(self._db, self._auth, entity,
+                                                       str(payload.get("instruction") or description))
+            elif action_type == "draft_purchase_order":
+                payload = await compose_purchase_order(adapter, str(payload.get("instruction") or description))
+                computed = Decimal(payload["total"])
+                amount = max(amount, computed) if amount is not None else computed
+        except DraftIncomplete as exc:
+            return ProposalOutcome(LolaStatus.FAILED, f"I couldn't prepare this: {exc}. Nothing was queued.",
+                                   decision)
 
         tier = self._tier(spec, amount)
 
@@ -401,7 +419,8 @@ class GovernedActionService:
         }
         try:
             await ApprovalQueue(self._db).enqueue(
-                company_id=self.p.company_id, action_type=spec.action_type, content=content,
+                company_id=self.p.company_id, action_type=spec.queue_action_type or spec.action_type,
+                content=content,
                 created_by=self.p.user_id, draft_id=row["draft_id"],
             )
         except Exception:
@@ -498,7 +517,8 @@ class GovernedActionService:
 # ─── Approval hook used by the EXISTING /api/actions/approve endpoint ────────
 
 
-def check_lola_approval(db, draft: dict, approver_user: dict) -> Optional[PermissionDecision]:
+def check_lola_approval(db, draft: dict, approver_user: dict,
+                        edited_content: Optional[dict] = None) -> Optional[PermissionDecision]:
     """
     Separation-of-duties and stale-permission check for Lola-originated drafts.
 
@@ -550,6 +570,16 @@ def check_lola_approval(db, draft: dict, approver_user: dict) -> Optional[Permis
     spec = CATALOG.get(str(meta.get("action_type") or draft.get("action_type")))
     if spec is None:
         return deny("This action type is no longer permitted")
+    # Approvers may polish wording or fill a missing vendor, never redirect an
+    # email, change PO lines/amounts, or strip governance metadata.
+    from app.lola.drafting import locked_fields_changed
+    changed = locked_fields_changed(spec.action_type, content, edited_content)
+    if changed:
+        return deny("These details are locked after drafting: " + ", ".join(sorted(set(changed))))
+    if spec.action_type == "draft_purchase_order":
+        final = edited_content if edited_content is not None else content
+        if not final.get("vendor_id"):
+            return deny("Add the vendor before approving this purchase order")
     try:
         requester = build_principal(db, company_id, requested_by)
     except AuthorizationDenied:

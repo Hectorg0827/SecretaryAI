@@ -107,15 +107,15 @@ class TestProposals:
 
     async def test_large_purchase_order_is_high_risk(self):
         db = seed()
-        out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": "500 cases"},
-                                                 amount=Decimal("25000"))
+        out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": "Reorder 500 cases of Olive Oil 1L"},
+                                                 amount=Decimal("25000"), adapter=FakeAdapter())
         assert out.proposal.risk_tier == RiskTier.HIGH_RISK
         assert out.proposal.requires_independent_approval is True
 
     async def test_amount_over_personal_limit_is_high_risk(self):
         db = seed()  # SALES_MGR action_limit = 5000
-        out = await svc(db, SALES_MGR).propose("draft_purchase_order", {"instruction": "x"},
-                                               amount=Decimal("6000"))
+        out = await svc(db, SALES_MGR).propose("draft_purchase_order", {"instruction": "Reorder 500 cases of Olive Oil 1L"},
+                                               amount=Decimal("6000"), adapter=FakeAdapter())
         assert out.proposal.risk_tier == RiskTier.HIGH_RISK
 
     async def test_routine_report_completes_with_verification(self):
@@ -147,8 +147,9 @@ class TestSafeRetry:
 class TestApprovalRules:
     async def _draft(self, db, uid, action="draft_customer_email", amount=None, entity="acme"):
         ent = acme() if entity == "acme" else None
-        out = await svc(db, uid).propose(action, {"instruction": "x"}, entity=ent, amount=amount,
-                                         client_request_id=str(uuid.uuid4()))
+        instr = "Reorder 500 cases of Olive Oil 1L" if action == "draft_purchase_order" else "x"
+        out = await svc(db, uid).propose(action, {"instruction": instr}, entity=ent, amount=amount,
+                                         client_request_id=str(uuid.uuid4()), adapter=FakeAdapter())
         return db.rows("drafts", id=out.receipt.draft_id)[0]
 
     async def test_non_lola_drafts_are_unaffected(self):
@@ -219,7 +220,8 @@ class TestApprovalEndpoint:
 
     async def test_self_approval_of_high_risk_refused_and_nothing_runs(self):
         db = seed()
-        out = await svc(db, OWNER).propose("draft_purchase_order", {"instruction": "x"}, amount=Decimal("25000"))
+        out = await svc(db, OWNER).propose("draft_purchase_order", {"instruction": "Reorder 500 cases of Olive Oil 1L"},
+                                           amount=Decimal("25000"), adapter=FakeAdapter())
         app, client = self._client(db)
         try:
             r = client.post(f"/api/actions/approve/{out.receipt.draft_id}", json={},
@@ -327,8 +329,8 @@ class TestReviewerScope:
     async def test_manager_cannot_approve_other_teams_request(self):
         from lola_fakes import OTHER_MGR
         db = seed()
-        out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": "x"},
-                                                 amount=Decimal("100"))
+        out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": "Reorder 5 cases of Olive Oil 1L"},
+                                                 amount=Decimal("100"), adapter=FakeAdapter())
         draft = db.rows("drafts", id=out.receipt.draft_id)[0]
         d = check_lola_approval(db, draft, user(OTHER_MGR))
         assert not d.allowed and "team" in d.reason

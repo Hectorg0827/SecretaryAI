@@ -142,14 +142,14 @@ errors and the `ToolResult` envelope are handled by the base class.
 * WS3 logistics endpoints other than Lola's tool still build their viewer from the
   JWT role (short-lived tokens; role is reloaded on refresh). Moving them onto
   `logistics_viewer_for` is a follow-up.
-* WS3 approved stock postings / claims and WS2 AP payment proposals have no
+* Approved Lola emails and QuickBooks Online purchase orders now have a gated
+  executor — see `EXECUTION.md`. Every switch is off by default.
+* WS3 approved stock postings / claims and WS2 AP payment proposals still have no
   executor (by design: nothing is posted or paid).
 
-* **No external execution path for Lola drafts yet.** The durable gateway only
-  accepts `email_reply`. Approving a Lola `draft_customer_email` /
-  `draft_purchase_order` returns 409 and nothing is sent (by design for this
-  workstream). Wiring Lola drafts into the durable email outbox / a QBO PO
-  executor is a separate reviewed change.
+* Lola emails and purchase orders run through the durable queue and a gated
+  executor (`EXECUTION.md`). Until an operator turns the switches on, approving
+  returns "not enabled — nothing was approved or sent".
 * Legacy `/api/chat` still shows balances of a rep's *own* accounts (record
   scope is fixed; attribute redaction is not). Recommended: move clients to
   `/api/lola/ask`.

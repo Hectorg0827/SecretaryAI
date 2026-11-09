@@ -259,6 +259,27 @@ class UnifiedDataAdapter:
             memo=memo,
         )
 
+    def po_execution_target(self) -> tuple[str, Optional[bool]]:
+        """("qbo", is_sandbox) | ("desktop", None) | ("none", None).
+
+        Only QuickBooks Online offers an idempotent create (requestid), so only
+        QBO purchase orders may be executed by an automated worker."""
+        from app.connectors.qb_online import QBOnlineAdapter
+        if isinstance(self._qb, QBOnlineAdapter):
+            return "qbo", bool(self._qb.is_sandbox)
+        return ("desktop", None) if self._qb else ("none", None)
+
+    async def create_purchase_order_idempotent(
+        self, *, vendor_id: str, line_items: list[dict], memo: Optional[str], request_id: str,
+    ) -> PurchaseOrder:
+        """QBO-only idempotent create used by the approved-action executor."""
+        from app.connectors.qb_online import QBOnlineAdapter
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("Idempotent purchase order creation requires QuickBooks Online")
+        return await self._qb.create_purchase_order(
+            vendor_id=vendor_id, line_items=line_items, memo=memo, request_id=request_id,
+        )
+
     async def update_invoice_status(
         self,
         invoice_id: str,

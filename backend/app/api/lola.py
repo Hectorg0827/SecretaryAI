@@ -346,7 +346,13 @@ def _preview_for(db, user: dict, receipt) -> dict:
             proposal = ActionProposal.model_validate(rows[0]["proposal"])
     except Exception:
         proposal = None
-    return client_events.action_preview(receipt, proposal, can_approve=can, approval_note=note)
+    try:
+        show_amount = build_principal(db, str(user.get("company_id") or ""),
+                                      str(user.get("sub") or "")).has_financial_access
+    except (AuthorizationDenied, AuthorizationUnavailable):
+        show_amount = False
+    return client_events.action_preview(receipt, proposal, can_approve=can, approval_note=note,
+                                        show_amount=show_amount)
 
 
 @router.post("/turn")

@@ -79,6 +79,22 @@ async def _execute_approved_draft(draft: dict, adapter) -> str:
     )
 
 
+def _dispatch_execution(company_id: str, execution_id: str, action_type: str) -> None:
+    """Hand a queued, approved action to the gated executor (never inline).
+
+    Off unless SECRETARYAI_LOLA_EXECUTOR_ENABLED=1. If dispatch fails the
+    execution simply stays queued in the durable ledger; nothing is lost and
+    nothing is sent twice."""
+    from app.workflows.lola_executor import executor_enabled
+    if not executor_enabled():
+        return
+    try:
+        from tasks.lola_execution import execute
+        execute.delay(company_id, execution_id, action_type)
+    except Exception:
+        log.warning("Could not dispatch execution %s; it remains queued", execution_id)
+
+
 @router.get("/pending")
 async def list_pending_actions(
     user: dict = Depends(require_permission("approve_actions")),
@@ -139,7 +155,7 @@ async def approve_draft(
     # the REQUESTER's current permissions (stale-permission defence).
     # Drafts that did not come from Lola are unaffected (returns None).
     try:
-        lola_decision = check_lola_approval(db, draft, user)
+        lola_decision = check_lola_approval(db, draft, user, body.edited_content)
     except AuthorizationUnavailable:
         raise HTTPException(
             status_code=503, detail="Approval authorization unavailable; nothing was approved"
@@ -168,14 +184,22 @@ async def approve_draft(
     # enqueue together; never approve via PostgREST and enqueue afterward.
     # This mode queues approved email only. No live send or worker dispatch.
     if os.getenv("SECRETARYAI_DURABLE_APPROVAL_ENABLED") == "1":
-        if draft.get("action_type") != "email_reply":
+        action_type = draft.get("action_type")
+        content = draft.get("content") or {}
+        # Only STRUCTURED purchase orders (vendor + lines, as Lola prepares
+        # them) can be executed; legacy free-text PO drafts stay review-only.
+        structured_po = (action_type == "purchase_order" and isinstance(content, dict)
+                         and "vendor_id" in content and isinstance(content.get("lines"), list))
+        if action_type != "email_reply" and not structured_po:
             raise HTTPException(
                 status_code=409,
                 detail="Durable approval is not enabled for this action type",
             )
         try:
             gateway = PostgresDurableGateway.from_environment()
-            durable = await gateway.approve_and_enqueue(
+            approve = (gateway.approve_and_enqueue if action_type == "email_reply"
+                       else gateway.approve_and_enqueue_purchase_order)
+            durable = await approve(
                 company_id=user["company_id"],
                 draft_id=draft_id,
                 actor_id=user["sub"],
@@ -215,10 +239,11 @@ async def approve_draft(
             db, company_id=user["company_id"],
             event_type="draft_approved", actor_id=user["sub"],
             approved_by=user["sub"], action_class=draft.get("action_type"),
-            metadata={"draft_id": draft_id, "action_type": "email_reply",
+            metadata={"draft_id": draft_id, "action_type": action_type,
                       "execution_status": "queued",
                       "execution_id": durable["execution_id"]},
         )
+        _dispatch_execution(user["company_id"], str(durable["execution_id"]), action_type)
         return {
             "draft_id": draft_id,
             "status": durable.get("status", "approved"),

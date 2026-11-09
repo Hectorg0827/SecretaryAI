@@ -265,7 +265,7 @@ class LolaOrchestrator:
                 outcome = await service.propose(
                     spec.action_type, payload, entity=spec.entity, amount=spec.amount,
                     description=spec.instruction[:300], client_request_id=request.client_request_id,
-                    conversation_id=conversation_id,
+                    conversation_id=conversation_id, adapter=self._adapter,
                 )
                 action_statuses.append(outcome.status)
                 if outcome.proposal:

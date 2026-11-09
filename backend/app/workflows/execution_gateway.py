@@ -26,7 +26,18 @@ class PostgresDurableGateway:
     )
     _FINISH = (
         "SELECT secretary_internal.finish_agent_execution("
-        "$1::text::uuid,$2::text::uuid,$3::text::uuid,$4::text)"
+        "$1::text::uuid,$2::text::uuid,$3::text::uuid,$4::text,$5::text,$6::text)"
+    )
+
+    _APPROVE_PO = (
+        "SELECT secretary_internal.approve_and_queue_purchase_order("
+        "$1::text::uuid,$2::text::uuid,$3::text::uuid,"
+        "$4::text::jsonb,$5::text,$6::text::jsonb)"
+    )
+
+    _CLAIM_PO = (
+        "SELECT secretary_internal.claim_approved_purchase_order("
+        "$1::text::uuid,$2::text::uuid,$3::text)"
     )
 
     _APPROVE = (
@@ -156,10 +167,46 @@ class PostgresDurableGateway:
             raise ExecutionDatabaseUnavailable("Invalid staging email claim")
         return data
 
-    async def finish(self, company_id: str, execution_id: str,
-                     claim_token: str, outcome: str) -> bool:
+    async def approve_and_enqueue_purchase_order(
+        self, company_id: str, draft_id: str, actor_id: str,
+        expected_content: dict, idempotency_key: str,
+        edited_content: dict | None = None,
+    ) -> dict[str, Any]:
+        """Atomically approve a PO draft and snapshot its payload; never creates the PO."""
         data = await self._call(
-            self._FINISH, company_id, execution_id, claim_token, outcome
+            self._APPROVE_PO, company_id, draft_id, actor_id,
+            json.dumps(expected_content), idempotency_key,
+            json.dumps(edited_content) if edited_content is not None else None,
+        )
+        if not data.get("execution_id") or type(data.get("queued")) is not bool:
+            raise ExecutionDatabaseUnavailable("Invalid durable approval response")
+        if data["queued"] is False and data.get("already_processed") is not True:
+            raise ExecutionDatabaseUnavailable(
+                "Durable approval did not enqueue or establish prior processing"
+            )
+        return data
+
+    async def claim_purchase_order(
+        self, company_id: str, execution_id: str, worker_id: str,
+    ) -> dict[str, Any]:
+        """Claim the immutable approved PO snapshot (never the mutable draft)."""
+        data = await self._call(self._CLAIM_PO, company_id, execution_id, worker_id)
+        if data.get("claimed") is False:
+            return {"claimed": False}
+        fields = ("claim_token", "vendor_id", "lines", "total", "payload_sha256")
+        if data.get("claimed") is not True or any(data.get(k) is None for k in fields):
+            raise ExecutionDatabaseUnavailable("Incomplete approved purchase order claim")
+        return data
+
+    async def finish(self, company_id: str, execution_id: str,
+                     claim_token: str, outcome: str,
+                     external_reference: str | None = None,
+                     error_code: str | None = None) -> bool:
+        """Finalize a claim. ``external_reference`` is the provider's proof
+        (message id / QuickBooks id) that Lola receipts require to say "verified"."""
+        data = await self._call(
+            self._FINISH, company_id, execution_id, claim_token, outcome,
+            external_reference, error_code,
         )
         if type(data.get("finalized")) is not bool:
             raise ExecutionDatabaseUnavailable("Invalid finalization response")

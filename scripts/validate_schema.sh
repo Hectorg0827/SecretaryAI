@@ -136,3 +136,8 @@ echo '── applying Workstream 3 logistics journey ledger'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261109000011_logistics_journey.sql
 psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_journey.sql
 echo '✓ Logistics journey ledger checks passed.'
+
+echo '── applying Lola purchase-order durable approval (immutable payload + claim)'
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261109130000_lola_purchase_order_execution.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_lola_po_execution.sql
+echo '✓ Lola purchase-order execution checks passed.'

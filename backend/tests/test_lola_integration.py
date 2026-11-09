@@ -120,7 +120,7 @@ class TestApprovalsFromTheClient:
         assert db.tables["drafts"][0]["status"] == "pending"                    # nothing approved or sent
 
     def test_high_risk_self_approval_blocked(self, db, client):
-        ev = turn(client, OWNER, "Prepare a purchase order for 500 cases, about $25,000")
+        ev = turn(client, OWNER, "Prepare a purchase order for 500 cases of Olive Oil 1L, about $25,000")
         p = next(e["action"] for e in ev if e["type"] == "action_preview")
         assert p["risk"] == "high" and p["can_approve"] is False
         assert client.post(f"/api/lola/actions/{p['id']}/approve", headers=token(OWNER)).status_code == 403
@@ -280,3 +280,18 @@ class TestLogisticsScope:
         lg = next(t for t in r.tool_results if t.tool == "logistics.assistant")
         assert lg.status == LolaStatus.DENIED
         assert ("logistics_events", "select") not in db.calls
+
+
+class TestExecutablePreviews:
+    def test_email_preview_shows_real_recipient(self, db, client):
+        ev = turn(client, REP1, "Draft an email to Acme Foods about the new price list", role="sales_rep")
+        p = next(e["action"] for e in ev if e["type"] == "action_preview")
+        fields = {f["label"]: f["value"] for f in p["fields"]}
+        assert fields["To"] == "buyer@acmefoods.test" and fields["Subject"].startswith("Following up")
+
+    def test_po_preview_hides_amount_without_financial_access(self, db, client):
+        ev = turn(client, BACK_OFFICE, "Prepare a purchase order for 20 cases of Olive Oil 1L", role="back_office")
+        p = next(e["action"] for e in ev if e["type"] == "action_preview")
+        fields = {f["label"]: f["value"] for f in p["fields"]}
+        assert fields["Vendor"] == "Oliva SA" and fields["Item"] == "20 × Olive Oil 1L"
+        assert "Amount" not in fields

@@ -230,11 +230,11 @@ def seed(db: Optional[FakeDB] = None) -> FakeDB:
         {"company_id": CO_A, "user_id": HR, "org_level": "employee", "department": "hr", "hr_clearance": True},
     ]
     db.tables["accounts"] = [
-        {"id": "acc-1", "company_id": CO_A, "qb_customer_id": "QB-1", "name": "Acme Foods",
+        {"id": "acc-1", "company_id": CO_A, "qb_customer_id": "QB-1", "email": "buyer@acmefoods.test", "name": "Acme Foods",
          "territory": "West", "assigned_rep_id": REP1},
-        {"id": "acc-2", "company_id": CO_A, "qb_customer_id": "QB-2", "name": "Bravo Imports",
+        {"id": "acc-2", "company_id": CO_A, "qb_customer_id": "QB-2", "email": "orders@bravo.test", "name": "Bravo Imports",
          "territory": "North", "assigned_rep_id": REP2},
-        {"id": "acc-3", "company_id": CO_A, "qb_customer_id": "QB-3", "name": "Cedar Trading",
+        {"id": "acc-3", "company_id": CO_A, "qb_customer_id": "QB-3", "email": "ap@cedar.test", "name": "Cedar Trading",
          "territory": "East", "assigned_rep_id": REP3},
         {"id": "acc-4", "company_id": CO_A, "qb_customer_id": "QB-4", "name": "Delta Supply",
          "territory": "West", "assigned_rep_id": None},
@@ -348,4 +348,6 @@ class FakeAdapter:
 
     async def get_purchase_orders(self):
         self._check("get_purchase_orders")
-        return [{"qb_id": "PO-1", "vendor_name": "Oliva SA", "status": "open", "total": 5000}]
+        return [{"qb_id": "PO-1", "vendor_id": "V-7", "vendor_name": "Oliva SA", "status": "open", "total": 5000,
+                 "date": "2026-09-01",
+                 "line_items": [{"ItemBasedExpenseLineDetail": {"ItemRef": {"value": "SKU-1"}}}]}]

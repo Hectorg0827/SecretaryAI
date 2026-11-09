@@ -123,12 +123,22 @@ def notice_for(result: ToolResult) -> Optional[dict]:
 
 
 def action_preview(receipt: ActionReceipt, proposal: Optional[ActionProposal], *,
-                   can_approve: bool, approval_note: Optional[str]) -> dict:
+                   can_approve: bool, approval_note: Optional[str], show_amount: bool = True) -> dict:
     payload = proposal.payload if proposal else {}
     fields = []
     if proposal and proposal.entity:
         fields.append({"label": "Account", "value": proposal.entity.display_name})
-    if proposal and proposal.amount is not None:
+    # Exactly what would be executed, so the approver reviews the real thing.
+    if payload.get("to"):
+        fields.append({"label": "To", "value": str(payload["to"])})
+    if payload.get("subject"):
+        fields.append({"label": "Subject", "value": str(payload["subject"])[:200]})
+    if "vendor_id" in payload:
+        fields.append({"label": "Vendor", "value": str(payload.get("vendor_name") or payload.get("vendor_id")
+                                                         or "Missing — add before approving")})
+    for line in (payload.get("lines") or [])[:5]:
+        fields.append({"label": "Item", "value": f"{line.get('quantity')} × {line.get('description') or line.get('item_id')}"})
+    if proposal and proposal.amount is not None and show_amount:
         fields.append({"label": "Amount", "value": _money(proposal.amount)})
     if payload.get("instruction"):
         fields.append({"label": "Request", "value": str(payload["instruction"])[:200]})

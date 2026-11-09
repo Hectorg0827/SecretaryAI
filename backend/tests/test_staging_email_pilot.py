@@ -51,7 +51,7 @@ async def test_pilot_disabled_by_default(monkeypatch):
 async def test_single_allowlisted_recipient_only(monkeypatch):
     enable(monkeypatch)
     g = gateway()
-    adapter = MagicMock(send_email_reply=AsyncMock(return_value={"status": "sent"}))
+    adapter = MagicMock(send_email_reply=AsyncMock(return_value={"status": "sent", "message_id": "msg-1"}))
     result = await pilot(g, adapter)
     assert result.state == "completed"
     g.claim_staging_email.assert_awaited_once_with(
@@ -60,6 +60,18 @@ async def test_single_allowlisted_recipient_only(monkeypatch):
     adapter.send_email_reply.assert_awaited_once_with(
         to="pilot@example.test", subject="Synthetic", body="Approved snapshot"
     )
+    # The provider's id is recorded as proof, so receipts can say "verified".
+    assert g.finish.await_args.kwargs["external_reference"] == "email:msg-1"
+
+
+@pytest.mark.asyncio
+async def test_accepted_without_message_id_is_never_completed(monkeypatch):
+    enable(monkeypatch)
+    g = gateway()
+    adapter = MagicMock(send_email_reply=AsyncMock(return_value={"status": "sent"}))
+    with pytest.raises(ExecutionReconciliationRequired):
+        await pilot(g, adapter)
+    assert g.finish.await_args.args[3] == "needs_reconciliation"
 
 
 @pytest.mark.asyncio

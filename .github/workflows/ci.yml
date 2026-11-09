@@ -337,6 +337,7 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_executor LOGIN PASSWORD 'ci-execution-only'"
           python scripts/test_execution_integration.py
+          python scripts/test_lola_executor_integration.py
 
   secret-scan:
     name: Secret scan (gitleaks)

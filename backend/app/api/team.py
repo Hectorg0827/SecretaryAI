@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.jwt import hash_password
 from app.auth.rbac import get_current_user
 from app.config import get_settings
+from app.middleware.subscription_guard import require_active_subscription
 from app.utils.qbo_token_store import create_qbo_client
 from app.utils.rate_limiter import login_limiter, require_rate_limit
 
@@ -179,7 +180,8 @@ def _audit(db, company_id: str, event: str, actor: str | None, metadata: dict) -
         log.warning("Invitation audit event unavailable")
 
 
-@router.post("/invitations", status_code=201)
+@router.post("/invitations", status_code=201,
+             dependencies=[Depends(require_active_subscription())])
 async def invite_manager(
     body: InviteManagerRequest,
     actor: dict = Depends(get_current_user),
@@ -273,7 +275,7 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
     return {"status": "accepted", "role": "manager", "message": "You can now sign in"}
 
 
-@router.get("/members")
+@router.get("/members", dependencies=[Depends(require_active_subscription())])
 async def list_team_members(actor: dict = Depends(get_current_user)):
     _staging_settings()
     db = _db()

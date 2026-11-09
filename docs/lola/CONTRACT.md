@@ -2,7 +2,7 @@
 
 **Owners:** Workstream 4 (client experience) ⇄ Workstream 1 (backend policy, permissions, execution).
 **Source of truth for types:** [`frontend/src/lola/contract.ts`](../../frontend/src/lola/contract.ts).
-**Status:** the client ships against this contract today. It uses the existing SecretaryAI endpoints as a fallback until Workstream 1 ships the `/api/lola/*` endpoints below. No backend authorization code or database schema was changed by Workstream 4.
+**Status (combined Lion BI branch):** all four endpoints below are implemented by Workstream 1 in `backend/app/api/lola.py` on top of the Lola orchestrator, authorization and governance (tests: `backend/tests/test_lola_integration.py`). The legacy fallback remains in the client for older backends.
 
 ## Ground rules (both sides)
 
@@ -105,7 +105,19 @@ Cards and sections marked `financial` or `executive` are also hidden from roles 
 | `/api/lola/actions/{id}/approve` (404) | `/api/actions/approve/{id}` | Receipt `submitted`, `verified: false` ("check the Audit Log") |
 | `/api/lola/briefing` (404) | `dashboard/summary`, `feed`, `actions/pending` | Sections the legacy API can't produce are marked **unavailable**, not empty |
 
-## Open items for Workstream 1
+## Open items for Workstream 1 — status after combining
+
+| # | Item | Status |
+|---|---|---|
+| 1 | back_office can use Lola | **Done** — `/api/lola/turn` uses Lola's own authorization, not `view_own_accounts` |
+| 2 | `/api/chat/transcribe` language | **Done** — honours `language` (`en`/`es`), otherwise auto-detects |
+| 3 | Binary attachments | Open — attachments are not read; the turn returns an `info` notice |
+| 4 | Retention | **Partly done** — `transcript: none` stores no conversation rows; audio is never stored by the server |
+| 5 | Pollable receipts | **Done** — `GET /api/lola/actions/{id}` returns `client_receipt` |
+| — | Spanish answers | Open — answers are English; `language: es` returns an info notice |
+| — | `supersedes_turn` | Turns are computed atomically before streaming, so there is no unfinished work to cancel; no action is executed by a turn |
+
+### Original requests
 
 1. Add a Lola permission so `back_office` can use Lola. Today `/api/chat/message` requires `view_own_accounts`, so back office gets `403` (the client shows a permission notice).
 2. `/api/chat/transcribe` hard-codes `language="en"`. Please honour the `language` form field the client now sends, or auto-detect, for Spanish voice input on browsers without built-in speech recognition (Firefox).

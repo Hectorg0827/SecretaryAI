@@ -40,16 +40,23 @@ CREATE INDEX IF NOT EXISTS idx_logistics_events_shipment
 
 ALTER TABLE logistics_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "company_isolation" ON logistics_events
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- Backend-only (combined Lion BI review): role- and record-level visibility for
+-- shipments lives in the API (LogisticsViewer), so browser keys must not read or
+-- write this table directly — a tenant-wide RLS policy would let any signed-in
+-- user read commercial payloads or append "carrier_api" events. Matches the
+-- other backend-only ledgers (agent_executions, lola_*).
+REVOKE ALL ON logistics_events FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON logistics_events FROM service_role;
+GRANT SELECT, INSERT, DELETE ON logistics_events TO service_role;
 
 -- Append-only: block UPDATE even for clients that pass RLS. DELETE stays
 -- possible so company deletion (ON DELETE CASCADE) and data-erasure requests work.
-CREATE OR REPLACE FUNCTION logistics_events_append_only() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION logistics_events_append_only() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
     RAISE EXCEPTION 'logistics_events is append-only (UPDATE not allowed)';
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_logistics_events_append_only ON logistics_events;
 CREATE TRIGGER trg_logistics_events_append_only

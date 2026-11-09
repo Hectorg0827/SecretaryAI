@@ -402,4 +402,7 @@ def default_registry() -> ToolRegistry:
     for tool in (CustomerAccountsTool(), SalesPerformanceTool(), ReceivablesTool(),
                  InventoryTool(), PurchasingTool(), HRDirectoryTool(), PayrollTool()):
         reg.register(tool)
+    # Workstreams 2 (business intelligence) and 3 (logistics), run through Lola.
+    from app.lola.integrations import register_workstream_tools
+    register_workstream_tools(reg)
     return reg

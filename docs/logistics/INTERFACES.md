@@ -89,7 +89,7 @@ LogisticsEvent(
 ### Persistence
 Append-only table `logistics_events` — migration `backend/supabase/migrations/20261109000011_logistics_journey.sql`
 (unique `(company_id, idempotency_key)`, source whitelist, confirmer check, UPDATE blocked by trigger, RLS
-`company_isolation`). State is rebuilt by replay: `ShipmentLedger.load(company_id, SupabaseEventStore(db))`.
+backend-only: browser roles have no grants — see the migration header). State is rebuilt by replay: `ShipmentLedger.load(company_id, SupabaseEventStore(db))`.
 
 Failure behaviour: the event is applied to a copy, persisted, and only then committed. If the store write fails the
 API returns **503 "nothing was changed"** and the same event can be retried safely.

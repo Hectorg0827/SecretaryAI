@@ -27,8 +27,11 @@ router = APIRouter()
 
 
 def get_scope_provider(db=Depends(get_db)):
-    """Override point for Workstream 1's policy-backed scope resolver."""
-    return AssignmentScopeProvider(db)
+    """Workstream 1's policy-backed resolver: role, hierarchy, territories and
+    delegations re-read from the database on every request (never the JWT role).
+    ``AssignmentScopeProvider`` remains available for isolated WS2 tests."""
+    from app.lola.integrations import LolaBIScopeProvider
+    return LolaBIScopeProvider(db)
 
 
 async def _scope(user: dict, provider) -> Any:

@@ -203,7 +203,8 @@ class LolaOrchestrator:
             return str(uuid.uuid4())
         return requested
 
-    async def handle(self, user: dict, request: LolaRequest) -> LolaResponse:
+    async def handle(self, user: dict, request: LolaRequest, *, persist: bool = True) -> LolaResponse:
+        """``persist=False`` honours a user's "don't keep a transcript" choice."""
         request_id = str(uuid.uuid4())
         company_id = str(user.get("company_id") or "")
         user_id = str(user.get("sub") or "")
@@ -314,7 +315,8 @@ class LolaOrchestrator:
             evidence=evidence, proposals=proposals, receipts=receipts, withheld=withheld,
             memory_used=len(memory_rows),
         )
-        self._persist(principal.company_id, principal.user_id, conversation_id, request.message, answer)
+        if persist:
+            self._persist(principal.company_id, principal.user_id, conversation_id, request.message, answer)
         write_audit_event(
             self._db, company_id=principal.company_id, event_type="lola_request", actor_id=principal.user_id,
             action_class="read",

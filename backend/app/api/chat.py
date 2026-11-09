@@ -16,7 +16,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
@@ -472,6 +472,7 @@ async def list_conversations(
 @router.post("/transcribe")
 async def transcribe_audio(
     audio: UploadFile,
+    language: str | None = Form(default=None),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -498,7 +499,8 @@ async def transcribe_audio(
         transcript = await client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
-            language="en",
+            # Lola voice supports English and Spanish; anything else → auto-detect.
+            **({"language": language} if language in ("en", "es") else {}),
         )
         return {"text": transcript.text}
     except Exception as exc:

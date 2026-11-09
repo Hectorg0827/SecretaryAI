@@ -21,6 +21,21 @@ LolaOrchestrator ── build_principal()  ← users + lola_org_members + lola_d
 
 Code: `backend/app/lola/` · API: `backend/app/api/lola.py` · Tests: `backend/tests/test_lola_*.py`
 
+## Combined Lion BI (Workstreams 1–4)
+
+| Workstream | What it adds | How it is connected to Lola |
+|---|---|---|
+| 1 — core (this guide) | orchestrator, permissions, governed actions, memory | — |
+| 2 — business intelligence (`app/lola_bi`) | 26 read-only finance / AR / AP / pricing / sales / CRM tools | `LolaBIScopeProvider` replaces the JWT-role scope; tools registered as `bi.*` Lola tools; `/api/lola/bi/*` uses the same scope |
+| 3 — logistics (`intelligence/.../logistics`) | 14-stage shipment ledger, documents, receiving, monitoring, Q&A | `logistics_viewer_for` builds the viewer from the Lola principal; `logistics.assistant` is a Lola tool |
+| 4 — client experience (`frontend/src/lola`, `desktop/src/lola`) | command center, dock, voice, approval cards | `/api/lola/turn`, `/briefing`, `/actions/{id}/approve|reject` (see `CONTRACT.md`, `CLIENT.md`) |
+
+Two TypeScript contract files exist on purpose: `frontend/src/lola/contract.ts`
+is the **UI wire format** (WS4 events, cards, receipts) and
+`frontend/src/lola/contracts.ts` mirrors the **core WS1 models**
+(`LolaResponse`, `ToolResult`, …). `backend/app/lola/client_events.py`
+translates the second into the first.
+
 ## Security guarantees (all tested)
 
 | Guarantee | Where | Test file |
@@ -121,6 +136,14 @@ errors and the `ToolResult` envelope are handled by the base class.
   classification, which was failing the suite).
 
 ## Remaining blockers / follow-ups
+
+* Lola answers in English only (Spanish UI/voice input works; answers get an info notice).
+* Attachments are not read yet (notice returned; nothing is executed from them).
+* WS3 logistics endpoints other than Lola's tool still build their viewer from the
+  JWT role (short-lived tokens; role is reloaded on refresh). Moving them onto
+  `logistics_viewer_for` is a follow-up.
+* WS3 approved stock postings / claims and WS2 AP payment proposals have no
+  executor (by design: nothing is posted or paid).
 
 * **No external execution path for Lola drafts yet.** The durable gateway only
   accepts `email_reply`. Approving a Lola `draft_customer_email` /

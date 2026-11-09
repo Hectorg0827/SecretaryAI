@@ -31,8 +31,22 @@ INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
                 r"\bbonus(es)?\b"),
     "hr_lookup": (r"\bemployees?\b", r"\bstaff\b", r"\borg chart\b", r"\bwho reports\b", r"\bheadcount\b",
                   r"\bhr\b"),
+    # Workstream 3 — logistics journey (checked before sales so "orders" in a
+    # shipping question still reaches the logistics assistant).
+    "logistics": (r"\bcontainers?\b", r"\bshipments?\b", r"\bvessels?\b", r"\beta\b", r"\bcustoms\b",
+                  r"\bdemurrage\b", r"\bbill of lading\b", r"\bb/l\b", r"\bin transit\b", r"\barriv",
+                  r"\bbroker\b", r"\bfreight\b", r"\bproof of delivery\b", r"\bpods?\b", r"\bdelivered\b"),
+    # Workstream 2 — business intelligence
+    "cash_position": (r"\bcash position\b", r"\bbank balances?\b", r"\bhow much cash\b", r"\bcash on hand\b"),
+    "cash_flow": (r"\bcash ?flow\b",),
+    "profit_loss": (r"\bp ?& ?l\b", r"\bprofit and loss\b", r"\bnet income\b", r"\bprofitab"),
+    "collections": (r"\bcollect(ion|ions|ing)?\b", r"\bwho should (we|i) chase\b", r"\bpayment reminders?\b"),
+    "payables": (r"\bpayables?\b", r"\ba/p\b", r"\bbills?\b", r"\bwe owe\b", r"\bowe (our )?(suppliers|vendors)\b"),
+    "pricing": (r"\bmargins?\b", r"\bpricing\b", r"\bprice discrepanc", r"\bbelow cost\b"),
+    "declining": (r"\bdeclin", r"\bordering less\b", r"\bbuying less\b", r"\bdropp(ed|ing) off\b"),
+    "data_coverage": (r"\bdata coverage\b", r"\bwhich (systems|sources)\b", r"\bwhat data\b.{0,20}\bconnected\b"),
     "receivables": (r"\bowes?\b", r"\boverdue\b", r"\breceivables?\b", r"\bunpaid\b", r"\boutstanding\b",
-                    r"\bcollections?\b", r"\bpast due\b", r"\bbalance\b", r"\ba/?r\b"),
+                    r"\bpast due\b", r"\bbalance\b", r"\ba/?r\b"),
     "purchasing": (r"\bpurchase orders?\b", r"\bpos\b", r"\bsuppliers?\b", r"\bvendors?\b", r"\bincoming\b"),
     "inventory_check": (r"\bstock\b", r"\binventory\b", r"\bskus?\b", r"\bon hand\b", r"\bwarehouse\b",
                         r"\breorder point\b", r"\brunning low\b", r"\bproducts?\b"),
@@ -49,6 +63,15 @@ INTENT_TOOLS: dict[str, tuple[str, ...]] = {
     "purchasing": ("purchasing.open_orders",),
     "hr_lookup": ("hr.directory",),
     "payroll": ("hr.payroll",),
+    "logistics": ("logistics.assistant",),
+    "cash_position": ("bi.finance_cash_position",),
+    "cash_flow": ("bi.finance_cash_flow_projection",),
+    "profit_loss": ("bi.finance_profit_and_loss",),
+    "collections": ("bi.ar_collection_priorities",),
+    "payables": ("bi.ap_open_bills",),
+    "pricing": ("bi.pricing_product_margins",),
+    "declining": ("bi.sales_declining_accounts",),
+    "data_coverage": ("bi.bi_data_coverage",),
 }
 
 ACTION_INTENTS: dict[str, str] = {
@@ -198,6 +221,12 @@ def build_plan(message: str, authorizer: Authorizer, *, allow_actions: bool = Tr
             args: dict = {}
             if entity_ids and tool in ("sales.customer_accounts", "sales.performance", "finance.receivables"):
                 args["entity_ids"] = entity_ids
+            if tool == "logistics.assistant":
+                args["question"] = message[:1000]
+            if tool == "bi.sales_declining_accounts" and entities:
+                # "Why is Acme ordering less?" → investigate that (visible) account.
+                tool = "bi.investigate_account_decline"
+                args["customer"] = entities[0].display_name
             steps.append(PlanStep(step_id=f"s{len(steps) + 1}", tool=tool, args=args, intent=intent))
 
     # A named account with no other data intent ("how is Acme?") → account view.

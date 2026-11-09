@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from app.auth.jwt import hash_password
 from app.auth.rbac import get_current_user
 from app.config import get_settings
+from app.middleware.subscription_guard import require_active_subscription
 from app.utils.qbo_token_store import create_qbo_client
 from app.utils.rate_limiter import login_limiter, require_rate_limit
 
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 _TTL_SECONDS = 48 * 60 * 60
 _REDIS_PREFIX = "secretaryai_manager_invite:"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_INVITATION_SUBJECT = "Lion BI staging — Manager invitation"
 
 
 def _staging_settings():
@@ -119,11 +121,13 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
 
     body = (
         f"Hello {full_name},\n\n"
-        "You have been invited to join SecretaryAI staging as a Manager. "
+        "You have been invited to join Lion Business Intelligence (Lion BI) "
+        "staging as a Manager. "
         "To accept, open this link and choose your own password:\n\n"
         f"{link}\n\n"
         "This invitation expires in 48 hours and can be used only once. "
-        "If you did not expect it, you can ignore this message.\n"
+        "If you did not expect it, you can ignore this message.\n\n"
+        "Lola\nYour AI business assistant at Lion BI\n"
     )
 
     # This account already has a Resend API key in its staging environment.
@@ -138,7 +142,7 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
                 json={
                     "from": settings.from_email,
                     "to": [email],
-                    "subject": "SecretaryAI staging — Manager invitation",
+                    "subject": _INVITATION_SUBJECT,
                     "text": body,
                 },
                 timeout=10.0,
@@ -156,7 +160,7 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
         try:
             resp = SendGridAPIClient(api_key=settings.sendgrid_api_key).send(
                 Mail(from_email=settings.from_email, to_emails=email,
-                     subject="SecretaryAI staging — Manager invitation", plain_text_content=body)
+                     subject=_INVITATION_SUBJECT, plain_text_content=body)
             )
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError("Email provider rejected invitation")
@@ -176,7 +180,8 @@ def _audit(db, company_id: str, event: str, actor: str | None, metadata: dict) -
         log.warning("Invitation audit event unavailable")
 
 
-@router.post("/invitations", status_code=201)
+@router.post("/invitations", status_code=201,
+             dependencies=[Depends(require_active_subscription())])
 async def invite_manager(
     body: InviteManagerRequest,
     actor: dict = Depends(get_current_user),
@@ -270,7 +275,7 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
     return {"status": "accepted", "role": "manager", "message": "You can now sign in"}
 
 
-@router.get("/members")
+@router.get("/members", dependencies=[Depends(require_active_subscription())])
 async def list_team_members(actor: dict = Depends(get_current_user)):
     _staging_settings()
     db = _db()

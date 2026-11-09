@@ -43,7 +43,8 @@ export function AcceptInvite() {
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-xl p-8 space-y-5">
-        <h1 className="text-xl font-bold text-slate-900">Join SecretaryAI staging</h1>
+        <h1 className="text-xl font-bold text-slate-900">Join Lion BI (staging)</h1>
+        <p className="text-sm text-slate-600">Meet Lola, your AI business assistant at Lion Business Intelligence.</p>
         {done ? (
           <div role="status" className="space-y-4">
             <p className="text-emerald-700">Your Manager account is ready. Sign in with your email and new password.</p>

@@ -1882,7 +1882,8 @@ def _load_ledger(user: dict, db) -> ShipmentLedger:
     try:
         return ShipmentLedger.load(user["company_id"], SupabaseEventStore(db))
     except Exception as exc:  # noqa: BLE001
-        log.error("logistics ledger load failed for %s: %s", user.get("company_id"), exc)
+        # Exception text can carry request data; log only its type (no log injection).
+        log.error("logistics ledger load failed: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Logistics data temporarily unavailable")
 
 
@@ -1925,7 +1926,8 @@ def _record_email_evidence(user: dict, db, shipment_id: str, code: str, occurred
             payload=payload or {},
         )).to_dict()
     except Exception as exc:  # noqa: BLE001
-        log.warning("could not record email evidence on %s: %s", shipment_id, exc)
+        # shipment_id comes from the request body: never write it raw to the log.
+        log.warning("could not record email evidence: %s", type(exc).__name__)
         return None
 
 

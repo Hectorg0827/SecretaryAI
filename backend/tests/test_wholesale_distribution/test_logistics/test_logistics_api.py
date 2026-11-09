@@ -361,3 +361,20 @@ class TestErrorsDoNotLeakDetails:
         _seed_shipment(db)
         r = client.post("/api/logistics/journey/evidence/evd-nope/confirm", headers=_tok(), json={})
         assert r.status_code == 404 and "evd-nope" not in r.text
+
+
+class TestLogsCarryNoRequestData:
+    """CodeQL log-injection findings: request values must not reach log lines."""
+
+    def test_evidence_failure_logs_no_request_values(self, caplog):
+        from app.api.logistics import _record_email_evidence
+
+        class Boom:
+            def table(self, *_):
+                raise RuntimeError("db down\nFORGED log line")
+
+        forged = "SHP-1\nINFO fake: admin granted"
+        with caplog.at_level("WARNING"):
+            assert _record_email_evidence({"company_id": "company-A"}, Boom(), forged, "x") is None
+        text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "fake: admin granted" not in text and "FORGED" not in text

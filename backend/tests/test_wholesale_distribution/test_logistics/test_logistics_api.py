@@ -333,3 +333,26 @@ class TestLegacyEndpointRegressions:
         d = client.get("/api/logistics/journey/shipments/SHP-1", headers=_tok()).json()
         assert "customs_released" not in d["milestones"]
         assert d["pending_evidence"][0]["source_ref"] == "gmail-42"
+
+
+class TestErrorsDoNotLeakDetails:
+    """Clients get fixed messages; exception text stays in server logs."""
+
+    def test_unknown_shipment_fixed_message(self, client, db):
+        r = client.post("/api/logistics/journey/events", headers=_tok(), json={
+            "shipment_id": "SHIP-<script>", "kind": "milestone", "code": "vessel_arrived",
+            "source": "user_confirmed"})
+        assert r.status_code == 404
+        assert r.json()["detail"] == "Shipment, order, evidence or exception not found"
+        assert "<script>" not in r.text
+
+    def test_invalid_event_fixed_message(self, client, db):
+        _seed_shipment(db)
+        r = client.post("/api/logistics/journey/events", headers=_tok(), json={
+            "shipment_id": "SHP-1", "kind": "milestone", "code": "made_up_code", "source": "user_confirmed"})
+        assert r.status_code == 422 and "made_up_code" not in r.text
+
+    def test_missing_evidence_is_404(self, client, db):
+        _seed_shipment(db)
+        r = client.post("/api/logistics/journey/evidence/evd-nope/confirm", headers=_tok(), json={})
+        assert r.status_code == 404 and "evd-nope" not in r.text

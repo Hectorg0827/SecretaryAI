@@ -721,7 +721,10 @@ from app.intelligence.wholesale_distribution.logistics.documents import Document
 from app.intelligence.wholesale_distribution.logistics.journey import (
     HUMAN_VERIFIED_SOURCES,
     MACHINE_SOURCES,
+    ConfirmerRequiredError,
     LedgerError,
+    RecordNotFoundError,
+    TenantMismatchError,
     LogisticsEvent,
     ShipmentLedger,
     SourceType,
@@ -746,8 +749,8 @@ def _viewer(user: dict) -> LogisticsViewer:
     v = LogisticsViewer.from_user(user)
     try:
         v.require_access()
-    except LogisticsAccessDenied as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+    except LogisticsAccessDenied:
+        raise HTTPException(status_code=403, detail="Your role has no access to logistics data")
     return v
 
 
@@ -767,11 +770,27 @@ def _load_ledger(user: dict, db) -> ShipmentLedger:
         raise HTTPException(status_code=503, detail="Logistics data temporarily unavailable")
 
 
+def _ledger_http_error(exc: LedgerError) -> HTTPException:
+    """
+    Map ledger errors to FIXED client messages.  Exception text is logged
+    server-side only (never echoed to the caller).
+    """
+    log.info("logistics ledger rejected request: %s", type(exc).__name__)
+    if isinstance(exc, RecordNotFoundError):
+        return HTTPException(status_code=404, detail="Shipment, order, evidence or exception not found")
+    if isinstance(exc, ConfirmerRequiredError):
+        return HTTPException(status_code=422, detail="This must be confirmed by a named person")
+    if isinstance(exc, TenantMismatchError):
+        return HTTPException(status_code=403, detail="Record belongs to another company")
+    return HTTPException(status_code=422, detail=(
+        "Invalid logistics event — check kind, milestone code and payload (see docs/logistics/INTERFACES.md)"))
+
+
 def _ingest(ledger: ShipmentLedger, event: LogisticsEvent) -> dict:
     try:
         return ledger.ingest(event).to_dict()
     except LedgerError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise _ledger_http_error(exc)
     except StoreUnavailableError as exc:
         log.error("logistics event store write failed: %s", exc)
         raise HTTPException(status_code=503, detail="Event not saved — store unavailable; nothing was changed")
@@ -809,7 +828,8 @@ def ingest_integration_events(db, company_id: str, events: list[LogisticsEvent])
         try:
             out.append(ledger.ingest(ev).to_dict())
         except (LedgerError, StoreUnavailableError) as exc:
-            out.append({"applied": False, "message": str(exc)})
+            log.warning("integration event %s rejected: %s", ev.event_id, exc)
+            out.append({"applied": False, "message": type(exc).__name__})
     return out
 
 
@@ -974,7 +994,7 @@ async def confirm_journey_evidence(
         return ledger.confirm_evidence(evidence_id, confirmed_by=user["sub"],
                                        occurred_at=request.occurred_at, note=request.note).to_dict()
     except LedgerError as exc:
-        raise HTTPException(status_code=404 if "not found" in str(exc) else 422, detail=str(exc))
+        raise _ledger_http_error(exc)
     except StoreUnavailableError:
         raise HTTPException(status_code=503, detail="Event not saved — store unavailable; nothing was changed")
 
@@ -1028,8 +1048,10 @@ async def reconcile_receipt(
             received_at=request.received_at,
             landed_cost_per_case=request.landed_cost_per_case,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid receiving counts (case quantities cannot be negative)")
 
     # The count was entered by a named person → verified receipt milestone.
     milestone = _ingest(ledger, LogisticsEvent(

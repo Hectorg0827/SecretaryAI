@@ -9,17 +9,17 @@ instance for the migration.
 | Suite | Result |
 |---|---|
 | Full backend suite (before this work) | 1,086 passed, 4 skipped |
-| **Full backend suite (after)** | **1,265 passed, 4 skipped, 0 failed** |
-| New logistics tests | 179 (all passing) |
+| **Full backend suite (after)** | **1,284 passed, 4 skipped, 0 failed** |
+| New logistics tests | 198 (all passing) |
 
 | New test file | Tests | Covers |
 |---|---|---|
 | `test_journey_ledger.py` | 36 | 14-stage transitions, provenance, ETA provenance, customs holds, duplicates, tenant isolation, failure recovery |
-| `test_documents.py` | 36 | identify/extract/validate/link for 13 document types, ISO 6346 container check digit, broker-status negation |
+| `test_documents.py` | 52 | identify/extract/validate/link for 13 document types, ISO 6346 container check digit, broker-status negation, ReDoS resistance |
 | `test_receiving_acceptance.py` | 18 | **mandatory 1,200-case scenario**, liability, claims, hand-off to PolicyEngine + ApprovalQueue |
 | `test_monitoring.py` | 22 | all 10 proactive detections, prioritization, drafts never sent, landed cost |
 | `test_visibility_and_assistant.py` | 29 | role scoping (owner / logistics / sales / viewer / other company), all 12 questions |
-| `test_logistics_api.py` | 24 | HTTP endpoints, machine-source refusal, 503 on store outage, legacy endpoint regressions |
+| `test_logistics_api.py` | 27 | HTTP endpoints, machine-source refusal, 503 on store outage, fixed error messages, legacy endpoint regressions |
 | `test_engine_regressions.py` | 14 | fixes to existing engines, parcel adapter, Supabase store |
 
 The migration `20261109000011_logistics_journey.sql` was applied to a real PostgreSQL instance and checked:
@@ -141,6 +141,20 @@ alert types (freight "−100%" with no invoice, "PO overdue" on delivered shipme
 arrived containers). Each now has a covering test.
 
 ---
+
+## Security review (CodeQL on the PR)
+
+The first CI run reported 15 CodeQL alerts in the new code (11 high, 4 medium). Both causes were fixed:
+
+* **Polynomial ReDoS (high).** Document label patterns such as `seal\s*(?:no|#)?\s*[:#]?\s*…` had cubic
+  worst-case time: 2,000 spaces after "seal" took 14 s, and uploads may be 200,000 characters. All patterns now use
+  a single bounded separator class and digit-run look-behinds. The `regexploit` scanner reports 0 vulnerable
+  patterns. The worst 50,000-character attack string takes 0.09 s, and a full 200,000-character hostile document
+  takes 0.06 s. These are covered by `TestReDoSResistance`.
+* **Exception text in responses (medium).** Endpoints echoed `str(exc)`. They now return fixed messages chosen by
+  error type (`RecordNotFoundError` → 404, `ConfirmerRequiredError` / invalid event → 422,
+  `TenantMismatchError` → 403). The detail is logged server-side only. These are covered by
+  `TestErrorsDoNotLeakDetails`.
 
 ## Known limits / not done
 

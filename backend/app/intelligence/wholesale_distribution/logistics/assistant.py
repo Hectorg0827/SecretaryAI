@@ -47,11 +47,12 @@ class AssistantAnswer:
         return asdict(self)
 
 
+# One bounded separator class per pattern (ReDoS-safe; see documents.py).
 _ID_PATTERNS = (
-    re.compile(r"\b(?:b/?l|bol|bill of lading)\s*#?\s*([A-Z0-9-]{6,24})", re.I),
-    re.compile(r"\b(?:po|p\.o\.|purchase order)\s*#?\s*([A-Z0-9-]{3,24})", re.I),
-    re.compile(r"\border\s*#?\s*([A-Z0-9-]{3,24})", re.I),
-    re.compile(r"\bshipment\s*#?\s*([A-Z0-9-]{3,40})", re.I),
+    re.compile(r"\b(?:b/?l|bol|bill of lading)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{5,23})", re.I),
+    re.compile(r"\b(?:po|p\.o\.|purchase order)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
+    re.compile(r"\border[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
+    re.compile(r"\bshipment[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,39})", re.I),
 )
 
 INTENTS: list[tuple[str, Callable[[str], bool]]] = [

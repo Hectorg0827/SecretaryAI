@@ -198,3 +198,31 @@ class TestValidationAndLinking:
         s = L.get("SHP-1")
         assert "last_free_day" not in s.port_terms
         assert any(e.kind == "port_terms" for e in s.pending_evidence())
+
+
+class TestReDoSResistance:
+    """Hostile uploads must not hang the server (CodeQL py/polynomial-redos)."""
+
+    @pytest.mark.parametrize("label", ["seal", "sku", "lot", "batch", "bol", "b/l", "po", "booking",
+                                       "entry no", "short", "total", "dock", "signed by", "date"])
+    def test_label_followed_by_huge_whitespace_is_fast(self, label):
+        import time
+        start = time.perf_counter()
+        DI.extract(label + " " * 100_000 + "!")
+        DI.extract((label + " ") * 30_000)
+        assert time.perf_counter() - start < 2.0
+
+    def test_long_digit_runs_are_fast(self):
+        import time
+        start = time.perf_counter()
+        DI.extract("1" * 100_000 + "\n" + "1," * 50_000 + "\nFREIGHT INVOICE " + "9" * 50_000)
+        assert time.perf_counter() - start < 2.0
+
+    def test_labels_still_extract_after_hardening(self):
+        f = DI.extract("BILL OF LADING  B/L Number: MAEU240001234   Seal #: SL445566\n"
+                       "PO No. PO-1001   SKU: WINE-RED   Lot No: L2026A   1,200 cases\n"
+                       "Booking ref: BKG12345   Entry No: 123-4567890").fields
+        assert f["bol_number"] == "MAEU240001234" and f["seal_numbers"] == ["SL445566"]
+        assert f["po_numbers"] == ["PO-1001"] and f["skus"] == ["WINE-RED"] and f["lots"] == ["L2026A"]
+        assert f["booking_ref"] == "BKG12345" and f["entry_number"] == "123-4567890"
+        assert f["quantities_cases"] == [1200]

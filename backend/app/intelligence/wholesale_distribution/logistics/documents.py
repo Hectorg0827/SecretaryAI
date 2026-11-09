@@ -135,35 +135,49 @@ def is_valid_container_number(number: str) -> bool:
 
 # ─── Extraction ───────────────────────────────────────────────────────────────
 
-_BOL_RE = re.compile(
-    r"(?:bill\s+of\s+lading|b/l|bol|mbl|hbl)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,24})",
-    re.I)
-_PO_RE = re.compile(r"\b(?:p\.?o\.?|purchase\s+order)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{2,24})",
-                    re.I)
-_BOOKING_RE = re.compile(r"booking\s*(?:no\.?|number|ref(?:erence)?|#)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{4,24})", re.I)
-_ENTRY_RE = re.compile(r"entry\s*(?:no\.?|number|#)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,20})", re.I)
-_SEAL_RE = re.compile(r"seal\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{3,20})", re.I)
-_SKU_RE = re.compile(r"\b(?:sku|item)\s*(?:no\.?|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9_-]{1,24})", re.I)
-_LOT_RE = re.compile(r"\b(?:lot|batch)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{1,24})", re.I)
-_QTY_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)\s*(?:cases|case|cs|ctns?|cartons?)\b", re.I)
+# ReDoS-safe construction (CodeQL py/polynomial-redos): every gap between a
+# label and its value is ONE bounded character class, never several adjacent
+# optional/starred pieces that can all match the same whitespace, and number
+# runs carry a look-behind so a search cannot restart inside a long digit run.
+# Uploaded text can be up to 200k characters; all patterns below are linear.
+_SEP = r"[\s:#.]{0,20}"                       # spaces / ':' / '#' / '.' between label and value
+_NO = r"(?:\s{1,10}(?:no|number|nbr|ref(?:erence)?)\b)?"   # optional "No" / "Number" word
+
+
+def _label_re(labels: str, value: str) -> re.Pattern:
+    return re.compile(rf"\b(?:{labels}){_NO}{_SEP}({value})", re.I)
+
+
+_BOL_RE = _label_re(r"bill\s{1,5}of\s{1,5}lading|b/l|bol|mbl|hbl", r"[A-Z0-9][A-Z0-9-]{5,24}")
+_PO_RE = _label_re(r"p\.?o|purchase\s{1,5}order", r"[A-Z0-9][A-Z0-9-]{2,24}")
+_BOOKING_RE = _label_re(r"booking", r"[A-Z0-9][A-Z0-9-]{4,24}")
+_ENTRY_RE = re.compile(rf"\bentry\s{{1,10}}(?:no|number|nbr)\b{_SEP}([A-Z0-9][A-Z0-9-]{{5,20}})", re.I)
+_SEAL_RE = _label_re(r"seal", r"[A-Z0-9][A-Z0-9-]{3,20}")
+_SKU_RE = _label_re(r"sku|item", r"[A-Z0-9][A-Z0-9_-]{1,24}")
+_LOT_RE = _label_re(r"lot|batch", r"[A-Z0-9][A-Z0-9-]{1,24}")
+_NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d+)"
+_UNIT = r"(?:cases|case|cs|ctns|ctn|cartons|carton)"
+_QTY_RE = re.compile(rf"(?<![\w.,])(\d{{1,3}}(?:,\d{{3}})+|\d+)\s{{0,5}}{_UNIT}\b", re.I)
 _DAMAGED_RE = re.compile(
-    r"(\d{1,3}(?:,\d{3})+|\d+)\s*(?:cases|case|cs|ctns?|cartons?)?\s*(?:were\s+|are\s+)?(?:damaged|crushed|wet|broken)",
-    re.I)
-_SHORT_RE = re.compile(r"(?:short(?:age)?\s*(?:of)?\s*[:#]?\s*(\d+)|(\d+)\s*(?:cases|cs|ctns?)?\s*short)", re.I)
+    rf"{_NUM}\s{{0,5}}(?:{_UNIT}\s{{1,5}})?(?:(?:were|are)\s{{1,5}})?(?:damaged|crushed|wet|broken)", re.I)
+_SHORT_RE = re.compile(
+    rf"\bshort(?:age)?(?:\s{{1,5}}of)?[\s:#]{{0,10}}(\d{{1,7}})\b|{_NUM}\s{{0,5}}(?:{_UNIT}\s{{1,5}})?short\b", re.I)
 _TOTAL_RE = re.compile(
-    r"(?:invoice\s+total|total(?:\s+due)?|amount\s+due|balance\s+due)[^\d$\n]*\$?\s*([\d,]+\.\d{2})", re.I)
-_MONEY_LINE_RE = re.compile(r"\$?\s*([\d,]+\.\d{2})")
-_SIGNED_RE = re.compile(r"(?:signed\s+by|received\s+by|consignee\s+signature)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]{1,60})",
-                        re.I)
+    r"\b(?:invoice\s{1,5}total|total(?:\s{1,5}due)?|amount\s{1,5}due|balance\s{1,5}due)"
+    r"[^\d$\n]{0,60}(?:\$\s{0,3})?(\d[\d,]{0,15}\.\d{2})", re.I)
+_MONEY_LINE_RE = re.compile(r"(?<![\d,.])(\d[\d,]{0,15}\.\d{2})")
+_SIGNED_RE = re.compile(
+    r"\b(?:signed\s{1,5}by|received\s{1,5}by|consignee\s{1,5}signature)[\s:\-]{0,10}([A-Za-z][A-Za-z .'-]{1,60})",
+    re.I)
 _DATE_PATTERNS = (
     (re.compile(r"\b(\d{4}-\d{2}-\d{2})\b"), "%Y-%m-%d"),
     (re.compile(r"\b(\d{1,2}/\d{1,2}/\d{4})\b"), "%m/%d/%Y"),
 )
 _LABELLED_DATE_RE = re.compile(
-    r"(eta|etd|delivered(?:\s+on)?|delivery\s+date|appointment(?:\s+date)?|last\s+free\s+day|lfd|"
-    r"released(?:\s+on)?|release\s+date|arrival(?:\s+date)?|received(?:\s+on)?|date)\s*[:\-]?\s*"
+    r"\b(eta|etd|delivered(?: on)?|delivery date|appointment(?: date)?|last free day|lfd|"
+    r"released(?: on)?|release date|arrival(?: date)?|received(?: on)?|date)[\s:\-]{0,10}"
     r"(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})", re.I)
-_TIME_WINDOW_RE = re.compile(r"(\d{1,2}:\d{2})\s*(?:-|to|–)\s*(\d{1,2}:\d{2})")
+_TIME_WINDOW_RE = re.compile(r"(\d{1,2}:\d{2})\s{0,3}(?:-|to|–)\s{0,3}(\d{1,2}:\d{2})")
 _NEGATION_RE = re.compile(
     r"\b(not|no|pending|awaiting|unable|cannot|has\s+not|have\s+not|yet\s+to)\b[^.\n]{0,40}"
     r"\b(release|released|clear|cleared|clearance)\b"
@@ -270,7 +284,7 @@ class DocumentIntelligence:
         if doc_type == DocumentType.DELIVERY_APPOINTMENT:
             tw = _TIME_WINDOW_RE.search(text)
             fields["window"] = {"start": tw.group(1), "end": tw.group(2)} if tw else {}
-            dock = re.search(r"dock\s*(?:door)?\s*[:#]?\s*([A-Z0-9-]{1,6})", text, re.I)
+            dock = re.search(r"\bdock(?:\s{1,5}door)?[\s:#]{0,10}([A-Z0-9][A-Z0-9-]{0,5})", text, re.I)
             fields["dock"] = dock.group(1).upper() if dock else ""
         if doc_type == DocumentType.BROKER_NOTICE or doc_type == DocumentType.CUSTOMS_RELEASE:
             fields["customs_status"] = broker_status(text)
@@ -482,8 +496,8 @@ def _to_iso(s: str) -> str:
 def _labelled_dates(text: str) -> dict:
     out: dict[str, str] = {}
     for m in _LABELLED_DATE_RE.finditer(text):
-        label = re.sub(r"\s+on$", "", m.group(1).lower().strip())
-        label = label.replace(" ", "_")
+        label = " ".join(m.group(1).lower().split())
+        label = label.removesuffix(" on").replace(" ", "_")
         if label == "lfd":
             label = "last_free_day"
         iso = _to_iso(m.group(2))

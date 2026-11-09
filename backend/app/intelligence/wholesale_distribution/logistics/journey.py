@@ -247,7 +247,19 @@ REQUIRED_CUSTOMS_DOCUMENTS = ("bill_of_lading", "commercial_invoice", "packing_l
 
 
 class LedgerError(ValueError):
-    """Invalid event (bad tenant, unknown milestone, bad confirmer, …)."""
+    """Invalid event (unknown kind / milestone, malformed payload, …)."""
+
+
+class TenantMismatchError(LedgerError):
+    """Event or ledger belongs to a different company."""
+
+
+class RecordNotFoundError(LedgerError):
+    """Shipment, evidence, allocation or exception does not exist."""
+
+
+class ConfirmerRequiredError(LedgerError):
+    """A human-verified source or confirmation lacks a named person."""
 
 
 class StoreUnavailableError(RuntimeError):
@@ -711,7 +723,7 @@ class ShipmentLedger:
 
     def __init__(self, company_id: str, store: Optional[EventStore] = None):
         if not company_id:
-            raise LedgerError("company_id is required")
+            raise TenantMismatchError("company_id is required")
         self.company_id = company_id
         self._store = store
         self._shipments: dict[str, Shipment] = {}
@@ -779,20 +791,20 @@ class ShipmentLedger:
     def ingest(self, event: LogisticsEvent) -> ApplyResult:
         """Validate, apply atomically, persist, then commit."""
         if event.company_id != self.company_id:
-            raise LedgerError("event belongs to a different company")
+            raise TenantMismatchError("event belongs to a different company")
         if event.kind not in EVENT_KINDS:
             raise LedgerError(f"unknown event kind: {event.kind!r}")
         if event.idempotency_key in self._seen_keys:
             return ApplyResult(applied=False, duplicate=True, message="duplicate event ignored")
 
         if event.source in HUMAN_VERIFIED_SOURCES and _is_non_human(event.confirmed_by):
-            raise LedgerError(
+            raise ConfirmerRequiredError(
                 f"source {event.source.value} requires a named human confirmer (confirmed_by)"
             )
 
         existing = self._shipments.get(event.shipment_id)
         if existing is None and event.kind != "shipment_created":
-            raise LedgerError(f"unknown shipment {event.shipment_id!r}")
+            raise RecordNotFoundError(f"unknown shipment {event.shipment_id!r}")
         if existing is not None and event.kind == "shipment_created":
             # Re-creation with different content is treated as an update.
             event_kind = "shipment_updated"
@@ -829,10 +841,10 @@ class ShipmentLedger:
                          occurred_at: str = "", note: str = "") -> ApplyResult:
         """A named person promotes unverified evidence to a verified fact."""
         if _is_non_human(confirmed_by):
-            raise LedgerError("evidence can only be confirmed by a named person")
+            raise ConfirmerRequiredError("evidence can only be confirmed by a named person")
         shipment, ev = self.find_evidence(evidence_id)
         if not shipment or not ev:
-            raise LedgerError(f"evidence {evidence_id!r} not found")
+            raise RecordNotFoundError(f"evidence {evidence_id!r} not found")
         if ev.status != "unverified":
             return ApplyResult(applied=False, duplicate=True, message=f"evidence already {ev.status}")
         return self.ingest(LogisticsEvent(
@@ -1055,7 +1067,7 @@ def _apply_allocation_update(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
     order_id = p.get("order_id", "")
     targets = [a for a in s.allocations if a.order_id == order_id]
     if not targets:
-        raise LedgerError(f"no allocation for order {order_id!r}")
+        raise RecordNotFoundError(f"no allocation for order {order_id!r}")
     authoritative = {S.CARRIER_API, S.WMS, S.ERP} | HUMAN_VERIFIED_SOURCES
     if ev.source not in authoritative:
         evid = _add_evidence(s, ev, "allocation_update")
@@ -1111,13 +1123,13 @@ def _apply_exception_resolved(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
         if e.exception_id == xid:
             e.resolved, e.resolved_by = True, ev.confirmed_by or ev.source.value
             return ApplyResult(applied=True)
-    raise LedgerError(f"exception {xid!r} not found")
+    raise RecordNotFoundError(f"exception {xid!r} not found")
 
 
 def _apply_evidence_confirmed(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
     target = next((e for e in s.evidence if e.evidence_id == ev.source_ref), None)
     if target is None:
-        raise LedgerError("evidence not found on shipment")
+        raise RecordNotFoundError("evidence not found on shipment")
     if target.status != "unverified":
         return ApplyResult(applied=True, message=f"evidence already {target.status}")
     target.status, target.reviewed_by = "confirmed", ev.confirmed_by

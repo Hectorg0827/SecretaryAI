@@ -190,7 +190,10 @@ def test_negated_broker_release_does_not_become_release_candidate():
         "body": "The shipment is on hold and has not yet been released.",
     })
     assert response.status_code == 200, response.text
-    assert response.json()["candidate_milestone"] is None
+    # Combined WS3 rule: a reported hold is surfaced as an UNVERIFIED hold
+    # candidate (cautious); the negated release is never read as a release.
+    assert response.json()["candidate_milestone"] == "hold_placed"
+    assert response.json()["candidate_milestone"] != "released"
     assert response.json()["requires_human_review"] is True
     db.rpc.assert_not_called()
 
@@ -213,4 +216,5 @@ def test_default_vessel_adapter_must_not_invent_live_location():
     )
     assert event.vessel_lat is None
     assert event.vessel_lon is None
-    assert event.status_description == "unknown"
+    # Combined label: say plainly that no live feed exists (WS3).
+    assert event.status_description == "no_live_tracking_feed"

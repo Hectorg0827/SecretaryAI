@@ -202,6 +202,52 @@ def test_invalid_invitation_role_and_password_rejected():
         team.AcceptInviteRequest(token="a" * 44, password="weak")
 
 
+def test_lionbi_lola_resend_invitation_is_branded_and_mocked(monkeypatch):
+    """Validate the exact provider payload without any network or mailbox delivery."""
+    import httpx
+
+    settings = SimpleNamespace(
+        secretaryai_invite_delivery_enabled=True,
+        secretaryai_invite_email_recipient=EMAIL,
+        resend_api_key="test-only-resend-key",
+        resed_api_key="",
+        sendgrid_api_key="",
+        from_email="lola@lionbi.app",
+    )
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return SimpleNamespace(status_code=202)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    invite_url = "https://secretaryai-web-staging.up.railway.app/accept-invite#token=test"
+    team._send_invite_email(EMAIL, "Abel Garcia", invite_url, settings)
+
+    assert len(calls) == 1
+    url, kwargs = calls[0]
+    assert url == "https://api.resend.com/emails"
+    payload = kwargs["json"]
+    assert payload["from"] == "lola@lionbi.app"
+    assert payload["to"] == [EMAIL]
+    assert payload["subject"] == "Lion BI staging — Manager invitation"
+    assert "Lion Business Intelligence (Lion BI)" in payload["text"]
+    assert "Lola" in payload["text"]
+    assert invite_url in payload["text"]
+    assert "SecretaryAI" not in payload["text"]
+
+    with pytest.raises(HTTPException) as exc:
+        team._send_invite_email("not-allowed@example.com", "Other Person", invite_url, settings)
+    assert exc.value.status_code == 403
+    assert len(calls) == 1  # No additional delivery attempt.
+
+    settings.secretaryai_invite_delivery_enabled = False
+    with pytest.raises(HTTPException) as exc:
+        team._send_invite_email(EMAIL, "Abel Garcia", invite_url, settings)
+    assert exc.value.status_code == 503
+    assert len(calls) == 1
+
+
 def test_http_routes_are_registered_and_maintain_separate_auth(setup, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

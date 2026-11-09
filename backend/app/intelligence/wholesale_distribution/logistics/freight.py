@@ -85,28 +85,34 @@ class FreightCostParser:
         components: list[FreightCostComponent] = []
         text_lower = text.lower()
 
+        lines = text.split("\n")
         for component_key, keywords in self._COMPONENT_KEYWORDS.items():
+            # First line mentioning any keyword for this component that carries
+            # an amount.  (Previously a misplaced `break` meant only the FIRST
+            # line of the invoice was ever inspected, dropping later charges.)
+            found = False
             for kw in keywords:
-                if kw in text_lower:
-                    # Find the amount on the same line
-                    for line in text.split("\n"):
-                        if kw in line.lower():
-                            amounts = self._AMOUNT_PATTERN.findall(line)
-                            if amounts:
-                                # Take the last (rightmost) amount — usually the total
-                                amount_str = amounts[-1].replace(",", "")
-                                try:
-                                    amount = float(amount_str)
-                                    if amount > 0:
-                                        components.append(FreightCostComponent(
-                                            component=component_key,
-                                            amount_usd=amount,
-                                            notes=f"Extracted from: {line.strip()[:80]}",
-                                        ))
-                                        break
-                                except ValueError:
-                                    pass
-                        break  # matched keyword, move to next component
+                if found or kw not in text_lower:
+                    continue
+                for line in lines:
+                    if kw not in line.lower():
+                        continue
+                    amounts = self._AMOUNT_PATTERN.findall(line)
+                    if not amounts:
+                        continue
+                    # Take the last (rightmost) amount — usually the total
+                    try:
+                        amount = float(amounts[-1].replace(",", ""))
+                    except ValueError:
+                        continue
+                    if amount > 0:
+                        components.append(FreightCostComponent(
+                            component=component_key,
+                            amount_usd=amount,
+                            notes=f"Extracted from: {line.strip()[:80]}",
+                        ))
+                        found = True
+                        break
         return components
 
     def allocate_to_skus(
@@ -204,6 +210,10 @@ class TransitTracker:
         position = {}
         if booking.container_numbers:
             position = self._adapter.get_position(booking.container_numbers[0])
+        if position.get("source") == "stub":
+            # No live carrier/AIS feed configured: never present placeholder
+            # coordinates or vessel names as if they were real tracking data.
+            position = {"status": "no_live_tracking_feed", "current_port": ""}
 
         updated_eta = (
             self._adapter.get_eta(booking.booking_ref)

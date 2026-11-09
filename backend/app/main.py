@@ -310,6 +310,8 @@ from app.api import compliance as compliance_router
 app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"], dependencies=_PAID)
 from app.api import insights as insights_router
 app.include_router(insights_router.router,     prefix="/api/insights",       tags=["insights"],   dependencies=_PAID)
+from app.api import lola_bi as lola_bi_router  # Workstream 2: read-only Lola BI tools
+app.include_router(lola_bi_router.router,      prefix="/api/lola/bi",        tags=["lola-bi"],    dependencies=_PAID)
 # connectors is NOT gated at the router level: /heartbeat, /tasks, /task-result,
 # /sync-status and /error authenticate with a *connector* token via
 # get_connector_identity, not a user JWT. A router-wide user-subscription check

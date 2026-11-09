@@ -183,31 +183,40 @@ class CustomsMonitor:
         """
         Parse a customs broker email to extract clearance milestone.
         Returns a CustomsEvent if a milestone is detected.
+
+        The result is an *interpretation of an email*.  The journey ledger
+        records it as unverified evidence (SourceType.EMAIL_PARSED); it never
+        becomes an official release on its own.
+
+        Precedence (most cautious first): hold/exam → released → entry filed →
+        duties paid.  Negated language ("NOT released", "pending release",
+        "awaiting clearance") is never read as a release.
         """
+        from .documents import broker_status
+
         text = f"{subject}\n{body}".lower()
+        status = broker_status(f"{subject}\n{body}")
+        note = f"From broker email (unverified): {subject[:60]}"
 
-        if any(kw in text for kw in ["entry filed", "entrada presentada", "filing submitted"]):
-            return self.log_entry_filed(booking_id, notes=f"Detected from broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["duties paid", "aranceles pagados", "duty payment"]):
-            return self.log_duties_paid(booking_id, 0.0, notes=f"From broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["released", "cleared", "liberado", "despachado", "released from customs"]):
-            return self.log_released(booking_id, days_at_port=0, notes=f"From broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["hold", "retención", "exam", "revisión", "inspection", "fda", "ttb", "detained"]):
-            # Extract hold reason
+        if status in ("hold", "exam"):
             for issue in CRITICAL_DOC_ISSUES:
                 if issue in text:
-                    _, alert = self.log_hold(booking_id, issue.title(), days_at_port=0)
                     return self.log_hold(booking_id, issue.title(), days_at_port=0)[0]
-            return self.log_hold(
-                booking_id,
-                "Customs hold — reason under investigation",
-                days_at_port=0,
-            )[0]
+            reason = ("Customs exam ordered" if status == "exam"
+                      else "Customs hold — reason under investigation")
+            return self.log_hold(booking_id, reason, days_at_port=0)[0]
 
-        return None  # No recognizable milestone
+        if status == "released":
+            return self.log_released(booking_id, days_at_port=0, notes=note)
+
+        if any(kw in text for kw in ["entry filed", "entrada presentada", "filing submitted",
+                                     "entry has been filed"]):
+            return self.log_entry_filed(booking_id, notes=note)
+
+        if any(kw in text for kw in ["duties paid", "aranceles pagados", "duty payment"]):
+            return self.log_duties_paid(booking_id, 0.0, notes=note)
+
+        return None  # No recognizable milestone (includes "not released" with no hold)
 
     # ── Historical Performance ────────────────────────────────────────────────
 

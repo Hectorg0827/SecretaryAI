@@ -65,6 +65,7 @@ class FakePrograms:
         self.tmpdirs: list[Path] = []
 
     def run(self, args, **kw):
+        args = [Path(args[0]).name, *args[1:]]          # /usr/bin/tesseract → tesseract
         self.calls.append(list(args))
         self.envs.append(kw.get("env") or {})
         assert kw.get("shell") in (None, False)
@@ -173,6 +174,30 @@ class TestScannedPdf:
         finally:
             for _ in held:
                 ocr._slots.release()
+
+
+class TestOnlyKnownProgramsWithSafeArguments:
+    def test_unknown_program_refused(self, ocr_on, tmp_path):
+        with pytest.raises(ocr.OCRUnavailable):
+            ocr._command("sh", ["-c", "id"], tmp_path)
+
+    def test_program_runs_from_its_absolute_path(self, ocr_on, tmp_path):
+        assert ocr._command("tesseract", [str(tmp_path / "a.png"), "stdout"], tmp_path)[0] == "/usr/bin/tesseract"
+
+    @pytest.mark.parametrize("bad", ["a; rm -rf /", "$(id)", "a b", "`id`", "x|y", "\nnew"])
+    def test_shell_like_arguments_refused(self, ocr_on, tmp_path, bad):
+        with pytest.raises(ocr.OCRFailed):
+            ocr._command("tesseract", [bad], tmp_path)
+
+    def test_paths_outside_the_private_folder_refused(self, ocr_on, tmp_path):
+        with pytest.raises(ocr.OCRFailed):
+            ocr._command("tesseract", ["/etc/passwd", "stdout"], tmp_path)
+        with pytest.raises(ocr.OCRFailed):
+            ocr._command("tesseract", [str(tmp_path / ".." / "escape.png")], tmp_path)
+
+    def test_no_shell_is_ever_used(self, ocr_on):
+        extract("scan.pdf", scanned_pdf())
+        assert ocr_on.calls                                   # FakePrograms asserts shell is falsy
 
 
 class TestPhotos:

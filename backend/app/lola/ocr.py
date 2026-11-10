@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -72,13 +73,39 @@ def _env() -> dict:
     return keep
 
 
-def _run(args: list[str], deadline: float) -> bytes:
+# The only programs this module may start. Arguments are never user text:
+# fixed flags, numbers computed here, and paths inside our own private
+# temporary folder (checked below). There is no shell, so nothing can be
+# interpreted as a command even if a path were unusual.
+_PROGRAMS = ("pdftoppm", "tesseract")
+_SAFE_ARG = re.compile(r"^[A-Za-z0-9+_.:/-]{1,4096}$")
+
+
+def _command(program: str, args: list[str], workdir: Path) -> list[str]:
+    if program not in _PROGRAMS:
+        raise OCRUnavailable("program not allowed")
+    exe = shutil.which(program)
+    if not exe:
+        raise OCRUnavailable("program not installed")
+    root = workdir.resolve()
+    for a in args:
+        if not _SAFE_ARG.match(a):
+            raise OCRFailed("ocr_failed")
+        if a.startswith("/") and not (Path(a).resolve() == root or root in Path(a).resolve().parents):
+            raise OCRFailed("ocr_failed")        # every path must be inside our temp folder
+    return [exe, *args]
+
+
+def _run(program: str, args: list[str], workdir: Path, deadline: float) -> bytes:
+    cmd = _command(program, args, workdir)
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise OCRFailed("too_slow")
     try:
-        done = subprocess.run(args, capture_output=True, timeout=remaining, env=_env(),
-                              stdin=subprocess.DEVNULL, check=False)
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+        # (allow-listed absolute program, validated args, no shell — see _command)
+        done = subprocess.run(cmd, capture_output=True, timeout=remaining, env=_env(),  # noqa: S603
+                              stdin=subprocess.DEVNULL, check=False, shell=False)
     except subprocess.TimeoutExpired:
         raise OCRFailed("too_slow") from None
     except OSError:
@@ -89,7 +116,7 @@ def _run(args: list[str], deadline: float) -> bytes:
 
 
 def _recognise(image: Path, deadline: float) -> str:
-    out = _run(["tesseract", str(image), "stdout", "-l", LANGUAGES, "--psm", "3"], deadline)
+    out = _run("tesseract", [str(image), "stdout", "-l", LANGUAGES, "--psm", "3"], image.parent, deadline)
     return out.decode("utf-8", errors="replace")
 
 
@@ -114,8 +141,8 @@ def pdf_text(data: bytes, total_pages: int) -> tuple[str, int, bool]:
             os.chmod(tmp, 0o700)
             src = Path(tmp) / "in.pdf"
             src.write_bytes(data)
-            _run(["pdftoppm", "-f", "1", "-l", str(pages), "-gray", "-png",
-                  "-scale-to", str(RENDER_MAX_PX), str(src), str(Path(tmp) / "p")], deadline)
+            _run("pdftoppm", ["-f", "1", "-l", str(pages), "-gray", "-png",
+                  "-scale-to", str(RENDER_MAX_PX), str(src), str(Path(tmp) / "p")], Path(tmp), deadline)
             src.unlink()
             images = sorted(Path(tmp).glob("p*.png"))
             if not images:

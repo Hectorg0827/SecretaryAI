@@ -618,7 +618,7 @@ from fastapi import UploadFile  # noqa: E402
 
 _EXTRACTION_MESSAGES = {
     "too_large": "Files must be 5 MB or smaller.",
-    "unsupported_type": "Only PDF and Excel (.xlsx) files can be uploaded here.",
+    "unsupported_type": "Only PDF, Excel (.xlsx) and photo (PNG/JPEG) files can be uploaded here.",
     "legacy_xls": "Old Excel (.xls) files aren't supported; save it as .xlsx or CSV.",
     "encrypted_pdf": "Password-protected PDFs can't be read.",
     "unreadable_pdf": "This PDF couldn't be read.",
@@ -629,11 +629,42 @@ _EXTRACTION_MESSAGES = {
     "macro_xlsx": "Macro-enabled Excel files aren't accepted; save it as a regular .xlsx.",
     "empty_xlsx": "The first sheet of this Excel file is empty.",
     "too_slow": "This file took too long to read.",
+    "ocr_off": "Reading photos needs text recognition, which isn't switched on.",
+    "ocr_busy": "Text recognition is busy right now; please try again in a minute.",
+    "ocr_failed": "Text recognition couldn't read this file.",
+    "ocr_no_text": "No readable text was found in this scan.",
+    "unreadable_image": "This image couldn't be read.",
+    "image_too_large": "This image is too large; please send a smaller photo.",
+}
+_EXTRACTION_MESSAGES_ES = {
+    "too_large": "Los archivos deben pesar 5 MB o menos.",
+    "unsupported_type": "Solo se pueden subir archivos PDF, Excel (.xlsx) y fotos (PNG/JPEG).",
+    "legacy_xls": "Los archivos de Excel antiguos (.xls) no se admiten; guárdelo como .xlsx o CSV.",
+    "encrypted_pdf": "Los PDF protegidos con contraseña no se pueden leer.",
+    "unreadable_pdf": "No se pudo leer este PDF.",
+    "no_text_in_pdf": "Este PDF no tiene texto legible (puede ser una imagen escaneada).",
+    "unreadable_xlsx": "No se pudo leer este archivo de Excel.",
+    "unsafe_xlsx": "Este archivo de Excel fue rechazado porque se expande a un tamaño inseguro.",
+    "not_xlsx": "Este archivo no es un libro de Excel.",
+    "macro_xlsx": "No se aceptan archivos de Excel con macros; guárdelo como .xlsx normal.",
+    "empty_xlsx": "La primera hoja de este archivo de Excel está vacía.",
+    "too_slow": "Este archivo tardó demasiado en leerse.",
+    "ocr_off": "Para leer fotos se necesita el reconocimiento de texto, que no está activado.",
+    "ocr_busy": "El reconocimiento de texto está ocupado; inténtelo de nuevo en un minuto.",
+    "ocr_failed": "El reconocimiento de texto no pudo leer este archivo.",
+    "ocr_no_text": "No se encontró texto legible en este escaneo.",
+    "unreadable_image": "No se pudo leer esta imagen.",
+    "image_too_large": "Esta imagen es demasiado grande; envíe una foto más pequeña.",
+}
+OCR_NOTE = {
+    "en": "Read with text recognition. Check numbers, dates and amounts against the original.",
+    "es": "Leído con reconocimiento de texto. Compare números, fechas e importes con el original.",
 }
 
 
 @router.post("/files")
-async def extract_file(file: UploadFile, user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def extract_file(request: Request, file: UploadFile, user: dict = Depends(get_current_user),
+                       db=Depends(get_db)):
     """
     Turn a PDF or .xlsx into text the client sends back with the question.
     Nothing is stored or logged; the file is read in memory and discarded.
@@ -643,19 +674,24 @@ async def extract_file(file: UploadFile, user: dict = Depends(get_current_user),
     from starlette.concurrency import run_in_threadpool
 
     from app.lola.attachments import clean_cell
+    from app.lola import ocr
     from app.lola.file_extraction import MAX_UPLOAD_BYTES, ExtractionRejected, extract
 
     _principal(db, user)
+    lang = request_language(request)
+    messages = _EXTRACTION_MESSAGES_ES if lang == "es" else _EXTRACTION_MESSAGES
+    budget = 20 + (ocr.TIME_BUDGET_SECONDS + 5 if ocr.available() else 0)
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     name = clean_cell(file.filename or "attachment")[:255].lstrip("'") or "attachment"
     try:
-        result = await asyncio.wait_for(run_in_threadpool(extract, name, data), timeout=20)
+        result = await asyncio.wait_for(run_in_threadpool(extract, name, data), timeout=budget)
     except ExtractionRejected as exc:
-        raise HTTPException(status_code=422, detail=_EXTRACTION_MESSAGES.get(exc.code, "This file couldn't be read.")) \
-            from None
+        detail = messages.get(exc.code) or _L(lang, "This file couldn't be read.", "No se pudo leer este archivo.")
+        raise HTTPException(status_code=422, detail=detail) from None
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=422, detail=_EXTRACTION_MESSAGES["too_slow"]) from None
+        raise HTTPException(status_code=422, detail=messages["too_slow"]) from None
     finally:
         del data
     return {"name": name, "mime": result.mime, "size": len(result.text), "text": result.text,
-            "kind": result.kind, "pages": result.pages, "sheets": result.sheets, "truncated": result.truncated}
+            "kind": result.kind, "pages": result.pages, "sheets": result.sheets, "truncated": result.truncated,
+            "ocr": result.ocr, "note": OCR_NOTE[lang] if result.ocr else None}

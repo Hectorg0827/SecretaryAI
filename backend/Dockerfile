@@ -20,6 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxss1 \
     libxtst6 \
     xvfb \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-spa \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies

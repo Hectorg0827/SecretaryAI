@@ -114,6 +114,15 @@ describe('HttpLolaTransport.extractFile (PDF / Excel)', () => {
     expect((init.headers as Record<string, string>).Authorization).toMatch(/^Bearer /);
   });
 
+  it('keeps the text-recognition flag and caution for scans', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(200, {
+      name: 'scan.pdf', mime: 'text/plain', size: 9, text: 'Total 120', ocr: true,
+      note: 'Read with text recognition. Check numbers, dates and amounts against the original.' }));
+    const a = await new HttpLolaTransport().extractFile(file);
+    expect(a?.ocr).toBe(true);
+    expect(a?.note).toMatch(/Check numbers/);
+  });
+
   it('resolves null on servers without the endpoint', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
     expect(await new HttpLolaTransport().extractFile(file)).toBeNull();

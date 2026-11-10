@@ -147,7 +147,12 @@ errors and the `ToolResult` envelope are handled by the base class.
   never instructions, never stored, formulas neutralised, cross-checks only within permissions.
   PDF and Excel (.xlsx) are extracted by `POST /api/lola/files` (`app/lola/file_extraction.py`):
   in memory only, type checked by content, 5 MB cap, encrypted PDFs / legacy .xls / macro
-  workbooks / zip bombs refused, formulas never evaluated. Scanned PDFs (no text layer) need OCR (not offered).
+  workbooks / zip bombs refused, formulas never evaluated.
+* Scanned PDFs and photos (PNG/JPEG) are read by text recognition (`app/lola/ocr.py`) only when
+  `LOLA_OCR=1` and `poppler-utils` + `tesseract-ocr` (eng, spa) are installed (the backend
+  Dockerfile installs them). Bounded: 10 pages, 60 s, 2 jobs per worker, images ≤ 40 MP,
+  no shell, no secrets in the programs' environment, temp folder deleted at once. Results carry
+  `ocr: true` and a caution ("check numbers against the original") that the chat shows.
 * WS3 logistics endpoints now build their viewer from the database role via
   `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated

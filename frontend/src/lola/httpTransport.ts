@@ -151,8 +151,10 @@ export class HttpLolaTransport implements LolaTransport {
       const body = await res.json().catch(() => ({} as Record<string, unknown>));
       throw new Error(typeof body.detail === 'string' ? body.detail : `${file.name} couldn't be read.`);
     }
-    const body = await res.json() as { name: string; mime: string; size: number; text: string };
-    return { name: body.name, size: file.size, mime: body.mime, text: body.text };
+    const body = await res.json() as { name: string; mime: string; size: number; text: string; ocr?: boolean; note?: string | null };
+    const out: Attachment = { name: body.name, size: file.size, mime: body.mime, text: body.text };
+    if (body.ocr) { out.ocr = true; if (body.note) out.note = body.note; }
+    return out;
   }
 
   async approve(actionId: string): Promise<Receipt> {

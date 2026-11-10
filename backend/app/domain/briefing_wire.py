@@ -66,6 +66,8 @@ class BriefingTodayResponseV1(BaseModel):
     sections: BriefingSectionsV1
     source_coverage: Literal[
         "dashboard_snapshot_only", "dashboard_snapshot_plus_purchasing",
+        "dashboard_snapshot_plus_finance_docs",
+        "dashboard_snapshot_plus_purchasing_and_finance_docs",
     ]
     complete_digest: Literal[False]
     source_quality: Literal["partial"]

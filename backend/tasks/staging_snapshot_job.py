@@ -87,6 +87,7 @@ def run_once(*, settings=None, environ=None, db_factory=None,
             generated_by="staging_readonly_cron",
             include_finance_comparison=True,
             include_purchasing_coverage=True,
+            include_finance_document_coverage=True,
         )
         # Never log fetched customer, financial, inventory, or credential values.
         return {

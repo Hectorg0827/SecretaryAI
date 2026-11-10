@@ -58,7 +58,10 @@ export function verifiedBriefingToday(value: unknown): BriefingTodayResponseV1 |
   if (value.contract_version !== '1.0' || !nonempty(value.company_id)
     || !['owner', 'manager'].includes(String(value.audience_role))
     || !awareTimestamp(value.created_at) || !awareTimestamp(value.snapshot_generated_at)
-    || !['dashboard_snapshot_only', 'dashboard_snapshot_plus_purchasing'].includes(String(value.source_coverage))
+    || ![
+      'dashboard_snapshot_only', 'dashboard_snapshot_plus_purchasing',
+      'dashboard_snapshot_plus_finance_docs', 'dashboard_snapshot_plus_purchasing_and_finance_docs',
+    ].includes(String(value.source_coverage))
     || value.complete_digest !== false
     || value.source_quality !== 'partial' || typeof value.snapshot_age_seconds !== 'number'
     || !Number.isFinite(value.snapshot_age_seconds) || value.snapshot_age_seconds < 0

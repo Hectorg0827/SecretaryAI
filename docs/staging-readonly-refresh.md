@@ -117,3 +117,34 @@ orders or receipts, or dispatch any external action. The ordinary dashboard
 refresh remains unchanged; only the allowlisted staging cron opts into these
 additional reads. Future gates can expand coverage after verifying independent
 source quality and fine-grained role access.
+
+## Gate 5 — read-only QuickBooks sandbox AR/AP document coverage
+
+The same allowlisted staging cron now optionally issues two bounded QuickBooks
+Online **query GETs**, independently reading Invoice and Bill headers across
+the sandbox company. Pagination rejects duplicate identities and stops without
+publishing counts if more than 5,000 documents are encountered. Invoice totals,
+balances and dates must pass the existing strict QBO header normalizer; Bill
+totals, balances and dates are independently validated. The documents are
+counted as open when their observed balance is positive; overdue means a
+positive balance with a due date before the recorded `as_of` date. Missing due
+dates are shown separately instead of being silently treated as current.
+
+Only aggregate header counts enter the snapshot: examined, open, past-due,
+and open-without-due-date. Individual customer/vendor names, invoice or bill
+IDs, monetary amounts, payment information and OAuth metadata never enter
+Lola's briefing. The two sources fail independently: if AR fails, its counts
+are null/unavailable while a valid AP read can still be shown, and vice versa.
+
+No currency has been independently verified and no credits, applied payments,
+AR/AP ledger balances or actual supplier obligations have been reconciled.
+`currency_verified=false` and `ledger_reconciled=false` are enforced by a
+strict cached-data contract. A zero document count means **only** that the
+approved sandbox query returned no open records; it is not a certified real
+business zero. Both observations are stamped with provenance and shown only
+in the owner/manager `/api/briefing/today`; the complete-digest flag remains
+false. The normal production and manual dashboard refresh paths do not opt in.
+
+Separate finance-team employee roles, actual payment posting, AR statements,
+AP approvals, and email communications remain out of scope. These require
+explicit role policies and independent write-action approval gates.

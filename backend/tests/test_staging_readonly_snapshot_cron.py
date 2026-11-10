@@ -97,6 +97,7 @@ def test_single_tenant_refresh_cannot_enqueue_outbound_tasks():
         generated_by="staging_readonly_cron",
         include_finance_comparison=True,
         include_purchasing_coverage=True,
+        include_finance_document_coverage=True,
     )
 
 

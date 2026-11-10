@@ -237,6 +237,19 @@ class UnifiedDataAdapter:
             raise RuntimeError("QuickBooks Online sandbox connection unavailable")
         return await self._qb.get_bill_read_only(bill_id)
 
+    async def get_qbo_finance_document_headers_read_only(self, entity: str) -> list:
+        """Staging sandbox only; QBO invoice/bill headers for aggregate counts."""
+        from app.config import get_settings
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("Finance document coverage requires QuickBooks sandbox")
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("QuickBooks Online sandbox connection unavailable")
+        if entity == "ar":
+            return await self._qb.get_invoice_headers_read_only()
+        if entity == "ap":
+            return await self._qb.get_bill_headers_read_only()
+        raise ValueError("Unsupported finance document source")
+
     async def get_qbo_profit_loss_read_only(self, date_from: date, date_to: date) -> dict:
         """A sandbox-only, GET-only ledger report for the staging finance gate."""
         from app.config import get_settings

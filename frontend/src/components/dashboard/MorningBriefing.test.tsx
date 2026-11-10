@@ -8,6 +8,9 @@ describe('canonical Morning Briefing v1 source integrity (synthetic only)', () =
     expect(verifiedBriefingToday({
       ...fixtureBriefing(), source_coverage: 'dashboard_snapshot_plus_purchasing',
     })?.source_coverage).toBe('dashboard_snapshot_plus_purchasing');
+    expect(verifiedBriefingToday({
+      ...fixtureBriefing(), source_coverage: 'dashboard_snapshot_plus_purchasing_and_finance_docs',
+    })?.source_coverage).toBe('dashboard_snapshot_plus_purchasing_and_finance_docs');
     expect(verifiedBriefingToday({ ...fixtureBriefing(), sections: { red_alerts: [] } })).toBeNull();
     expect(verifiedBriefingToday({ ...fixtureBriefing(), source_quality: 'verified' })).toBeNull();
     expect(verifiedBriefingToday({ ...fixtureBriefing(), complete_digest: true })).toBeNull();

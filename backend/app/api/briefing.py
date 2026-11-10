@@ -25,6 +25,9 @@ from app.scheduler.finance_comparison import FinanceReportInvalid, validate_fina
 from app.scheduler.purchasing_coverage import (
     PurchasingCoverageInvalid, validate_purchasing_coverage,
 )
+from app.scheduler.finance_document_coverage import (
+    FinanceDocumentCoverageInvalid, validate_finance_document_coverage,
+)
 from app.scheduler.weekly_report import (
     WeeklyReportInvalid, WeeklyReportResponseV1, read_weekly_report,
 )
@@ -120,6 +123,12 @@ def build_owner_briefing(
             purchasing = validate_purchasing_coverage(purchasing)
         except PurchasingCoverageInvalid as exc:
             raise BriefingSourceUnavailable("Invalid purchasing evidence") from exc
+    finance_documents = payload.get("finance_document_coverage")
+    if finance_documents is not None:
+        try:
+            finance_documents = validate_finance_document_coverage(finance_documents)
+        except FinanceDocumentCoverageInvalid as exc:
+            raise BriefingSourceUnavailable("Invalid AR/AP evidence") from exc
 
     evidence = (EvidenceRef(
         source_system="dashboard_snapshot",
@@ -234,6 +243,39 @@ def build_owner_briefing(
             entry_evidence=purchasing_evidence,
             status="source_unavailable" if quality == "unavailable" else "needs_review")
 
+    if finance_documents is not None:
+        for kind, name, source_name in (
+            ("ar", "Accounts receivable", "qbo_invoice_headers"),
+            ("ap", "Accounts payable", "qbo_bill_headers"),
+        ):
+            source = finance_documents[kind]
+            quality = source["source_quality"]
+            document_evidence = (EvidenceRef(
+                source_system=source_name,
+                source_record_id=(f"{company_id}:{source_name}:"
+                                  f"{finance_documents['as_of']}"),
+                fetched_at=observed, quality=quality,
+                confidence=40 if quality == "partial" else 0,
+            ),)
+            if source["status"] == "unavailable":
+                add(f"{kind}-document-unavailable", BriefingSection.YELLOW_ALERTS,
+                    f"{name} QuickBooks sandbox document source unavailable; "
+                    "no open-balance conclusion can be drawn",
+                    entry_evidence=document_evidence, status="source_unavailable")
+            else:
+                add(f"{kind}-document-counts", BriefingSection.SCOREBOARD,
+                    f"{name} QBO sandbox headers: {source['open_count']} open, "
+                    f"{source['overdue_count']} past due, "
+                    f"{source['due_date_missing_count']} open without due date "
+                    f"({source['headers_examined']} headers examined; counts only)",
+                    entry_evidence=document_evidence)
+        # Each source may be readable independently. The note uses the
+        # trusted snapshot itself, not any unverified monetary inference.
+        add("finance-documents-uncertified", BriefingSection.YELLOW_ALERTS,
+            "AR/AP document counts are sandbox observations only; currency, "
+            "payment application and ledger reconciliation are not verified",
+            entry_evidence=evidence)
+
     briefing = RoleBriefing.project(
         company_id=company_id, audience_role=role, created_at=current,
         entries=entries,
@@ -241,8 +283,11 @@ def build_owner_briefing(
     response = briefing.to_payload()
     response.update({
         "source_coverage": (
-            "dashboard_snapshot_plus_purchasing" if purchasing is not None
-            else "dashboard_snapshot_only"
+            "dashboard_snapshot_plus_purchasing_and_finance_docs"
+            if purchasing is not None and finance_documents is not None else
+            "dashboard_snapshot_plus_purchasing" if purchasing is not None else
+            "dashboard_snapshot_plus_finance_docs" if finance_documents is not None else
+            "dashboard_snapshot_only"
         ),
         "complete_digest": False,
         "source_quality": "partial",

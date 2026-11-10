@@ -190,7 +190,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
                 raise ValueError("QBO Profit and Loss report envelope invalid")
             return payload
 
-    async def _query_all(self, entity: str, where: str = "") -> list[dict]:
+    async def _query_all(
+        self, entity: str, where: str = "", *, record_limit: int | None = None,
+    ) -> list[dict]:
         """Paginate through all results for a QBO entity."""
         results: list[dict] = []
         seen_ids: set[str] = set()
@@ -233,6 +235,8 @@ class QBOnlineAdapter(QuickBooksAdapter):
                     raise ValueError(f"QBO {entity} pagination returned duplicate Id")
                 seen_ids.add(entity_id)
             results.extend(items)
+            if record_limit is not None and len(results) > record_limit:
+                raise ValueError("QBO paginated read exceeds bounded document coverage")
 
             if len(items) < page_size:
                 break
@@ -419,6 +423,29 @@ class QBOnlineAdapter(QuickBooksAdapter):
         where = f"TxnDate >= '{date_from.isoformat()}' AND TxnDate <= '{date_to.isoformat()}'"
         raw = await self._query_all("Invoice", where)
         return [self._normalize_invoice_summary(i) for i in raw]
+
+    async def get_invoice_headers_read_only(self) -> list[Invoice]:
+        """Bounded QBO sandbox invoice headers for count-only AR visibility."""
+        raw = await self._query_all("Invoice", record_limit=5000)
+        return [self._normalize_invoice_summary(item) for item in raw]
+
+    async def get_bill_headers_read_only(self) -> list[dict]:
+        """Bounded QBO sandbox bill headers; never fetch details or issue writes."""
+        raw = await self._query_all("Bill", record_limit=5000)
+        results: list[dict] = []
+        for item in raw:
+            if any(item.get(k) in (None, "") for k in ("Id", "TxnDate", "TotalAmt", "Balance")):
+                raise ValueError("QBO bill header missing required financial fields")
+            total = decimal_field(item["TotalAmt"], "QBO Bill TotalAmt")
+            balance = decimal_field(item["Balance"], "QBO Bill Balance")
+            invoice_balance(total, balance, "QBO Bill Balance")
+            try:
+                date.fromisoformat(item["TxnDate"])
+                due = date.fromisoformat(item["DueDate"]) if item.get("DueDate") else None
+            except (TypeError, ValueError) as exc:
+                raise ValueError("QBO bill header has invalid dates") from exc
+            results.append({"id": item["Id"], "balance": balance, "due_date": due})
+        return results
 
     async def get_inventory(self) -> list[InventoryItem]:
         raw = await self._query_all("Item", "Type = 'Inventory'")

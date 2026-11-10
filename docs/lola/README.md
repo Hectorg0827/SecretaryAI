@@ -141,7 +141,9 @@ errors and the `ToolResult` envelope are handled by the base class.
   emails (`app/lola/i18n.py`, contract 1.1.0 `language`). Workstream 2 BI findings and the
   Workstream 3 logistics assistant still phrase their own detail in English, and the
   logistics assistant only understands English question wording.
-* Attachments are not read yet (notice returned; nothing is executed from them).
+* Attachments: CSV/TSV/TXT/Markdown/JSON are read as untrusted data (`app/lola/attachments.py`):
+  never instructions, never stored, formulas neutralised, cross-checks only within permissions.
+  PDF/Excel need a binary upload path (reported as unsupported).
 * WS3 logistics endpoints now build their viewer from the database role via
   `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated

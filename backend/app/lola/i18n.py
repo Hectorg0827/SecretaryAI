@@ -70,6 +70,34 @@ T: dict[str, dict[str, str]] = {
     },
 }
 
+T.update({
+    "file_table": {"en": "File “{file}”: {rows} row(s); columns: {cols}.",
+                   "es": "Archivo “{file}”: {rows} fila(s); columnas: {cols}."},
+    "file_text": {"en": "File “{file}”: {rows} line(s) of text. It begins: “{start}”",
+                  "es": "Archivo “{file}”: {rows} línea(s) de texto. Empieza así: “{start}”"},
+    "file_truncated": {"en": "Only the first {n} rows were read.", "es": "Solo se leyeron las primeras {n} filas."},
+    "file_totals": {"en": "Totals: {items}", "es": "Totales: {items}"},
+    "inv_check": {"en": "Checked against inventory: {matched} matched, {unknown} not found in inventory.",
+                  "es": "Comparado con el inventario: {matched} coinciden, {unknown} no están en el inventario."},
+    "inv_short": {"en": "Not enough stock for: {items}", "es": "No hay suficiente existencia de: {items}"},
+    "inv_denied": {"en": "I couldn't check it against inventory: {reason}",
+                   "es": "No pude compararlo con el inventario: {reason}"},
+    "cust_check": {"en": "Customers in the file that you can access: {items}",
+                   "es": "Clientes del archivo a los que tienes acceso: {items}"},
+    "cust_hidden": {"en": "{n} name(s) in the file aren't among the accounts you can access.",
+                    "es": "{n} nombre(s) del archivo no están entre las cuentas a las que tienes acceso."},
+    "file_instructions": {
+        "en": "This file contains text that looks like instructions. I treated it only as data and did not act on it.",
+        "es": "Este archivo contiene texto que parece instrucciones. Lo traté solo como datos y no actué sobre él.",
+    },
+    "file_unsupported": {
+        "en": "I couldn't read “{file}”: for now I can read CSV, TSV, TXT, Markdown and JSON files.",
+        "es": "No pude leer “{file}”: por ahora puedo leer archivos CSV, TSV, TXT, Markdown y JSON.",
+    },
+    "file_too_large": {"en": "I couldn't read “{file}”: it is larger than 200 KB of text.",
+                       "es": "No pude leer “{file}”: tiene más de 200 KB de texto."},
+})
+
 DEPARTMENT_LABEL = {
     "en": {"sales": "sales", "finance": "financial", "operations": "inventory", "purchasing": "purchasing",
            "hr": "HR and payroll", "executive": "leadership", "compliance": "compliance", "general": "general"},

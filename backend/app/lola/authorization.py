@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 
 # Data classes Lola can never hand out through a delegation.
 NON_DELEGABLE: frozenset[ResourceType] = frozenset({
-    ResourceType.HR, ResourceType.PAYROLL, ResourceType.MEMORY,
+    ResourceType.HR, ResourceType.PAYROLL, ResourceType.MEMORY, ResourceType.ATTACHMENT,
 })
 
 # Highest org level each role may hold. Prevents escalation through a
@@ -477,6 +477,11 @@ class Authorizer:
 
         if resource == ResourceType.MEMORY:
             return allow("own", Sensitivity.INTERNAL, "Personal memory")
+
+        if resource == ResourceType.ATTACHMENT:
+            # The caller's own file. Any cross-check against business data is
+            # authorised separately by the tool doing it.
+            return allow("own", Sensitivity.INTERNAL, "Your own attached file")
 
         return deny("Unknown resource")
 

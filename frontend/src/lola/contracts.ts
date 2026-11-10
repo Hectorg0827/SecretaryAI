@@ -1,6 +1,6 @@
 /**
  * Lola shared integration contracts — TypeScript mirror of
- * backend/app/lola/contracts.py (contract version 1.1.0).
+ * backend/app/lola/contracts.py (contract version 1.2.0).
  *
  * Source of truth: the Python models. JSON Schema: docs/lola/contracts.schema.json.
  * Example payloads for every status: docs/lola/examples.json.
@@ -13,7 +13,7 @@
  *  - Voice clients speak `speech`, never the raw `answer`.
  */
 
-export const LOLA_CONTRACT_VERSION = "1.1.0";
+export const LOLA_CONTRACT_VERSION = "1.2.0";
 
 export type LolaStatus =
   | "answered"
@@ -38,7 +38,7 @@ export type OrgLevel = "executive" | "department_manager" | "employee";
 
 export type ResourceType =
   | "customer_account" | "sales" | "receivables" | "inventory" | "inventory_cost" | "purchasing"
-  | "financials" | "hr" | "payroll" | "memory" | "action";
+  | "financials" | "hr" | "payroll" | "memory" | "action" | "attachment";
 
 export type RiskTier =
   | "read_only" | "draft" | "approval_required" | "routine_automation" | "high_risk" | "prohibited";
@@ -153,6 +153,15 @@ export interface LolaContext {
   built_at: string;
 }
 
+/** A small text file the client read and inlined (CSV, TSV, TXT, Markdown, JSON). Untrusted data. */
+export interface LolaAttachment {
+  name: string;
+  mime?: string;
+  size?: number;
+  /** File text; omit for binary files (Lola reports them as unsupported). */
+  text?: string | null;
+}
+
 export interface LolaRequest {
   message: string;
   conversation_id?: string | null;
@@ -163,6 +172,8 @@ export interface LolaRequest {
   allow_actions?: boolean;
   /** Answer language. "auto" (default) detects English or Spanish from the message. */
   language?: "auto" | "en" | "es";
+  /** Up to 5 files. Read as data only: never instructions, never stored. */
+  attachments?: LolaAttachment[];
 }
 
 export interface LolaResponse {

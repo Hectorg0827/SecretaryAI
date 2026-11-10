@@ -1,9 +1,9 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "1.2.0",
   "examples": {
     "answered": {
       "answer": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [
@@ -60,7 +60,7 @@
               "org_level:employee"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Assigned accounts only",
             "redacted_fields": [
               "balance",
@@ -107,7 +107,7 @@
     },
     "completed": {
       "answer": "Done and verified.",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [],
@@ -147,7 +147,7 @@
     },
     "denied": {
       "answer": "I can't share HR and payroll information with your current permissions.",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [],
@@ -171,7 +171,7 @@
               "role:sales_rep"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Payroll information is restricted",
             "redacted_fields": [],
             "resource_type": "payroll",
@@ -197,7 +197,7 @@
     },
     "failed": {
       "answer": "Your company's action policy could not be checked, so nothing was queued",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [],
@@ -217,7 +217,7 @@
     },
     "high_risk": {
       "answer": "Prepared and waiting for approval. Nothing has been sent.",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [],
@@ -243,7 +243,7 @@
               "org_level:employee"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Assigned accounts only",
             "redacted_fields": [],
             "resource_type": "customer_account",
@@ -296,7 +296,7 @@
     },
     "partial": {
       "answer": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods\nI can't share financial information with your current permissions.",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [
@@ -354,7 +354,7 @@
               "org_level:employee"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Assigned accounts only",
             "redacted_fields": [
               "balance",
@@ -404,7 +404,7 @@
               "role:sales_rep"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Financial information is restricted to finance and leadership",
             "redacted_fields": [],
             "resource_type": "receivables",
@@ -430,7 +430,7 @@
     },
     "pending_approval": {
       "answer": "Prepared and waiting for approval. Nothing has been sent.",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [
@@ -477,7 +477,7 @@
               "org_level:employee"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Assigned accounts only",
             "redacted_fields": [],
             "resource_type": "customer_account",
@@ -550,7 +550,7 @@
     },
     "unavailable": {
       "answer": "Inventory information is unavailable right now (This data source is not connected).",
-      "contract_version": "1.1.0",
+      "contract_version": "1.2.0",
       "conversation_id": "conv-0001",
       "created_at": "2026-11-09T15:00:00Z",
       "entities": [],
@@ -575,7 +575,7 @@
               "org_level:employee"
             ],
             "evaluated_at": "2026-11-09T15:00:00Z",
-            "policy_version": "1.1.0",
+            "policy_version": "1.2.0",
             "reason": "Assigned accounts only",
             "redacted_fields": [],
             "resource_type": "inventory",

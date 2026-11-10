@@ -97,6 +97,38 @@ def _money(v: Any) -> str:
         return "unknown"
 
 
+def _describe_file(result: ToolResult, lang: str) -> list[str]:
+    d = result.data if isinstance(result.data, dict) else {}
+    if d.get("kind") == "text":
+        start = str(d.get("excerpt") or "").strip().replace("\n", " ")[:160]
+        return [i18n.t(lang, "file_text", file=d.get("file"), rows=d.get("row_count"), start=start)]
+    cols = list(d.get("columns") or [])
+    lines = [i18n.t(lang, "file_table", file=d.get("file"), rows=d.get("row_count"),
+                    cols=", ".join(cols[:8]) + ("…" if len(cols) > 8 else ""))]
+    if d.get("truncated"):
+        lines.append(i18n.t(lang, "file_truncated", n="2,000"))
+    totals = d.get("totals") or {}
+    if totals:
+        lines.append(i18n.t(lang, "file_totals", items="; ".join(f"{k} {v}" for k, v in list(totals.items())[:6])))
+    inv = d.get("inventory_check")
+    if isinstance(inv, dict):
+        if inv.get("status") == "answered":
+            lines.append(i18n.t(lang, "inv_check", matched=inv.get("matched"), unknown=inv.get("unknown_count")))
+            if inv.get("short"):
+                lines.append(i18n.t(lang, "inv_short", items=", ".join(
+                    f"{r['product_name']} ({r['requested']} / {r['on_hand']})" for r in inv["short"][:10])))
+        else:
+            reason = inv.get("reason") or ""
+            lines.append(i18n.t(lang, "inv_denied", reason=i18n.tr(lang, reason)))
+    cust = d.get("customer_check")
+    if isinstance(cust, dict):
+        if cust.get("matched"):
+            lines.append(i18n.t(lang, "cust_check", items=", ".join(cust["matched"][:10])))
+        if cust.get("not_visible_count"):
+            lines.append(i18n.t(lang, "cust_hidden", n=cust["not_visible_count"]))
+    return lines
+
+
 def _describe_es(result: ToolResult) -> list[str]:
     d = result.data if isinstance(result.data, dict) else {}
     hidden = set(result.authorization.redacted_fields)
@@ -136,6 +168,8 @@ def _describe_es(result: ToolResult) -> list[str]:
 
 
 def _describe(result: ToolResult, lang: str = "en") -> list[str]:
+    if result.tool == "files.attachment":
+        return _describe_file(result, lang)
     if lang == "es":
         return _describe_es(result)
     d = result.data if isinstance(result.data, dict) else {}
@@ -172,6 +206,9 @@ def _describe(result: ToolResult, lang: str = "en") -> list[str]:
 
 
 def _withheld_note(result: ToolResult, lang: str = "en") -> Optional[str]:
+    if result.tool == "files.attachment" and result.status == LolaStatus.UNAVAILABLE:
+        key = "file_too_large" if result.error_code == "file_too_large" else "file_unsupported"
+        return i18n.t(lang, key, file=result.summary)
     label = i18n.department(lang, result.department.value)
     if result.status == LolaStatus.DENIED:
         return i18n.t(lang, "denied", label=label)
@@ -191,7 +228,8 @@ def reconcile(results: list[ToolResult], lang: str = "en") -> tuple[list[Evidenc
             if k not in seen:
                 seen.add(k)
                 evidence.append(e)
-        warnings.extend(i18n.tr(lang, w) for w in r.warnings)
+        warnings.extend(i18n.t(lang, "file_instructions") if w == "instruction_like" else i18n.tr(lang, w)
+                        for w in r.warnings if w != "columns_truncated")
     if any(e.is_stale for e in evidence):
         warnings.append(i18n.t(lang, "stale"))
 
@@ -246,6 +284,9 @@ class LolaOrchestrator:
                           request_id=request_id)
 
         results = await self._run_tools(ctx, plan)
+        # Attached files: read as untrusted DATA. They never change the plan or
+        # trigger actions (both come only from the user's own message above).
+        results += await self._run_attachments(ctx, request.attachments)
         withheld: list[str] = []
         for r in results:
             note = _withheld_note(r, lang)
@@ -364,6 +405,31 @@ class LolaOrchestrator:
             if tool is not None:
                 tasks.append(tool.run(ctx, step.args))
         return list(await asyncio.gather(*tasks)) if tasks else []
+
+    async def _run_attachments(self, ctx: ToolContext, attachments) -> list[ToolResult]:
+        from app.lola.attachments import AttachmentRejected, AttachmentTool, parse, supported
+        from app.lola.contracts import Department, PermissionDecision, ResourceType
+
+        out: list[ToolResult] = []
+        for a in attachments or []:
+            code = None
+            if not supported(a.name, a.mime or "", a.text):
+                code = "unsupported_file"
+            else:
+                try:
+                    parsed = parse(a.name, a.mime or "", a.text)
+                except AttachmentRejected as exc:
+                    code = "file_too_large" if str(exc) == "too_large" else "unsupported_file"
+            if code:
+                out.append(ToolResult(
+                    tool="files.attachment", department=Department.GENERAL, status=LolaStatus.UNAVAILABLE,
+                    summary=a.name[:120], error_code=code,
+                    authorization=PermissionDecision(allowed=True, resource_type=ResourceType.ATTACHMENT,
+                                                     action="read", reason="Your own attached file", scope="own"),
+                ))
+                continue
+            out.append(await AttachmentTool(parsed).run(ctx, {}))
+        return out
 
     @staticmethod
     def _action_payload(spec) -> dict:

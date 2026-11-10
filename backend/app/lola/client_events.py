@@ -110,11 +110,19 @@ def card_for(result: ToolResult) -> Optional[dict]:
         return {**base, "kind": "table", "title": result.tool[3:].replace("_", " ").capitalize(),
                 "columns": [{"key": "statement", "label": "Finding"}, {"key": "basis", "label": "Basis"}],
                 "rows": rows}
+    if result.tool == "files.attachment" and d.get("kind") == "table":
+        cols = [{"key": c, "label": c} for c in (d.get("columns") or [])[:12]]
+        rows = [{c["key"]: r.get(c["key"], "") for c in cols} for r in (d.get("preview") or [])]
+        return {**base, "kind": "table", "title": str(d.get("file")), "columns": cols, "rows": rows,
+                "availability_note": "Provided by you; not verified against the system of record."}
     return None  # logistics.assistant and others answer in text
 
 
 def notice_for(result: ToolResult, lang: str = "en") -> Optional[dict]:
     from app.lola import i18n
+    if result.tool == "files.attachment" and result.status == LolaStatus.UNAVAILABLE:
+        key = "file_too_large" if result.error_code == "file_too_large" else "file_unsupported"
+        return {"kind": "info", "message": i18n.t(lang, key, file=result.summary)}
     if result.status == LolaStatus.DENIED:
         msg = result.summary if lang == "en" else i18n.t(lang, "denied", label=i18n.department(lang, result.department.value))
         return {"kind": "permission_denied", "message": msg}
@@ -134,7 +142,9 @@ UI_ES: dict[str, str] = {
     "Inventory": "Inventario", "Product": "Producto", "On hand": "Existencias", "Reorder at": "Reordenar en",
     "Open purchase orders": "Órdenes de compra abiertas", "PO": "OC", "Vendor": "Proveedor",
     "Expected": "Fecha esperada", "Team": "Equipo", "Name": "Nombre", "Role": "Rol",
-    "Finding": "Hallazgo", "Basis": "Base", "To": "Para", "Subject": "Asunto", "Item": "Artículo",
+    "Finding": "Hallazgo", "Basis": "Base",
+    "Provided by you; not verified against the system of record.":
+        "Proporcionado por ti; no verificado contra el sistema de registro.", "To": "Para", "Subject": "Asunto", "Item": "Artículo",
     "Amount": "Monto", "Request": "Solicitud", "Approval": "Aprobación",
     "Missing — add before approving": "Falta — agrégalo antes de aprobar",
     "Independent leadership approval required": "Requiere aprobación independiente de la dirección",

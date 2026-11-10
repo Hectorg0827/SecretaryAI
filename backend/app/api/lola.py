@@ -365,21 +365,13 @@ async def lola_turn(body: TurnRequest, user: dict = Depends(get_current_user), d
             message=body.message, conversation_id=body.conversation_id,
             channel="voice" if body.channel == "voice" else "chat",
             client_request_id=body.client_request_id, language=body.language,
+            attachments=[{"name": a.name, "mime": a.mime, "size": a.size, "text": a.text} for a in body.attachments],
         )
         orchestrator = LolaOrchestrator(db, _adapter_for(user, db), narrator=narrator_from_env())
         resp = await orchestrator.handle(user, request, persist=body.retention.transcript != "none")
         previews = [_preview_for(db, user, r) for r in resp.receipts
                     if r.status not in (LolaStatus.COMPLETED,)]
         events = client_events.turn_events(resp, previews, suggestions=client_events.suggestions_for(resp))
-        extra: list[dict] = []
-        if body.attachments:
-            extra.append({"type": "notice", "notice": {
-                "kind": "info",
-                "message": ("Lola todavía no lee archivos adjuntos; respondí solo con tus datos del negocio."
-                            if resp.language == "es" else
-                            "Attachments aren't read by Lola yet, so I answered from your business data only.")}})
-        if extra:
-            events = events[:-1] + extra + events[-1:]
     except (AuthorizationDenied, AuthorizationUnavailable):
         events = [{"type": "error", "message": "Lola couldn't check your permissions. Nothing was executed.",
                    "retryable": True}, {"type": "done"}]

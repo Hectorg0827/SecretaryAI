@@ -151,8 +151,10 @@ export class HttpLolaTransport implements LolaTransport {
       const body = await res.json().catch(() => ({} as Record<string, unknown>));
       throw new Error(typeof body.detail === 'string' ? body.detail : `${file.name} couldn't be read.`);
     }
-    const body = await res.json() as { name: string; mime: string; size: number; text: string };
-    return { name: body.name, size: file.size, mime: body.mime, text: body.text };
+    const body = await res.json() as { name: string; mime: string; size: number; text: string; ocr?: boolean; note?: string | null };
+    const out: Attachment = { name: body.name, size: file.size, mime: body.mime, text: body.text };
+    if (body.ocr) { out.ocr = true; if (body.note) out.note = body.note; }
+    return out;
   }
 
   async approve(actionId: string): Promise<Receipt> {
@@ -177,6 +179,25 @@ export class HttpLolaTransport implements LolaTransport {
         ? `This was already ${String(r.status ?? 'processed')}. I didn’t run it again.`
         : 'Approved and handed to the execution queue. I’ll confirm once the system of record shows it — check the Audit Log for the result.',
     };
+  }
+
+  async downloadPaymentRun(receiptId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/lola/payment-runs/${encodeURIComponent(receiptId)}/file`, {
+      headers: authHeaders(),
+    }).catch(() => null);
+    if (!res) throw new Error('Couldn’t reach Lion BI. Try again when you’re back online.');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as Record<string, unknown>));
+      throw new Error(typeof body.detail === 'string' ? body.detail : `Download failed (HTTP ${res.status})`);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `payment-run-${receiptId.slice(0, 8)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async getReceipt(actionId: string): Promise<Receipt | null> {

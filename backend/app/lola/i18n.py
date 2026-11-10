@@ -141,6 +141,17 @@ MESSAGES_ES: dict[str, str] = {
         "Indícame exactamente un producto (por nombre o SKU) para esta orden de compra",
     "I couldn't match a product from your inventory": "No pude encontrar el producto en tu inventario",
     "Tell me how many units to order": "Dime cuántas unidades pedir",
+    "QuickBooks is not connected, so I can't prepare a payment run":
+        "QuickBooks no está conectado, así que no puedo preparar una corrida de pagos",
+    "Your role can't prepare supplier payment runs": "Su rol no puede preparar corridas de pagos a proveedores",
+    "The QuickBooks connection doesn't match your company": "La conexión de QuickBooks no corresponde a su empresa",
+    "Supplier bills are unavailable right now": "Las facturas de proveedores no están disponibles en este momento",
+    "No supplier bills fit in the available cash for this period":
+        "Ninguna factura de proveedor cabe en el efectivo disponible para este periodo",
+    "A supplier bill had an unreadable amount, so nothing was prepared":
+        "Una factura de proveedor tenía un importe ilegible, así que no se preparó nada",
+    "A supplier bill had incomplete details, so nothing was prepared":
+        "Una factura de proveedor tenía datos incompletos, así que no se preparó nada",
     'I found more than one possible quantity; say it once, like "20 units"':
         'Encontré más de una cantidad posible; dígala una sola vez, por ejemplo "20 unidades"',
     "This item has no readable purchase cost in QuickBooks":

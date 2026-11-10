@@ -8,6 +8,7 @@ import { api, IntegrationsResponse } from '../lib/api';
 import { BillingStatus, type BillingReturn } from '../components/BillingStatus';
 import { useAuth } from '../hooks/useAuth';
 import { TeamSection } from './TeamSection';
+import { OrgAccessSection } from './OrgAccessSection';
 import toast from 'react-hot-toast';
 
 interface Section { id: string; label: string; icon: React.ElementType; }
@@ -741,7 +742,10 @@ export function Settings() {
             <TwoFASection />
           )}
           {active === 'team' && role === 'owner' && (
-            <TeamSection />
+            <div className="space-y-5">
+              <TeamSection />
+              <OrgAccessSection />
+            </div>
           )}
           {active === 'billing' && role === 'owner' && (
             <div className="rounded-xl border border-slate-200 bg-white px-5">

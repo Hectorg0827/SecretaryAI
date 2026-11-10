@@ -118,7 +118,7 @@ errors and the `ToolResult` envelope are handled by the base class.
 1. Apply `supabase/migrations/20261109120000_lola_core.sql` (additive; adds
    `users_company_id_id_unique` if missing and four `lola_*` tables).
    Validated in CI by `scripts/validate_schema.sh` + `scripts/test_lola_core.sql`.
-2. Optional, per company: insert `lola_org_members` rows. Without a row a user
+2. Optional, per company: set up the org chart in **Settings → Team → Org & access** (owner only), which writes `lola_org_members` rows. Without a row a user
    keeps today's behaviour (owner/manager company-wide, others own-scope). A
    manager row with `org_level='department_manager'` narrows them to their
    department + reporting line.
@@ -157,8 +157,24 @@ errors and the `ToolResult` envelope are handled by the base class.
   classifier can be added behind it, but must only choose tools, never grant.
 * Memory recall scans the 200 most recent tenant rows; add a per-user index /
   query before tenants accumulate large memory volumes.
-* An admin UI/API for editing `lola_org_members` (owner-only) is not built yet;
-  rows can be managed in SQL for now.
+* ~~Admin UI for `lola_org_members`~~ Done: **Settings → Team → Org & access**
+  (owner-only; API `GET/PUT/DELETE /api/lola/org`, see below).
 * Account visibility relies on the `accounts` table (`assigned_rep_id`,
   `territory`). Customers that exist in QuickBooks but not in `accounts` are
   visible only to company-wide users (fail closed).
+
+
+## Org & access administration
+
+`backend/app/api/lola_org.py` · UI `frontend/src/pages/OrgAccessSection.tsx` · tests
+`backend/tests/test_lola_org_api.py`, `frontend/src/pages/OrgAccessSection.test.tsx`.
+
+| Rule | Enforced |
+|---|---|
+| Only an **active owner in the database** can view or change it (token role ignored) | `_require_owner` |
+| Nobody above their role: owner → executive only; manager → executive / department manager / employee; others → employee | `_ALLOWED_LEVELS` |
+| Department managers need a real department | `put_org_profile` |
+| "Reports to" is an active same-company member, never themselves, never a loop | `_creates_loop` |
+| Can't remove someone who still has people reporting to them | `delete_org_profile` |
+| Every change is audited with before/after | `lola_org_profile_updated` / `_removed` |
+| Takes effect on the person's next request (Lola re-reads it every time) | `build_principal` |

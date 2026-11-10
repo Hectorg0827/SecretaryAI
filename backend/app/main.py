@@ -326,6 +326,8 @@ app.include_router(admin_router.router,        prefix="/api/admin",          tag
 # conversational surface over every paid module.
 from app.api import lola as lola_router
 app.include_router(lola_router.router,         prefix="/api/lola",           tags=["lola"],       dependencies=_PAID)
+from app.api import lola_org as lola_org_router  # owner-only org & access administration
+app.include_router(lola_org_router.router,     prefix="/api/lola/org",       tags=["lola"],       dependencies=_PAID)
 from app.api import team as team_router
 app.include_router(team_router.router,          prefix="/api/team",           tags=["team"])
 

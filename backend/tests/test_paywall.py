@@ -139,26 +139,30 @@ def _effective_app_routes():
     return list(iter_route_contexts(app.routes))
 
 
+def _route_has_subscription_guard(context) -> bool:
+    calls = []
+    dependant = getattr(context, "dependant", None)
+    calls.extend(
+        getattr(d, "call", None)
+        for d in getattr(dependant, "dependencies", ()) or ()
+    )
+    calls.extend(
+        getattr(d, "dependency", None) or getattr(d, "call", None)
+        for d in getattr(context, "dependencies", ()) or ()
+    )
+    return any(
+        callable(fn) and "require_active_subscription" in getattr(fn, "__qualname__", "")
+        for fn in calls
+    )
+
+
 def _gated_prefixes() -> set[str]:
     """Route groups with an actual effective subscription dependency."""
-    gated = set()
-    for context in _effective_app_routes():
-        calls = []
-        dependant = getattr(context, "dependant", None)
-        calls.extend(
-            getattr(d, "call", None)
-            for d in getattr(dependant, "dependencies", ()) or ()
-        )
-        calls.extend(
-            getattr(d, "dependency", None) or getattr(d, "call", None)
-            for d in getattr(context, "dependencies", ()) or ()
-        )
-        if any(
-            callable(fn) and "require_active_subscription" in getattr(fn, "__qualname__", "")
-            for fn in calls
-        ):
-            gated.add(_group(getattr(context, "path", "")))
-    return gated
+    return {
+        _group(getattr(context, "path", ""))
+        for context in _effective_app_routes()
+        if _route_has_subscription_guard(context)
+    }
 
 # Everything a customer pays for.
 PAID = [
@@ -186,6 +190,11 @@ FREE = {
         "connector token, not a user JWT; its user-facing endpoints are gated "
         "individually — asserted by TestConnectorEndpointsSplit below"
     ),
+    "/api/team": (
+        "invitation acceptance is unauthenticated before a Manager can sign in; "
+        "owner-only invitations and membership listing require subscriptions "
+        "individually — asserted by TestTeamEndpointsSplit below"
+    ),
 }
 
 
@@ -200,13 +209,12 @@ class TestPaywallBoundary:
 
     @pytest.mark.parametrize("prefix", sorted(FREE))
     def test_free_router_is_not_gated(self, prefix):
-        if prefix == "/api/connectors":
-            # The connector router is intentionally mixed: its user-facing
-            # endpoints ARE paid, while machine calls authenticate with their
-            # own connector credential. The per-endpoint split below checks
-            # both sides; looking only at the group would hide that distinction.
+        if prefix in ("/api/connectors", "/api/team"):
+            # Both routers are intentionally mixed. Connector machine calls
+            # and invitation acceptance stay free; user-facing paid endpoints
+            # are checked separately below.
             assert prefix in _gated_prefixes(), (
-                "User-facing connector endpoints unexpectedly lost the paywall"
+                f"Paid endpoints in mixed router {prefix} lost the paywall"
             )
             return
         assert prefix not in _gated_prefixes(), (
@@ -231,6 +239,20 @@ class TestPaywallBoundary:
             f"{sorted(unclassified)}. Add each to PAID or to FREE (with a reason) "
             f"in tests/test_paywall.py, and gate it in app/main.py if it is paid."
         )
+
+
+class TestTeamEndpointsSplit:
+    """Invited Managers must activate without a subscription or existing JWT."""
+
+    def test_paid_owner_endpoints_and_free_activation(self):
+        team_routes = {
+            context.path: _route_has_subscription_guard(context)
+            for context in _effective_app_routes()
+            if _group(getattr(context, "path", "")) == "/api/team"
+        }
+        assert team_routes["/api/team/invitations"] is True
+        assert team_routes["/api/team/members"] is True
+        assert team_routes["/api/team/invitations/accept"] is False
 
 
 class TestConnectorEndpointsSplit:

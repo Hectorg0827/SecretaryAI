@@ -253,11 +253,17 @@ def test_http_routes_are_registered_and_maintain_separate_auth(setup, monkeypatc
     from fastapi.testclient import TestClient
     from app.utils.rate_limiter import login_limiter
 
-    _, _, _, sent = setup
+    db, _, _, sent = setup
     monkeypatch.setattr(login_limiter, "is_allowed", lambda *_: True)
     app = FastAPI()
     app.include_router(team.router, prefix="/api/team")
     app.dependency_overrides[team.get_current_user] = lambda: ACTOR
+    # The paid owner routes still work in billing-disabled staging, without a
+    # real subscription database or any external access during this test.
+    from app.api.deps import get_db
+    from app.middleware import subscription_guard
+    app.dependency_overrides[get_db] = lambda: db
+    monkeypatch.setattr(subscription_guard, "get_settings", lambda: SimpleNamespace(billing_enabled=False))
     client = TestClient(app)
 
     response = client.post("/api/team/invitations", json={

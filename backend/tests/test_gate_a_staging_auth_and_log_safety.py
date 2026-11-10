@@ -11,11 +11,32 @@ import pytest
 from fastapi import HTTPException
 
 from app.api import auth, dashboard
+from app.utils.log_safety import configure_safe_transport_logging
 from app.scheduler.dashboard_snapshot import (
     SnapshotPersistenceUnavailable,
     SnapshotSourceUnavailable,
     store_snapshot,
 )
+
+
+def test_http_transport_success_logging_does_not_record_oauth_token_urls(caplog):
+    """HTTPX request URLs may contain token-bearing PostgREST filters."""
+    httpx_logger = logging.getLogger("httpx")
+    httpcore_logger = logging.getLogger("httpcore")
+    original_levels = (httpx_logger.level, httpcore_logger.level)
+    try:
+        httpx_logger.setLevel(logging.INFO)
+        httpcore_logger.setLevel(logging.INFO)
+        configure_safe_transport_logging()
+        with caplog.at_level(logging.INFO):
+            httpx_logger.info("PATCH /companies?qbo_refresh_token=synthetic-secret")
+            httpcore_logger.info("PATCH /companies?qbo_refresh_token=synthetic-secret")
+        assert httpx_logger.getEffectiveLevel() >= logging.WARNING
+        assert httpcore_logger.getEffectiveLevel() >= logging.WARNING
+        assert not any("synthetic-secret" in record.getMessage() for record in caplog.records)
+    finally:
+        httpx_logger.setLevel(original_levels[0])
+        httpcore_logger.setLevel(original_levels[1])
 
 
 @pytest.mark.asyncio

@@ -61,7 +61,7 @@ export function TopBar() {
           <RefreshCw size={13} className={rotating ? 'animate-spin' : ''} />
         </button>
 
-        {agent === null ? (
+        {agent === null || (!agent.connected && !agent.last_seen) ? (
           <span className="text-xs text-slate-400">Desktop sync not configured</span>
         ) : agent.connected ? (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium">

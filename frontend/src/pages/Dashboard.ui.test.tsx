@@ -54,6 +54,13 @@ afterEach(async () => {
 });
 
 describe('dashboard summary source and reload sequence (synthetic only)', () => {
+  it('explicitly identifies stale accounting data without suggesting that reload refreshes the source', async () => {
+    mocks.summary.mockResolvedValue({ ...validSummary(), snapshot_stale: true });
+    const node = await render();
+    expect(node.querySelector('[role="alert"]')?.textContent).toContain('Stale accounting snapshot');
+    expect(node.textContent).toContain('Reloading this page does not refresh the source');
+  });
+
   it('shows unavailable instead of zero when the email count is absent', async () => {
     mocks.summary.mockResolvedValue(validSummary(null));
     const node = await render();

@@ -24,6 +24,13 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
     });
   });
 
+  it('preserves the source freshness verdict and fails closed when it is missing', () => {
+    expect(verifiedDashboardSummary({ ...validSummary(), snapshot_stale: true })?.snapshot_stale).toBe(true);
+    expect(verifiedDashboardSummary({ ...validSummary(), snapshot_stale: false })?.snapshot_stale).toBe(false);
+    expect(verifiedDashboardSummary(validSummary())?.snapshot_stale).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), snapshot_stale: 'false' })?.snapshot_stale).toBeNull();
+  });
+
   it('rejects incomplete account counts and malformed inventory instead of inventing zeros', () => {
     expect(verifiedDashboardSummary({ ...validSummary(), accounts: { healthy: 0 } })).toBeNull();
     expect(verifiedDashboardSummary({ ...validSummary(), accounts: { healthy: 5, slowing: -1, at_risk: 0, dormant: 0 } })).toBeNull();

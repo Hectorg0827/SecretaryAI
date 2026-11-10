@@ -18,10 +18,14 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   owner: new Set([
     'view_all', 'manage_users', 'approve_actions', 'manage_billing',
     'view_financials', 'trigger_actions', 'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   manager: new Set([
     'view_all', 'approve_actions', 'trigger_actions', 'view_financials',
     'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   sales_rep: new Set([
     'view_own_accounts', 'view_inventory',
@@ -55,7 +59,9 @@ export function parseJwtRole(token: string): string {
 /** Pure permission check, shared by useAuth and Lola (no React needed). */
 export function roleHasPermission(role: Role, permission: string): boolean {
   const perms = ROLE_PERMISSIONS[role] ?? ROLE_PERMISSIONS.viewer;
-  return perms.has(permission) || perms.has('view_all');
+  // Match the server's exact RBAC check. "view_all" is a read scope,
+  // never permission to administer billing, users or credentials.
+  return perms.has(permission);
 }
 
 /** Resolve the current role from the stored JWT (UI gating only). */
@@ -69,7 +75,6 @@ export function useAuth() {
   // Source of truth: the signed JWT token — not the writable localStorage.secretary_role
   const role = currentRole();
 
-  // view_all is a super-permission (owner + manager bypass all checks)
   function hasPermission(permission: string): boolean {
     return roleHasPermission(role, permission);
   }

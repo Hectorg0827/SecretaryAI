@@ -29,6 +29,10 @@ QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
 
+class QBOReportAuthenticationUnavailable(RuntimeError):
+    """The read-only sandbox report could not obtain valid OAuth credentials."""
+
+
 class QBOnlineAdapter(QuickBooksAdapter):
     def __init__(
         self,
@@ -161,6 +165,42 @@ class QBOnlineAdapter(QuickBooksAdapter):
 
             response.raise_for_status()
             return response.json()
+
+    async def get_profit_loss_report_read_only(
+        self, date_from: date, date_to: date,
+    ) -> dict:
+        """GET the QBO accrual Profit & Loss report; never issue an entity POST.
+
+        The report is an independent ledger-oriented comparison source, not a
+        certification that invoice headers and recognized revenue must match.
+        """
+        if not isinstance(date_from, date) or not isinstance(date_to, date) or date_from >= date_to:
+            raise ValueError("Profit and Loss requires an increasing date window")
+        url = f"{self._base_url}/{self._realm_id}/reports/ProfitAndLoss"
+        params = {
+            "start_date": date_from.isoformat(),
+            "end_date": date_to.isoformat(),
+            "accounting_method": "Accrual",
+            "summarize_column_by": "Total",
+            "minorversion": "70",
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(url, params=params, headers=self._headers())
+            if response.status_code == 401:
+                try:
+                    await self._refresh_access_token()
+                except Exception:
+                    # Report diagnostics must distinguish an OAuth refresh
+                    # failure from a bad P&L query without exposing token data.
+                    raise QBOReportAuthenticationUnavailable(
+                        "QuickBooks sandbox authorization unavailable"
+                    ) from None
+                response = await client.get(url, params=params, headers=self._headers())
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or "Fault" in payload:
+                raise ValueError("QBO Profit and Loss report envelope invalid")
+            return payload
 
     async def _query_all(self, entity: str, where: str = "") -> list[dict]:
         """Paginate through all results for a QBO entity."""

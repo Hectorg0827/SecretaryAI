@@ -84,6 +84,7 @@ export function Sidebar({
   }, []);
 
   const connected = agent?.connected ?? false;
+  const agentConfigured = Boolean(agent?.last_seen);
   const visibleItems = ALL_NAV_ITEMS.filter((item) => (item.roles as readonly string[]).includes(role));
 
   return (
@@ -182,7 +183,7 @@ export function Sidebar({
           connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-300',
         )}>
           {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
-          <span>{connected ? 'Agent online' : 'Agent offline'}</span>
+          <span>{connected ? 'Agent online' : agentConfigured ? 'Agent offline' : 'Agent not configured'}</span>
           {connected && (
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           )}

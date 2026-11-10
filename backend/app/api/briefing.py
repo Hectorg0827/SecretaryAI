@@ -21,6 +21,7 @@ from app.domain.briefing_contract import (
 )
 from app.domain.briefing_wire import BriefingTodayResponseV1
 from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness, SnapshotReadUnavailable
+from app.scheduler.finance_comparison import FinanceReportInvalid, validate_finance_comparison
 from app.scheduler.weekly_report import (
     WeeklyReportInvalid, WeeklyReportResponseV1, read_weekly_report,
 )
@@ -103,6 +104,13 @@ def build_owner_briefing(
     if type(unassessed) is not int or unassessed < 0:
         raise BriefingSourceUnavailable("Invalid inventory coverage")
 
+    finance = payload.get("finance_comparison")
+    if finance is not None:
+        try:
+            finance = validate_finance_comparison(finance)
+        except FinanceReportInvalid as exc:
+            raise BriefingSourceUnavailable("Invalid financial comparison evidence") from exc
+
     evidence = (EvidenceRef(
         source_system="dashboard_snapshot",
         source_record_id=f"{company_id}:dashboard_summary:{observed.isoformat()}",
@@ -111,11 +119,12 @@ def build_owner_briefing(
     scope = frozenset({"owner", "manager"})
     entries: list[DigestEntry] = []
 
-    def add(key: str, section: BriefingSection, title: str) -> None:
+    def add(key: str, section: BriefingSection, title: str, *,
+            entry_evidence=None, status: str = "needs_review") -> None:
         entries.append(DigestEntry(
             company_id=company_id, entry_id=key, section=section,
-            title=title, role_scope=scope, evidence=evidence,
-            detected_at=observed, status="needs_review",
+            title=title, role_scope=scope, evidence=entry_evidence or evidence,
+            detected_at=observed, status=status,
         ))
 
     if counts["at_risk"] or counts["dormant"] or critical:
@@ -134,6 +143,34 @@ def build_owner_briefing(
     add("aggregate-scoreboard", BriefingSection.SCOREBOARD,
         f"Last 30-day sales in snapshot: {float(sales):.2f} "
         f"across {classified} classified accounts{unscored} (source not independently verified)")
+
+    if finance is not None:
+        source_quality = finance["source_quality"]
+        finance_evidence = (EvidenceRef(
+            source_system="qbo_profit_loss",
+            source_record_id=(f"{company_id}:ProfitAndLoss:"
+                              f"{finance['window_start']}:{finance['window_end']}"),
+            fetched_at=_snapshot_time(finance["fetched_at"]) if source_quality == "partial" else observed,
+            quality=source_quality,
+            confidence=50 if source_quality == "partial" else 0,
+        ),)
+        if finance["status"] == "unavailable":
+            add("ledger-comparison-unavailable", BriefingSection.YELLOW_ALERTS,
+                "QuickBooks accrual Profit & Loss unavailable; invoice sales cannot be compared to ledger income",
+                entry_evidence=finance_evidence, status="source_unavailable")
+        else:
+            currency = finance["currency"]
+            add("ledger-income-comparison", BriefingSection.SCOREBOARD,
+                f"QBO accrual income {currency} {finance['ledger_income_total']} vs "
+                f"invoice headers {currency} {finance['invoice_headers_total']} "
+                "(30 days; comparison only, not financially certified)",
+                entry_evidence=finance_evidence)
+            if finance["status"] == "variance_detected":
+                add("ledger-income-variance", BriefingSection.YELLOW_ALERTS,
+                    f"QBO income minus invoice headers: {currency} "
+                    f"{finance['variance_ledger_minus_invoices']}; review credits, "
+                    "sales receipts, taxes, and journal entries before relying on revenue",
+                    entry_evidence=finance_evidence)
 
     briefing = RoleBriefing.project(
         company_id=company_id, audience_role=role, created_at=current,

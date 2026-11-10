@@ -14,6 +14,7 @@ from tasks.base import (
     get_supabase, get_active_companies, build_adapter, task_lock, locked_task,
 )
 from app.scheduler.dashboard_snapshot import compute_dashboard_payload, store_snapshot
+from app.scheduler.finance_comparison import compare_invoice_headers_to_qbo_income
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 def refresh_company_snapshot(
     company_id: str, *, db, companies, adapter_factory,
     generated_by: str = "manual_dashboard_refresh",
+    include_finance_comparison: bool = False,
 ) -> dict:
     """Purely read from the provider; persist one tenant-scoped dashboard snapshot."""
     if not isinstance(company_id, str) or not company_id.strip():
@@ -33,7 +35,19 @@ def refresh_company_snapshot(
     # Without a DB the adapter cannot read inventory sell rates, so no item
     # would ever be assessed; request-time adapters attach it the same way.
     adapter.set_db(db)
-    payload = asyncio.run(compute_dashboard_payload(adapter))
+
+    async def collect() -> dict:
+        payload = await compute_dashboard_payload(adapter)
+        if include_finance_comparison:
+            # This optional cross-check is only enabled by the hard-gated
+            # single-company staging cron. A failed P&L read is exposed as
+            # unavailable evidence, not as a verified $0 ledger report.
+            payload["finance_comparison"] = await compare_invoice_headers_to_qbo_income(
+                adapter, payload["sales_30d"]
+            )
+        return payload
+
+    payload = asyncio.run(collect())
     store_snapshot(
         db, company_id, "dashboard_summary", payload,
         generated_by=generated_by,

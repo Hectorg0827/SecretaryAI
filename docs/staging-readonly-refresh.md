@@ -39,3 +39,31 @@ The executable also checks Railway's injected project, environment ID, and envir
 Rollback: disable the cron schedule or scale down/stop only the dedicated snapshot service. Leave Backend, Web, and Redis unchanged; the Manager UI will truthfully warn when the last snapshot ages out.
 
 Limitations: An online connector can produce syntactically valid but incomplete sandbox data. The stored snapshot intentionally remains `source_quality=partial`; source-level revenue reconciliation and complete executive-digest validation are separate gates.
+
+## Gate 3 — read-only financial comparison
+
+The same isolated staging cron now optionally performs one additional **GET**
+against QuickBooks Online sandbox: `reports/ProfitAndLoss` with a 30-day explicit
+window, `accounting_method=Accrual`, and `summarize_column_by=Total`. It extracts
+the top-level `Income` section's `Total Income` only if the returned report
+name, period, accounting basis, currency and total column are unambiguous.
+
+- The existing `sales_30d` measures nonvoid invoice-header totals. P&L income
+  measures a different accounting concept and may include sales receipts, credit
+  memos, journal entries and other adjustments. A match **never** certifies
+  revenue, and a difference is a review signal, not a proof of corruption.
+- The `dashboard_summary` payload contains `finance_comparison` with statuses
+  `aligned_not_certified`, `variance_detected`, or `unavailable`, explicit
+  dates/currency/source, and `comparison_is_reconciliation=false`.
+- If the report fails or is malformed, the cron still retains the completed
+  basic snapshot but marks finance `unavailable` and stores **no fabricated
+  ledger income**. The executive briefing shows an unavailable evidence warning.
+- Finance evidence appears only for roles that can view financials. The
+  six-section briefing continues to show `complete_digest=false` and
+  `source_quality=partial`.
+
+Acceptance: verify the latest staging snapshot includes the non-certified
+comparison object and the Manager briefing reports its availability or variance
+accurately. Never set a financial `verified` flag based solely on these two
+aggregates. The next gate must independently reconcile credits, sales receipts,
+adjustments, tax treatment, currency and source transaction completeness.

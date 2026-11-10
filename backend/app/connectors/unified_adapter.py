@@ -237,6 +237,15 @@ class UnifiedDataAdapter:
             raise RuntimeError("QuickBooks Online sandbox connection unavailable")
         return await self._qb.get_bill_read_only(bill_id)
 
+    async def get_qbo_profit_loss_read_only(self, date_from: date, date_to: date) -> dict:
+        """A sandbox-only, GET-only ledger report for the staging finance gate."""
+        from app.config import get_settings
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("Finance comparison requires QuickBooks sandbox")
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("QuickBooks Online sandbox connection unavailable")
+        return await self._qb.get_profit_loss_report_read_only(date_from, date_to)
+
     async def get_purchase_orders(self) -> list[PurchaseOrder]:
         if not self._qb:
             raise RuntimeError("No QB connector configured")

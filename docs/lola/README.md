@@ -139,9 +139,8 @@ errors and the `ToolResult` envelope are handled by the base class.
 
 * Lola answers in English only (Spanish UI/voice input works; answers get an info notice).
 * Attachments are not read yet (notice returned; nothing is executed from them).
-* WS3 logistics endpoints other than Lola's tool still build their viewer from the
-  JWT role (short-lived tokens; role is reloaded on refresh). Moving them onto
-  `logistics_viewer_for` is a follow-up.
+* WS3 logistics endpoints now build their viewer from the database role via
+  `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated
   executor — see `EXECUTION.md`. Every switch is off by default.
 * WS3 approved stock postings / claims and WS2 AP payment proposals still have no
@@ -150,9 +149,8 @@ errors and the `ToolResult` envelope are handled by the base class.
 * Lola emails and purchase orders run through the durable queue and a gated
   executor (`EXECUTION.md`). Until an operator turns the switches on, approving
   returns "not enabled — nothing was approved or sent".
-* Legacy `/api/chat` still shows balances of a rep's *own* accounts (record
-  scope is fixed; attribute redaction is not). Recommended: move clients to
-  `/api/lola/ask`.
+* Legacy `/api/chat` now applies record scope AND attribute redaction (balances,
+  costs, margins hidden without financial access; shown as "withheld").
 * Intent detection is rule-based (deterministic and injection-proof). An LLM
   classifier can be added behind it, but must only choose tools, never grant.
 * Memory recall scans the 200 most recent tenant rows; add a per-user index /

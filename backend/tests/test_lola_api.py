@@ -184,3 +184,41 @@ class TestLegacyChatRepair:
         # Only the rep's two accounts are counted (the company has four).
         assert "(2 total)" in captured["summary"]
         assert "Cedar" not in captured["summary"] and "Bravo" not in captured["summary"]
+
+
+class TestLegacyChatFinancialRedaction:
+    """The old /api/chat pipeline hides balances from callers without financial access."""
+
+    def _summary(self, client, uid, role):
+        from app.api.deps import get_adapter
+        captured = {}
+
+        async def fake_stream(message, history, data_summary, company_context, *a, **k):
+            captured["summary"] = data_summary
+            yield "ok"
+
+        async def fake_intent(message, *a, **k):
+            return "account_status"
+
+        app.dependency_overrides[get_adapter] = lambda: FakeAdapter()
+        with patch("app.api.chat.stream_chat", fake_stream), patch("app.api.chat.classify_intent", fake_intent):
+            r = client.post("/api/chat/message", json={"message": "how is acme foods doing?"},
+                            headers=token(uid, role))
+            r.read()
+        assert r.status_code == 200
+        return captured["summary"]
+
+    def test_rep_sees_withheld_not_balance(self, db, client):
+        s = self._summary(client, REP1, "sales_rep")
+        assert "Acme Foods" in s and "withheld" in s
+        assert "1,200.00" not in s and "$0.00" not in s
+
+    def test_owner_still_sees_balance(self, db, client):
+        s = self._summary(client, OWNER, "owner")
+        assert "Outstanding balance: $1,200.00" in s
+
+    def test_redaction_is_deep(self):
+        from app.api.chat import _redact_financial_fields
+        out = _redact_financial_fields({"account": {"name": "A", "current_balance": 5},
+                                        "items": [{"sku": "x", "purchase_cost": 2, "margin": 1}]})
+        assert out == {"account": {"name": "A"}, "items": [{"sku": "x"}]}

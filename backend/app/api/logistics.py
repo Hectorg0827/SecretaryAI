@@ -1861,8 +1861,27 @@ from app.intelligence.wholesale_distribution.logistics.visibility import (
 )
 
 
-def _viewer(user: dict) -> LogisticsViewer:
-    v = LogisticsViewer.from_user(user)
+def _viewer(user: dict, db) -> LogisticsViewer:
+    """Viewer from the CURRENT database role and Lola's account scope.
+
+    The token only identifies the user; role, financial access and a sales
+    rep's customers are re-read from the database on every request, so a
+    demoted or deactivated user loses access immediately (not at token expiry).
+    """
+    from app.lola.authorization import (
+        AuthorizationDenied, AuthorizationUnavailable, Authorizer, build_principal,
+    )
+    from app.lola.integrations import logistics_viewer_for
+    try:
+        principal = build_principal(db, str(user.get("company_id") or ""), str(user.get("sub") or ""),
+                                    include_delegations=False)
+    except AuthorizationDenied:
+        raise HTTPException(status_code=403, detail="Your account is not active for this company") from None
+    except AuthorizationUnavailable:
+        raise HTTPException(status_code=503, detail="Authorization temporarily unavailable") from None
+    v = logistics_viewer_for(principal, Authorizer(principal, db))
+    # Server-issued shipment assignments for logistics staff (optional claim).
+    v.assigned_shipment_ids = set(user.get("assigned_shipment_ids") or [])
     try:
         v.require_access()
     except LogisticsAccessDenied:
@@ -1870,8 +1889,8 @@ def _viewer(user: dict) -> LogisticsViewer:
     return v
 
 
-def _operator(user: dict) -> LogisticsViewer:
-    v = _viewer(user)
+def _operator(user: dict, db) -> LogisticsViewer:
+    v = _viewer(user, db)
     if not v.can_operate:
         raise HTTPException(status_code=403, detail="Logistics operations require logistics or management access")
     return v
@@ -2026,7 +2045,7 @@ async def record_journey_event(
     user id) or unverified sources (``email_parsed``, ``ai_inferred``,
     ``manual_note``).  Machine sources come only through connectors.
     """
-    _operator(user)
+    _operator(user, db)
     try:
         source = SourceType(request.source)
     except ValueError:
@@ -2051,7 +2070,7 @@ async def list_journey_shipments(
     db=Depends(get_db),
 ):
     """Shipments this user may see, summarised for their role."""
-    viewer = _viewer(user)
+    viewer = _viewer(user, db)
     ledger = _load_ledger(user, db)
     out = []
     for s in viewer.visible(ledger.shipments()):
@@ -2074,7 +2093,7 @@ async def get_journey_shipment(
     db=Depends(get_db),
 ):
     """Full 14-stage view of one shipment, projected for the caller's role."""
-    viewer = _viewer(user)
+    viewer = _viewer(user, db)
     ledger = _load_ledger(user, db)
     s = ledger.get(shipment_id)
     if s is None or not viewer.can_see_shipment(s):
@@ -2088,7 +2107,7 @@ async def get_landed_cost(
     user: dict = Depends(get_current_user),
     db=Depends(get_db),
 ):
-    viewer = _viewer(user)
+    viewer = _viewer(user, db)
     if not viewer.can_view_commercial:
         raise HTTPException(status_code=403, detail="Landed cost requires financial access")
     ledger = _load_ledger(user, db)
@@ -2106,7 +2125,7 @@ async def confirm_journey_evidence(
     db=Depends(get_db),
 ):
     """A named person promotes an unverified report (email / AI / document) to a verified fact."""
-    _operator(user)
+    _operator(user, db)
     ledger = _load_ledger(user, db)
     try:
         return ledger.confirm_evidence(evidence_id, confirmed_by=user["sub"],
@@ -2128,7 +2147,7 @@ async def ingest_document(
     values are evidence: unless ``reviewed`` is true (you vouch for the
     document) any milestone it suggests stays unverified.
     """
-    _operator(user)
+    _operator(user, db)
     ledger = _load_ledger(user, db)
     di = DocumentIntelligence()
     doc, events = di.process(request.text, ledger, doc_id=request.doc_id, hint=request.hint,
@@ -2150,7 +2169,7 @@ async def reconcile_receipt(
     to quarantine; every stock posting and claim is queued for approval via
     the PolicyEngine + ApprovalQueue.  Nothing is posted or sent.
     """
-    viewer = _operator(user)
+    viewer = _operator(user, db)
     ledger = _load_ledger(user, db)
     shipment = ledger.get(request.shipment_id)
     if shipment is None or not viewer.can_see_shipment(shipment):
@@ -2216,7 +2235,7 @@ async def logistics_monitor(
     db=Depends(get_db),
 ):
     """Prioritized logistics alerts with recommended actions and reviewable drafts (never sent)."""
-    viewer = _viewer(user)
+    viewer = _viewer(user, db)
     ledger = _load_ledger(user, db)
     alerts = LogisticsMonitor(ledger).scan(_as_of(as_of))
     visible = viewer.filter_alerts(alerts, {s.shipment_id: s for s in ledger.shipments()})
@@ -2233,7 +2252,7 @@ async def ask_lola_logistics(
     Answer a logistics question from verified ledger data, scoped to the
     caller's role.  Callable as a tool by the chat orchestrator.
     """
-    viewer = _viewer(user)
+    viewer = _viewer(user, db)
     ledger = _load_ledger(user, db)
     return LogisticsAssistant(ledger, viewer).ask(request.question, as_of=_as_of(request.as_of)).to_dict()
 

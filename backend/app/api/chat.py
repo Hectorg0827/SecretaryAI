@@ -271,6 +271,16 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
     return data
 
 
+def _redact_financial_fields(value):
+    """Drop balance/cost/margin fields at any depth (Lola's FINANCIAL_FIELDS)."""
+    from app.lola.authorization import FINANCIAL_FIELDS
+    if isinstance(value, dict):
+        return {k: _redact_financial_fields(v) for k, v in value.items() if k not in FINANCIAL_FIELDS}
+    if isinstance(value, list):
+        return [_redact_financial_fields(v) for v in value]
+    return value
+
+
 def _qty_to_status(item: dict) -> str:
     """Map weeks_of_stock to a status string."""
     wks = _weeks_remaining(item)
@@ -345,6 +355,9 @@ async def send_message(
 
     # 3. Fetch real data for the intent
     data = await _fetch_data_for_intent(intent, request.message, adapter)
+    # Attribute level: balances, costs and margins only for financial access.
+    if not lola_auth.p.has_financial_access:
+        data = _redact_financial_fields(data)
     data_summary = build_query_context(intent, data)
 
     # 4. Build company context for system prompt

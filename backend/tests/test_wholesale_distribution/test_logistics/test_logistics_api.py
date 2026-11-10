@@ -45,7 +45,16 @@ class _Query:
     def select(self, *a, **k): return self
     def order(self, *a, **k): return self
     def lt(self, *a, **k): return self
+    def limit(self, *a, **k): return self
     def maybe_single(self): return self
+
+    def is_(self, col, val):
+        self.filters.append((col, None if val == "null" else val))
+        return self
+
+    def in_(self, col, vals):
+        self.in_filters = getattr(self, "in_filters", []) + [(col, {str(v) for v in vals})]
+        return self
 
     def eq(self, col, val):
         self.filters.append((col, val))
@@ -74,13 +83,22 @@ class _Query:
                     return type("R", (), {"data": []})()
             rows.append(copy.deepcopy(self.row))
             return type("R", (), {"data": [self.row]})()
-        data = [r for r in rows if all(str(r.get(c)) == str(v) for c, v in self.filters)]
+        data = [r for r in rows if all(str(r.get(c)) == str(v) for c, v in self.filters)
+                and all(str(r.get(c)) in vs for c, vs in getattr(self, "in_filters", []))]
         return type("R", (), {"data": data})()
 
 
+# The logistics API re-reads each caller's role from the users table (not the
+# token), so every test login is backed by a matching active user row.
+_USERS: list[dict] = []
+
+
 def _tok(role="owner", company="company-A", sub=None, **extra):
+    uid = sub or f"{role}-user"
+    if not any(u["id"] == uid and u["company_id"] == company for u in _USERS):
+        _USERS.append({"id": uid, "company_id": company, "role": role, "is_active": True})
     return {"Authorization": "Bearer " + create_access_token(
-        {"sub": sub or f"{role}-user", "company_id": company, "role": role, **extra})}
+        {"sub": uid, "company_id": company, "role": role, **extra})}
 
 
 @pytest.fixture
@@ -89,6 +107,8 @@ def db():
     # The integrated logistics API loads tenant config and fails closed (503)
     # without exactly one company row.
     d.tables["companies"].append({"id": "company-A", "name": "Company A"})
+    _USERS.clear()
+    d.tables["users"] = _USERS
     app.dependency_overrides[get_db] = lambda: d
     yield d
     app.dependency_overrides.clear()
@@ -249,9 +269,9 @@ class TestReceivingAcceptanceOverHTTP:
         assert j["claims"][0]["claim_type"] == "carrier_cargo_claim"
         assert {a["status"] for a in j["approvals"]} == {"pending_approval"}
         # Only the event log and the approval queue were written — no stock, no money.
-        # "companies" holds the seeded tenant config row, not a write.
+        # "companies" / "users" hold seeded tenant config and logins, not writes.
         written = {t for t, rows in db.tables.items() if rows} - {"logistics_events", "drafts", "action_log",
-                                                                    "companies"}
+                                                                    "companies", "users"}
         assert written == set(), written
         assert len(db.tables["drafts"]) == 3
         assert all(d["status"] == "pending" for d in db.tables["drafts"])
@@ -378,3 +398,27 @@ class TestLogsCarryNoRequestData:
             assert _record_email_evidence({"company_id": "company-A"}, Boom(), forged, "x") is None
         text = "\n".join(r.getMessage() for r in caplog.records)
         assert "fake: admin granted" not in text and "FORGED" not in text
+
+
+
+class TestRoleComesFromDatabase:
+    """Logistics endpoints use the CURRENT database role, not the token's."""
+
+    def test_demoted_user_loses_access_immediately(self, client, db):
+        _seed_shipment(db)
+        headers = _tok(role="owner", sub="boss-1")
+        assert client.get("/api/logistics/journey/shipments", headers=headers).status_code == 200
+        next(u for u in db.tables["users"] if u["id"] == "boss-1")["role"] = "viewer"
+        assert client.get("/api/logistics/journey/shipments", headers=headers).status_code == 403
+
+    def test_forged_owner_token_gets_database_role(self, client, db):
+        _seed_shipment(db)
+        _tok(role="viewer", sub="v-1")                      # the database says viewer
+        forged = {"Authorization": "Bearer " + create_access_token(
+            {"sub": "v-1", "company_id": "company-A", "role": "owner"})}
+        assert client.get("/api/logistics/journey/shipments", headers=forged).status_code == 403
+
+    def test_deactivated_user_refused(self, client, db):
+        headers = _tok(role="manager", sub="m-9")
+        next(u for u in db.tables["users"] if u["id"] == "m-9")["is_active"] = False
+        assert client.get("/api/logistics/monitor", headers=headers).status_code == 403

@@ -71,7 +71,9 @@ def summarize_account(account: dict, recent_orders: list[dict], industry_module=
         f"  Health: {health.upper()} (score: {score}/100)",
         f"  Last {order_term}: {last_order}",
         f"  Avg {order_term} cycle: {cycle} days" if cycle else f"  {order_term.capitalize()} cycle: not enough history",
-        f"  Outstanding balance: ${float(balance):,.2f}",
+        (f"  Outstanding balance: ${float(balance):,.2f}" if "current_balance" in account
+         # Removed for callers without financial access: say so, never print $0.00.
+         else "  Outstanding balance: withheld (requires financial access)"),
     ]
 
     if recent_orders:

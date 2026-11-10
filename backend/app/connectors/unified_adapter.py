@@ -228,6 +228,15 @@ class UnifiedDataAdapter:
             raise RuntimeError("No QB connector configured")
         return await self._qb.get_inventory()
 
+    async def get_qbo_bill_read_only(self, bill_id: str) -> dict:
+        """Sandbox-only candidate match data; accounting entries stay untouched."""
+        from app.config import get_settings
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("QuickBooks Bill comparison requires sandbox")
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("QuickBooks Online sandbox connection unavailable")
+        return await self._qb.get_bill_read_only(bill_id)
+
     async def get_purchase_orders(self) -> list[PurchaseOrder]:
         if not self._qb:
             raise RuntimeError("No QB connector configured")

@@ -388,6 +388,18 @@ class QBOnlineAdapter(QuickBooksAdapter):
         raw = await self._query_all("PurchaseOrder")
         return [self._normalize_purchase_order(p) for p in raw]
 
+    async def get_bill_read_only(self, bill_id: str) -> dict:
+        """Fetch one QBO Bill. Never invokes create/update/delete endpoints."""
+        if not isinstance(bill_id, str) or not bill_id.isascii() or not bill_id.isdigit():
+            raise ValueError("QBO Bill ID must be numeric")
+        result = await self._get_entity("bill", bill_id)
+        if not isinstance(result, dict) or not isinstance(result.get("Bill"), dict):
+            raise ValueError("QBO Bill response missing Bill")
+        bill = result["Bill"]
+        if str(bill.get("Id")) != bill_id:
+            raise ValueError("QBO Bill identifier mismatch")
+        return bill
+
     async def test_connection(self) -> bool:
         try:
             await self._query("SELECT COUNT(*) FROM Customer")

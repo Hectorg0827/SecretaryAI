@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -325,7 +326,47 @@ class DurablePORequest(BaseModel):
     lines: list[DurablePOLine] = Field(min_length=1, max_length=100)
 
 
-from decimal import Decimal, InvalidOperation
+class ProvisionalPOCostLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sku: str = Field(min_length=1, max_length=120)
+    qty_ordered: int = Field(strict=True, gt=0, le=10000000)
+    unit_cost: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+
+    @field_validator("unit_cost", mode="before")
+    @classmethod
+    def require_exact_unit_cost(cls, value):
+        if type(value) not in (str, int, Decimal):
+            raise ValueError("Unit cost must be an exact decimal amount")
+        return value
+
+
+class ProvisionalPOCostRequest(BaseModel):
+    """Finance assumptions, not validated invoices or journal entries."""
+    model_config = ConfigDict(extra="forbid")
+    assessment_key: str = Field(min_length=1, max_length=150)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    fx_rate_to_usd: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+    landed_cost_total: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    lines: list[ProvisionalPOCostLine] = Field(min_length=1, max_length=100)
+
+    @field_validator("landed_cost_total", "fx_rate_to_usd", mode="before")
+    @classmethod
+    def require_exact_finance_amount(cls, value):
+        if type(value) not in (str, int, Decimal):
+            raise ValueError("Finance amounts require explicit decimal values")
+        return value
+
+    @model_validator(mode="after")
+    def require_unique_cost_lines_and_explicit_fx(self):
+        if len({line.sku for line in self.lines}) != len(self.lines):
+            raise ValueError("Each ordered SKU needs one cost line")
+        if self.currency == "USD" and self.fx_rate_to_usd != 1:
+            raise ValueError("USD exchange rate must equal 1")
+        if self.landed_cost_total and not any(line.unit_cost for line in self.lines):
+            raise ValueError("Landed cost cannot be apportioned without goods costs")
+        return self
+
+
 class PurchasingEvidenceClaimRequest(BaseModel):
     evidence_key: str = Field(min_length=1, max_length=150)
     document_type: Literal[
@@ -958,6 +999,136 @@ async def approve_staged_receipt_and_post_inventory(
         "p_staged_receipt_id": str(staged_receipt_id),
         "p_actor": user["sub"],
     })
+
+
+# ─── Provisional purchasing finance (no accounting writes) ───────────────────
+
+@router.post("/orders/{po_number}/finance/assessments", status_code=201)
+async def record_provisional_po_cost_assessment(
+    po_number: str,
+    request: ProvisionalPOCostRequest,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Capture one immutable cost claim for a PO; DB checks actual PO quantities."""
+    _require_purchasing_employee(user)
+    return _execute_purchasing_rpc(db, "record_provisional_purchasing_cost_assessment", {
+        "p_company_id": user["company_id"], "p_po_number": po_number,
+        "p_assessment_key": request.assessment_key, "p_currency": request.currency,
+        "p_fx_rate_to_usd": str(request.fx_rate_to_usd),
+        "p_landed_cost_total": str(request.landed_cost_total),
+        "p_lines": [line.model_dump(mode="json") for line in request.lines],
+        "p_actor": user["sub"],
+    })
+
+
+def _load_finance_assessment(db, company_id: str, assessment_id: UUID) -> tuple[dict, dict, list[dict]]:
+    assessments = _read_purchasing_rows(
+        db.table("purchasing_cost_assessments")
+        .select("id,po_id,assessment_key,currency,fx_rate_to_usd,landed_cost_total,lines,"
+                "assertion_status,created_by,created_at")
+        .eq("company_id", company_id).eq("id", str(assessment_id)).limit(2)
+    )
+    if not assessments:
+        raise HTTPException(status_code=404, detail="Cost assessment not found")
+    if len(assessments) != 1:
+        raise HTTPException(status_code=503, detail="Ambiguous finance assessment")
+    assessment = assessments[0]
+    orders = _read_purchasing_rows(
+        db.table("purchasing_orders").select("id,po_number,supplier_ref,status")
+        .eq("company_id", company_id).eq("id", assessment["po_id"]).limit(2)
+    )
+    if len(orders) != 1:
+        raise HTTPException(status_code=503, detail="Finance purchase order unavailable")
+    lines = _read_purchasing_rows(
+        db.table("purchasing_order_lines").select("sku,qty_ordered,qty_received")
+        .eq("company_id", company_id).eq("po_id", assessment["po_id"]).limit(101)
+    )
+    if len(lines) > 100:
+        raise HTTPException(status_code=503, detail="Cost line scope exceeds supported page")
+    return assessment, orders[0], lines
+
+
+@router.get("/finance/assessments/{assessment_id}")
+async def preview_provisional_po_valuation(
+    assessment_id: UUID,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Read receipt classifications and cost assumptions; never book valuation."""
+    _require_purchasing_employee(user)
+    company_id = user["company_id"]
+    assessment, order, lines = _load_finance_assessment(db, company_id, assessment_id)
+    documents = _read_purchasing_rows(
+        db.table("warehouse_receipt_documents").select("id")
+        .eq("company_id", company_id).eq("po_id", assessment["po_id"]).limit(501)
+    )
+    if len(documents) > 500:
+        raise HTTPException(status_code=503, detail="Receipt scope exceeds supported page")
+    posted_lines = []
+    if documents:
+        posted_lines = _read_purchasing_rows(
+            db.table("warehouse_receipt_lines")
+            .select("receipt_id,sku,accepted_qty,damaged_qty,quarantined_qty")
+            .eq("company_id", company_id)
+            .in_("receipt_id", [row["id"] for row in documents]).limit(1001)
+        )
+        if len(posted_lines) > 1000:
+            raise HTTPException(status_code=503, detail="Receipt line scope exceeds supported page")
+    from app.services.purchasing_finance import value_receipts
+    try:
+        valuation = value_receipts(assessment, lines, posted_lines)
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        log.warning("Financial preview failed closed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Purchasing valuation unavailable") from exc
+    return {
+        "assessment_id": str(assessment_id), "po_number": order["po_number"],
+        "assertion_status": assessment["assertion_status"],
+        "read_consistency": "separate_tenant_scoped_queries_not_atomic_snapshot",
+        **valuation,
+    }
+
+
+@router.get("/finance/assessments/{assessment_id}/qbo-bills/{bill_id}/compare")
+async def preview_qbo_bill_financial_match(
+    assessment_id: UUID,
+    bill_id: str,
+    expected_vendor_qb_id: str = Query(pattern=r"^[0-9]{1,30}$"),
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """QBO sandbox GET only; caller-supplied vendor mapping stays unverified."""
+    _require_purchasing_employee(user)
+    if not bill_id.isascii() or not bill_id.isdigit() or len(bill_id) > 30:
+        raise HTTPException(status_code=422, detail="Invalid QBO Bill ID")
+    from app.config import get_settings
+    if get_settings().intuit_environment != "sandbox":
+        raise HTTPException(status_code=409, detail="Financial Bill comparison requires QBO sandbox")
+    company_id = user["company_id"]
+    assessment, order, po_lines = _load_finance_assessment(db, company_id, assessment_id)
+    sku_codes = [line["sku"] for line in po_lines]
+    stock = _read_purchasing_rows(
+        db.table("stock_skus").select("sku,qb_item_id")
+        .eq("company_id", company_id).in_("sku", sku_codes).limit(101)
+    ) if sku_codes else []
+    if len(stock) != len(po_lines) or len({row["sku"] for row in stock}) != len(po_lines):
+        raise HTTPException(status_code=503, detail="QBO item mapping scope unavailable")
+    ids = {row["sku"]: row["qb_item_id"] for row in stock}
+    scoped = [{**line, "qb_item_id": ids.get(line["sku"])} for line in po_lines]
+    from app.api.deps import get_adapter
+    try:
+        adapter = get_adapter(user=user, db=db)
+        bill = await adapter.get_qbo_bill_read_only(bill_id)
+    except Exception as exc:
+        log.warning("Read-only Bill comparison unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="QuickBooks sandbox Bill unavailable") from exc
+    from app.services.purchasing_finance import compare_qbo_bill
+    comparison = compare_qbo_bill(assessment, scoped, bill, expected_vendor_qb_id)
+    return {
+        "assessment_id": str(assessment_id), "po_number": order["po_number"],
+        "qbo_bill_id": bill_id, "vendor_mapping_verified": False,
+        "qbo_environment": "sandbox", "qb_read_only": True, **comparison,
+    }
 
 
 

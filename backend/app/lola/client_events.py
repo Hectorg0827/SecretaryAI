@@ -243,7 +243,7 @@ def action_preview(receipt: ActionReceipt, proposal: Optional[ActionProposal], *
     return out
 
 
-def client_receipt(receipt: ActionReceipt, message: Optional[str] = None) -> dict:
+def client_receipt(receipt: ActionReceipt, message: Optional[str] = None, *, lang: str = "en") -> dict:
     """WS4 Receipt. ``executed`` only when the receipt is completed AND verified."""
     if receipt.status == LolaStatus.COMPLETED and receipt.verified:
         status, default = "executed", "Done and verified."
@@ -251,8 +251,11 @@ def client_receipt(receipt: ActionReceipt, message: Optional[str] = None) -> dic
         status, default = "failed", "This did not happen. Nothing was sent."
     else:
         status, default = "submitted", "Accepted, awaiting confirmation. Nothing is confirmed as sent yet."
+    text = message or default
+    if lang == "es" and message is None:
+        text = UI_ES.get(default, default)
     out = {"action_id": receipt.receipt_id, "status": status,
-           "verified": bool(status == "executed"), "message": message or default}
+           "verified": bool(status == "executed"), "message": text}
     if receipt.external_reference and status == "executed":
         out["reference"] = receipt.external_reference
         out["executed_at"] = receipt.updated_at.isoformat()

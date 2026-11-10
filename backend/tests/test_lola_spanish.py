@@ -153,3 +153,85 @@ class TestSpanishStream:
         ev = self._turn(client, REP1, "list my customers", language="en")
         card = next(e["card"] for e in ev if e["type"] == "card")
         assert card["title"] == "Accounts"
+
+
+class TestSpanishLogisticsAndDetail:
+    @pytest.mark.parametrize("q,intent", [
+        ("¿Dónde está el contenedor MSCU1234566?", "where_is"),
+        ("¿Qué envíos están retrasados?", "delayed"),
+        ("¿Qué llega esta semana?", "arriving_this_week"),
+        ("¿Tenemos cargos de demora?", "demurrage"),
+        ("¿Faltan documentos de aduana?", "missing_customs_docs"),
+        ("¿El agente aduanal ya liberó la carga?", "broker_released"),
+        ("¿Qué órdenes de compra están atrasadas?", "overdue_pos"),
+        ("¿Qué hay en tránsito en el inventario?", "in_transit_inventory"),
+        ("Where is container MSCU1234566?", "where_is"),
+    ])
+    def test_logistics_assistant_understands_spanish(self, q, intent):
+        from app.intelligence.wholesale_distribution.logistics.assistant import INTENTS
+        found = next((name for name, test in INTENTS if test(q.lower())), None)
+        assert found == intent
+
+    def test_faithfulness_check(self):
+        orig = "3 delay(s): MSCU1234566 ETA moved to 2026-11-20; $1,200.00 at risk."
+        good = "3 retraso(s): MSCU1234566 ETA movida al 2026-11-20; $1,200.00 en riesgo."
+        bad = "3 retrasos: MSCU1234566 ETA al 20/11/2026; 1.200,00 en riesgo."
+        assert i18n.translation_is_faithful(orig, good)
+        assert not i18n.translation_is_faithful(orig, bad)
+
+    async def test_translation_off_by_default_marks_english(self, monkeypatch):
+        monkeypatch.delenv("LOLA_LLM_TRANSLATION", raising=False)
+        out = await i18n.translate_details(["No shipments are delayed."], "es")
+        assert out == ["No shipments are delayed. (detalle en inglés)"]
+
+    async def test_verified_translation_used_and_drift_rejected(self, monkeypatch):
+        monkeypatch.setenv("LOLA_LLM_TRANSLATION", "1")
+
+        async def fake(texts):
+            return ["Hay 2 envíos retrasados.", "Saldo de 999 dólares"]   # second drops "$1,200.00"
+        monkeypatch.setattr(i18n, "_llm_translate", fake)
+        out = await i18n.translate_details(["2 shipments are delayed.", "Balance $1,200.00"], "es")
+        assert out == ["Hay 2 envíos retrasados.", "Balance $1,200.00 (detalle en inglés)"]
+
+    async def test_translation_failure_falls_back(self, monkeypatch):
+        monkeypatch.setenv("LOLA_LLM_TRANSLATION", "1")
+
+        async def boom(texts):
+            raise RuntimeError("model down")
+        monkeypatch.setattr(i18n, "_llm_translate", boom)
+        assert await i18n.translate_details(["x 1"], "es") == ["x 1 (detalle en inglés)"]
+
+    async def test_english_sessions_never_translate(self, monkeypatch):
+        monkeypatch.setenv("LOLA_LLM_TRANSLATION", "1")
+
+        async def never(texts):
+            raise AssertionError("must not be called")
+        monkeypatch.setattr(i18n, "_llm_translate", never)
+        assert await i18n.translate_details(["hello 1"], "en") == ["hello 1"]
+
+
+class TestSpanishBriefingAndReceipts(TestSpanishStream):
+    def _h(self, uid=OWNER, role="owner", **extra):
+        return {"Authorization": "Bearer " + create_access_token({"sub": uid, "company_id": CO_A, "role": role}),
+                **extra}
+
+    def test_briefing_follows_accept_language(self, client):
+        es = client.get("/api/lola/briefing", headers=self._h(**{"Accept-Language": "es-MX,es;q=0.9"})).json()
+        assert es["language"] == "es" and es["greeting"] == "Buen día"
+        titles = {s["id"]: s["title"] for s in es["sections"]}
+        assert titles["critical_alerts"] == "Alertas críticas" and titles["financial_risks"] == "Riesgos financieros"
+        assert any("punto de reorden" in i["title"] for s in es["sections"] for i in s["items"])
+        en = client.get("/api/lola/briefing", headers=self._h()).json()
+        assert en["language"] == "en" and en["greeting"] == "Good day"
+
+    def test_query_parameter_wins(self, client):
+        r = client.get("/api/lola/briefing?language=en", headers=self._h(**{"Accept-Language": "es"})).json()
+        assert r["language"] == "en"
+
+    def test_receipt_messages_in_spanish(self, client):
+        ev = self._turn(client, REP1, "Redacta un correo para Acme Foods sobre su pedido", language="es")
+        rid = next(e["action"]["id"] for e in ev if e["type"] == "action_preview")
+        got = client.get(f"/api/lola/actions/{rid}", headers=self._h(REP1, "sales_rep", **{"Accept-Language": "es"}))
+        assert got.json()["client_receipt"]["message"].startswith("Aceptado, en espera")
+        approved = client.post(f"/api/lola/actions/{rid}/approve", headers=self._h(**{"Accept-Language": "es"}))
+        assert approved.status_code == 200 and "no se aprobó ni se envió nada" in approved.json()["message"]

@@ -138,9 +138,11 @@ errors and the `ToolResult` envelope are handled by the base class.
 ## Remaining blockers / follow-ups
 
 * Spanish: Lola understands Spanish questions, answers in Spanish and drafts Spanish customer
-  emails (`app/lola/i18n.py`, contract 1.1.0 `language`). Workstream 2 BI findings and the
-  Workstream 3 logistics assistant still phrase their own detail in English, and the
-  logistics assistant only understands English question wording.
+  emails (`app/lola/i18n.py`, contract 1.1.0 `language`). The Workstream 3 logistics assistant
+  understands Spanish questions. Detail that WS2/WS3 phrase in English is translated by
+  Claude only when `LOLA_LLM_TRANSLATION=1`, and a translation is used only if every number,
+  date, amount and identifier is unchanged; otherwise it is shown marked "(detalle en inglés)".
+  Briefing and receipts follow `?language=` or the browser's `Accept-Language`.
 * Attachments: CSV/TSV/TXT/Markdown/JSON are read as untrusted data (`app/lola/attachments.py`):
   never instructions, never stored, formulas neutralised, cross-checks only within permissions.
   PDF and Excel (.xlsx) are extracted by `POST /api/lola/files` (`app/lola/file_extraction.py`):

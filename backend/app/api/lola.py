@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_db
@@ -170,7 +170,8 @@ async def list_actions(limit: int = Query(50, ge=1, le=200), user: dict = Depend
 
 
 @router.get("/actions/{receipt_id}")
-async def get_action(receipt_id: str, user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def get_action(receipt_id: str, request: Request, user: dict = Depends(get_current_user),
+                     db=Depends(get_db)):
     """Returns the receipt re-verified against the approval queue and execution ledger."""
     p = _principal(db, user)
     svc = GovernedActionService(db, Authorizer(p, db))
@@ -187,7 +188,8 @@ async def get_action(receipt_id: str, user: dict = Depends(get_current_user), db
     # "client_receipt" is the Workstream 4 shape, so the UI can poll a
     # "submitted" receipt until the ledger verifies (or fails) it.
     from app.lola.client_events import client_receipt
-    return {"receipt": json.loads(receipt.model_dump_json()), "client_receipt": client_receipt(receipt)}
+    return {"receipt": json.loads(receipt.model_dump_json()),
+            "client_receipt": client_receipt(receipt, lang=request_language(request))}
 
 
 # ─── Delegations ─────────────────────────────────────────────────────────────
@@ -395,7 +397,8 @@ def _receipt_or_404(db, user: dict, receipt_id: str):
 
 
 @router.post("/actions/{receipt_id}/approve")
-async def lola_approve(receipt_id: str, user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def lola_approve(receipt_id: str, request: Request, user: dict = Depends(get_current_user),
+                       db=Depends(get_db)):
     """
     Approve via the EXISTING approval endpoint logic (Lola separation-of-duties
     checks, tenant policy, durable gateway). Returns a WS4 ``Receipt`` that is
@@ -403,10 +406,11 @@ async def lola_approve(receipt_id: str, user: dict = Depends(get_current_user), 
     """
     from app.api.actions import ApprovalRequest, approve_draft
 
+    lang = request_language(request)
     svc, row = _receipt_or_404(db, user, receipt_id)
     receipt = receipt_from_row(row)
     if not receipt.draft_id or receipt.status != LolaStatus.PENDING_APPROVAL:
-        return client_events.client_receipt(receipt_from_row(svc.refresh(row)))
+        return client_events.client_receipt(receipt_from_row(svc.refresh(row)), lang=lang)
     draft = _draft_for(db, receipt.company_id, receipt.draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Action not found")
@@ -421,11 +425,14 @@ async def lola_approve(receipt_id: str, user: dict = Depends(get_current_user), 
                             adapter=_adapter_for(user, db))
     except HTTPException as exc:
         if exc.status_code == 409:
-            return client_events.client_receipt(
-                receipt, "Approval is recorded only when this action type can be executed safely. "
-                         "It isn't enabled yet, so nothing was approved or sent.") | {"status": "failed"}
+            return client_events.client_receipt(receipt, _L(
+                lang, "Approval is recorded only when this action type can be executed safely. "
+                      "It isn't enabled yet, so nothing was approved or sent.",
+                "La aprobación solo se registra cuando este tipo de acción puede ejecutarse de forma segura. "
+                "Aún no está habilitado, así que no se aprobó ni se envió nada."), lang=lang) | {"status": "failed"}
         raise
-    return client_events.client_receipt(receipt_from_row(svc.refresh(svc.get_receipt(receipt_id) or row)))
+    return client_events.client_receipt(receipt_from_row(svc.refresh(svc.get_receipt(receipt_id) or row)),
+                                        lang=lang)
 
 
 class RejectBody(BaseModel):
@@ -478,9 +485,25 @@ def _section(sid: str, title: str, result=None, items=None, *, availability=None
     return sec
 
 
+def request_language(request: Request) -> str:
+    """?language=es|en wins; otherwise the browser's Accept-Language; default English."""
+    q = (request.query_params.get("language") or "").lower()
+    if q in ("en", "es"):
+        return q
+    accept = (request.headers.get("accept-language") or "").lower()
+    return "es" if accept.split(",")[0].strip().startswith("es") else "en"
+
+
+def _L(lang: str, en: str, es: str) -> str:
+    return es if lang == "es" else en
+
+
 @router.get("/briefing")
-async def lola_briefing(user: dict = Depends(get_current_user), db=Depends(get_db)):
+async def lola_briefing(request: Request, user: dict = Depends(get_current_user), db=Depends(get_db)):
     """Role- and record-scoped command-center briefing built from Lola tools."""
+    from app.lola import i18n
+
+    lang = request_language(request)
     p = _principal(db, user)
     auth = Authorizer(p, db)
     reg = default_registry()
@@ -494,39 +517,60 @@ async def lola_briefing(user: dict = Depends(get_current_user), db=Depends(get_d
     inventory = await run("operations.inventory")
     receivables = await run("finance.receivables")
     logistics = await run("logistics.assistant", {"question": "Which shipments are delayed?"})
+    money = client_events._money
 
     sections: list[dict] = []
     low = (inventory.data or {}).get("low_stock", []) if inventory.status == LolaStatus.ANSWERED else []
-    critical = [{"id": f"low-{i}", "title": f"{name} is at or below its reorder point", "severity": "critical",
-                 "href": "/inventory", "ask": f"What should we do about {name}?"} for i, name in enumerate(low[:5])]
+    critical = [{"id": f"low-{i}", "severity": "critical", "href": "/inventory",
+                 "title": _L(lang, f"{name} is at or below its reorder point",
+                             f"{name} está en o por debajo de su punto de reorden"),
+                 "ask": _L(lang, f"What should we do about {name}?", f"¿Qué hacemos con {name}?")}
+                for i, name in enumerate(low[:5])]
     if receivables.status == LolaStatus.ANSWERED and (receivables.data or {}).get("overdue_invoices"):
         d = receivables.data
-        critical.append({"id": "ar-overdue", "title": f"{d['overdue_invoices']} overdue invoices "
-                         f"({client_events._money(d['overdue_balance'])})", "severity": "warning",
-                         "href": "/accounts", "ask": "Who should we prioritise for collections?"})
-    sections.append(_section("critical_alerts", "Critical alerts", inventory, critical))
+        critical.append({"id": "ar-overdue", "severity": "warning", "href": "/accounts",
+                         "title": _L(lang, f"{d['overdue_invoices']} overdue invoices ({money(d['overdue_balance'])})",
+                                     f"{d['overdue_invoices']} facturas vencidas ({money(d['overdue_balance'])})"),
+                         "ask": _L(lang, "Who should we prioritise for collections?",
+                                   "¿A quién deberíamos priorizar en la cobranza?")})
+    sections.append(_section("critical_alerts", _L(lang, "Critical alerts", "Alertas críticas"), inventory, critical))
     if sales.status == LolaStatus.ANSWERED:
         d = sales.data
-        perf = [{"id": "sales-30d", "title": f"{d['order_count']} orders, {client_events._money(d['total_revenue'])}",
-                 "detail": f"Last {d['days']} days · {d['scope']} scope", "severity": "info",
-                 "ask": "How do sales compare with last month?"}]
-        perf += [{"id": f"top-{i}", "title": t["name"], "meta": client_events._money(t["revenue"])}
+        perf = [{"id": "sales-30d", "severity": "info",
+                 "title": _L(lang, f"{d['order_count']} orders, {money(d['total_revenue'])}",
+                             f"{d['order_count']} pedidos, {money(d['total_revenue'])}"),
+                 "detail": _L(lang, f"Last {d['days']} days · {d['scope']} scope",
+                              f"Últimos {d['days']} días · alcance {i18n.scope('es', str(d['scope']))}"),
+                 "ask": _L(lang, "How do sales compare with last month?",
+                           "¿Cómo van las ventas comparadas con el mes pasado?")}]
+        perf += [{"id": f"top-{i}", "title": t["name"], "meta": money(t["revenue"])}
                  for i, t in enumerate(d.get("top_accounts", [])[:3])]
     else:
         perf = []
-    sections.append(_section("performance", "Performance", sales, perf))
-    sections.append(_section("department_priorities", "Department priorities", inventory,
-                             [{"id": "inv", "title": inventory.summary, "href": "/inventory"}]
+    sections.append(_section("performance", _L(lang, "Performance", "Desempeño"), sales, perf))
+    inv_summary = inventory.summary if lang == "en" else i18n.t(
+        "es", "inventory", n=len((inventory.data or {}).get("items", [])), low=len(low))
+    sections.append(_section("department_priorities", _L(lang, "Department priorities", "Prioridades por departamento"),
+                             inventory, [{"id": "inv", "title": inv_summary, "href": "/inventory"}]
                              if inventory.status == LolaStatus.ANSWERED else []))
-    sections.append(_section("financial_risks", "Financial risks", receivables,
-                             [{"id": "ar", "title": receivables.summary, "href": "/accounts", "severity": "warning"}]
+    if receivables.status == LolaStatus.ANSWERED:
+        d = receivables.data or {}
+        ar_summary = receivables.summary if lang == "en" else i18n.t(
+            "es", "receivables", open=d.get("open_invoices"), open_money=money(d.get("open_balance")),
+            overdue=d.get("overdue_invoices"), overdue_money=money(d.get("overdue_balance")))
+    sections.append(_section("financial_risks", _L(lang, "Financial risks", "Riesgos financieros"), receivables,
+                             [{"id": "ar", "title": ar_summary, "href": "/accounts", "severity": "warning"}]
                              if receivables.status == LolaStatus.ANSWERED else [], sensitivity="financial"))
-    sections.append(_section("logistics_exceptions", "Logistics exceptions", logistics,
-                             [{"id": "log", "title": logistics.summary[:200], "href": "/logistics",
-                               "ask": "Which shipments are delayed?"}]
-                             if logistics.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL) else []))
+    log_items = []
+    if logistics.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL):
+        (log_title,) = await i18n.translate_details([logistics.summary[:200]], lang)
+        log_items = [{"id": "log", "title": log_title, "href": "/logistics",
+                      "ask": _L(lang, "Which shipments are delayed?", "¿Qué envíos están retrasados?")}]
+    sections.append(_section("logistics_exceptions", _L(lang, "Logistics exceptions", "Excepciones de logística"),
+                             logistics, log_items))
 
     svc = GovernedActionService(db, auth)
+    pending_title = _L(lang, "Pending approvals", "Aprobaciones pendientes")
     if p.has("approve_actions"):
         try:
             from app.actions.approval_queue import ApprovalQueue
@@ -534,32 +578,38 @@ async def lola_briefing(user: dict = Depends(get_current_user), db=Depends(get_d
             items = [{"id": d["id"], "title": str(d.get("action_type", "")).replace("_", " ").capitalize(),
                       "detail": str((d.get("content") or {}).get("instruction", ""))[:140], "href": "/work"}
                      for d in drafts[:6]]
-            sections.append(_section("pending_approvals", "Pending approvals", items=items))
+            sections.append(_section("pending_approvals", pending_title, items=items))
         except Exception:
-            sections.append(_section("pending_approvals", "Pending approvals", availability="unavailable",
-                                     note="The approval queue is unavailable right now."))
+            sections.append(_section("pending_approvals", pending_title, availability="unavailable",
+                                     note=_L(lang, "The approval queue is unavailable right now.",
+                                             "La cola de aprobaciones no está disponible en este momento.")))
+    recent_title = _L(lang, "Recent tasks", "Tareas recientes")
     try:
         mine = [r for r in svc.list_receipts(20) if str(r.get("requested_by")) == p.user_id]
         recent = [{"id": r["id"], "title": r["action_type"].replace("_", " ").capitalize(),
                    "meta": client_events.client_receipt(receipt_from_row(r))["status"]} for r in mine[:6]]
-        sections.append(_section("recent_tasks", "Recent tasks", items=recent))
+        sections.append(_section("recent_tasks", recent_title, items=recent))
     except Exception:
-        sections.append(_section("recent_tasks", "Recent tasks", availability="unavailable",
-                                 note="Task history is unavailable right now."))
-    sections.append(_section("next_actions", "Next actions", items=[
-        {"id": "na-1", "title": "Review accounts that need attention", "ask": "Which of my accounts need attention?"},
-        {"id": "na-2", "title": "Check stock that is running low", "ask": "What's running low in inventory?"},
+        sections.append(_section("recent_tasks", recent_title, availability="unavailable",
+                                 note=_L(lang, "Task history is unavailable right now.",
+                                         "El historial de tareas no está disponible en este momento.")))
+    sections.append(_section("next_actions", _L(lang, "Next actions", "Próximas acciones"), items=[
+        {"id": "na-1", "title": _L(lang, "Review accounts that need attention", "Revisa las cuentas que necesitan atención"),
+         "ask": _L(lang, "Which of my accounts need attention?", "¿Cuáles de mis cuentas necesitan atención?")},
+        {"id": "na-2", "title": _L(lang, "Check stock that is running low", "Revisa el inventario que se está acabando"),
+         "ask": _L(lang, "What's running low in inventory?", "¿Qué se está acabando en el inventario?")},
     ]))
     # Morning briefing = the top item from each of the first sections that has one.
     highlights = [{"id": f"mb-{s['id']}", "title": s["items"][0]["title"]}
                   for s in sections[:3] if s.get("items")]
-    sections.append(_section("morning_briefing", "Morning briefing", items=highlights))
+    sections.append(_section("morning_briefing", _L(lang, "Morning briefing", "Resumen de la mañana"), items=highlights))
 
     statuses = [sales.status, inventory.status, receivables.status]
-    headline = ("Here's where things stand." if LolaStatus.ANSWERED in statuses
-                else "Some business data isn't available right now.")
-    return {"generated_at": datetime.now(timezone.utc).isoformat(), "greeting": "Good day",
-            "headline": headline, "sections": sections}
+    headline = (_L(lang, "Here's where things stand.", "Así están las cosas.") if LolaStatus.ANSWERED in statuses
+                else _L(lang, "Some business data isn't available right now.",
+                        "Algunos datos del negocio no están disponibles en este momento."))
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "greeting": _L(lang, "Good day", "Buen día"),
+            "headline": headline, "sections": sections, "language": lang}
 
 
 # ─── PDF / Excel extraction (stateless) ──────────────────────────────────────

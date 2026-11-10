@@ -49,31 +49,45 @@ class AssistantAnswer:
 
 # One bounded separator class per pattern (ReDoS-safe; see documents.py).
 _ID_PATTERNS = (
-    re.compile(r"\b(?:b/?l|bol|bill of lading)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{5,23})", re.I),
-    re.compile(r"\b(?:po|p\.o\.|purchase order)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
-    re.compile(r"\border[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
-    re.compile(r"\bshipment[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,39})", re.I),
+    re.compile(r"\b(?:b/?l|bol|bill of lading|conocimiento de embarque)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{5,23})", re.I),
+    re.compile(r"\b(?:po|p\.o\.|purchase order|orden de compra|oc)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
+    re.compile(r"\b(?:order|pedido)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,23})", re.I),
+    re.compile(r"\b(?:shipment|env[ií]o|embarque)[\s#:]{0,10}([A-Z0-9][A-Z0-9-]{2,39})", re.I),
 )
 
+
+def _any(q: str, *words: str) -> bool:
+    return any(w in q for w in words)
+
 INTENTS: list[tuple[str, Callable[[str], bool]]] = [
-    ("landed_cost", lambda q: "landed cost" in q or "cost per case" in q),
-    ("supplier_responsibility", lambda q: "supplier" in q and any(
-        w in q for w in ("responsible", "shortage", "short", "damage", "blame", "fault"))),
-    ("missing_customs_docs", lambda q: "missing" in q and ("doc" in q or "customs" in q)),
-    ("broker_released", lambda q: ("release" in q or "cleared" in q or "clear" in q) and any(
-        w in q for w in ("broker", "customs", "cargo", "container", "shipment"))),
-    ("demurrage", lambda q: any(w in q for w in ("demurrage", "detention", "free time", "storage",
-                                                 "last free day"))),
-    ("overdue_pos", lambda q: ("purchase order" in q or re.search(r"\bpos?\b", q) is not None)
-     and any(w in q for w in ("overdue", "late", "behind"))),
-    ("proof_of_delivery", lambda q: "proof of delivery" in q or re.search(r"\bpods?\b", q) is not None),
-    ("customer_not_received", lambda q: ("customer" in q or "order" in q) and any(
-        w in q for w in ("received", "receive", "get their", "gotten", "delivered yet", "hasn't", "not received"))),
-    ("in_transit_inventory", lambda q: "in transit" in q and any(
-        w in q for w in ("inventory", "stock", "cases", "what", "units"))),
-    ("arriving_this_week", lambda q: "arriv" in q and any(w in q for w in ("this week", "next 7", "next seven"))),
-    ("delayed", lambda q: "delay" in q or ("late" in q and "shipment" in q)),
-    ("where_is", lambda q: "where" in q or "status" in q or "track" in q),
+    # English and Spanish wording (Lion BI serves both).
+    ("landed_cost", lambda q: _any(q, "landed cost", "cost per case", "costo puesto", "costo de importaci",
+                                   "costo por caja")),
+    ("supplier_responsibility", lambda q: _any(q, "supplier", "proveedor") and _any(
+        q, "responsible", "shortage", "short", "damage", "blame", "fault",
+        "responsable", "faltante", "falt", "daño", "dano", "culpa")),
+    ("missing_customs_docs", lambda q: _any(q, "missing", "falta", "faltan") and _any(q, "doc", "customs", "aduana")),
+    ("broker_released", lambda q: _any(q, "release", "cleared", "clear", "liberad", "despachad", "liber") and _any(
+        q, "broker", "customs", "cargo", "container", "shipment", "agente", "aduana", "carga", "contenedor",
+        "envío", "envio", "embarque")),
+    ("demurrage", lambda q: _any(q, "demurrage", "detention", "free time", "storage", "last free day",
+                                 "demora", "almacenaje", "días libres", "dias libres", "estadía", "estadia")),
+    ("overdue_pos", lambda q: (_any(q, "purchase order", "orden de compra", "órdenes de compra", "ordenes de compra")
+                               or re.search(r"\b(pos?|oc)\b", q) is not None)
+     and _any(q, "overdue", "late", "behind", "atrasad", "vencid", "retrasad")),
+    ("proof_of_delivery", lambda q: _any(q, "proof of delivery", "prueba de entrega", "comprobante de entrega")
+     or re.search(r"\bpods?\b", q) is not None),
+    ("customer_not_received", lambda q: _any(q, "customer", "order", "cliente", "pedido") and _any(
+        q, "received", "receive", "get their", "gotten", "delivered yet", "hasn't", "not received",
+        "recibi", "recibido", "no ha llegado", "entregado")),
+    ("in_transit_inventory", lambda q: _any(q, "in transit", "en tránsito", "en transito") and _any(
+        q, "inventory", "stock", "cases", "what", "units", "inventario", "existencias", "cajas", "qué", "que",
+        "unidades")),
+    ("arriving_this_week", lambda q: _any(q, "arriv", "lleg") and _any(
+        q, "this week", "next 7", "next seven", "esta semana", "próximos 7", "proximos 7", "siete días")),
+    ("delayed", lambda q: _any(q, "delay", "retras", "demorad") or (_any(q, "late", "tarde") and _any(
+        q, "shipment", "envío", "envio", "embarque"))),
+    ("where_is", lambda q: _any(q, "where", "status", "track", "dónde", "donde", "estado", "rastre", "ubicaci")),
 ]
 
 

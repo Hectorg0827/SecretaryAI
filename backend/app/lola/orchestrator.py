@@ -163,13 +163,16 @@ def _describe_es(result: ToolResult) -> list[str]:
         return [i18n.t(es, "purchasing", n=len(d.get("purchase_orders", [])))]
     if result.tool == "hr.directory":
         return [i18n.t(es, "team", n=len(d.get("employees", [])))]
-    # Workstream 2 / 3 tools phrase their own findings (English for now).
+    # Workstream 2 / 3 tools phrase their own findings in English; the caller
+    # passes a verified translation (or the marked English) as ``detail``.
     return [i18n.t(es, "english_detail", text=result.summary)]
 
 
-def _describe(result: ToolResult, lang: str = "en") -> list[str]:
+def _describe(result: ToolResult, lang: str = "en", detail: Optional[str] = None) -> list[str]:
     if result.tool == "files.attachment":
         return _describe_file(result, lang)
+    if detail is not None:
+        return [detail]
     if lang == "es":
         return _describe_es(result)
     d = result.data if isinstance(result.data, dict) else {}
@@ -353,10 +356,17 @@ class LolaOrchestrator:
         if status == LolaStatus.ANSWERED and plan.unresolved_names:
             status = LolaStatus.PARTIAL
 
+        # Spanish sessions: English detail from WS2 / WS3 tools is translated
+        # (verified) or shown marked as English — never silently mixed.
+        foreign = [r for r in results if lang == "es" and r.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL)
+                   and r.tool.startswith(("bi.", "logistics."))]
+        translated = dict(zip((id(r) for r in foreign),
+                              await i18n.translate_details([r.summary for r in foreign], lang)))
+
         lines: list[str] = []
         for r in results:
             if r.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL):
-                lines += _describe(r, lang)
+                lines += _describe(r, lang, translated.get(id(r)))
         lines += action_lines + memory_lines
         if not lines and not withheld:
             lines.append(i18n.t(lang, "capabilities"))

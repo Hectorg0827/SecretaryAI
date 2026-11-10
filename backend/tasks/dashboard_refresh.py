@@ -18,7 +18,10 @@ from app.scheduler.dashboard_snapshot import compute_dashboard_payload, store_sn
 log = logging.getLogger(__name__)
 
 
-def refresh_company_snapshot(company_id: str, *, db, companies, adapter_factory) -> dict:
+def refresh_company_snapshot(
+    company_id: str, *, db, companies, adapter_factory,
+    generated_by: str = "manual_dashboard_refresh",
+) -> dict:
     """Purely read from the provider; persist one tenant-scoped dashboard snapshot."""
     if not isinstance(company_id, str) or not company_id.strip():
         raise ValueError("company_id is required")
@@ -33,7 +36,7 @@ def refresh_company_snapshot(company_id: str, *, db, companies, adapter_factory)
     payload = asyncio.run(compute_dashboard_payload(adapter))
     store_snapshot(
         db, company_id, "dashboard_summary", payload,
-        generated_by="manual_dashboard_refresh",
+        generated_by=generated_by,
     )
     return {
         "company_id": company_id,

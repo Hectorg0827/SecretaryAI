@@ -182,7 +182,8 @@ export function Composer({ autoFocus = false }: { autoFocus?: boolean }) {
     for (const f of Array.from(list).slice(0, 3)) {
       if (f.size > MAX_FILE_BYTES) { setFileError(lang === 'es' ? `${f.name} supera 15 MB.` : `${f.name} is over 15 MB.`); continue; }
       const isText = /^text\/|json|csv/.test(f.type) || /\.(csv|txt|md|json)$/i.test(f.name);
-      const isDocument = /pdf|spreadsheetml/.test(f.type) || /\.(pdf|xlsx)$/i.test(f.name);
+      // PDFs, Excel and photos (scans are read by text recognition when the server has it on).
+      const isDocument = /pdf|spreadsheetml|image\/(png|jpeg)/.test(f.type) || /\.(pdf|xlsx|png|jpe?g)$/i.test(f.name);
       const a: Attachment = { name: f.name, size: f.size, mime: f.type || 'application/octet-stream' };
       if (isText && f.size <= MAX_INLINE_BYTES) a.text = await f.text();
       if (isDocument && f.size <= MAX_EXTRACT_BYTES) {
@@ -229,9 +230,16 @@ export function Composer({ autoFocus = false }: { autoFocus?: boolean }) {
       {files.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-1.5" aria-label={lang === 'es' ? 'Adjuntos' : 'Attachments'}>
           {files.map((f) => (
-            <li key={f.name} className="inline-flex items-center gap-1 rounded-md border border-lola-line bg-white/[0.03] py-1 pl-2 pr-1 text-[12px] text-lola-text">
+            <li key={f.name} className="inline-flex items-center gap-1 rounded-md border border-lola-line bg-white/[0.03] py-1 pl-2 pr-1 text-[12px] text-lola-text flex-wrap">
               <FileText size={12} aria-hidden />{f.name}
               <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((c) => c.filter((x) => x.name !== f.name))} className="rounded p-0.5 text-lola-mute hover:text-lola-text"><X size={12} /></button>
+              {f.ocr && (
+                <span data-testid="ocr-note" className="basis-full text-[11px] text-lola-amber">
+                  {f.note ?? (lang === 'es'
+                    ? 'Leído con reconocimiento de texto. Compare los números con el original.'
+                    : 'Read with text recognition. Check the numbers against the original.')}
+                </span>
+              )}
             </li>
           ))}
         </ul>

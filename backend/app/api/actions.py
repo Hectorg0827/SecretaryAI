@@ -170,6 +170,36 @@ async def approve_draft(
     if await _execution_policy_effect(db, user["company_id"], user["sub"], draft, content_for_policy) == "deny":
         raise HTTPException(status_code=403, detail="This action is blocked by your company's action policy")
 
+    # Lola supplier payment runs: approval only RECORDS the decision and unlocks
+    # the payment file for the bookkeeper. Nothing is paid, nothing is written
+    # to QuickBooks, no bank is touched — so no durable executor is involved.
+    if draft.get("action_type") == "payment_run":
+        if lola_decision is None:
+            raise HTTPException(status_code=409, detail="Only Lola payment runs can be approved here")
+        if body.edited_content is not None:
+            raise HTTPException(status_code=409, detail="A payment run can't be edited; reject it and ask "
+                                                        "Lola for a new one")
+        from datetime import datetime, timezone
+        try:
+            updated = (db.table("drafts").update({
+                "status": "approved", "reviewed_by": user["sub"],
+                "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", draft_id).eq("company_id", user["company_id"]).eq("status", "pending").execute()).data
+        except Exception:
+            raise HTTPException(status_code=503, detail="Approval unavailable; nothing was approved") from None
+        if not updated:
+            raise HTTPException(status_code=409, detail="This payment run is no longer pending")
+        record_lola_review(db, draft, user["sub"], approved=True)
+        write_audit_event(
+            db, company_id=user["company_id"], event_type="payment_run_approved",
+            actor_id=user["sub"], approved_by=user["sub"], action_class="payment_run",
+            metadata={"draft_id": draft_id, "total": str((draft.get("content") or {}).get("total")),
+                      "bills": len((draft.get("content") or {}).get("payments") or []),
+                      "paid": False},
+        )
+        return {"draft_id": draft_id, "status": "approved", "execution_status": "not_executed",
+                "paid": False, "already_processed": False}
+
     # No legacy inline email send or PO dispatch after review: those effects
     # cannot atomically bind approval, idempotency, claim and provider receipt.
     # Enabling the durable approval gateway queues immutable approved email

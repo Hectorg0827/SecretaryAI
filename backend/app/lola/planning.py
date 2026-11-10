@@ -27,6 +27,8 @@ INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
                     r"\bemail (to|for)\b"),
     "draft_purchase_order": (r"\b(draft|prepare|create|place|raise)\b.{0,20}\b(po|purchase order)\b",
                              r"\breorder (more|stock|of|from)\b", r"\border more\b"),
+    "payment_run": (r"\b(prepare|draft|create|build|propose|put together|make)\b.{0,25}\b(payment run|pay run|"
+                    r"payment batch|batch of payments|supplier payments|vendor payments|bill payments)\b",),
     "payroll": (r"\bpayroll\b", r"\bsalar(y|ies)\b", r"\bwages?\b", r"\bcompensation\b", r"\bpaycheck\b",
                 r"\bbonus(es)?\b"),
     "hr_lookup": (r"\bemployees?\b", r"\bstaff\b", r"\borg chart\b", r"\bwho reports\b", r"\bheadcount\b",
@@ -65,6 +67,8 @@ SPANISH_PATTERNS: dict[str, tuple[str, ...]] = {
                     r"\b(correo|email)\s+(a|para)\b", r"\bdale seguimiento a\b"),
     "draft_purchase_order": (r"\b(prepara|crea|haz|genera|redacta)\b.{0,25}\borden(es)? de compra\b",
                              r"\breordena[rn]?\b", r"\bpide[rn]? m[aá]s\b", r"\bpedir m[aá]s\b"),
+    "payment_run": (r"\b(prepara|arma|crea|propon|prop[oó]n|haz)\b.{0,25}\b(corrida de pagos|lote de pagos|"
+                    r"pagos? a proveedores|relaci[oó]n de pagos)\b",),
     "payroll": (r"\bn[oó]mina\b", r"\bsalarios?\b", r"\bsueldos?\b", r"\bcompensaci[oó]n\b", r"\bbonos?\b"),
     "hr_lookup": (r"\bempleados?\b", r"\bpersonal\b", r"\borganigrama\b", r"\bqui[eé]n reporta\b",
                   r"\bplantilla\b", r"\brecursos humanos\b"),
@@ -127,6 +131,7 @@ INTENT_TOOLS: dict[str, tuple[str, ...]] = {
 ACTION_INTENTS: dict[str, str] = {
     "draft_email": "draft_customer_email",
     "draft_purchase_order": "draft_purchase_order",
+    "payment_run": "prepare_payment_run",
 }
 
 _AMOUNT = re.compile(r"\$\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(k|m)?\b", re.IGNORECASE)
@@ -152,6 +157,9 @@ def detect_intents(message: str) -> list[str]:
     # A draft-email/PO request is about the action, not a sales report.
     if "draft_purchase_order" in found:
         found = [i for i in found if i != "inventory_check" or "stock" in text]
+    # A payment-run request is the action itself, not a payables or supplier report.
+    if "payment_run" in found:
+        found = [i for i in found if i not in ("payables", "purchasing", "draft_purchase_order")]
     return found or ["general"]
 
 

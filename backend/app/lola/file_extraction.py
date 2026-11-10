@@ -12,7 +12,10 @@ Defences:
 * XLSX: zip-bomb guard (entry count, total uncompressed size, compression
   ratio), macro-enabled workbooks refused, first sheet only, cached VALUES only
   (formulas are never evaluated), row/column caps;
-* legacy binary .xls is refused.
+* legacy binary .xls is refused;
+* scanned PDFs and photos (PNG/JPEG) are read with text recognition only when
+  ``LOLA_OCR=1`` and the OCR programs are installed (see ``app.lola.ocr``);
+  such results carry ``ocr=True`` so clients ask the user to check numbers.
 """
 from __future__ import annotations
 
@@ -42,10 +45,11 @@ class ExtractionRejected(ValueError):
 class Extracted:
     text: str
     mime: str                       # "text/plain" (PDF) or "text/csv" (Excel)
-    kind: str                       # "pdf" | "xlsx"
+    kind: str                       # "pdf" | "xlsx" | "image"
     pages: int = 0
     sheets: list[str] = field(default_factory=list)
     truncated: bool = False
+    ocr: bool = False               # text came from text recognition: check numbers
 
 
 def sniff(data: bytes) -> str:
@@ -55,6 +59,10 @@ def sniff(data: bytes) -> str:
         return "zip"
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return "ole"                # legacy .xls / .doc
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpeg"
     return "unknown"
 
 
@@ -84,8 +92,46 @@ def _pdf(data: bytes) -> Extracted:
         raise ExtractionRejected("unreadable_pdf") from None
     text = "\n".join(parts)[:MAX_TEXT_CHARS]
     if not text.strip():
-        raise ExtractionRejected("no_text_in_pdf")     # scanned image: needs OCR (not offered)
+        return _scanned_pdf(data, total)                # no text layer: a scanned image
     return Extracted(text=text, mime="text/plain", kind="pdf", pages=total, truncated=truncated)
+
+
+def _ocr_errors(fn):
+    from app.lola import ocr
+
+    try:
+        return fn()
+    except ocr.OCRUnavailable:
+        return None
+    except ocr.OCRFailed as exc:
+        raise ExtractionRejected(exc.code) from None
+
+
+def _scanned_pdf(data: bytes, total: int) -> Extracted:
+    from app.lola import ocr
+
+    got = _ocr_errors(lambda: ocr.pdf_text(data, total))
+    if got is None:
+        raise ExtractionRejected("no_text_in_pdf")
+    text, _read, truncated = got
+    if len(text) > MAX_TEXT_CHARS:
+        text, truncated = text[:MAX_TEXT_CHARS], True
+    if not text.strip():
+        raise ExtractionRejected("ocr_no_text")
+    return Extracted(text=text, mime="text/plain", kind="pdf", pages=total, truncated=truncated, ocr=True)
+
+
+def _image(data: bytes) -> Extracted:
+    from app.lola import ocr
+
+    text = _ocr_errors(lambda: ocr.image_text(data))
+    if text is None:
+        raise ExtractionRejected("ocr_off")
+    truncated = len(text) > MAX_TEXT_CHARS
+    text = text[:MAX_TEXT_CHARS]
+    if not text.strip():
+        raise ExtractionRejected("ocr_no_text")
+    return Extracted(text=text, mime="text/plain", kind="image", pages=1, truncated=truncated, ocr=True)
 
 
 def _zip_guard(data: bytes) -> zipfile.ZipFile:
@@ -155,4 +201,6 @@ def extract(name: str, data: bytes) -> Extracted:
         return _xlsx(data)
     if kind == "ole":
         raise ExtractionRejected("legacy_xls")
+    if kind in ("png", "jpeg"):
+        return _image(data)
     raise ExtractionRejected("unsupported_type")

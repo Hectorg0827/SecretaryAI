@@ -147,13 +147,22 @@ errors and the `ToolResult` envelope are handled by the base class.
   never instructions, never stored, formulas neutralised, cross-checks only within permissions.
   PDF and Excel (.xlsx) are extracted by `POST /api/lola/files` (`app/lola/file_extraction.py`):
   in memory only, type checked by content, 5 MB cap, encrypted PDFs / legacy .xls / macro
-  workbooks / zip bombs refused, formulas never evaluated. Scanned PDFs (no text layer) need OCR (not offered).
+  workbooks / zip bombs refused, formulas never evaluated.
+* Scanned PDFs and photos (PNG/JPEG) are read by text recognition (`app/lola/ocr.py`) only when
+  `LOLA_OCR=1` and `poppler-utils` + `tesseract-ocr` (eng, spa) are installed (the backend
+  Dockerfile installs them). Bounded: 10 pages, 60 s, 2 jobs per worker, images ≤ 40 MP,
+  no shell, no secrets in the programs' environment, temp folder deleted at once. Results carry
+  `ocr: true` and a caution ("check numbers against the original") that the chat shows.
 * WS3 logistics endpoints now build their viewer from the database role via
   `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated
   executor — see `EXECUTION.md`. Every switch is off by default.
-* WS3 approved stock postings / claims and WS2 AP payment proposals still have no
-  executor (by design: nothing is posted or paid).
+* WS3 stock postings: with `SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1` a clean count is staged on
+  the existing two-person receiving path and booked only after a different owner/manager approves
+  it (`app/lola/stock_receiving.py`, `EXECUTION.md`). WS3 claims stay drafts (never filed).
+* WS2 supplier payments: Lola prepares a **payment run** (approved list); an independent leader approves
+  it and finance downloads a CSV to pay outside Lion BI. Lola never pays, never records payments in
+  QuickBooks and never touches a bank (`EXECUTION.md`).
 
 * Lola emails and purchase orders run through the durable queue and a gated
   executor (`EXECUTION.md`). Until an operator turns the switches on, approving

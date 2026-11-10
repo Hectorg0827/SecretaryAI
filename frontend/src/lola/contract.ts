@@ -156,6 +156,10 @@ export interface Attachment {
   mime: string;
   /** Present only for small text files the client may inline. */
   text?: string;
+  /** UI only: the text came from text recognition (scan / photo); numbers must be checked. */
+  ocr?: boolean;
+  /** UI only: the server's localised caution for OCR text. */
+  note?: string;
 }
 
 export interface TurnRequest {

@@ -155,7 +155,7 @@ class TestEndpoint:
     def test_rejections_are_plain_messages(self, db):
         r = TestClient(app).post("/api/lola/files", headers=self._h(),
                                  files={"file": ("x.exe", b"MZ\x90\x00", "application/octet-stream")})
-        assert r.status_code == 422 and "PDF and Excel" in r.json()["detail"]
+        assert r.status_code == 422 and "PDF, Excel" in r.json()["detail"]
 
     def test_requires_active_member(self, db):
         r = TestClient(app).post("/api/lola/files", headers=self._h(INACTIVE, "sales_rep"),

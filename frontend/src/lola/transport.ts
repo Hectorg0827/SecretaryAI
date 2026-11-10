@@ -18,6 +18,8 @@ export interface LolaTransport {
   reject(actionId: string, reason?: string): Promise<void>;
   /** Optional: re-check a submitted action's receipt against the execution ledger (null = not supported). */
   getReceipt?(actionId: string): Promise<Receipt | null>;
+  /** Optional: download the CSV of an APPROVED supplier payment run (Lola pays nothing). */
+  downloadPaymentRun?(receiptId: string): Promise<void>;
   briefing(role: Role, signal?: AbortSignal): Promise<Briefing>;
   /**
    * Optional: turn a PDF / .xlsx into text on the server (nothing is stored),

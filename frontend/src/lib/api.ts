@@ -152,7 +152,7 @@ export interface BriefingTodayResponseV1 {
   audience_role: 'owner' | 'manager';
   created_at: string;
   sections: Record<BriefingSectionV1, BriefingEntryV1[]>;
-  source_coverage: 'dashboard_snapshot_only';
+  source_coverage: 'dashboard_snapshot_only' | 'dashboard_snapshot_plus_purchasing';
   complete_digest: false;
   source_quality: 'partial';
   snapshot_generated_at: string;

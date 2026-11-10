@@ -15,6 +15,7 @@ from tasks.base import (
 )
 from app.scheduler.dashboard_snapshot import compute_dashboard_payload, store_snapshot
 from app.scheduler.finance_comparison import compare_invoice_headers_to_qbo_income
+from app.scheduler.purchasing_coverage import read_purchasing_coverage
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ def refresh_company_snapshot(
     company_id: str, *, db, companies, adapter_factory,
     generated_by: str = "manual_dashboard_refresh",
     include_finance_comparison: bool = False,
+    include_purchasing_coverage: bool = False,
 ) -> dict:
     """Purely read from the provider; persist one tenant-scoped dashboard snapshot."""
     if not isinstance(company_id, str) or not company_id.strip():
@@ -48,6 +50,10 @@ def refresh_company_snapshot(
         return payload
 
     payload = asyncio.run(collect())
+    if include_purchasing_coverage:
+        # Only the staging allowlisted cron opts into this source. Aggregate
+        # tenant-scoped DB reads never call external systems or take actions.
+        payload["purchasing_coverage"] = read_purchasing_coverage(db, company_id)
     store_snapshot(
         db, company_id, "dashboard_summary", payload,
         generated_by=generated_by,

@@ -22,6 +22,9 @@ from app.domain.briefing_contract import (
 from app.domain.briefing_wire import BriefingTodayResponseV1
 from app.scheduler.dashboard_snapshot import read_snapshot, snapshot_freshness, SnapshotReadUnavailable
 from app.scheduler.finance_comparison import FinanceReportInvalid, validate_finance_comparison
+from app.scheduler.purchasing_coverage import (
+    PurchasingCoverageInvalid, validate_purchasing_coverage,
+)
 from app.scheduler.weekly_report import (
     WeeklyReportInvalid, WeeklyReportResponseV1, read_weekly_report,
 )
@@ -111,6 +114,13 @@ def build_owner_briefing(
         except FinanceReportInvalid as exc:
             raise BriefingSourceUnavailable("Invalid financial comparison evidence") from exc
 
+    purchasing = payload.get("purchasing_coverage")
+    if purchasing is not None:
+        try:
+            purchasing = validate_purchasing_coverage(purchasing)
+        except PurchasingCoverageInvalid as exc:
+            raise BriefingSourceUnavailable("Invalid purchasing evidence") from exc
+
     evidence = (EvidenceRef(
         source_system="dashboard_snapshot",
         source_record_id=f"{company_id}:dashboard_summary:{observed.isoformat()}",
@@ -189,13 +199,51 @@ def build_owner_briefing(
                     "sales receipts, taxes, and journal entries before relying on revenue",
                     entry_evidence=finance_evidence)
 
+    if purchasing is not None:
+        quality = purchasing["source_quality"]
+        purchasing_evidence = (EvidenceRef(
+            source_system="tenant_purchasing_database",
+            source_record_id=f"{company_id}:purchasing_headers:{observed.isoformat()}",
+            fetched_at=observed,
+            quality=quality,
+            confidence=40 if quality == "partial" else 0,
+        ),)
+        if purchasing["status"] == "unavailable":
+            add("purchasing-source-unavailable", BriefingSection.YELLOW_ALERTS,
+                "Purchasing and receiving database evidence is unavailable; "
+                "no zero-activity conclusion can be drawn",
+                entry_evidence=purchasing_evidence, status="source_unavailable")
+        else:
+            by_state = purchasing["purchase_orders_by_status"]
+            add("purchasing-status", BriefingSection.SCOREBOARD,
+                f"Purchasing database: {purchasing['purchase_orders_total']} recorded "
+                f"orders ({by_state['draft']} draft, {by_state['approved']} approved, "
+                f"{by_state['partially_received']} partially received, "
+                f"{by_state['received']} received); "
+                f"{purchasing['pending_receipts']} staged receipts pending "
+                "(tenant database only)",
+                entry_evidence=purchasing_evidence)
+            if purchasing["pending_receipts"]:
+                add("purchasing-pending-receipts", BriefingSection.YELLOW_ALERTS,
+                    f"{purchasing['pending_receipts']} staged warehouse receipts "
+                    "await review; approval eligibility not assessed",
+                    entry_evidence=purchasing_evidence)
+        add("logistics-unassessed", BriefingSection.YELLOW_ALERTS,
+            "Freight, customs, vendor ETA, supplier claims and full "
+            "logistics reconciliation have not been assessed",
+            entry_evidence=purchasing_evidence,
+            status="source_unavailable" if quality == "unavailable" else "needs_review")
+
     briefing = RoleBriefing.project(
         company_id=company_id, audience_role=role, created_at=current,
         entries=entries,
     )
     response = briefing.to_payload()
     response.update({
-        "source_coverage": "dashboard_snapshot_only",
+        "source_coverage": (
+            "dashboard_snapshot_plus_purchasing" if purchasing is not None
+            else "dashboard_snapshot_only"
+        ),
         "complete_digest": False,
         "source_quality": "partial",
         "snapshot_generated_at": observed.isoformat(),

@@ -64,7 +64,9 @@ class BriefingTodayResponseV1(BaseModel):
     audience_role: Literal["owner", "manager"]
     created_at: datetime
     sections: BriefingSectionsV1
-    source_coverage: Literal["dashboard_snapshot_only"]
+    source_coverage: Literal[
+        "dashboard_snapshot_only", "dashboard_snapshot_plus_purchasing",
+    ]
     complete_digest: Literal[False]
     source_quality: Literal["partial"]
     snapshot_generated_at: datetime

@@ -89,3 +89,31 @@ before invoice-vs-income comparison can pass its live acceptance gate. If the
 category is `provider_auth_failed`, reconnect/refresh the approved sandbox
 credentials through the existing OAuth flow; do not copy credentials to logs or
 the UI. The hourly production schedule of the staging cron is `0 * * * *` UTC.
+
+## Gate 4 — tenant-scoped purchasing coverage for Lola
+
+The staging cron now also reads **headers only** from two local Supabase
+tables: `purchasing_orders` (`id,status,company_id`) and `staged_warehouse_receipts`
+(`id,company_id`, filtered to `status=pending`). Each read is filtered by the approved
+`company_id`, checked again against each returned row, limited to 500 rows,
+and rejected if the limit is exceeded,
+identifiers are duplicated/missing, a PO status is unknown, or a read fails.
+No supplier references, line details, costs, customer records, receipt payloads,
+or individual identifiers enter the dashboard snapshot or briefing.
+
+The cached `purchasing_coverage` reports counts by PO status and the number of
+pending staged receipts with `source_quality=partial`. Failed reads produce
+`status=unavailable`, null counts and `source_quality=unavailable`: an outage
+is never translated to zero purchase orders or zero receipts. The cached data
+is validated again before use. Only an owner or manager may see the purchasing
+aggregate in `GET /api/briefing/today`; its `complete_digest` flag remains
+**false**. The source coverage label is `dashboard_snapshot_plus_purchasing`
+for refreshed Gate 4 snapshots; older snapshots retain the prior label.
+
+The digest explicitly notes that freight, customs, vendor ETA, supplier
+claims, and full logistics reconciliation are **not assessed**. This gate
+does not certify external stock, prove an AP/AR balance, approve purchase
+orders or receipts, or dispatch any external action. The ordinary dashboard
+refresh remains unchanged; only the allowlisted staging cron opts into these
+additional reads. Future gates can expand coverage after verifying independent
+source quality and fine-grained role access.

@@ -96,6 +96,7 @@ def test_single_tenant_refresh_cannot_enqueue_outbound_tasks():
         adapter_factory=refresh.call_args.kwargs["adapter_factory"],
         generated_by="staging_readonly_cron",
         include_finance_comparison=True,
+        include_purchasing_coverage=True,
     )
 
 

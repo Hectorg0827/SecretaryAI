@@ -431,6 +431,14 @@ def validate_dashboard_cached_payload(payload: dict) -> dict:
             validate_finance_comparison(payload["finance_comparison"])
         except FinanceReportInvalid as exc:
             raise SnapshotDataInvalid("Dashboard financial comparison invalid") from exc
+    if "purchasing_coverage" in payload:
+        from app.scheduler.purchasing_coverage import (
+            PurchasingCoverageInvalid, validate_purchasing_coverage,
+        )
+        try:
+            validate_purchasing_coverage(payload["purchasing_coverage"])
+        except PurchasingCoverageInvalid as exc:
+            raise SnapshotDataInvalid("Dashboard purchasing evidence invalid") from exc
     return payload
 
 

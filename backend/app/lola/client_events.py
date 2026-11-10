@@ -146,6 +146,8 @@ UI_ES: dict[str, str] = {
     "Provided by you; not verified against the system of record.":
         "Proporcionado por ti; no verificado contra el sistema de registro.", "To": "Para", "Subject": "Asunto", "Item": "Artículo",
     "Amount": "Monto", "Request": "Solicitud", "Approval": "Aprobación",
+    "Pay": "Pagar", "Held back": "Retenida", "Bills": "Facturas", "Paid by Lola": "Pagado por Lola",
+    "Nothing — finance pays outside Lion BI": "Nada — finanzas paga fuera de Lion BI",
     "Missing — add before approving": "Falta — agrégalo antes de aprobar",
     "Independent leadership approval required": "Requiere aprobación independiente de la dirección",
     "Manager or owner approval": "Aprobación de un gerente o del dueño",
@@ -227,6 +229,20 @@ def action_preview(receipt: ActionReceipt, proposal: Optional[ActionProposal], *
                                                          or "Missing — add before approving")})
     for line in (payload.get("lines") or [])[:5]:
         fields.append({"label": "Item", "value": f"{line.get('quantity')} × {line.get('description') or line.get('item_id')}"})
+    # Supplier payment run: the approver sees every bill that would go on the
+    # payment file (the whole list — never a sample), and every bill held back.
+    for bill in payload.get("payments") or []:
+        who = str(bill.get("vendor") or "?")[:80]
+        ref = str(bill.get("doc_number") or bill.get("bill_id") or "")[:40]
+        due = str(bill.get("due_date") or "")[:10]
+        amount = f" · {_money(bill.get('amount'))}" if show_amount else ""
+        fields.append({"label": "Pay", "value": f"{who} · bill {ref} · due {due}{amount}"})
+    for held in payload.get("held_for_review") or []:
+        fields.append({"label": "Held back", "value": f"bill {str(held.get('bill_id'))[:40]} — "
+                                                      f"{str(held.get('reason') or 'needs review')[:120]}"})
+    if payload.get("payments"):
+        fields.append({"label": "Bills", "value": str(len(payload["payments"]))})
+        fields.append({"label": "Paid by Lola", "value": "Nothing — finance pays outside Lion BI"})
     if proposal and proposal.amount is not None and show_amount:
         fields.append({"label": "Amount", "value": _money(proposal.amount)})
     if payload.get("instruction"):

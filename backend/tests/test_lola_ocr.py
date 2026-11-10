@@ -196,6 +196,20 @@ class TestPhotos:
             extract("big.png", png_claiming(7_000, 7_000))     # 49 MP: under Pillow's limit, over ours
         assert e.value.code == "image_too_large" and ocr_on.calls == []
 
+    def test_busy_worker_refuses_photos_before_decoding(self, ocr_on, monkeypatch):
+        from PIL import ImageOps
+        decoded = []
+        monkeypatch.setattr(ImageOps, "exif_transpose", lambda im: decoded.append(1) or im)
+        held = [ocr._slots.acquire(blocking=False) for _ in range(ocr.MAX_CONCURRENT)]
+        try:
+            with pytest.raises(ExtractionRejected) as e:
+                extract("slip.png", png())
+            assert e.value.code == "ocr_busy" and decoded == [] and ocr_on.calls == []
+        finally:
+            for _ in held:
+                ocr._slots.release()
+        assert extract("slip.png", png()).ocr is True and decoded == [1]
+
     def test_broken_image(self, ocr_on):
         with pytest.raises(ExtractionRejected) as e:
             extract("bad.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 40)

@@ -129,3 +129,43 @@ class TestNotStaged:
         stockdb.tables["purchasing_orders"] = None                    # breaks the read
         j = _post(client).json()
         assert j["inventory_staging"]["reason"] == "unavailable" and stockdb.rpc_calls == []
+
+
+class TestTenantPolicyComesFirst:
+    """A tenant rule that denies stock postings stops staging; the receiving approval path can't see policy."""
+
+    def _policy(self, monkeypatch, effect=None, error=False):
+        from types import SimpleNamespace
+
+        from app.domain.policy import PolicyEngine
+
+        async def evaluate(self, proposal):
+            if error:
+                raise RuntimeError("policy store down")
+            stock = proposal.action_type.startswith("logistics.post_inventory")
+            return SimpleNamespace(effect=effect if stock else "require_approval", rule_name="r",
+                                   approval_roles=["owner"])
+        monkeypatch.setattr(PolicyEngine, "evaluate", evaluate)
+
+    def test_deny_rule_blocks_staging(self, client, stockdb, monkeypatch):  # noqa: F811
+        self._policy(monkeypatch, effect="deny")
+        _seed_shipment(stockdb)
+        j = _post(client).json()
+        assert j["inventory_staging"]["staged"] is False
+        assert j["inventory_staging"]["reason"] == "blocked_by_policy"
+        assert stockdb.rpc_calls == []
+        assert {a["status"] for a in j["approvals"] if a["action_type"].startswith("logistics.post_inventory")} \
+            == {"blocked_by_policy"}
+
+    def test_policy_unavailable_blocks_staging(self, client, stockdb, monkeypatch):  # noqa: F811
+        self._policy(monkeypatch, error=True)
+        _seed_shipment(stockdb)
+        j = _post(client).json()
+        assert j["inventory_staging"]["reason"] == "policy_unavailable" and stockdb.rpc_calls == []
+
+    @pytest.mark.parametrize("effect", ["allow", "require_approval"])
+    def test_non_deny_policy_still_stages(self, client, stockdb, monkeypatch, effect):  # noqa: F811
+        self._policy(monkeypatch, effect=effect)
+        _seed_shipment(stockdb)
+        j = _post(client).json()
+        assert j["inventory_staging"]["staged"] is True and len(stockdb.rpc_calls) == 1

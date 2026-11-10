@@ -129,6 +129,29 @@ class TestPrepare:
         await _propose(db, adapter=adapter)
 
 
+class TestApproverSeesTheList:
+    async def test_card_lists_every_bill_and_every_hold(self, bi):
+        from app.lola.client_events import action_preview
+        db = seed()
+        out = await _propose(db)
+        fields = action_preview(out.receipt, out.proposal, can_approve=True, approval_note=None)["fields"]
+        pays = [f["value"] for f in fields if f["label"] == "Pay"]
+        assert len(pays) == 2
+        assert pays[0] == "Vinos SA · bill INV-77 · due 2026-11-12 · $1,500.00"
+        held = [f["value"] for f in fields if f["label"] == "Held back"]
+        assert held and "B1" in held[0] and "duplicate" in held[0]
+        assert {"label": "Paid by Lola", "value": "Nothing — finance pays outside Lion BI"} in fields
+
+    async def test_amounts_hidden_when_the_viewer_cannot_see_money(self, bi):
+        from app.lola.client_events import action_preview
+        db = seed()
+        out = await _propose(db)
+        fields = action_preview(out.receipt, out.proposal, can_approve=False, approval_note="x",
+                                show_amount=False)["fields"]
+        assert all("$" not in f["value"] for f in fields if f["label"] in ("Pay", "Amount", "Held back"))
+        assert len([f for f in fields if f["label"] == "Pay"]) == 2            # still sees which bills
+
+
 class TestApproveAndDownload:
     async def _pending(self, db):
         out = await _propose(db)

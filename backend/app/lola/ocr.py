@@ -133,25 +133,34 @@ def image_text(data: bytes) -> str:
         raise OCRUnavailable("off")
     from PIL import Image, ImageOps, UnidentifiedImageError
 
+    # Cheap header check first (no pixels decoded), so oversized images are
+    # refused without taking a slot.
     try:
         with Image.open(io.BytesIO(data)) as probe:
             w, h = probe.size
-            if w * h > MAX_IMAGE_PIXELS or w < 16 or h < 16:
-                raise OCRFailed("image_too_large" if w * h > MAX_IMAGE_PIXELS else "unreadable_image")
-            if probe.format not in ("PNG", "JPEG"):
-                raise OCRFailed("unreadable_image")
-            img = ImageOps.exif_transpose(probe).convert("L")
-            img.thumbnail((RENDER_MAX_PX, RENDER_MAX_PX))
-            clean = io.BytesIO()
-            img.save(clean, format="PNG")          # re-encoded: no metadata, one known format
-    except OCRFailed:
-        raise
+            fmt = probe.format
     except Image.DecompressionBombError:
         raise OCRFailed("image_too_large") from None
     except (UnidentifiedImageError, OSError, ValueError):
         raise OCRFailed("unreadable_image") from None
+    if w * h > MAX_IMAGE_PIXELS:
+        raise OCRFailed("image_too_large")
+    if w < 16 or h < 16 or fmt not in ("PNG", "JPEG"):
+        raise OCRFailed("unreadable_image")
 
     def work():
+        # The memory-heavy decode / resize happens only while holding a slot,
+        # so a busy worker refuses before allocating any full-size image.
+        try:
+            with Image.open(io.BytesIO(data)) as src:
+                img = ImageOps.exif_transpose(src).convert("L")
+                img.thumbnail((RENDER_MAX_PX, RENDER_MAX_PX))
+                clean = io.BytesIO()
+                img.save(clean, format="PNG")      # re-encoded: no metadata, one known format
+        except Image.DecompressionBombError:
+            raise OCRFailed("image_too_large") from None
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise OCRFailed("unreadable_image") from None
         deadline = time.monotonic() + TIME_BUDGET_SECONDS
         with tempfile.TemporaryDirectory(prefix="lola-ocr-") as tmp:
             os.chmod(tmp, 0o700)

@@ -56,6 +56,8 @@ REASONS = {
     "nothing_counted": "No cases were counted, so nothing was staged.",
     "unavailable": "Purchasing records are unavailable right now, so nothing was staged.",
     "not_permitted": "Your role can't stage warehouse receipts.",
+    "blocked_by_policy": "Your company's action policy blocks these stock postings, so nothing was staged.",
+    "policy_unavailable": "Your company's action policy couldn't be checked, so nothing was staged.",
     "refused": "The database refused this receipt (it may already be staged differently), so nothing was staged.",
 }
 
@@ -154,6 +156,25 @@ def stage(db, p: StagePlan, *, company_id: str, actor_id: str) -> dict:
         "approve_path": f"/api/logistics/receipts/{staged_id}/approve",
         "lines": p.lines,
     }
+
+
+async def policy_clear(proposals, policy_engine) -> Optional[str]:
+    """
+    Tenant policy for every stock posting, BEFORE anything is staged. The
+    receiving approval path checks roles and quantities, not tenant policy, so
+    a rule that denies these postings must stop staging here. None = clear,
+    otherwise the reason code. Any error counts as "couldn't check" (fail closed).
+    """
+    for p in proposals:
+        if p.action_type not in STOCK_ACTIONS:
+            continue
+        try:
+            decision = await policy_engine.evaluate(p)
+        except Exception:  # noqa: BLE001
+            return "policy_unavailable"
+        if getattr(decision, "effect", None) == "deny":
+            return "blocked_by_policy"
+    return None
 
 
 STOCK_ACTIONS = frozenset({"logistics.post_inventory_receipt", "logistics.post_inventory_quarantine"})

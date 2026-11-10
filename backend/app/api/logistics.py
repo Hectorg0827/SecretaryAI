@@ -2211,9 +2211,13 @@ async def reconcile_receipt(
     # review-only drafts exactly as before. Claims are always drafts.
     stock_plan = stock_receiving.plan(db, company_id=user["company_id"], shipment_id=shipment.shipment_id,
                                       po_numbers=rec.po_numbers, received=request.lines)
-    staging = (stock_receiving.stage(db, stock_plan, company_id=user["company_id"], actor_id=user["sub"])
-               if stock_plan.ok else
-               {"staged": False, "reason": stock_plan.reason, "message": stock_receiving.REASONS[stock_plan.reason]})
+    blocked = (await stock_receiving.policy_clear(rec.proposals, PolicyEngine(user["company_id"], db))
+               if stock_plan.ok else None)
+    if stock_plan.ok and not blocked:
+        staging = stock_receiving.stage(db, stock_plan, company_id=user["company_id"], actor_id=user["sub"])
+    else:
+        reason = blocked or stock_plan.reason
+        staging = {"staged": False, "reason": reason, "message": stock_receiving.REASONS[reason]}
     to_queue = ([p for p in rec.proposals if p.action_type not in stock_receiving.STOCK_ACTIONS]
                 if staging["staged"] else rec.proposals)
     try:

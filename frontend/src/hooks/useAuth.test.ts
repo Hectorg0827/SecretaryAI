@@ -17,6 +17,13 @@ function backendPermissions(): Record<string, string[]> {
 }
 
 describe('web permission map', () => {
+  it('does not grant owner-only operations to a manager through view_all', () => {
+    expect(ROLE_PERMISSIONS.manager.has('view_all')).toBe(true);
+    expect(ROLE_PERMISSIONS.manager.has('manage_users')).toBe(false);
+    expect(ROLE_PERMISSIONS.manager.has('manage_billing')).toBe(false);
+    expect(ROLE_PERMISSIONS.owner.has('manage_users')).toBe(true);
+    expect(ROLE_PERMISSIONS.owner.has('manage_billing')).toBe(true);
+  });
   it('mirrors backend/app/auth/rbac.py exactly', () => {
     const web = Object.fromEntries(
       Object.entries(ROLE_PERMISSIONS).map(([role, perms]) => [role, [...perms].sort()]),

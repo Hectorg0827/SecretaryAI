@@ -150,6 +150,9 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
     unread_emails: unreadEmails,
     generated_at: generatedAt,
     cached: value.cached === true,
+    // Do not discard the backend's freshness verdict: an old but otherwise
+    // correctly shaped source row remains historical, not current.
+    snapshot_stale: typeof value.snapshot_stale === 'boolean' ? value.snapshot_stale : null,
   };
 }
 

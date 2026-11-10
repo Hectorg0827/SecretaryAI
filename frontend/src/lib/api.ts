@@ -121,6 +121,8 @@ export interface DashboardSummary {
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */
   cached: boolean;
+  /** Backend freshness check; null means the field was missing or untrusted. */
+  snapshot_stale: boolean | null;
 }
 
 export type BriefingSectionV1 = 'red_alerts' | 'yellow_alerts' | 'opportunities'

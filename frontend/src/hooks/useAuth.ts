@@ -18,10 +18,14 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   owner: new Set([
     'view_all', 'manage_users', 'approve_actions', 'manage_billing',
     'view_financials', 'trigger_actions', 'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   manager: new Set([
     'view_all', 'approve_actions', 'trigger_actions', 'view_financials',
     'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   sales_rep: new Set([
     'view_own_accounts', 'view_inventory',
@@ -60,8 +64,9 @@ export function useAuth() {
 
   function hasPermission(permission: string): boolean {
     const perms = ROLE_PERMISSIONS[role];
-    // view_all is a super-permission (owner + manager bypass all checks)
-    return perms.has(permission) || perms.has('view_all');
+    // Match the server's exact RBAC check. "view_all" is a read scope,
+    // never permission to administer billing, users or credentials.
+    return perms.has(permission);
   }
 
   return {

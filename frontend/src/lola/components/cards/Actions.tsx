@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckCircle2, Clock, Loader2, Lock, ShieldAlert, XCircle, CloudOff, Info, ShieldCheck } from 'lucide-react';
 import type { ActionPreview, Notice, Receipt, LolaLanguage } from '../../contract';
 import { t } from '../../persona';
+import { getTransport } from '../../store';
 
 const RISK = {
   low: 'text-lola-ok border-lola-ok/30',
@@ -98,12 +99,34 @@ export function ActionCard({ action, receipt, lang, onApprove, onReject }: Actio
   );
 }
 
+function PaymentFileButton({ receiptId, es }: { receiptId: string; es: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const download = getTransport().downloadPaymentRun;
+  if (!download) return null;
+  return (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => { setError(null); download.call(getTransport(), receiptId).catch((e: Error) => setError(e.message)); }}
+        className="rounded-md border border-lola-line px-2.5 py-1 text-[12px] text-lola-text hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-lola-gold"
+      >
+        {es ? 'Descargar archivo de pagos (CSV)' : 'Download payment file (CSV)'}
+      </button>
+      {error && <p role="alert" className="mt-1 text-[12px] text-lola-danger">{error}</p>}
+    </div>
+  );
+}
+
 export function ReceiptView({ receipt, lang }: { receipt: Receipt; lang: LolaLanguage }) {
   const es = lang === 'es';
   const done = receipt.status === 'executed' && receipt.verified;
   const failed = receipt.status === 'failed';
   const Icon = done ? CheckCircle2 : failed ? XCircle : Clock;
-  const title = done
+  // An approved supplier payment run: approved to pay, NOT paid (the bookkeeper pays outside Lion BI).
+  const paymentRun = done && (receipt.reference ?? '').startsWith('lion-bi:payment-run:');
+  const title = paymentRun
+    ? (es ? 'Aprobado · no se pagó nada' : 'Approved · nothing paid')
+    : done
     ? (es ? 'Hecho y verificado' : 'Done · verified')
     : failed
       ? (es ? 'No se completó' : 'Not completed')
@@ -118,6 +141,7 @@ export function ReceiptView({ receipt, lang }: { receipt: Receipt; lang: LolaLan
         <Icon size={14} aria-hidden />{title}
       </p>
       <p className="mt-0.5">{receipt.message}</p>
+      {paymentRun && <PaymentFileButton receiptId={receipt.action_id} es={es} />}
       {(receipt.reference || receipt.executed_at) && (
         <p className="mt-0.5 text-[11px] text-lola-mute">
           {receipt.reference && <>{es ? 'Referencia' : 'Reference'} {receipt.reference}</>}

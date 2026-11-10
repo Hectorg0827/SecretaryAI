@@ -695,3 +695,66 @@ async def extract_file(request: Request, file: UploadFile, user: dict = Depends(
     return {"name": name, "mime": result.mime, "size": len(result.text), "text": result.text,
             "kind": result.kind, "pages": result.pages, "sheets": result.sheets, "truncated": result.truncated,
             "ocr": result.ocr, "note": OCR_NOTE[lang] if result.ocr else None}
+
+
+# ─── Supplier payment run file (approved list; Lola pays nothing) ────────────
+
+from fastapi.responses import Response  # noqa: E402
+
+
+def _payment_file_reader(p) -> bool:
+    """Who may download an approved payment file: leadership, or finance staff with financial access."""
+    return p.has_financial_access and (p.is_executive or p.financial_clearance
+                                       or getattr(p.department, "value", p.department) == "finance")
+
+
+@router.get("/payment-runs/{receipt_id}/file")
+async def payment_run_file(receipt_id: str, request: Request, user: dict = Depends(get_current_user),
+                           db=Depends(get_db)):
+    """
+    CSV of an APPROVED supplier payment run, for the bookkeeper to pay outside
+    Lion BI. Exactly the list the approver saw (drafts are locked); nothing is
+    paid or recorded anywhere by this download. Every download is audited.
+    """
+    import csv
+    import io
+
+    from app.lola.attachments import clean_cell
+
+    lang = request_language(request)
+    p = _principal(db, user)
+    if not _payment_file_reader(p):
+        raise HTTPException(status_code=403, detail=_L(lang, "Only leadership or finance can download payment files.",
+                                                       "Solo la dirección o finanzas pueden descargar archivos de pagos."))
+    try:
+        rows = (db.table("lola_action_receipts").select("*").eq("company_id", p.company_id)
+                .eq("id", receipt_id).limit(1).execute()).data or []
+        row = rows[0] if rows else None
+        draft = _draft_for(db, p.company_id, row.get("draft_id")) if row else None
+    except Exception:
+        raise HTTPException(status_code=503, detail="Payment runs unavailable") from None
+    if not row or row.get("action_type") != "prepare_payment_run" or not draft:
+        raise HTTPException(status_code=404, detail="Payment run not found")
+    if draft.get("status") != "approved" or draft.get("action_type") != "payment_run":
+        raise HTTPException(status_code=409, detail=_L(lang, "This payment run hasn't been approved.",
+                                                       "Esta corrida de pagos no ha sido aprobada."))
+    content = draft.get("content") or {}
+    meta = content.get("_lola") or {}
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["vendor", "bill_number", "bill_id", "due_date", "amount", "currency"])
+    for pay in content.get("payments") or []:
+        w.writerow([clean_cell(pay.get("vendor")), clean_cell(pay.get("doc_number")), clean_cell(pay.get("bill_id")),
+                    clean_cell(pay.get("due_date")), clean_cell(pay.get("amount")), clean_cell(content.get("currency"))])
+    w.writerow([])
+    w.writerow(["TOTAL", "", "", "", clean_cell(content.get("total")), clean_cell(content.get("currency"))])
+    w.writerow(["approved_by", clean_cell(draft.get("reviewed_by")), "approved_at", clean_cell(draft.get("reviewed_at")),
+                "requested_by", clean_cell(meta.get("requested_by"))])
+    w.writerow([_L(lang, "Nothing has been paid. Before paying, confirm each bill is still open in QuickBooks.",
+                   "No se ha pagado nada. Antes de pagar, confirme que cada factura siga abierta en QuickBooks.")])
+    write_audit_event(db, company_id=p.company_id, event_type="payment_run_file_downloaded", actor_id=p.user_id,
+                      action_class="payment_run", metadata={"receipt_id": receipt_id, "draft_id": draft.get("id")})
+    return Response(content=out.getvalue(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="payment-run-{str(draft.get("id"))[:8]}.csv"',
+        "Cache-Control": "no-store",
+    })

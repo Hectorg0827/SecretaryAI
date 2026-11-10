@@ -181,6 +181,25 @@ export class HttpLolaTransport implements LolaTransport {
     };
   }
 
+  async downloadPaymentRun(receiptId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/api/lola/payment-runs/${encodeURIComponent(receiptId)}/file`, {
+      headers: authHeaders(),
+    }).catch(() => null);
+    if (!res) throw new Error('Couldn’t reach Lion BI. Try again when you’re back online.');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as Record<string, unknown>));
+      throw new Error(typeof body.detail === 'string' ? body.detail : `Download failed (HTTP ${res.status})`);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `payment-run-${receiptId.slice(0, 8)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async getReceipt(actionId: string): Promise<Receipt | null> {
     const res = await fetch(`${API_BASE}/api/lola/actions/${encodeURIComponent(actionId)}`, { headers: authHeaders() })
       .catch(() => null);

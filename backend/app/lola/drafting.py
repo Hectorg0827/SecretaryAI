@@ -256,6 +256,8 @@ def locked_fields_changed(action_type: str, original: dict, edited: Optional[dic
         return []
     from app.lola.governance import LOLA_META_KEY
 
+    if action_type == "prepare_payment_run":
+        return ["payment_run"]           # the approved list is exactly what was reviewed: no edits
     keys = list(LOCKED_EMAIL_FIELDS if action_type == "draft_customer_email" else LOCKED_PO_FIELDS)
     keys.append(LOLA_META_KEY)
     changed = [k for k in keys if edited.get(k) != original.get(k)]
@@ -263,3 +265,77 @@ def locked_fields_changed(action_type: str, original: dict, edited: Optional[dic
             edited.get("vendor_id") != original.get("vendor_id"):
         changed.append("vendor_id")
     return changed
+
+
+# ─── Supplier payment run (approved list only — nothing is paid) ─────────────
+
+MAX_PAYMENT_RUN_BILLS = 200
+_HORIZON = re.compile(r"\b(?:next|pr[oó]xim[oa]s?)\s+(\d{1,2})\s*(?:days?|d[ií]as)\b", re.IGNORECASE)
+
+
+def _payment_horizon(message: str) -> int:
+    m = _HORIZON.search(message or "")
+    if m and 0 <= int(m.group(1)) <= 60:
+        return int(m.group(1))
+    return 14
+
+
+async def compose_payment_run(db, authorizer: Authorizer, adapter, message: str) -> dict:
+    """
+    A list of supplier bills to pay, for a human to approve and a bookkeeper to
+    pay OUTSIDE Lola. Built only from WS2's read-only payment proposal, under
+    the requester's own BI scope (needs the ap.propose_payments capability).
+
+    Never pays, never records a payment in QuickBooks, never touches a bank.
+    Bills flagged as possible duplicates are left out (listed for review), and
+    only home-currency bills due inside the horizon are included.
+    """
+    from app.lola.integrations import bi_scope_for
+    from app.lola_bi.contracts import TenantMismatch
+    from app.lola_bi.gateway import BusinessDataGateway
+    from app.lola_bi.scope import Cap
+    from app.lola_bi.tools import LolaBIService
+
+    if adapter is None:
+        raise DraftIncomplete("QuickBooks is not connected, so I can't prepare a payment run")
+    scope = bi_scope_for(authorizer.p, authorizer)
+    if Cap.AP_PROPOSE not in scope.capabilities:
+        raise DraftIncomplete("Your role can't prepare supplier payment runs")
+    horizon = _payment_horizon(message)
+    try:
+        env = await LolaBIService(BusinessDataGateway(adapter, scope, db=db)).invoke(
+            "ap_payment_proposal", {"horizon_days": horizon})
+    except TenantMismatch as exc:
+        raise DraftIncomplete("The QuickBooks connection doesn't match your company") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise DraftIncomplete("Supplier bills are unavailable right now") from exc
+    answer = env.get("answer") if isinstance(env, dict) else None
+    if env.get("status") not in ("ok", "partial") or not isinstance(answer, dict):
+        raise DraftIncomplete("Supplier bills are unavailable right now")
+    payments = []
+    for p in answer.get("proposed_payments") or []:
+        try:
+            amount = Decimal(str(p["amount"])).quantize(Decimal("0.01"))
+        except (InvalidOperation, KeyError, TypeError):
+            raise DraftIncomplete("A supplier bill had an unreadable amount, so nothing was prepared") from None
+        if amount <= 0 or not str(p.get("bill_id") or "").strip():
+            raise DraftIncomplete("A supplier bill had incomplete details, so nothing was prepared")
+        payments.append({"bill_id": str(p["bill_id"])[:64], "vendor": str(p.get("vendor") or "")[:200],
+                         "doc_number": str(p.get("doc_number") or "")[:64],
+                         "due_date": str(p.get("due_date") or "")[:10], "amount": str(amount)})
+    if not payments:
+        raise DraftIncomplete("No supplier bills fit in the available cash for this period")
+    if len(payments) > MAX_PAYMENT_RUN_BILLS:
+        raise DraftIncomplete(f"That's more than {MAX_PAYMENT_RUN_BILLS} bills; ask for a shorter period")
+    total = sum((Decimal(p["amount"]) for p in payments), Decimal("0")).quantize(Decimal("0.01"))
+    return {
+        "currency": str(answer.get("currency") or ""), "as_of": str(answer.get("as_of") or ""),
+        "horizon_end": str(answer.get("horizon_end") or ""), "horizon_days": horizon,
+        "payments": payments, "total": str(total),
+        "held_for_review": [{"bill_id": str(h.get("bill_id")), "reason": str(h.get("reason") or "")[:200]}
+                            for h in (answer.get("held_for_review") or [])][:50],
+        "deferred_count": len(answer.get("deferred") or []),
+        "cash_remaining_after_run": str(answer.get("cash_remaining_after_proposal") or ""),
+        "instruction": (message or "")[:500],
+        "pays_nothing": True,
+    }

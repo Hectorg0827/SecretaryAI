@@ -152,6 +152,9 @@ UI_ES: dict[str, str] = {
     "Prepared by Lola. Nothing is sent until it is approved and verified.":
         "Preparado por Lola. No se envía nada hasta que se apruebe y se verifique.",
     "Done and verified.": "Hecho y verificado.",
+    ("Payment run approved. Nothing was paid: your bookkeeper can download the payment file and pay the "
+     "bills outside Lion BI."): ("Corrida de pagos aprobada. No se pagó nada: su contador puede descargar el "
+                                 "archivo de pagos y pagar las facturas fuera de Lion BI."),
     "This did not happen. Nothing was sent.": "Esto no ocurrió. No se envió nada.",
     "Accepted, awaiting confirmation. Nothing is confirmed as sent yet.":
         "Aceptado, en espera de confirmación. Aún no se confirma ningún envío.",
@@ -245,7 +248,11 @@ def action_preview(receipt: ActionReceipt, proposal: Optional[ActionProposal], *
 
 def client_receipt(receipt: ActionReceipt, message: Optional[str] = None, *, lang: str = "en") -> dict:
     """WS4 Receipt. ``executed`` only when the receipt is completed AND verified."""
-    if receipt.status == LolaStatus.COMPLETED and receipt.verified:
+    if (receipt.status == LolaStatus.COMPLETED and receipt.verified
+            and str(receipt.external_reference or "").startswith("lion-bi:payment-run:")):
+        status, default = "executed", ("Payment run approved. Nothing was paid: your bookkeeper can download "
+                                       "the payment file and pay the bills outside Lion BI.")
+    elif receipt.status == LolaStatus.COMPLETED and receipt.verified:
         status, default = "executed", "Done and verified."
     elif receipt.status in (LolaStatus.FAILED, LolaStatus.REJECTED, LolaStatus.DENIED):
         status, default = "failed", "This did not happen. Nothing was sent."

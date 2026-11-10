@@ -160,6 +160,9 @@ errors and the `ToolResult` envelope are handled by the base class.
 * WS3 stock postings: with `SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1` a clean count is staged on
   the existing two-person receiving path and booked only after a different owner/manager approves
   it (`app/lola/stock_receiving.py`, `EXECUTION.md`). WS3 claims stay drafts (never filed).
+* WS2 supplier payments: Lola prepares a **payment run** (approved list); an independent leader approves
+  it and finance downloads a CSV to pay outside Lion BI. Lola never pays, never records payments in
+  QuickBooks and never touches a bank (`EXECUTION.md`).
 
 * Lola emails and purchase orders run through the durable queue and a gated
   executor (`EXECUTION.md`). Until an operator turns the switches on, approving

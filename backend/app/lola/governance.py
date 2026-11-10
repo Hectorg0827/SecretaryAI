@@ -91,6 +91,15 @@ CATALOG: dict[str, ActionSpecDef] = {
         ("draft_purchase_orders",), ActionClass.COMMIT, "purchase_orders",
         resource=ResourceType.PURCHASING, queue_action_type="purchase_order",
     ),
+    # A list of supplier bills for a bookkeeper to pay OUTSIDE Lola. Always
+    # high-risk (independent leadership approval). Approval only records the
+    # decision and unlocks the payment file; nothing is paid or recorded in
+    # QuickBooks, and no bank is touched (those stay prohibited).
+    "prepare_payment_run": ActionSpecDef(
+        "prepare_payment_run", RiskTier.HIGH_RISK, "Supplier payment run (approved list)",
+        ("view_financials",), ActionClass.DRAFT, "payment_run",
+        resource=ResourceType.FINANCIALS, queue_action_type="payment_run",
+    ),
     "generate_internal_report": ActionSpecDef(
         "generate_internal_report", RiskTier.ROUTINE_AUTOMATION, "Generate internal report",
         ("run_reports",), ActionClass.DRAFT, "reports",
@@ -329,7 +338,8 @@ class GovernedActionService:
                                    decision, receipt=receipt_from_row(existing), duplicate=True)
 
         # Turn the request into an executable draft (real recipient / PO lines).
-        from app.lola.drafting import DraftIncomplete, compose_customer_email, compose_purchase_order
+        from app.lola.drafting import (DraftIncomplete, compose_customer_email, compose_payment_run,
+                                       compose_purchase_order)
         try:
             if action_type == "draft_customer_email":
                 payload = await compose_customer_email(self._db, self._auth, entity,
@@ -339,6 +349,10 @@ class GovernedActionService:
                 payload = await compose_purchase_order(adapter, str(payload.get("instruction") or description))
                 computed = Decimal(payload["total"])
                 amount = max(amount, computed) if amount is not None else computed
+            elif action_type == "prepare_payment_run":
+                payload = await compose_payment_run(self._db, self._auth, adapter,
+                                                    str(payload.get("instruction") or description))
+                amount = Decimal(payload["total"])          # never a figure from the message
         except DraftIncomplete as exc:
             return ProposalOutcome(LolaStatus.FAILED, f"I couldn't prepare this: {exc}. Nothing was queued.",
                                    decision)
@@ -494,7 +508,12 @@ class GovernedActionService:
                               .limit(1).execute())
             except Exception:
                 execs = []
-            if not execs:
+            if row.get("action_type") == "prepare_payment_run":
+                # The approved list IS the outcome (recorded in the approval
+                # queue). It means "approved to pay" — nothing was paid.
+                target = LolaStatus.COMPLETED
+                fields.update(external_reference=f"lion-bi:payment-run:{row['draft_id']}", verified=True)
+            elif not execs:
                 target = LolaStatus.APPROVED
             else:
                 ex = execs[0]

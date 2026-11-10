@@ -59,6 +59,24 @@ Switch: `SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1` (off by default).
 This books stock in Lion BI's own stock ledger only. It does **not** change QuickBooks quantities,
 value the stock, or pay the supplier (`accounting_reconciled` stays false). Claims are drafts only.
 
+## Supplier payment runs (approved list only — Lola pays nothing)
+
+No switch is needed because nothing external happens. Payments themselves stay **prohibited** for Lola
+(`access_bank_accounts`, `modify_financial_records`).
+
+1. An owner or manager with financial access asks Lola to "prepare a payment run" ("prepara la corrida
+   de pagos"). Lola builds the list from Workstream 2's read-only payment proposal: home-currency bills
+   due in the horizon (default 14 days, "next 30 days" allowed) that fit the available cash. Possible
+   duplicates are left out and listed for review. The total comes from the bills, never from the message.
+2. It is always **high-risk**: a *different* member of leadership must approve it
+   (`/api/actions/approve/{draft_id}` or the chat card). Edits are refused; reject and ask again instead.
+   Approval only records the decision (`payment_run_approved` audit event, `paid: false`).
+3. Leadership or finance staff download the CSV at `GET /api/lola/payment-runs/{receipt_id}/file`
+   (audited; cells are formula-safe; `Cache-Control: no-store`). The bookkeeper pays the bills **outside
+   Lion BI** and records them in QuickBooks as usual, after checking each bill is still open.
+
+The receipt shows "Approved · nothing paid" with reference `lion-bi:payment-run:<draft id>`.
+
 ## When something needs reconciliation
 
 The receipt shows "needs a human check". Look in Gmail "Sent" / Outlook / QuickBooks for the item

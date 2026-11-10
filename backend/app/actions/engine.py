@@ -44,6 +44,7 @@ class ActionEngine:
         # ── DRAFT AND WAIT — AI prepares, human must approve ──────────────────
         "draft_customer_email": "draft_and_wait",
         "draft_purchase_order": "draft_and_wait",
+        "prepare_payment_run": "draft_and_wait",     # list only; payments stay outside Lola
         "draft_rep_assignment": "draft_and_wait",
         "generate_external_report": "draft_and_wait",
         # Computer Use — any action that changes data or submits a form

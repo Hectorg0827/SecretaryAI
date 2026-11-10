@@ -148,3 +148,34 @@ false. The normal production and manual dashboard refresh paths do not opt in.
 Separate finance-team employee roles, actual payment posting, AR statements,
 AP approvals, and email communications remain out of scope. These require
 explicit role policies and independent write-action approval gates.
+
+## Gate 6A — read-only departmental finance access foundation
+
+`GET /api/finance/workspace` is a subscription-gated **staging-only** endpoint.
+It checks exact finance RBAC permission, confirms the caller's current active
+role and tenant directly against `users` (not merely their JWT), then reads only
+that tenant's fresh cached `dashboard_summary`. It never queries Intuit, posts
+transactions, sends emails, or changes database records. The response is
+`private, no-store` and returns only scopes authorized for the role:
+
+| Role | Allowed scopes |
+|---|---|
+| Owner/Manager | AR, AP, ledger comparison, pricing status |
+| Finance Controller | AR, AP, ledger comparison |
+| AR Specialist | AR only |
+| AP Specialist | AP only |
+| Pricing & Billbacks | Pricing status only |
+
+The last four roles are **policy-only reservations**, not active employee
+accounts: the existing database `users.role` CHECK and manager-only invitation
+flow have intentionally NOT been changed by this gate. Role assignment and
+mailbox-verified onboarding must be migrated together, after verifying the
+staging-only database target and all authorization/RLS implications. The new
+roles have only `view_finance_workspace`, no broad `back_office` inheritance.
+
+The workspace represents unavailable or not-yet-assessed evidence with null
+counts. It never asserts billback validation, income certification, currency,
+cash flow or a reconciled balance. The UI exposes the server-selected sections
+without providing a role/scope selection input. Existing owner and manager
+accounts can use the Finance Workspace now in staging; other existing roles
+retain their prior access and are denied this endpoint.

@@ -11,7 +11,8 @@
  *   · helper booleans for the most common UI gates
  */
 
-export type Role = 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
+export type Role = 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer'
+  | 'finance_controller' | 'ar_specialist' | 'ap_specialist' | 'pricing_billbacks';
 
 // Mirrors backend/app/auth/rbac.py ROLE_PERMISSIONS exactly
 export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
@@ -19,13 +20,13 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
     'view_all', 'manage_users', 'approve_actions', 'manage_billing',
     'view_financials', 'trigger_actions', 'run_reports', 'draft_purchase_orders',
     'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
-    'view_dashboard', 'manage_inventory',
+    'view_dashboard', 'manage_inventory', 'view_finance_workspace',
   ]),
   manager: new Set([
     'view_all', 'approve_actions', 'trigger_actions', 'view_financials',
     'run_reports', 'draft_purchase_orders',
     'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
-    'view_dashboard', 'manage_inventory',
+    'view_dashboard', 'manage_inventory', 'view_finance_workspace',
   ]),
   sales_rep: new Set([
     'view_own_accounts', 'view_inventory',
@@ -37,6 +38,10 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   viewer: new Set([
     'view_dashboard',
   ]),
+  finance_controller: new Set(['view_finance_workspace']),
+  ar_specialist: new Set(['view_finance_workspace']),
+  ap_specialist: new Set(['view_finance_workspace']),
+  pricing_billbacks: new Set(['view_finance_workspace']),
 };
 
 /**
@@ -78,7 +83,7 @@ export function useAuth() {
     canDraftPO:         hasPermission('view_inventory') && hasPermission('trigger_actions')
                           || role === 'back_office',
     canTriggerActions:  hasPermission('trigger_actions'),
-    canAccessChat:      role !== 'viewer',
+    canAccessChat:      role === 'owner' || role === 'manager' || role === 'sales_rep',
     canAccessSettings:  hasPermission('manage_billing') || role === 'manager',
     canAccessAccounts:  hasPermission('view_all') || hasPermission('view_own_accounts') || hasPermission('view_customers'),
     canAccessInventory: hasPermission('view_inventory') || hasPermission('view_all'),

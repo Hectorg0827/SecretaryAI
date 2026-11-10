@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, WalletCards } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
@@ -12,12 +12,17 @@ const ROLE_LABELS: Record<Role, string> = {
   sales_rep:   'Sales Rep',
   back_office: 'Back Office',
   viewer:      'Viewer',
+  finance_controller: 'Finance Controller',
+  ar_specialist: 'Accounts Receivable',
+  ap_specialist: 'Accounts Payable',
+  pricing_billbacks: 'Pricing & Billbacks',
 };
 
 const ALL_NAV_ITEMS = [
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
+  { to: '/finance',   label: 'Finance Workspace', icon: WalletCards, exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   // Rep account assignment is not yet server-verified; fail closed until the
   // domain owner provides a scoped account read contract.
   { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },

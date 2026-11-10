@@ -166,7 +166,7 @@ def _gated_prefixes() -> set[str]:
 
 # Everything a customer pays for.
 PAID = [
-    "/api/chat", "/api/dashboard", "/api/briefing", "/api/accounts", "/api/inventory",
+    "/api/chat", "/api/dashboard", "/api/briefing", "/api/finance", "/api/accounts", "/api/inventory",
     "/api/actions", "/api/agent", "/api/notifications", "/api/inbox",
     "/api/workflows", "/api/feed", "/api/computer-use", "/api/logistics",
     "/api/compliance", "/api/insights",

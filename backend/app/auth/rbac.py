@@ -1,6 +1,7 @@
 """
 Role-Based Access Control.
-Roles: owner, manager, sales_rep, back_office, viewer
+Departmental finance roles are reserved for staged onboarding; the existing
+database role constraint and invite flow still gate assignment separately.
 """
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -14,12 +15,13 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "view_all", "manage_users", "approve_actions", "manage_billing",
         "view_financials", "trigger_actions", "run_reports", "draft_purchase_orders",
         "view_inventory", "view_orders", "view_customers", "view_own_accounts",
-        "view_dashboard", "manage_inventory",
+        "view_dashboard", "manage_inventory", "view_finance_workspace",
     },
     "manager": {
         "view_all", "approve_actions", "trigger_actions", "view_financials",
         "run_reports", "draft_purchase_orders", "view_inventory", "view_orders",
         "view_customers", "view_own_accounts", "view_dashboard", "manage_inventory",
+        "view_finance_workspace",
     },
     "sales_rep": {
         "view_own_accounts", "view_inventory",
@@ -31,6 +33,12 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "viewer": {
         "view_dashboard",
     },
+    # Deliberately no view_all, view_financials, action or connector rights.
+    # These identities must not inherit the broad back_office permissions.
+    "finance_controller": {"view_finance_workspace"},
+    "ar_specialist": {"view_finance_workspace"},
+    "ap_specialist": {"view_finance_workspace"},
+    "pricing_billbacks": {"view_finance_workspace"},
 }
 
 

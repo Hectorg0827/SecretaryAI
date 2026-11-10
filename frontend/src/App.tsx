@@ -19,7 +19,15 @@ import { Connectors } from './pages/Connectors';
 import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
 import { Insights } from './pages/Insights';
+import { FinanceWorkspace } from './pages/FinanceWorkspace';
 import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
+import { useAuth } from './hooks/useAuth';
+
+function RoleHome() {
+  const { hasPermission } = useAuth();
+  return hasPermission('view_finance_workspace') && !hasPermission('view_dashboard')
+    ? <Navigate to="/finance" replace /> : <Dashboard />;
+}
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
 function AppShell() {
@@ -97,7 +105,12 @@ function AppShell() {
       <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
       <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<RoleHome />} />
+          <Route path="/finance" element={
+            <RoleGuard roles={['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks']}>
+              <FinanceWorkspace />
+            </RoleGuard>
+          } />
           <Route
             path="/inbox"
             element={

@@ -111,7 +111,7 @@ Cards and sections marked `financial` or `executive` are also hidden from roles 
 |---|---|---|
 | 1 | back_office can use Lola | **Done** — `/api/lola/turn` uses Lola's own authorization, not `view_own_accounts` |
 | 2 | `/api/chat/transcribe` language | **Done** — honours `language` (`en`/`es`), otherwise auto-detects |
-| 3 | Attachments | **Text files done** — CSV/TSV/TXT/Markdown/JSON (inline `text`, ≤200 KB, ≤5 files) are read as untrusted data: preview card, totals, inventory and customer cross-checks within the caller's permissions, instruction-like text flagged. **Binary (PDF, Excel) still open** — reported with an `info` notice |
+| 3 | Attachments | **Text files done** — CSV/TSV/TXT/Markdown/JSON (inline `text`, ≤200 KB, ≤5 files) are read as untrusted data: preview card, totals, inventory and customer cross-checks within the caller's permissions, instruction-like text flagged. **PDF and Excel done** — the client posts the file to `POST /api/lola/files` (multipart, ≤5 MB); the server extracts text (PDF) or CSV (first sheet of .xlsx, values only), stores nothing, and the client sends the text inline as a normal attachment. Encrypted PDFs, scanned PDFs without text, legacy .xls, macro workbooks and zip bombs are refused with a plain message |
 | 4 | Retention | **Partly done** — `transcript: none` stores no conversation rows; audio is never stored by the server |
 | 5 | Pollable receipts | **Done** — `GET /api/lola/actions/{id}` returns `client_receipt` |
 | — | Spanish answers | **Done** — `language: es` (or Spanish detected) answers in Spanish; a `language` event is sent; card labels, previews, notices and suggestions are Spanish; business data is never translated. WS2/WS3 findings text is still English, marked "(detalle en inglés)" |

@@ -6,7 +6,7 @@
  *                       (VITE_LOLA_MOCK=1 or ?lola_demo=1 outside production),
  *                       and every result it produces is badged "Demo data".
  */
-import type { Briefing, LolaEvent, Receipt, TurnRequest } from './contract';
+import type { Attachment, Briefing, LolaEvent, Receipt, TurnRequest } from './contract';
 import type { Role } from '../hooks/useAuth';
 
 export interface LolaTransport {
@@ -17,6 +17,12 @@ export interface LolaTransport {
   approve(actionId: string): Promise<Receipt>;
   reject(actionId: string, reason?: string): Promise<void>;
   briefing(role: Role, signal?: AbortSignal): Promise<Briefing>;
+  /**
+   * Optional: turn a PDF / .xlsx into text on the server (nothing is stored),
+   * so it can be sent inline like a CSV. Resolves null when the server has no
+   * extraction endpoint; rejects with a user-facing message when the file is refused.
+   */
+  extractFile?(file: File): Promise<Attachment | null>;
 }
 
 /**

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ArrowUp, Mic, MicOff, Paperclip, Square, RotateCw, X, FileText, PauseCircle } from 'lucide-react';
-import { useLolaStore, type LolaMessage } from '../store';
+import { getTransport, useLolaStore, type LolaMessage } from '../store';
 import { useVoice, stopSpeaking } from '../voice/useVoice';
 import { STARTER_PROMPTS, t, greeting, orbStatusLabel } from '../persona';
 import { currentRole } from '../../hooks/useAuth';
@@ -14,6 +14,7 @@ import { useOrbState } from './useOrbState';
 
 const MAX_INLINE_BYTES = 200_000;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_EXTRACT_BYTES = 5 * 1024 * 1024;
 
 function LolaReply({ m }: { m: LolaMessage }) {
   const approve = useLolaStore((s) => s.approve);
@@ -181,8 +182,19 @@ export function Composer({ autoFocus = false }: { autoFocus?: boolean }) {
     for (const f of Array.from(list).slice(0, 3)) {
       if (f.size > MAX_FILE_BYTES) { setFileError(lang === 'es' ? `${f.name} supera 15 MB.` : `${f.name} is over 15 MB.`); continue; }
       const isText = /^text\/|json|csv/.test(f.type) || /\.(csv|txt|md|json)$/i.test(f.name);
+      const isDocument = /pdf|spreadsheetml/.test(f.type) || /\.(pdf|xlsx)$/i.test(f.name);
       const a: Attachment = { name: f.name, size: f.size, mime: f.type || 'application/octet-stream' };
       if (isText && f.size <= MAX_INLINE_BYTES) a.text = await f.text();
+      if (isDocument && f.size <= MAX_EXTRACT_BYTES) {
+        // The server reads PDF / Excel into text and keeps nothing.
+        try {
+          const extracted = await getTransport().extractFile?.(f);
+          if (extracted) { next.push(extracted); continue; }
+        } catch (err) {
+          setFileError(err instanceof Error ? err.message : `${f.name}`);
+          continue;
+        }
+      }
       next.push(a);
     }
     setFiles((cur) => [...cur, ...next].slice(0, 3));

@@ -560,3 +560,52 @@ async def lola_briefing(user: dict = Depends(get_current_user), db=Depends(get_d
                 else "Some business data isn't available right now.")
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "greeting": "Good day",
             "headline": headline, "sections": sections}
+
+
+# ─── PDF / Excel extraction (stateless) ──────────────────────────────────────
+
+from fastapi import UploadFile  # noqa: E402
+
+_EXTRACTION_MESSAGES = {
+    "too_large": "Files must be 5 MB or smaller.",
+    "unsupported_type": "Only PDF and Excel (.xlsx) files can be uploaded here.",
+    "legacy_xls": "Old Excel (.xls) files aren't supported; save it as .xlsx or CSV.",
+    "encrypted_pdf": "Password-protected PDFs can't be read.",
+    "unreadable_pdf": "This PDF couldn't be read.",
+    "no_text_in_pdf": "This PDF has no readable text (it may be a scanned image).",
+    "unreadable_xlsx": "This Excel file couldn't be read.",
+    "unsafe_xlsx": "This Excel file was refused because it expands to an unsafe size.",
+    "not_xlsx": "This file isn't an Excel workbook.",
+    "macro_xlsx": "Macro-enabled Excel files aren't accepted; save it as a regular .xlsx.",
+    "empty_xlsx": "The first sheet of this Excel file is empty.",
+    "too_slow": "This file took too long to read.",
+}
+
+
+@router.post("/files")
+async def extract_file(file: UploadFile, user: dict = Depends(get_current_user), db=Depends(get_db)):
+    """
+    Turn a PDF or .xlsx into text the client sends back with the question.
+    Nothing is stored or logged; the file is read in memory and discarded.
+    """
+    import asyncio
+
+    from starlette.concurrency import run_in_threadpool
+
+    from app.lola.attachments import clean_cell
+    from app.lola.file_extraction import MAX_UPLOAD_BYTES, ExtractionRejected, extract
+
+    _principal(db, user)
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    name = clean_cell(file.filename or "attachment")[:255].lstrip("'") or "attachment"
+    try:
+        result = await asyncio.wait_for(run_in_threadpool(extract, name, data), timeout=20)
+    except ExtractionRejected as exc:
+        raise HTTPException(status_code=422, detail=_EXTRACTION_MESSAGES.get(exc.code, "This file couldn't be read.")) \
+            from None
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=422, detail=_EXTRACTION_MESSAGES["too_slow"]) from None
+    finally:
+        del data
+    return {"name": name, "mime": result.mime, "size": len(result.text), "text": result.text,
+            "kind": result.kind, "pages": result.pages, "sheets": result.sheets, "truncated": result.truncated}

@@ -96,3 +96,31 @@ describe('HttpLolaTransport', () => {
     expect(b.sections.filter((s) => s.availability === 'ok')).toHaveLength(0);
   });
 });
+
+describe('HttpLolaTransport.extractFile (PDF / Excel)', () => {
+  beforeEach(() => loginAs('owner'));
+  afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+  const file = new File(['%PDF-1.4'], 'po.pdf', { type: 'application/pdf' });
+
+  it('returns the extracted text as an inline attachment', async () => {
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      json(200, { name: 'po.pdf', mime: 'text/plain', size: 12, text: 'Olive Oil x 50' }));
+    const a = await new HttpLolaTransport().extractFile(file);
+    expect(a).toEqual({ name: 'po.pdf', size: file.size, mime: 'text/plain', text: 'Olive Oil x 50' });
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(String(url)).toContain('/api/lola/files');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.headers as Record<string, string>).Authorization).toMatch(/^Bearer /);
+  });
+
+  it('resolves null on servers without the endpoint', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+    expect(await new HttpLolaTransport().extractFile(file)).toBeNull();
+  });
+
+  it("surfaces the server's reason when a file is refused", async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(422, { detail: 'Password-protected PDFs can’t be read.' }));
+    await expect(new HttpLolaTransport().extractFile(file)).rejects.toThrow('Password-protected');
+  });
+});

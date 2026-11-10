@@ -9,7 +9,7 @@
 import { api, API_BASE, type DashboardSummary, type Draft, type FeedEvent } from '../lib/api';
 import type { Role } from '../hooks/useAuth';
 import type {
-  Briefing, BriefingSection, LolaEvent, Receipt, TurnRequest, LolaLanguage,
+  Attachment, Briefing, BriefingSection, LolaEvent, Receipt, TurnRequest, LolaLanguage,
 } from './contract';
 import { parseSse, type LolaTransport } from './transport';
 import { canApproveActions, canSeeFinancials, filterBriefingForRole } from './permissions';
@@ -139,6 +139,20 @@ export class HttpLolaTransport implements LolaTransport {
       };
       void err;
     }
+  }
+
+  async extractFile(file: File): Promise<Attachment | null> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`${API_BASE}/api/lola/files`, { method: 'POST', headers: authHeaders(), body: form })
+      .catch(() => null);
+    if (!res || res.status === 404 || res.status === 405) return null; // older server: no extraction
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as Record<string, unknown>));
+      throw new Error(typeof body.detail === 'string' ? body.detail : `${file.name} couldn't be read.`);
+    }
+    const body = await res.json() as { name: string; mime: string; size: number; text: string };
+    return { name: body.name, size: file.size, mime: body.mime, text: body.text };
   }
 
   async approve(actionId: string): Promise<Receipt> {

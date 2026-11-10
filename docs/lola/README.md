@@ -143,7 +143,9 @@ errors and the `ToolResult` envelope are handled by the base class.
   logistics assistant only understands English question wording.
 * Attachments: CSV/TSV/TXT/Markdown/JSON are read as untrusted data (`app/lola/attachments.py`):
   never instructions, never stored, formulas neutralised, cross-checks only within permissions.
-  PDF/Excel need a binary upload path (reported as unsupported).
+  PDF and Excel (.xlsx) are extracted by `POST /api/lola/files` (`app/lola/file_extraction.py`):
+  in memory only, type checked by content, 5 MB cap, encrypted PDFs / legacy .xls / macro
+  workbooks / zip bombs refused, formulas never evaluated. Scanned PDFs (no text layer) need OCR (not offered).
 * WS3 logistics endpoints now build their viewer from the database role via
   `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated

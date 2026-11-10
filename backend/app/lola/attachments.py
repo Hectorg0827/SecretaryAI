@@ -109,7 +109,7 @@ def parse(name: str, mime: str, text: Optional[str]) -> ParsedAttachment:
             return ParsedAttachment(name, "table", [clean_cell(c) for c in cols], rows, len(data),
                                     len(data) > MAX_ROWS, instruction_like=flagged)
     first_line = text.split("\n", 1)[0]
-    prose_file = low.endswith((".txt", ".md"))
+    prose_file = low.endswith((".txt", ".md", ".pdf"))
     looks_tabular = (low.endswith((".csv", ".tsv")) or "csv" in mime or "\t" in first_line
                      or (not prose_file and "," in first_line))
     if looks_tabular:

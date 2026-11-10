@@ -40,6 +40,25 @@ Production needs the same switches without the staging pilot, plus
 `SECRETARYAI_LIVE_PO_CREATION_APPROVED=1` and `SECRETARYAI_PO_EXECUTION_MODE=live` for real POs —
 a business decision, not a code change.
 
+## Received stock (Workstream 3 receiving counts)
+
+Switch: `SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1` (off by default).
+
+1. A warehouse person posts a count to `POST /api/logistics/receiving/reconcile`.
+2. If exactly one **approved, open** purchasing order (`purchasing_orders`) matches the shipment's PO
+   number, every counted SKU is on it and nothing is over-received, Lola stages the count with
+   `stage_warehouse_receipt` (good cases → `available`, damaged → `damaged`). The receipt key is a hash
+   of the count, so re-sending the same count never stages it twice.
+3. **A different** active owner or manager approves it at `POST /api/logistics/receipts/{id}/approve`.
+   Only then does the database book the stock (`receive_warehouse_purchase_order` →
+   `post_stock_movement`, immutable, exactly once). The database refuses a self-approval.
+4. Anything that doesn't match (no open PO, two POs, unknown SKU, over-receipt, database refusal)
+   is **not staged**; the postings stay review-only drafts and the response says why
+   (`inventory_staging.reason`).
+
+This books stock in Lion BI's own stock ledger only. It does **not** change QuickBooks quantities,
+value the stock, or pay the supplier (`accounting_reconciled` stays false). Claims are drafts only.
+
 ## When something needs reconciliation
 
 The receipt shows "needs a human check". Look in Gmail "Sent" / Outlook / QuickBooks for the item

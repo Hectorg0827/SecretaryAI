@@ -2166,8 +2166,12 @@ async def reconcile_receipt(
 ):
     """
     Reconcile a warehouse count against the PO.  Damaged cases are proposed
-    to quarantine; every stock posting and claim is queued for approval via
-    the PolicyEngine + ApprovalQueue.  Nothing is posted or sent.
+    to quarantine; claims are queued for approval via the PolicyEngine +
+    ApprovalQueue.  Stock postings are either staged on the two-person
+    receiving path (``SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1`` and one open
+    PO matches) or queued as review-only drafts.  Nothing is posted or sent
+    here: stock is booked only when a different owner/manager approves the
+    staged receipt at ``/receipts/{id}/approve``.
     """
     viewer = _operator(user, db)
     ledger = _load_ledger(user, db)
@@ -2200,9 +2204,21 @@ async def reconcile_receipt(
 
     from app.actions.approval_queue import ApprovalQueue
     from app.domain.policy import PolicyEngine
+    from app.lola import stock_receiving
+
+    # Stock postings go to the protected two-person receiving path when a
+    # matching open PO exists and staging is switched on; otherwise they stay
+    # review-only drafts exactly as before. Claims are always drafts.
+    stock_plan = stock_receiving.plan(db, company_id=user["company_id"], shipment_id=shipment.shipment_id,
+                                      po_numbers=rec.po_numbers, received=request.lines)
+    staging = (stock_receiving.stage(db, stock_plan, company_id=user["company_id"], actor_id=user["sub"])
+               if stock_plan.ok else
+               {"staged": False, "reason": stock_plan.reason, "message": stock_receiving.REASONS[stock_plan.reason]})
+    to_queue = ([p for p in rec.proposals if p.action_type not in stock_receiving.STOCK_ACTIONS]
+                if staging["staged"] else rec.proposals)
     try:
         approvals = await submit_for_approval(
-            rec.proposals, PolicyEngine(user["company_id"], db), ApprovalQueue(db))
+            to_queue, PolicyEngine(user["company_id"], db), ApprovalQueue(db))
     except Exception as exc:  # noqa: BLE001
         log.error("approval queue submission failed for %s: %s", rec.reconciliation_id, exc)
         approvals = [{"status": "not_queued", "error": "approval queue unavailable — resubmit"}]
@@ -2224,7 +2240,13 @@ async def reconcile_receipt(
         for a in approvals:
             a.pop("amount", None)
     body["ledger"] = {"milestone": milestone, "summary": summary}
+    if staging["staged"]:
+        approvals.append({"action_type": "logistics.stage_warehouse_receipt",
+                          "entity_id": staging["po_number"], "status": "pending_receiving_approval",
+                          "staged_receipt_id": staging["staged_receipt_id"],
+                          "approve_path": staging["approve_path"]})
     body["approvals"] = approvals
+    body["inventory_staging"] = staging
     return body
 
 

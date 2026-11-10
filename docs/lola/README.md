@@ -157,8 +157,9 @@ errors and the `ToolResult` envelope are handled by the base class.
   `logistics_viewer_for` (demotion/deactivation applies on the next request).
 * Approved Lola emails and QuickBooks Online purchase orders now have a gated
   executor — see `EXECUTION.md`. Every switch is off by default.
-* WS3 approved stock postings / claims and WS2 AP payment proposals still have no
-  executor (by design: nothing is posted or paid).
+* WS3 stock postings: with `SECRETARYAI_LOLA_STOCK_STAGING_ENABLED=1` a clean count is staged on
+  the existing two-person receiving path and booked only after a different owner/manager approves
+  it (`app/lola/stock_receiving.py`, `EXECUTION.md`). WS3 claims stay drafts (never filed).
 
 * Lola emails and purchase orders run through the durable queue and a gated
   executor (`EXECUTION.md`). Until an operator turns the switches on, approving

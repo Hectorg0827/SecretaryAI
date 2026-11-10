@@ -5,6 +5,9 @@ import { fixtureBriefing } from './briefingFixture.test-data';
 describe('canonical Morning Briefing v1 source integrity (synthetic only)', () => {
   it('requires exactly six server-scoped sections and partial provenance', () => {
     expect(verifiedBriefingToday(fixtureBriefing())?.sections.scoreboard).toHaveLength(1);
+    expect(verifiedBriefingToday({
+      ...fixtureBriefing(), source_coverage: 'dashboard_snapshot_plus_purchasing',
+    })?.source_coverage).toBe('dashboard_snapshot_plus_purchasing');
     expect(verifiedBriefingToday({ ...fixtureBriefing(), sections: { red_alerts: [] } })).toBeNull();
     expect(verifiedBriefingToday({ ...fixtureBriefing(), source_quality: 'verified' })).toBeNull();
     expect(verifiedBriefingToday({ ...fixtureBriefing(), complete_digest: true })).toBeNull();

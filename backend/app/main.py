@@ -18,6 +18,7 @@ from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.tenant import TenantMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.utils.log_safety import configure_safe_transport_logging
 
 settings = get_settings()
 
@@ -49,6 +50,9 @@ if _LOG_FORMAT == "json":
         logging.basicConfig(level=logging.INFO)
 else:
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+
+# Keep token-bearing outbound transport URLs out of Railway's retained logs.
+configure_safe_transport_logging()
 
 log = logging.getLogger(__name__)
 
@@ -320,6 +324,8 @@ app.include_router(connectors_router.router,   prefix="/api/connectors",     tag
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 from app.api import admin as admin_router
 app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
+from app.api import team as team_router
+app.include_router(team_router.router,          prefix="/api/team",           tags=["team"])
 
 register_error_handlers(app)
 

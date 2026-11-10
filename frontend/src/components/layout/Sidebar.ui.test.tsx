@@ -51,6 +51,18 @@ afterEach(async () => {
 });
 
 describe('sidebar badge source integrity (synthetic only)', () => {
+  it('distinguishes a never-configured desktop agent from one that stopped responding', async () => {
+    const node = await renderSidebar();
+    expect(node.textContent).toContain('Agent not configured');
+  });
+
+  it('labels a past heartbeat without a current connection as offline', async () => {
+    mocks.status.mockResolvedValue({ connected: false, last_seen: '2026-10-31T12:00:00Z' });
+    const node = await renderSidebar();
+    expect(node.textContent).toContain('Agent offline');
+    expect(node.textContent).not.toContain('Agent not configured');
+  });
+
   it('does not claim a count before Inbox loads or for a verified zero', async () => {
     await renderSidebar();
     expect(inboxBadge()).toBeNull();

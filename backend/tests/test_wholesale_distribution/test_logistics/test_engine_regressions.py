@@ -107,6 +107,10 @@ class _FakeTable:
     def select(self, *a): return self
     def order(self, *a, **k): return self
 
+    def range(self, start, end):
+        self.window = (start, end)
+        return self
+
     def eq(self, c, v):
         self.filters.append((c, v))
         return self
@@ -117,7 +121,10 @@ class _FakeTable:
                        and r["idempotency_key"] == self.pending["idempotency_key"] for r in self.rows):
                 self.rows.append(dict(self.pending))
             return type("R", (), {"data": []})()
-        return type("R", (), {"data": [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]})()
+        data = [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]
+        if getattr(self, "window", None):
+            data = data[self.window[0]:self.window[1] + 1]
+        return type("R", (), {"data": data[:1000]})()      # PostgREST caps every response
 
 
 class _FakeDB:
@@ -150,3 +157,34 @@ class TestNoFakeVesselPosition:
             FreightBooking(container_numbers=["MSCU1234566"], eta="2026-11-10"), [], {})
         assert ev_.vessel_lat is None and ev_.vessel_lon is None
         assert ev_.status_description == "no_live_tracking_feed"
+
+
+class TestEventStorePagination:
+    """The log is read page by page, so a large tenant never replays a partial history."""
+
+    def _db(self, n, company="co-1"):
+        db = _FakeDB()
+        for i in range(n):
+            db.rows.append({"event_id": f"e{i:06d}", "company_id": company, "idempotency_key": f"k{i}",
+                            "inserted_at": f"2026-01-01T00:00:{i:06d}", "recorded_at": f"2026-01-01T{i:06d}"})
+        return db
+
+    def test_reads_every_page(self, monkeypatch):
+        from app.intelligence.wholesale_distribution.logistics import store
+        from app.intelligence.wholesale_distribution.logistics.journey import LogisticsEvent
+        monkeypatch.setattr(LogisticsEvent, "from_dict", staticmethod(lambda row: row["event_id"]))
+        db = self._db(2_345)
+        got = store.SupabaseEventStore(db).load("co-1")
+        assert len(got) == 2_345 and got[0] == "e000000" and got[-1] == "e002344"
+
+    def test_exact_page_multiple(self, monkeypatch):
+        from app.intelligence.wholesale_distribution.logistics import store
+        from app.intelligence.wholesale_distribution.logistics.journey import LogisticsEvent
+        monkeypatch.setattr(LogisticsEvent, "from_dict", staticmethod(lambda row: row["event_id"]))
+        assert len(store.SupabaseEventStore(self._db(2_000)).load("co-1")) == 2_000
+
+    def test_too_large_refuses_instead_of_truncating(self, monkeypatch):
+        from app.intelligence.wholesale_distribution.logistics import store
+        monkeypatch.setattr(store, "MAX_EVENTS", 2_000)
+        with pytest.raises(store.LedgerTooLarge):
+            store.SupabaseEventStore(self._db(2_500)).load("co-1")

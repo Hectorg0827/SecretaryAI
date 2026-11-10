@@ -16,6 +16,8 @@ export interface LolaTransport {
   /** Approve a previewed action; resolves only with the server's receipt. */
   approve(actionId: string): Promise<Receipt>;
   reject(actionId: string, reason?: string): Promise<void>;
+  /** Optional: re-check a submitted action's receipt against the execution ledger (null = not supported). */
+  getReceipt?(actionId: string): Promise<Receipt | null>;
   briefing(role: Role, signal?: AbortSignal): Promise<Briefing>;
   /**
    * Optional: turn a PDF / .xlsx into text on the server (nothing is stored),

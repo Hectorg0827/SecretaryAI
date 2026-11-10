@@ -36,6 +36,7 @@ class RecordingDB:
     def select(self, *a, **k): return self
     def eq(self, *a, **k): return self
     def order(self, *a, **k): return self
+    def range(self, *a, **k): return self
     def lt(self, *a, **k): return self
 
     def insert(self, row):

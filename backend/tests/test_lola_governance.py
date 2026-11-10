@@ -246,6 +246,54 @@ class TestApprovalEndpoint:
         assert receipt["status"] == "pending_approval" and receipt["verified"] is False
 
 
+    def _reject(self, db, draft_id, uid, role):
+        db.tables.setdefault("company_subscriptions", [{"company_id": CO_A, "status": "active",
+                                                        "created_at": "2026-01-01"}])
+        app, client = self._client(db)
+        try:
+            return client.post(f"/api/actions/reject/{draft_id}", json={"reason": "no"},
+                               headers={"Authorization": f"Bearer {self._token(uid, role)}"})
+        finally:
+            app.dependency_overrides.clear()
+
+    async def test_legacy_reject_applies_reviewer_scope(self):
+        from lola_fakes import OTHER_MGR
+        db = seed()
+        out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": "Reorder 5 cases of Olive Oil 1L"},
+                                                 amount=Decimal("100"), adapter=FakeAdapter())
+        r = self._reject(db, out.receipt.draft_id, OTHER_MGR, "manager")      # other team
+        assert r.status_code == 403 and "team" in r.json()["detail"]
+        assert db.rows("drafts", id=out.receipt.draft_id)[0]["status"] == "pending"
+        assert db.tables["lola_action_receipts"][0]["status"] == "pending_approval"
+        r = self._reject(db, out.receipt.draft_id, EXEC_MGR, "manager")       # leadership: allowed
+        assert r.status_code == 200, r.text
+        assert db.rows("drafts", id=out.receipt.draft_id)[0]["status"] == "rejected"
+
+    async def test_legacy_reject_uses_the_database_role_not_the_token(self):
+        db = seed()
+        out = await svc(db, REP1).propose("draft_customer_email", {"instruction": "x"}, entity=acme())
+        db.rows("users", id=EXEC_MGR)[0]["role"] = "sales_rep"                 # demoted since login
+        r = self._reject(db, out.receipt.draft_id, EXEC_MGR, "manager")
+        assert r.status_code == 403
+        assert db.rows("drafts", id=out.receipt.draft_id)[0]["status"] == "pending"
+
+    async def test_requester_may_still_withdraw(self):
+        db = seed()
+        out = await svc(db, OWNER).propose("draft_purchase_order", {"instruction": "Reorder 500 cases of Olive Oil 1L"},
+                                           amount=Decimal("25000"), adapter=FakeAdapter())
+        r = self._reject(db, out.receipt.draft_id, OWNER, "owner")             # high-risk self-request
+        assert r.status_code == 200
+        assert db.rows("drafts", id=out.receipt.draft_id)[0]["status"] == "rejected"
+
+    async def test_permission_source_down_rejects_nothing(self):
+        db = seed()
+        out = await svc(db, REP1).propose("draft_customer_email", {"instruction": "x"}, entity=acme())
+        db.fail.add("users")
+        r = self._reject(db, out.receipt.draft_id, OWNER, "owner")
+        assert r.status_code in (503, 401)
+        assert db.rows("drafts", id=out.receipt.draft_id)[0]["status"] == "pending"
+
+
 class TestReceiptVerification:
     async def _pending(self, db):
         s = svc(db, REP1)

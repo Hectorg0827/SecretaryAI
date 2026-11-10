@@ -181,6 +181,15 @@ export class HttpLolaTransport implements LolaTransport {
     };
   }
 
+  async getReceipt(actionId: string): Promise<Receipt | null> {
+    const res = await fetch(`${API_BASE}/api/lola/actions/${encodeURIComponent(actionId)}`, { headers: authHeaders() })
+      .catch(() => null);
+    if (!res || res.status === 404 || res.status === 405) return null;
+    if (!res.ok) throw new Error(`Receipt check failed (HTTP ${res.status})`);
+    const body = await res.json() as { client_receipt?: Receipt };
+    return body.client_receipt ?? null;
+  }
+
   async reject(actionId: string, reason?: string): Promise<void> {
     const res = await fetch(`${API_BASE}/api/lola/actions/${encodeURIComponent(actionId)}/reject`, {
       method: 'POST',

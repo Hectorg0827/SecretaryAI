@@ -29,6 +29,10 @@ QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
 
+class QBOReportAuthenticationUnavailable(RuntimeError):
+    """The read-only sandbox report could not obtain valid OAuth credentials."""
+
+
 class QBOnlineAdapter(QuickBooksAdapter):
     def __init__(
         self,
@@ -171,7 +175,14 @@ class QBOnlineAdapter(QuickBooksAdapter):
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(url, params=params, headers=self._headers())
             if response.status_code == 401:
-                await self._refresh_access_token()
+                try:
+                    await self._refresh_access_token()
+                except Exception:
+                    # Report diagnostics must distinguish an OAuth refresh
+                    # failure from a bad P&L query without exposing token data.
+                    raise QBOReportAuthenticationUnavailable(
+                        "QuickBooks sandbox authorization unavailable"
+                    ) from None
                 response = await client.get(url, params=params, headers=self._headers())
             response.raise_for_status()
             payload = response.json()

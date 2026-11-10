@@ -155,8 +155,19 @@ def build_owner_briefing(
             confidence=50 if source_quality == "partial" else 0,
         ),)
         if finance["status"] == "unavailable":
+            explanation = {
+                "report_no_data": "QuickBooks returned no report data for this period",
+                "report_income_missing": "QuickBooks returned no income section for this period",
+                "provider_auth_failed": "QuickBooks sandbox authorization needs attention",
+                "provider_access_denied": "QuickBooks denied access to the sandbox report",
+                "provider_rate_limited": "QuickBooks temporarily limited report requests",
+            }.get(finance["reason"])
+            title = ("QuickBooks accrual Profit & Loss unavailable; invoice sales "
+                     "cannot be compared to ledger income")
+            if explanation:
+                title = f"{title} ({explanation})"
             add("ledger-comparison-unavailable", BriefingSection.YELLOW_ALERTS,
-                "QuickBooks accrual Profit & Loss unavailable; invoice sales cannot be compared to ledger income",
+                title,
                 entry_evidence=finance_evidence, status="source_unavailable")
         else:
             currency = finance["currency"]

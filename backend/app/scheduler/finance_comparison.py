@@ -10,14 +10,32 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+import httpx
+
+from app.connectors.qb_online import QBOReportAuthenticationUnavailable
+
 log = logging.getLogger(__name__)
 
 _CENTS = Decimal("0.01")
 _MAX_AMOUNT = Decimal("1000000000000000")
+_FAILURE_REASONS = frozenset({
+    "report_read_or_validation_failed",  # legacy snapshots
+    "provider_auth_failed", "provider_access_denied", "provider_bad_request",
+    "provider_not_found", "provider_rate_limited", "provider_service_error",
+    "provider_http_error", "provider_transport_error",
+    "connector_unavailable", "report_no_data", "report_header_mismatch",
+    "report_currency_missing", "report_rows_missing", "report_income_missing",
+    "report_income_ambiguous", "report_income_total_invalid",
+    "invoice_total_invalid", "unexpected_failure",
+})
 
 
 class FinanceReportInvalid(ValueError):
     """A QBO financial report cannot support a trusted comparison."""
+
+    @property
+    def code(self) -> str:
+        return str(self) if str(self) in _FAILURE_REASONS else "report_income_total_invalid"
 
 
 def _money(value) -> Decimal:
@@ -32,6 +50,26 @@ def _money(value) -> Decimal:
         raise FinanceReportInvalid("Financial amount invalid") from exc
 
 
+def _safe_failure_reason(error: Exception) -> str:
+    """Stable categories only: never serialize provider response bodies or tokens."""
+    if isinstance(error, QBOReportAuthenticationUnavailable):
+        return "provider_auth_failed"
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        return {
+            400: "provider_bad_request", 401: "provider_auth_failed",
+            403: "provider_access_denied", 404: "provider_not_found",
+            429: "provider_rate_limited",
+        }.get(status, "provider_service_error" if status >= 500 else "provider_http_error")
+    if isinstance(error, httpx.RequestError):
+        return "provider_transport_error"
+    if isinstance(error, FinanceReportInvalid):
+        return error.code
+    if isinstance(error, RuntimeError):
+        return "connector_unavailable"
+    return "unexpected_failure"
+
+
 def parse_profit_loss_income(
     report: dict, *, date_from: date, date_to: date,
 ) -> tuple[Decimal, str]:
@@ -41,8 +79,14 @@ def parse_profit_loss_income(
     rather than treating an absent income row as verified $0.
     """
     if not isinstance(report, dict) or "Fault" in report:
-        raise FinanceReportInvalid("QBO report response invalid")
+        raise FinanceReportInvalid("report_rows_missing")
     header = report.get("Header")
+    if isinstance(header, dict) and any(
+        isinstance(option, dict) and option.get("Name") == "NoReportData"
+        and str(option.get("Value", "")).lower() == "true"
+        for option in (header.get("Option") if isinstance(header.get("Option"), list) else [])
+    ):
+        raise FinanceReportInvalid("report_no_data")
     if not isinstance(header, dict) or (
         header.get("ReportName") != "ProfitAndLoss"
         or header.get("ReportBasis") != "Accrual"
@@ -50,29 +94,33 @@ def parse_profit_loss_income(
         or header.get("EndPeriod") != date_to.isoformat()
         or header.get("SummarizeColumnsBy") != "Total"
     ):
-        raise FinanceReportInvalid("QBO report period or basis mismatch")
+        raise FinanceReportInvalid("report_header_mismatch")
     currency = header.get("Currency")
     if not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha() or not currency.isupper():
-        raise FinanceReportInvalid("QBO report currency unavailable")
+        raise FinanceReportInvalid("report_currency_missing")
     rows = report.get("Rows")
     entries = rows.get("Row") if isinstance(rows, dict) else None
     if not isinstance(entries, list):
-        raise FinanceReportInvalid("QBO report row set unavailable")
+        raise FinanceReportInvalid("report_rows_missing")
     income_sections = [row for row in entries if isinstance(row, dict)
                        and row.get("type") == "Section" and row.get("group") == "Income"]
     if len(income_sections) != 1:
-        raise FinanceReportInvalid("QBO income section unavailable or ambiguous")
+        raise FinanceReportInvalid("report_income_missing" if not income_sections else "report_income_ambiguous")
     summary = income_sections[0].get("Summary")
     columns = summary.get("ColData") if isinstance(summary, dict) else None
     if not isinstance(columns, list) or len(columns) < 2 or any(not isinstance(x, dict) for x in columns):
-        raise FinanceReportInvalid("QBO income summary invalid")
+        raise FinanceReportInvalid("report_income_total_invalid")
     if columns[0].get("value") != "Total Income":
-        raise FinanceReportInvalid("QBO income total label mismatch")
+        raise FinanceReportInvalid("report_income_total_invalid")
     amounts = [col.get("value") for col in columns[1:]
                if col.get("value") is not None and str(col.get("value")).strip()]
     if len(amounts) != 1:
-        raise FinanceReportInvalid("QBO income total missing or ambiguous")
-    return _money(amounts[0]), currency
+        raise FinanceReportInvalid("report_income_total_invalid")
+    try:
+        amount = _money(amounts[0])
+    except FinanceReportInvalid as exc:
+        raise FinanceReportInvalid("report_income_total_invalid") from exc
+    return amount, currency
 
 
 async def compare_invoice_headers_to_qbo_income(adapter, invoice_total, *,
@@ -88,16 +136,24 @@ async def compare_invoice_headers_to_qbo_income(adapter, invoice_total, *,
     }
     try:
         invoice = _money(invoice_total)
+    except FinanceReportInvalid:
+        return {
+            **provenance, "status": "unavailable", "source_quality": "unavailable",
+            "reason": "invoice_total_invalid",
+        }
+    try:
         report = await adapter.get_qbo_profit_loss_read_only(start, end)
         income, currency = parse_profit_loss_income(report, date_from=start, date_to=end)
         delta = income - invoice
-    except Exception:
+    except Exception as exc:
         # A failed independent read does not invalidate the base dashboard,
-        # but can never be represented as a matched source.
-        log.warning("Read-only QBO income comparison unavailable")
+        # but can never be represented as a matched source. Log only a stable
+        # category, never an error string/body that could include credentials.
+        reason = _safe_failure_reason(exc)
+        log.warning("Read-only QBO income comparison unavailable: %s", reason)
         return {
             **provenance, "status": "unavailable", "source_quality": "unavailable",
-            "reason": "report_read_or_validation_failed",
+            "reason": reason,
         }
     return {
         **provenance,
@@ -124,7 +180,7 @@ def validate_finance_comparison(raw: dict) -> dict:
         raise FinanceReportInvalid("Financial comparison has an inconsistent period")
     status = raw.get("status")
     if status == "unavailable":
-        if raw.get("source_quality") != "unavailable" or raw.get("reason") != "report_read_or_validation_failed":
+        if raw.get("source_quality") != "unavailable" or raw.get("reason") not in _FAILURE_REASONS:
             raise FinanceReportInvalid("Financial comparison unavailable status invalid")
         if any(key in raw for key in ("invoice_headers_total", "ledger_income_total", "variance_ledger_minus_invoices", "currency", "fetched_at")):
             raise FinanceReportInvalid("Unavailable comparison cannot contain purported financial figures")

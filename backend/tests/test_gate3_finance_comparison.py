@@ -3,10 +3,11 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.api.briefing import build_owner_briefing
-from app.connectors.qb_online import QBOnlineAdapter
+from app.connectors.qb_online import QBOnlineAdapter, QBOReportAuthenticationUnavailable
 from app.scheduler.dashboard_snapshot import (
     SnapshotDataInvalid, validate_dashboard_cached_payload,
 )
@@ -91,6 +92,65 @@ async def test_unavailable_qbo_report_fails_open_for_basic_snapshot_but_closed_f
     validate_finance_comparison(result)
 
 
+@pytest.mark.asyncio
+async def test_qbo_report_failures_have_safe_reasons_not_provider_details(caplog):
+    request = httpx.Request("GET", "https://sandbox-quickbooks.api.intuit.com/report")
+    response = httpx.Response(401, request=request, text="sensitive-token-canary")
+    error = httpx.HTTPStatusError("sensitive-token-canary", request=request, response=response)
+    adapter = SimpleNamespace(get_qbo_profit_loss_read_only=AsyncMock(side_effect=error))
+    result = await compare_invoice_headers_to_qbo_income(adapter, 0, as_of=TODAY)
+    assert result["reason"] == "provider_auth_failed"
+    assert "sensitive-token-canary" not in caplog.text
+    assert "sensitive-token-canary" not in str(result)
+    validate_finance_comparison(result)
+
+
+@pytest.mark.asyncio
+async def test_expired_qbo_refresh_is_classified_as_auth_not_bad_report_request():
+    request = httpx.Request("POST", "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer")
+    response = httpx.Response(400, request=request, text="refresh-token-canary")
+    refresh_error = httpx.HTTPStatusError("refresh-token-canary", request=request, response=response)
+    class Unauthorized:
+        status_code = 401
+
+    with patch("app.config.get_settings", return_value=SimpleNamespace(intuit_environment="sandbox")):
+        qb = QBOnlineAdapter("client", "secret", "access", "refresh", "realm")
+    with patch("app.connectors.qb_online.httpx.AsyncClient") as client:
+        client.return_value.__aenter__.return_value.get = AsyncMock(return_value=Unauthorized())
+        with patch.object(qb, "_refresh_access_token", AsyncMock(side_effect=refresh_error)):
+            with pytest.raises(QBOReportAuthenticationUnavailable):
+                await qb.get_profit_loss_report_read_only(START, TODAY)
+            result = await compare_invoice_headers_to_qbo_income(
+                SimpleNamespace(get_qbo_profit_loss_read_only=qb.get_profit_loss_report_read_only),
+                "0.00", as_of=TODAY,
+            )
+    assert result["reason"] == "provider_auth_failed"
+    assert "refresh-token-canary" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_empty_report_and_no_income_section_cannot_be_treated_as_zero():
+    no_data = profit_loss()
+    no_data["Header"]["Option"] = [{"Name": "NoReportData", "Value": "true"}]
+    adapter = SimpleNamespace(get_qbo_profit_loss_read_only=AsyncMock(return_value=no_data))
+    empty = await compare_invoice_headers_to_qbo_income(adapter, "0.00", as_of=TODAY)
+    assert empty["reason"] == "report_no_data"
+    assert "ledger_income_total" not in empty
+    missing_income = profit_loss(group="Expenses")
+    adapter.get_qbo_profit_loss_read_only.return_value = missing_income
+    no_income = await compare_invoice_headers_to_qbo_income(adapter, "0.00", as_of=TODAY)
+    assert no_income["reason"] == "report_income_missing"
+    assert "ledger_income_total" not in no_income
+
+
+@pytest.mark.asyncio
+async def test_invalid_local_invoice_total_does_not_fetch_qbo():
+    adapter = SimpleNamespace(get_qbo_profit_loss_read_only=AsyncMock())
+    result = await compare_invoice_headers_to_qbo_income(adapter, float("nan"), as_of=TODAY)
+    assert result["reason"] == "invoice_total_invalid"
+    adapter.get_qbo_profit_loss_read_only.assert_not_called()
+
+
 def test_cached_comparison_rejects_forged_verified_or_unbalanced_amounts():
     base = {
         "source_system": "qbo_profit_loss", "window_start": START.isoformat(),
@@ -109,6 +169,12 @@ def test_cached_comparison_rejects_forged_verified_or_unbalanced_amounts():
     ):
         with pytest.raises(SnapshotDataInvalid):
             validate_dashboard_cached_payload(snapshot({**base, **mutation}))
+    unavailable = {k: v for k, v in base.items() if k not in (
+        "currency", "invoice_headers_total", "ledger_income_total", "variance_ledger_minus_invoices", "fetched_at"
+    )}
+    unavailable.update(status="unavailable", source_quality="unavailable", reason="response-token-canary")
+    with pytest.raises(FinanceReportInvalid):
+        validate_finance_comparison(unavailable)
 
 
 def test_briefing_evidence_exposes_variance_but_not_verified_revenue():

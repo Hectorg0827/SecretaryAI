@@ -67,3 +67,22 @@ comparison object and the Manager briefing reports its availability or variance
 accurately. Never set a financial `verified` flag based solely on these two
 aggregates. The next gate must independently reconcile credits, sales receipts,
 adjustments, tax treatment, currency and source transaction completeness.
+
+### Safe diagnostics for an unavailable P&L
+
+When the sandbox report cannot be compared, the isolated cron now records a
+small allowlisted `finance_comparison.reason` and prints that same category to
+its Railway runtime log. No provider response bodies, OAuth tokens, account IDs,
+or financial amounts are placed in diagnostics. Categories distinguish an OAuth
+failure (`provider_auth_failed`), a report API failure (for example
+`provider_bad_request`), transport/rate limits, a report with explicit
+`NoReportData` (`report_no_data`), an absent income section
+(`report_income_missing`), and incompatible report format/period. All still
+produce `status=unavailable`, `source_quality=unavailable`, and no ledger total.
+
+Do not infer a valid $0 P&L from `report_no_data` or an absent `Income` section.
+The external Intuit sandbox must return a period-matched accrual income summary
+before invoice-vs-income comparison can pass its live acceptance gate. If the
+category is `provider_auth_failed`, reconnect/refresh the approved sandbox
+credentials through the existing OAuth flow; do not copy credentials to logs or
+the UI. The hourly production schedule of the staging cron is `0 * * * *` UTC.

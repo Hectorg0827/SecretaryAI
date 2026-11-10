@@ -13,10 +13,13 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
         "view_all", "manage_users", "approve_actions", "manage_billing",
         "view_financials", "trigger_actions", "run_reports", "draft_purchase_orders",
+        "view_inventory", "view_orders", "view_customers", "view_own_accounts",
+        "view_dashboard", "manage_inventory",
     },
     "manager": {
         "view_all", "approve_actions", "trigger_actions", "view_financials",
-        "run_reports", "draft_purchase_orders",
+        "run_reports", "draft_purchase_orders", "view_inventory", "view_orders",
+        "view_customers", "view_own_accounts", "view_dashboard", "manage_inventory",
     },
     "sales_rep": {
         "view_own_accounts", "view_inventory",
@@ -76,8 +79,11 @@ def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
         role = user.get("role", "viewer")
         allowed = ROLE_PERMISSIONS.get(role, set())
-        # "view_all" is a super-permission — owner/manager can access everything
-        if permission not in allowed and "view_all" not in allowed:
+        # Permission checks are exact. "view_all" describes the user's read
+        # scope within their tenant, not a wildcard for administrative writes.
+        # In particular, managers must never inherit owner-only permissions
+        # such as manage_users or manage_billing through "view_all".
+        if permission not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{role}' does not have permission: {permission}",

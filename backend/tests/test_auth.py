@@ -118,6 +118,13 @@ class TestRBACPermissions:
     def test_manager_cannot_manage_users(self):
         assert "manage_users" not in self.perms["manager"]
 
+    def test_manager_cannot_manage_billing(self):
+        assert "manage_billing" not in self.perms["manager"]
+
+    def test_owner_and_manager_can_still_manage_inventory(self):
+        assert "manage_inventory" in self.perms["owner"]
+        assert "manage_inventory" in self.perms["manager"]
+
     def test_sales_rep_limited_permissions(self):
         perms = self.perms["sales_rep"]
         assert "view_own_accounts" in perms
@@ -140,6 +147,12 @@ class TestRBACPermissions:
 
 
 class TestGetCurrentUser:
+    @pytest.fixture(autouse=True)
+    def _available_revocation_store(self, monkeypatch):
+        # Authentication tests do not need a live Redis server; exercise the
+        # user token and permission paths with a non-revoked test JTI.
+        monkeypatch.setattr("app.auth.jwt.is_token_revoked", lambda _jti: False)
+
     def test_valid_token_returns_payload(self):
         from fastapi.testclient import TestClient
         from fastapi import FastAPI, Depends
@@ -176,6 +189,10 @@ class TestGetCurrentUser:
 
 
 class TestRequirePermission:
+    @pytest.fixture(autouse=True)
+    def _available_revocation_store(self, monkeypatch):
+        monkeypatch.setattr("app.auth.jwt.is_token_revoked", lambda _jti: False)
+
     def _make_app(self, permission: str):
         from fastapi import FastAPI, Depends
         from app.auth.rbac import require_permission
@@ -207,6 +224,43 @@ class TestRequirePermission:
         token = self._token_for_role("viewer")
         resp = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 403
+
+    @pytest.mark.parametrize("permission", ["manage_users", "manage_billing"])
+    def test_manager_blocked_from_owner_only_permissions(self, permission):
+        from fastapi.testclient import TestClient
+        client = TestClient(self._make_app(permission), raise_server_exceptions=False)
+        token = self._token_for_role("manager")
+        resp = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == f"Role 'manager' does not have permission: {permission}"
+
+    @pytest.mark.parametrize("permission", [
+        "view_inventory", "view_orders", "view_customers", "view_own_accounts",
+        "view_financials", "manage_inventory", "draft_purchase_orders",
+        "approve_actions", "run_reports", "trigger_actions",
+    ])
+    def test_manager_preserves_operational_permissions(self, permission):
+        from fastapi.testclient import TestClient
+        client = TestClient(self._make_app(permission), raise_server_exceptions=False)
+        token = self._token_for_role("manager")
+        resp = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("permission", ["manage_users", "manage_billing", "manage_inventory"])
+    def test_owner_preserves_administrative_permissions(self, permission):
+        from fastapi.testclient import TestClient
+        client = TestClient(self._make_app(permission), raise_server_exceptions=False)
+        token = self._token_for_role("owner")
+        resp = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_view_all_is_not_an_unknown_permission_wildcard(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(self._make_app("manage_sensitive_future_feature"), raise_server_exceptions=False)
+        for role in ("owner", "manager"):
+            token = self._token_for_role(role)
+            resp = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 403
 
     def test_manager_can_approve_actions(self):
         from fastapi.testclient import TestClient

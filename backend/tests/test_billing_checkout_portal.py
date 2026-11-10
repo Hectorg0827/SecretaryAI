@@ -167,11 +167,10 @@ def test_only_the_owner_can_start_checkout_or_open_the_portal(stripe, role, path
     stripe.Customer.create.assert_not_called()
 
 
-def test_manager_passes_view_all_but_is_still_refused(stripe):
-    # require_permission("manage_billing") alone would admit managers via view_all.
+def test_manager_is_refused_by_permission_gate(stripe):
     response = checkout(client_for(FakeDB(subscription_plans=[PLAN]), role="manager"))
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only the account owner can manage billing"
+    assert response.json()["detail"] == "Role 'manager' does not have permission: manage_billing"
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────

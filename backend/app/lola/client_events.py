@@ -113,13 +113,89 @@ def card_for(result: ToolResult) -> Optional[dict]:
     return None  # logistics.assistant and others answer in text
 
 
-def notice_for(result: ToolResult) -> Optional[dict]:
+def notice_for(result: ToolResult, lang: str = "en") -> Optional[dict]:
+    from app.lola import i18n
     if result.status == LolaStatus.DENIED:
-        return {"kind": "permission_denied", "message": result.summary}
+        msg = result.summary if lang == "en" else i18n.t(lang, "denied", label=i18n.department(lang, result.department.value))
+        return {"kind": "permission_denied", "message": msg}
     if result.status == LolaStatus.UNAVAILABLE:
         kind = "connector_outage" if result.error_code in ("source_not_connected", "source_error") else "data_unavailable"
-        return {"kind": kind, "message": result.summary, "connector": result.department.value}
+        msg = result.summary if lang == "en" else i18n.t(lang, "unavailable", label=i18n.department(lang, result.department.value),
+                                                         reason=result.summary)
+        return {"kind": kind, "message": msg, "connector": result.department.value}
     return None
+
+
+# Fixed UI wording (cards, previews, receipts, suggestions) — Spanish.
+UI_ES: dict[str, str] = {
+    "Accounts": "Cuentas", "Account": "Cuenta", "State": "Estado", "Balance": "Saldo",
+    "Orders": "Pedidos", "Revenue": "Ingresos", "Receivables": "Cuentas por cobrar",
+    "Open invoices": "Facturas abiertas", "Open balance": "Saldo abierto", "Overdue": "Vencido",
+    "Inventory": "Inventario", "Product": "Producto", "On hand": "Existencias", "Reorder at": "Reordenar en",
+    "Open purchase orders": "Órdenes de compra abiertas", "PO": "OC", "Vendor": "Proveedor",
+    "Expected": "Fecha esperada", "Team": "Equipo", "Name": "Nombre", "Role": "Rol",
+    "Finding": "Hallazgo", "Basis": "Base", "To": "Para", "Subject": "Asunto", "Item": "Artículo",
+    "Amount": "Monto", "Request": "Solicitud", "Approval": "Aprobación",
+    "Missing — add before approving": "Falta — agrégalo antes de aprobar",
+    "Independent leadership approval required": "Requiere aprobación independiente de la dirección",
+    "Manager or owner approval": "Aprobación de un gerente o del dueño",
+    "Prepared by Lola. Nothing is sent until it is approved and verified.":
+        "Preparado por Lola. No se envía nada hasta que se apruebe y se verifique.",
+    "Done and verified.": "Hecho y verificado.",
+    "This did not happen. Nothing was sent.": "Esto no ocurrió. No se envió nada.",
+    "Accepted, awaiting confirmation. Nothing is confirmed as sent yet.":
+        "Aceptado, en espera de confirmación. Aún no se confirma ningún envío.",
+    "Which items are below their reorder point?": "¿Qué artículos están por debajo de su punto de reorden?",
+    "Who should we prioritise for collections?": "¿A quién deberíamos priorizar en la cobranza?",
+    "How are my accounts doing?": "¿Cómo van mis cuentas?",
+    "What's running low in inventory?": "¿Qué se está acabando en el inventario?",
+    "Where are my shipments?": "¿Dónde están mis envíos?",
+}
+
+
+def _localize_text(value: str) -> str:
+    import re as _re
+    if value in UI_ES:
+        return UI_ES[value]
+    m = _re.match(r"^Sales — last (\d+) days$", value)
+    if m:
+        return f"Ventas — últimos {m.group(1)} días"
+    m = _re.match(r"^Draft a follow-up email to (.+)$", value)
+    if m:
+        return f"Redacta un correo de seguimiento para {m.group(1)}"
+    m = _re.match(r"^Checked ([a-z_]+): (.+)$", value)
+    if m:
+        from app.lola import i18n
+        return f"Revisé {i18n.department('es', m.group(1))}: {m.group(2)}"
+    return value
+
+
+def localize_events(events: list[dict], lang: str) -> list[dict]:
+    """Translate fixed UI wording in WS4 events. Data values are never altered."""
+    if lang != "es":
+        return events
+    keys = {"title", "label", "summary", "message", "step", "approval_note"}
+
+    def walk(node, key=None):
+        if isinstance(node, dict):
+            out = {}
+            for k, v in node.items():
+                if k == "rows":           # business data: never translated
+                    out[k] = v
+                elif k == "value" and node.get("label") not in ("Approval", "Vendor"):
+                    out[k] = v
+                else:
+                    out[k] = walk(v, k)
+            return out
+        if isinstance(node, list):
+            if key == "items":
+                return [_localize_text(x) if isinstance(x, str) else walk(x) for x in node]
+            return [walk(x) for x in node]
+        if isinstance(node, str) and (key in keys or key == "value"):
+            return _localize_text(node)
+        return node
+
+    return [walk(e) for e in events]
 
 
 def action_preview(receipt: ActionReceipt, proposal: Optional[ActionProposal], *,
@@ -174,7 +250,9 @@ def client_receipt(receipt: ActionReceipt, message: Optional[str] = None) -> dic
 
 
 def turn_events(resp: LolaResponse, previews: Iterable[dict], *, suggestions: Iterable[str] = ()) -> list[dict]:
-    events: list[dict] = [{"type": "conversation", "conversation_id": resp.conversation_id}]
+    lang = resp.language
+    events: list[dict] = [{"type": "conversation", "conversation_id": resp.conversation_id},
+                          {"type": "language", "language": lang}]
     for r in resp.tool_results:
         events.append({"type": "status", "state": "working", "step": f"Checked {r.department.value}: {r.tool}"})
     events.append({"type": "text", "delta": resp.answer})
@@ -184,7 +262,7 @@ def turn_events(resp: LolaResponse, previews: Iterable[dict], *, suggestions: It
             events.append({"type": "card", "card": card})
     seen_notices: set[str] = set()
     for r in resp.tool_results:
-        n = notice_for(r)
+        n = notice_for(r, lang)
         if n and n["message"] not in seen_notices:
             seen_notices.add(n["message"])
             events.append({"type": "notice", "notice": n})
@@ -197,7 +275,7 @@ def turn_events(resp: LolaResponse, previews: Iterable[dict], *, suggestions: It
     if sugg:
         events.append({"type": "suggestions", "items": sugg})
     events.append({"type": "done"})
-    return events
+    return localize_events(events, lang)
 
 
 def suggestions_for(resp: LolaResponse) -> list[str]:

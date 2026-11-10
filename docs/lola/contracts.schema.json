@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "models": {
     "ActionProposal": {
       "$defs": {
@@ -174,7 +174,7 @@
               "type": "string"
             },
             "policy_version": {
-              "default": "1.0.0",
+              "default": "1.1.0",
               "title": "Policy Version",
               "type": "string"
             },
@@ -925,6 +925,13 @@
           "default": null,
           "title": "Conversation Id"
         },
+        "language": {
+          "default": "auto",
+          "description": "Answer language; 'auto' detects English or Spanish from the message",
+          "pattern": "^(auto|en|es)$",
+          "title": "Language",
+          "type": "string"
+        },
         "message": {
           "maxLength": 4000,
           "minLength": 1,
@@ -1368,7 +1375,7 @@
               "type": "string"
             },
             "policy_version": {
-              "default": "1.0.0",
+              "default": "1.1.0",
               "title": "Policy Version",
               "type": "string"
             },
@@ -1534,7 +1541,7 @@
           "type": "string"
         },
         "contract_version": {
-          "default": "1.0.0",
+          "default": "1.1.0",
           "title": "Contract Version",
           "type": "string"
         },
@@ -1567,6 +1574,13 @@
           },
           "title": "Intents",
           "type": "array"
+        },
+        "language": {
+          "default": "en",
+          "description": "Language the answer is written in",
+          "pattern": "^(en|es)$",
+          "title": "Language",
+          "type": "string"
         },
         "memory_used": {
           "default": 0,
@@ -1683,7 +1697,7 @@
           "type": "string"
         },
         "policy_version": {
-          "default": "1.0.0",
+          "default": "1.1.0",
           "title": "Policy Version",
           "type": "string"
         },
@@ -1853,7 +1867,7 @@
               "type": "string"
             },
             "policy_version": {
-              "default": "1.0.0",
+              "default": "1.1.0",
               "title": "Policy Version",
               "type": "string"
             },

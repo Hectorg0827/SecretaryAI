@@ -137,7 +137,10 @@ errors and the `ToolResult` envelope are handled by the base class.
 
 ## Remaining blockers / follow-ups
 
-* Lola answers in English only (Spanish UI/voice input works; answers get an info notice).
+* Spanish: Lola understands Spanish questions, answers in Spanish and drafts Spanish customer
+  emails (`app/lola/i18n.py`, contract 1.1.0 `language`). Workstream 2 BI findings and the
+  Workstream 3 logistics assistant still phrase their own detail in English, and the
+  logistics assistant only understands English question wording.
 * Attachments are not read yet (notice returned; nothing is executed from them).
 * WS3 logistics endpoints now build their viewer from the database role via
   `logistics_viewer_for` (demotion/deactivation applies on the next request).

@@ -1,6 +1,6 @@
 /**
  * Lola shared integration contracts — TypeScript mirror of
- * backend/app/lola/contracts.py (contract version 1.0.0).
+ * backend/app/lola/contracts.py (contract version 1.1.0).
  *
  * Source of truth: the Python models. JSON Schema: docs/lola/contracts.schema.json.
  * Example payloads for every status: docs/lola/examples.json.
@@ -13,7 +13,7 @@
  *  - Voice clients speak `speech`, never the raw `answer`.
  */
 
-export const LOLA_CONTRACT_VERSION = "1.0.0";
+export const LOLA_CONTRACT_VERSION = "1.1.0";
 
 export type LolaStatus =
   | "answered"
@@ -161,6 +161,8 @@ export interface LolaRequest {
   client_request_id?: string | null;
   /** false = answer only, never draft actions. */
   allow_actions?: boolean;
+  /** Answer language. "auto" (default) detects English or Spanish from the message. */
+  language?: "auto" | "en" | "es";
 }
 
 export interface LolaResponse {
@@ -178,6 +180,8 @@ export interface LolaResponse {
   receipts: ActionReceipt[];
   withheld: string[];
   memory_used: number;
+  /** Language the answer is written in. */
+  language: "en" | "es";
   created_at: string;
 }
 

@@ -295,6 +295,7 @@ class GovernedActionService:
         client_request_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         adapter: Any = None,
+        language: str = "en",
     ) -> ProposalOutcome:
         spec = None if is_prohibited(action_type) else CATALOG[action_type]
         if spec is None:
@@ -332,7 +333,8 @@ class GovernedActionService:
         try:
             if action_type == "draft_customer_email":
                 payload = await compose_customer_email(self._db, self._auth, entity,
-                                                       str(payload.get("instruction") or description))
+                                                       str(payload.get("instruction") or description),
+                                                       language=language)
             elif action_type == "draft_purchase_order":
                 payload = await compose_purchase_order(adapter, str(payload.get("instruction") or description))
                 computed = Decimal(payload["total"])

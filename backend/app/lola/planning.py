@@ -55,6 +55,56 @@ INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "account_status": (r"\baccounts?\b", r"\bcustomers?\b", r"\bclients?\b", r"\bhow (is|are)\b.{0,40}\bdoing\b"),
 }
 
+# Spanish phrasings for the same intents (Lion BI serves English and Spanish
+# speakers). Accented and unaccented spellings are both accepted.
+SPANISH_PATTERNS: dict[str, tuple[str, ...]] = {
+    "memory_save": (r"^\s*(por favor\s+)?recuerda\b", r"\btoma nota\b", r"\bten en cuenta\b",
+                    r"\bde ahora en adelante\b"),
+    "memory_recall": (r"\bqu[eé] recuerdas\b", r"\bqu[eé] (decidimos|acordamos)\b", r"\bmis preferencias\b"),
+    "draft_email": (r"\b(redacta|escribe|prepara|haz)\b.{0,30}\b(correo|email|mensaje)\b",
+                    r"\b(correo|email)\s+(a|para)\b", r"\bdale seguimiento a\b"),
+    "draft_purchase_order": (r"\b(prepara|crea|haz|genera|redacta)\b.{0,25}\borden(es)? de compra\b",
+                             r"\breordena[rn]?\b", r"\bpide[rn]? m[aá]s\b", r"\bpedir m[aá]s\b"),
+    "payroll": (r"\bn[oó]mina\b", r"\bsalarios?\b", r"\bsueldos?\b", r"\bcompensaci[oó]n\b", r"\bbonos?\b"),
+    "hr_lookup": (r"\bempleados?\b", r"\bpersonal\b", r"\borganigrama\b", r"\bqui[eé]n reporta\b",
+                  r"\bplantilla\b", r"\brecursos humanos\b"),
+    "logistics": (r"\bcontenedor(es)?\b", r"\benv[ií]os?\b", r"\bembarques?\b", r"\bbuques?\b",
+                  r"\baduanas?\b", r"\bconocimiento de embarque\b", r"\ben tr[aá]nsito\b", r"\bllega",
+                  r"\bagente aduanal\b", r"\bfletes?\b", r"\bprueba de entrega\b", r"\bentregad[oa]s?\b"),
+    "cash_position": (r"\bposici[oó]n de (caja|efectivo)\b", r"\bsaldos? bancarios?\b",
+                      r"\bcu[aá]nto efectivo\b", r"\befectivo disponible\b"),
+    "cash_flow": (r"\bflujo de (caja|efectivo)\b",),
+    "profit_loss": (r"\bp[eé]rdidas y ganancias\b", r"\bestado de resultados\b", r"\butilidad neta\b",
+                    r"\brentabilidad\b"),
+    "collections": (r"\bcobranzas?\b", r"\bcobrar\b", r"\ba qui[eé]n(es)? (debemos|debo) cobrar\b",
+                    r"\brecordatorios? de pago\b"),
+    "payables": (r"\bcuentas por pagar\b", r"\bfacturas de proveedores\b", r"\ble debemos\b"),
+    "pricing": (r"\bm[aá]rgen(es)?\b", r"\bmargen\b", r"\bprecios?\b", r"\bdebajo del costo\b"),
+    "declining": (r"\bdisminu", r"\bcompra(ndo)? menos\b", r"\bpide(n)? menos\b", r"\bbajando\b"),
+    "data_coverage": (r"\bcobertura de datos\b", r"\bqu[eé] sistemas\b"),
+    "receivables": (r"\bdeben?\b", r"\bvencid[oa]s?\b", r"\bcuentas por cobrar\b", r"\bsin pagar\b",
+                    r"\bpendientes? de pago\b", r"\bsaldos?\b(?! bancario)"),
+    "purchasing": (r"\b[oó]rdenes de compra\b", r"\bproveedor(es)?\b"),
+    "inventory_check": (r"\binventario\b", r"\bexistencias\b", r"\balmac[eé]n\b", r"\bbodega\b",
+                        r"\bproductos?\b", r"\bse (est[aá]n?|va[n]?) (acabando|agotando)\b",
+                        r"\bpunto de reorden\b"),
+    "sales_performance": (r"\bventas\b", r"\bingresos\b", r"\bvendimos\b", r"\bdesempe[nñ]o\b",
+                          r"\brendimiento\b", r"\bmejores clientes\b", r"\bpedidos?\b"),
+    "account_status": (r"\bcuentas?\b", r"\bclientes?\b", r"\bc[oó]mo (va|est[aá]|van|est[aá]n)\b"),
+}
+
+_SPANISH_MARKERS = re.compile(
+    r"[¿¡ñ]|\b(qu[eé]|cu[aá]l(es)?|c[oó]mo|cu[aá]nt[oa]s?|d[oó]nde|por favor|tengo|tenemos|nuestr[oa]s?|"
+    r"mis|clientes|cuentas|ventas|inventario|env[ií]os?|correo|orden de compra|recuerda|debe|vencid)\b",
+    re.IGNORECASE)
+
+
+def detect_language(message: str) -> str:
+    """'es' when the message reads as Spanish, else 'en'."""
+    return "es" if len(_SPANISH_MARKERS.findall(message)) >= 1 and not re.search(
+        r"\b(the|what|which|how|show|please|our|my)\b", message, re.IGNORECASE) else "en"
+
+
 INTENT_TOOLS: dict[str, tuple[str, ...]] = {
     "account_status": ("sales.customer_accounts", "sales.performance"),
     "sales_performance": ("sales.performance",),
@@ -91,11 +141,12 @@ _LEADING_STOPWORDS = {"how", "what", "who", "show", "draft", "please", "can", "c
 
 def detect_intents(message: str) -> list[str]:
     text = message.lower()
-    found = [name for name, pats in INTENT_PATTERNS.items() if any(re.search(p, text) for p in pats)]
+    found = [name for name, pats in INTENT_PATTERNS.items()
+             if any(re.search(p, text) for p in pats + SPANISH_PATTERNS.get(name, ()))]
     # "Email Acme about their reorder" is an email, not a purchase order —
     # only an explicit PO mention makes it both.
     if "draft_email" in found and "draft_purchase_order" in found and not re.search(
-        r"\b(po|purchase order)\b", text
+        r"\b(po|purchase order|orden de compra)\b", text
     ):
         found.remove("draft_purchase_order")
     # A draft-email/PO request is about the action, not a sales report.
@@ -247,7 +298,8 @@ def build_plan(message: str, authorizer: Authorizer, *, allow_actions: bool = Tr
 
     memory_text = None
     if "memory_save" in intents:
-        memory_text = re.sub(r"^\s*(please\s+)?(remember( that)?|note that|keep in mind( that)?)\s*[:,-]?\s*",
+        memory_text = re.sub(r"^\s*(please\s+|por favor\s+)?(remember( that)?|note that|keep in mind( that)?|"
+                             r"recuerda( que)?|toma nota( de que)?|ten en cuenta( que)?)\s*[:,-]?\s*",
                              "", message, flags=re.IGNORECASE).strip() or None
 
     return LolaPlan(

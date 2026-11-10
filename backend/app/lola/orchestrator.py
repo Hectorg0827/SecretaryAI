@@ -39,24 +39,15 @@ from app.lola.contracts import (
     ToolResult,
     combine_statuses,
 )
+from app.lola import i18n
 from app.lola.governance import GovernedActionService
 from app.lola.memory import LolaMemoryStore, MemoryRejected, MemoryUnavailable
-from app.lola.planning import LolaPlan, build_plan
+from app.lola.planning import LolaPlan, build_plan, detect_language
 from app.lola.tools import ToolContext, ToolRegistry, default_registry
 from app.utils.audit import write_audit_event
 
 log = logging.getLogger(__name__)
 
-_DEPARTMENT_LABEL = {
-    "sales": "sales", "finance": "financial", "operations": "inventory", "purchasing": "purchasing",
-    "hr": "HR and payroll", "executive": "leadership", "compliance": "compliance", "general": "general",
-}
-
-CAPABILITIES_TEXT = (
-    "I can help with your customer accounts, sales, receivables, inventory, purchase orders and team "
-    "information — within your permissions — and I can prepare emails, purchase orders and reports "
-    "for approval. What would you like to look at?"
-)
 
 
 class Narrator(Protocol):
@@ -106,7 +97,47 @@ def _money(v: Any) -> str:
         return "unknown"
 
 
-def _describe(result: ToolResult) -> list[str]:
+def _describe_es(result: ToolResult) -> list[str]:
+    d = result.data if isinstance(result.data, dict) else {}
+    hidden = set(result.authorization.redacted_fields)
+    es = "es"
+    if result.tool == "sales.customer_accounts":
+        accts = d.get("accounts", [])
+        lines = []
+        for a in accts[:10]:
+            bal = "" if "balance" in hidden or a.get("balance") is None else \
+                i18n.t(es, "balance_suffix", money=i18n.money(a["balance"]))
+            lines.append(f"• {a.get('name')}{bal}")
+        if len(accts) > 10:
+            lines.append(i18n.t(es, "and_more", n=len(accts) - 10))
+        return [i18n.t(es, "accounts_header", n=len(accts))] + lines if lines else [i18n.t(es, "accounts_none")]
+    if result.tool == "sales.performance":
+        lines = [i18n.t(es, "sales", days=d.get("days"), orders=d.get("order_count"),
+                        money=i18n.money(d.get("total_revenue")), scope=i18n.scope(es, str(d.get("scope"))))]
+        top = d.get("top_accounts") or []
+        if top:
+            lines.append(i18n.t(es, "top_accounts", items=", ".join(
+                f"{x['name']} ({i18n.money(x['revenue'])})" for x in top)))
+        return lines
+    if result.tool == "finance.receivables":
+        return [i18n.t(es, "receivables", open=d.get("open_invoices"), open_money=i18n.money(d.get("open_balance")),
+                       overdue=d.get("overdue_invoices"), overdue_money=i18n.money(d.get("overdue_balance")))]
+    if result.tool == "operations.inventory":
+        lines = [i18n.t(es, "inventory", n=len(d.get("items", [])), low=len(d.get("low_stock", [])))]
+        if d.get("low_stock"):
+            lines.append(i18n.t(es, "low_stock", items=", ".join(map(str, d["low_stock"][:10]))))
+        return lines
+    if result.tool == "purchasing.open_orders":
+        return [i18n.t(es, "purchasing", n=len(d.get("purchase_orders", [])))]
+    if result.tool == "hr.directory":
+        return [i18n.t(es, "team", n=len(d.get("employees", [])))]
+    # Workstream 2 / 3 tools phrase their own findings (English for now).
+    return [i18n.t(es, "english_detail", text=result.summary)]
+
+
+def _describe(result: ToolResult, lang: str = "en") -> list[str]:
+    if lang == "es":
+        return _describe_es(result)
     d = result.data if isinstance(result.data, dict) else {}
     hidden = set(result.authorization.redacted_fields)
     if result.tool == "sales.customer_accounts":
@@ -140,16 +171,16 @@ def _describe(result: ToolResult) -> list[str]:
     return [result.summary]
 
 
-def _withheld_note(result: ToolResult) -> Optional[str]:
-    label = _DEPARTMENT_LABEL.get(result.department.value, result.department.value)
+def _withheld_note(result: ToolResult, lang: str = "en") -> Optional[str]:
+    label = i18n.department(lang, result.department.value)
     if result.status == LolaStatus.DENIED:
-        return f"I can't share {label} information with your current permissions."
+        return i18n.t(lang, "denied", label=label)
     if result.status == LolaStatus.UNAVAILABLE:
-        return f"{label.capitalize()} information is unavailable right now ({result.summary})."
+        return i18n.t(lang, "unavailable", label=label, reason=result.summary)
     return None
 
 
-def reconcile(results: list[ToolResult]) -> tuple[list[EvidenceRef], list[str]]:
+def reconcile(results: list[ToolResult], lang: str = "en") -> tuple[list[EvidenceRef], list[str]]:
     """Dedupe evidence across tools and flag stale or conflicting sources."""
     seen: set[tuple] = set()
     evidence: list[EvidenceRef] = []
@@ -160,9 +191,9 @@ def reconcile(results: list[ToolResult]) -> tuple[list[EvidenceRef], list[str]]:
             if k not in seen:
                 seen.add(k)
                 evidence.append(e)
-        warnings.extend(r.warnings)
+        warnings.extend(i18n.tr(lang, w) for w in r.warnings)
     if any(e.is_stale for e in evidence):
-        warnings.append("Some of this information comes from a stale source and may be out of date.")
+        warnings.append(i18n.t(lang, "stale"))
 
     by_tool = {r.tool: r for r in results if r.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL)}
     acct, ar = by_tool.get("sales.customer_accounts"), by_tool.get("finance.receivables")
@@ -172,10 +203,7 @@ def reconcile(results: list[ToolResult]) -> tuple[list[EvidenceRef], list[str]]:
         if len(accounts) == 1 and balances:
             diff = abs(float(balances[0]) - float(ar.data.get("open_balance") or 0))
             if diff > 0.01:
-                warnings.append(
-                    "The customer balance in QuickBooks and the open invoices Lola can see (last 90 days) "
-                    f"differ by {_money(diff)}; older invoices or unapplied payments may explain it."
-                )
+                warnings.append(i18n.t(lang, "balance_mismatch", money=_money(diff)))
     return evidence, warnings
 
 
@@ -212,6 +240,7 @@ class LolaOrchestrator:
         auth = Authorizer(principal, self._db)
         conversation_id = self._conversation_id(request.conversation_id, company_id, user_id)
 
+        lang = request.language if request.language in i18n.LANGS else detect_language(request.message)
         plan = build_plan(request.message, auth, allow_actions=request.allow_actions)
         ctx = ToolContext(principal=principal, authorizer=auth, db=self._db, adapter=self._adapter,
                           request_id=request_id)
@@ -219,15 +248,15 @@ class LolaOrchestrator:
         results = await self._run_tools(ctx, plan)
         withheld: list[str] = []
         for r in results:
-            note = _withheld_note(r)
+            note = _withheld_note(r, lang)
             if note and note not in withheld:
                 withheld.append(note)
         if any(r.authorization.redacted_fields and r.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL)
                and r.tool in ("sales.customer_accounts", "operations.inventory", "purchasing.open_orders")
                for r in results):
-            withheld.append("Financial details (balances, costs) are hidden for your role.")
+            withheld.append(i18n.t(lang, "financial_hidden"))
         for name in plan.unresolved_names:
-            withheld.append(f"I couldn't find “{name}” among the accounts you can access.")
+            withheld.append(i18n.t(lang, "not_found", name=name))
 
         # Memory
         memory_rows: list[dict] = []
@@ -236,21 +265,21 @@ class LolaOrchestrator:
         try:
             memory_rows = store.recall(entity_ids=[e.entity_id for e in plan.entities])
         except MemoryUnavailable:
-            withheld.append("My memory is unavailable right now.")
+            withheld.append(i18n.t(lang, "memory_unavailable"))
         if plan.memory_save:
             entity = plan.entities[0] if plan.entities else None
             try:
                 saved = store.remember(plan.memory_save, entity_type="customer" if entity else None,
                                        entity_id=entity.entity_id if entity else None,
                                        conversation_id=conversation_id)
-                scope_note = " (kept private to you)" if saved["sensitivity"] != "internal" else ""
-                memory_lines.append(f"Got it — I'll remember that{scope_note}.")
+                scope_note = i18n.t(lang, "private") if saved["sensitivity"] != "internal" else ""
+                memory_lines.append(i18n.t(lang, "remembered", private=scope_note))
             except MemoryRejected as exc:
-                memory_lines.append(f"I didn't save that: {exc}.")
+                memory_lines.append(i18n.t(lang, "not_saved", reason=i18n.tr(lang, str(exc))))
             except MemoryUnavailable:
-                memory_lines.append("I couldn't save that right now — my memory is unavailable.")
+                memory_lines.append(i18n.t(lang, "save_unavailable"))
         if plan.memory_recall:
-            memory_lines.append("Here's what I remember:" if memory_rows else "I don't have anything saved yet.")
+            memory_lines.append(i18n.t(lang, "recall_header") if memory_rows else i18n.t(lang, "recall_empty"))
             memory_lines += [f"• {m['content']}" for m in memory_rows[:8]]
 
         # Governed actions
@@ -265,16 +294,16 @@ class LolaOrchestrator:
                 outcome = await service.propose(
                     spec.action_type, payload, entity=spec.entity, amount=spec.amount,
                     description=spec.instruction[:300], client_request_id=request.client_request_id,
-                    conversation_id=conversation_id, adapter=self._adapter,
+                    conversation_id=conversation_id, adapter=self._adapter, language=lang,
                 )
                 action_statuses.append(outcome.status)
                 if outcome.proposal:
                     proposals.append(outcome.proposal)
                 if outcome.receipt:
                     receipts.append(outcome.receipt)
-                action_lines.append(outcome.message)
+                action_lines.append(i18n.tr(lang, outcome.message))
 
-        evidence, warnings = reconcile(results)
+        evidence, warnings = reconcile(results, lang)
 
         statuses = [r.status for r in results] + action_statuses
         status = combine_statuses(statuses) if statuses else LolaStatus.ANSWERED
@@ -286,11 +315,11 @@ class LolaOrchestrator:
         lines: list[str] = []
         for r in results:
             if r.status in (LolaStatus.ANSWERED, LolaStatus.PARTIAL):
-                lines += _describe(r)
+                lines += _describe(r, lang)
         lines += action_lines + memory_lines
         if not lines and not withheld:
-            lines.append(CAPABILITIES_TEXT)
-        lines += [f"Note: {w}" for w in warnings]
+            lines.append(i18n.t(lang, "capabilities"))
+        lines += [i18n.t(lang, "note", text=w) for w in warnings]
         lines += withheld
         answer = "\n".join(lines)
 
@@ -313,7 +342,7 @@ class LolaOrchestrator:
             request_id=request_id, conversation_id=conversation_id, status=status, answer=answer,
             speech=speech, intents=plan.intents, entities=plan.entities, tool_results=results,
             evidence=evidence, proposals=proposals, receipts=receipts, withheld=withheld,
-            memory_used=len(memory_rows),
+            memory_used=len(memory_rows), language=lang,
         )
         if persist:
             self._persist(principal.company_id, principal.user_id, conversation_id, request.message, answer)

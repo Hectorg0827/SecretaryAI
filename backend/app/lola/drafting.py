@@ -30,12 +30,14 @@ LOCKED_EMAIL_FIELDS = ("to", "account_id")
 LOCKED_PO_FIELDS = ("lines", "item_id", "total", "currency")
 _EMAIL = re.compile(r"^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}$")
 _TOPIC = re.compile(
-    r"^.*?\b(?:email|e-mail|message|note|follow[- ]?up)\b(?:\s+(?:to|for|with)\s+.+?)?"
-    r"\s+(?:about|regarding|re:?|on|concerning)\s+(?P<topic>.+?)[.?!]*$",
+    r"^.*?\b(?:email|e-mail|message|note|follow[- ]?up|correo|mensaje|nota|seguimiento)\b"
+    r"(?:\s+(?:to|for|with|a|para|con)\s+.+?)?"
+    r"\s+(?:about|regarding|re:?|on|concerning|sobre|acerca de|respecto a|con respecto a|por)\s+"
+    r"(?P<topic>.+?)[.?!]*$",
     re.IGNORECASE,
 )
-_QTY = re.compile(r"(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d+)\s*(cases?|units?|cs|pcs|pieces|boxes|pallets|ea|each)?\b",
-                  re.IGNORECASE)
+_QTY = re.compile(r"(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d+)\s*(cases?|units?|cs|pcs|pieces|boxes|pallets|ea|each|"
+                  r"cajas?|unidades|piezas|tarimas|paletas)?\b", re.IGNORECASE)
 MAX_PO_LINE_QTY = 1_000_000
 
 
@@ -66,6 +68,18 @@ def extract_topic(instruction: str, account_name: str) -> str:
     topic = re.sub(re.escape(account_name), "your account", topic, flags=re.IGNORECASE) if account_name else topic
     topic = re.sub(r"\btheir\b", "your", topic, flags=re.IGNORECASE)
     return topic[:200] or "your account with us"
+
+
+def extract_topic_es(instruction: str, account_name: str) -> str:
+    m = _TOPIC.match(instruction.strip())
+    topic = (m.group("topic") if m else "").strip()
+    topic = re.split(r"[;\n]|\b(?:y\s+)?(?:env[ií]a(lo)?|reenv[ií]a|cc|cco|copia)\b", topic, maxsplit=1,
+                     flags=re.IGNORECASE)[0]
+    topic = _ADDRESS_OR_LINK.sub("", topic)
+    topic = re.sub(r"\s{2,}", " ", topic).strip(" ,.-")
+    if account_name:
+        topic = re.sub(re.escape(account_name), "su cuenta", topic, flags=re.IGNORECASE)
+    return topic[:200] or "su cuenta con nosotros"
 
 
 def _sender_name(db, company_id: str, user_id: str) -> str:
@@ -120,21 +134,29 @@ async def _polish(account_name: str, topic: str, body: str) -> str:
 
 
 async def compose_customer_email(db, authorizer: Authorizer, entity: Optional[BusinessEntity],
-                                 instruction: str) -> dict:
+                                 instruction: str, *, language: str = "en") -> dict:
     if entity is None:
         raise DraftIncomplete("Tell me which of your accounts this is for")
     to, account_name = _account_email(db, authorizer, entity.entity_id)
     account_name = account_name or entity.display_name
-    topic = extract_topic(instruction, account_name)
     sender = _sender_name(db, authorizer.p.company_id, authorizer.p.user_id)
-    subject = f"Following up: {topic[:80]}"
-    body = (f"Hello {account_name} team,\n\n"
-            f"I'm reaching out about {topic}. Please let me know if you have any questions or if there is "
-            f"anything we can help with.\n\nBest regards,\n{sender}")
+    if language == "es":
+        topic = extract_topic_es(instruction, account_name)
+        subject = f"Seguimiento: {topic[:80]}"
+        body = (f"Hola, equipo de {account_name}:\n\n"
+                f"Me comunico con ustedes sobre {topic}. Quedo a sus órdenes para cualquier pregunta o "
+                f"cualquier cosa en la que podamos ayudarles.\n\nSaludos cordiales,\n{sender}")
+    else:
+        topic = extract_topic(instruction, account_name)
+        subject = f"Following up: {topic[:80]}"
+        body = (f"Hello {account_name} team,\n\n"
+                f"I'm reaching out about {topic}. Please let me know if you have any questions or if there is "
+                f"anything we can help with.\n\nBest regards,\n{sender}")
     body = await _polish(account_name, topic, body)
     return {
         "to": to, "subject": subject[:200], "body": body,
         "account_id": entity.entity_id, "account_name": account_name, "instruction": instruction[:500],
+        "language": language,
     }
 
 

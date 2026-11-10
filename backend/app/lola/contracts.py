@@ -32,7 +32,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 
 def utcnow() -> datetime:
@@ -285,6 +285,8 @@ class LolaRequest(_Model):
         description="Client idempotency key. Re-sending the same id never duplicates an action.",
     )
     allow_actions: bool = Field(default=True, description="False = answer only, never draft actions")
+    language: str = Field(default="auto", pattern="^(auto|en|es)$",
+                          description="Answer language; 'auto' detects English or Spanish from the message")
 
 
 class LolaResponse(_Model):
@@ -307,6 +309,7 @@ class LolaResponse(_Model):
         description="User-safe notes about what was not shown and why (never the hidden content)",
     )
     memory_used: int = 0
+    language: str = Field(default="en", pattern="^(en|es)$", description="Language the answer is written in")
     created_at: datetime = Field(default_factory=utcnow)
 
 

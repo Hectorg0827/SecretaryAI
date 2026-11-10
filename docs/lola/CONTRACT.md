@@ -114,7 +114,7 @@ Cards and sections marked `financial` or `executive` are also hidden from roles 
 | 3 | Binary attachments | Open — attachments are not read; the turn returns an `info` notice |
 | 4 | Retention | **Partly done** — `transcript: none` stores no conversation rows; audio is never stored by the server |
 | 5 | Pollable receipts | **Done** — `GET /api/lola/actions/{id}` returns `client_receipt` |
-| — | Spanish answers | Open — answers are English; `language: es` returns an info notice |
+| — | Spanish answers | **Done** — `language: es` (or Spanish detected) answers in Spanish; a `language` event is sent; card labels, previews, notices and suggestions are Spanish; business data is never translated. WS2/WS3 findings text is still English, marked "(detalle en inglés)" |
 | — | `supersedes_turn` | Turns are computed atomically before streaming, so there is no unfinished work to cancel; no action is executed by a turn |
 
 ### Original requests

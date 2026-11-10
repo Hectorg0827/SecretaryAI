@@ -364,7 +364,7 @@ async def lola_turn(body: TurnRequest, user: dict = Depends(get_current_user), d
         request = LolaRequest(
             message=body.message, conversation_id=body.conversation_id,
             channel="voice" if body.channel == "voice" else "chat",
-            client_request_id=body.client_request_id,
+            client_request_id=body.client_request_id, language=body.language,
         )
         orchestrator = LolaOrchestrator(db, _adapter_for(user, db), narrator=narrator_from_env())
         resp = await orchestrator.handle(user, request, persist=body.retention.transcript != "none")
@@ -375,10 +375,9 @@ async def lola_turn(body: TurnRequest, user: dict = Depends(get_current_user), d
         if body.attachments:
             extra.append({"type": "notice", "notice": {
                 "kind": "info",
-                "message": "Attachments aren't read by Lola yet, so I answered from your business data only."}})
-        if body.language == "es":
-            extra.append({"type": "notice", "notice": {
-                "kind": "info", "message": "Las respuestas en español llegarán pronto; respondí en inglés."}})
+                "message": ("Lola todavía no lee archivos adjuntos; respondí solo con tus datos del negocio."
+                            if resp.language == "es" else
+                            "Attachments aren't read by Lola yet, so I answered from your business data only.")}})
         if extra:
             events = events[:-1] + extra + events[-1:]
     except (AuthorizationDenied, AuthorizationUnavailable):

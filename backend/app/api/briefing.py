@@ -158,6 +158,12 @@ def build_owner_briefing(
             explanation = {
                 "report_no_data": "QuickBooks returned no report data for this period",
                 "report_income_missing": "QuickBooks returned no income section for this period",
+                "report_income_summary_missing": "QuickBooks income summary is absent",
+                "report_income_columns_missing": "QuickBooks income summary has no usable columns",
+                "report_income_label_mismatch": "QuickBooks income total label is not recognized",
+                "report_income_amount_missing": "QuickBooks did not return an income total amount",
+                "report_income_amount_ambiguous": "QuickBooks returned multiple income total values",
+                "report_income_amount_invalid": "QuickBooks income total is not a valid amount",
                 "provider_auth_failed": "QuickBooks sandbox authorization needs attention",
                 "provider_access_denied": "QuickBooks denied access to the sandbox report",
                 "provider_rate_limited": "QuickBooks temporarily limited report requests",

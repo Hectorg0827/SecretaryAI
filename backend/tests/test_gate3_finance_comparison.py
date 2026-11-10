@@ -144,6 +144,27 @@ async def test_empty_report_and_no_income_section_cannot_be_treated_as_zero():
 
 
 @pytest.mark.asyncio
+async def test_income_total_shape_failures_identify_missing_vs_ambiguous_without_amounts():
+    adapter = SimpleNamespace(get_qbo_profit_loss_read_only=AsyncMock())
+    cases = [
+        (None, "report_income_summary_missing"),
+        ({"ColData": []}, "report_income_columns_missing"),
+        ({"ColData": [{"value": "Total Other"}, {"value": "100.00"}]}, "report_income_label_mismatch"),
+        ({"ColData": [{"value": "Total Income"}, {"value": ""}]}, "report_income_amount_missing"),
+        ({"ColData": [{"value": "Total Income"}, {"value": "100"}, {"value": "200"}]}, "report_income_amount_ambiguous"),
+        ({"ColData": [{"value": "Total Income"}, {"value": "NaN"}]}, "report_income_amount_invalid"),
+    ]
+    for summary, reason in cases:
+        report = profit_loss()
+        report["Rows"]["Row"][0]["Summary"] = summary
+        adapter.get_qbo_profit_loss_read_only.return_value = report
+        result = await compare_invoice_headers_to_qbo_income(adapter, 0, as_of=TODAY)
+        assert result["reason"] == reason
+        assert "ledger_income_total" not in result
+        validate_finance_comparison(result)
+
+
+@pytest.mark.asyncio
 async def test_invalid_local_invoice_total_does_not_fetch_qbo():
     adapter = SimpleNamespace(get_qbo_profit_loss_read_only=AsyncMock())
     result = await compare_invoice_headers_to_qbo_income(adapter, float("nan"), as_of=TODAY)
@@ -213,6 +234,14 @@ def test_briefing_marks_missing_ledger_read_unavailable_not_all_clear():
                    if entry["entry_id"] == "ledger-comparison-unavailable")
     assert missing["status"] == "source_unavailable"
     assert missing["evidence"][0]["confidence"] == 0
+    finance["reason"] = "report_income_amount_missing"
+    detail = build_owner_briefing(
+        company_id="tenant-a", role="owner",
+        snapshot={"payload": snapshot(finance), "generated_at": OBSERVED.isoformat()},
+        now=OBSERVED + timedelta(minutes=2),
+    )
+    assert any("did not return an income total amount" in entry["title"]
+               for entry in detail["sections"]["yellow_alerts"])
 
 
 @pytest.mark.asyncio

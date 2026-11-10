@@ -26,6 +26,9 @@ _FAILURE_REASONS = frozenset({
     "connector_unavailable", "report_no_data", "report_header_mismatch",
     "report_currency_missing", "report_rows_missing", "report_income_missing",
     "report_income_ambiguous", "report_income_total_invalid",
+    "report_income_summary_missing", "report_income_columns_missing",
+    "report_income_label_mismatch", "report_income_amount_missing",
+    "report_income_amount_ambiguous", "report_income_amount_invalid",
     "invoice_total_invalid", "unexpected_failure",
 })
 
@@ -107,19 +110,23 @@ def parse_profit_loss_income(
     if len(income_sections) != 1:
         raise FinanceReportInvalid("report_income_missing" if not income_sections else "report_income_ambiguous")
     summary = income_sections[0].get("Summary")
-    columns = summary.get("ColData") if isinstance(summary, dict) else None
+    if not isinstance(summary, dict):
+        raise FinanceReportInvalid("report_income_summary_missing")
+    columns = summary.get("ColData")
     if not isinstance(columns, list) or len(columns) < 2 or any(not isinstance(x, dict) for x in columns):
-        raise FinanceReportInvalid("report_income_total_invalid")
+        raise FinanceReportInvalid("report_income_columns_missing")
     if columns[0].get("value") != "Total Income":
-        raise FinanceReportInvalid("report_income_total_invalid")
+        raise FinanceReportInvalid("report_income_label_mismatch")
     amounts = [col.get("value") for col in columns[1:]
                if col.get("value") is not None and str(col.get("value")).strip()]
-    if len(amounts) != 1:
-        raise FinanceReportInvalid("report_income_total_invalid")
+    if not amounts:
+        raise FinanceReportInvalid("report_income_amount_missing")
+    if len(amounts) > 1:
+        raise FinanceReportInvalid("report_income_amount_ambiguous")
     try:
         amount = _money(amounts[0])
     except FinanceReportInvalid as exc:
-        raise FinanceReportInvalid("report_income_total_invalid") from exc
+        raise FinanceReportInvalid("report_income_amount_invalid") from exc
     return amount, currency
 
 

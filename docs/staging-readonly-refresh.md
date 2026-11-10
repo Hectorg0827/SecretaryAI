@@ -79,6 +79,9 @@ failure (`provider_auth_failed`), a report API failure (for example
 `NoReportData` (`report_no_data`), an absent income section
 (`report_income_missing`), and incompatible report format/period. All still
 produce `status=unavailable`, `source_quality=unavailable`, and no ledger total.
+For an income section with an unusable summary, finer codes distinguish missing
+summary, missing columns, unexpected total label, missing amount, multiple
+amounts, and nonnumeric amount; none are interpreted as a valid zero.
 
 Do not infer a valid $0 P&L from `report_no_data` or an absent `Income` section.
 The external Intuit sandbox must return a period-matched accrual income summary

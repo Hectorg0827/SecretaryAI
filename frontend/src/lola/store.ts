@@ -106,6 +106,15 @@ export function onTurnComplete(fn: TurnListener): () => void {
 /** Receipt listeners — voice speaks ONLY verified receipts. */
 type ReceiptListener = (r: Receipt, lang: LolaLanguage) => void;
 const receiptListeners = new Set<ReceiptListener>();
+
+/** Re-check a "submitted" receipt until the execution ledger gives a final answer (~10 min). */
+export const RECEIPT_POLL_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000, 60_000, 60_000, 60_000,
+  60_000, 60_000, 60_000, 60_000, 60_000, 60_000];
+const receiptPolls = new Map<string, ReturnType<typeof setTimeout>>();
+function stopReceiptPolls() {
+  receiptPolls.forEach((t) => clearTimeout(t));
+  receiptPolls.clear();
+}
 export function onReceipt(fn: ReceiptListener): () => void {
   receiptListeners.add(fn);
   return () => receiptListeners.delete(fn);
@@ -124,6 +133,31 @@ function initialLanguage(): LolaLanguage {
 export const useLolaStore = create<LolaState>((set, get) => {
   const patchMsg = (id: string, fn: (m: LolaMessage) => LolaMessage) =>
     set((s) => ({ messages: s.messages.map((m) => (m.id === id ? fn(m) : m)) }));
+
+  // Follow a submitted action until the ledger verifies it (or it fails). Never
+  // marks anything "executed" without a verified receipt from the server.
+  const pollReceipt = (messageId: string, actionId: string, attempt: number) => {
+    const t = getTransport();
+    if (!t.getReceipt || attempt >= RECEIPT_POLL_DELAYS_MS.length) return;
+    const key = `${messageId}:${actionId}`;
+    clearTimeout(receiptPolls.get(key));
+    receiptPolls.set(key, setTimeout(async () => {
+      receiptPolls.delete(key);
+      let receipt: Receipt | null = null;
+      try { receipt = await t.getReceipt!(actionId); } catch { receipt = null; }
+      const msg = get().messages.find((m) => m.id === messageId);
+      if (!msg) return;                                   // conversation was cleared
+      const final = receipt && (receipt.status === 'failed' || (receipt.status === 'executed' && receipt.verified));
+      if (!receipt || !final) { pollReceipt(messageId, actionId, attempt + 1); return; }
+      const status: ActionPreview['status'] = receipt.status === 'failed' ? 'failed' : 'executed';
+      patchMsg(messageId, (m) => ({
+        ...m,
+        receipts: [...m.receipts.filter((r) => r.action_id !== actionId), receipt!],
+        actions: m.actions.map((a) => (a.id === actionId ? { ...a, status } : a)),
+      }));
+      receiptListeners.forEach((fn) => { try { fn(receipt!, msg.language); } catch { /* ignore speaker errors */ } });
+    }, RECEIPT_POLL_DELAYS_MS[attempt]));
+  };
 
   const recordMetric = (m: LolaMessage) =>
     set((s) => ({
@@ -292,6 +326,7 @@ export const useLolaStore = create<LolaState>((set, get) => {
         else if (receipt.status === 'executed' && receipt.verified) setStatus('executed');
         else setStatus('submitted'); // accepted, awaiting verification — never "done"
         receiptListeners.forEach((fn) => { try { fn(receipt, msg!.language); } catch { /* ignore speaker errors */ } });
+        if (receipt.status === 'submitted') pollReceipt(messageId, actionId, 0);
       } catch (e) {
         setStatus('failed');
         patchMsg(messageId, (m) => ({
@@ -305,12 +340,32 @@ export const useLolaStore = create<LolaState>((set, get) => {
     },
 
     reject: async (messageId, actionId) => {
+      const msg = get().messages.find((m) => m.id === messageId);
+      const action = msg?.actions.find((a) => a.id === actionId);
+      if (!action || action.status !== 'proposed') return;
+      try {
+        await getTransport().reject(actionId);
+      } catch (e) {
+        // The server still has it waiting for approval: keep the card actionable and say so.
+        const es = msg?.language === 'es';
+        patchMsg(messageId, (m) => ({
+          ...m,
+          notices: [...m.notices, {
+            kind: 'info',
+            message: (es
+              ? 'No se pudo descartar; sigue esperando aprobación. Inténtelo de nuevo. '
+              : 'Couldn’t dismiss this; it is still waiting for approval. Please try again. ')
+              + ((e as Error)?.message ?? ''),
+          }],
+        }));
+        return;
+      }
       patchMsg(messageId, (m) => ({ ...m, actions: m.actions.map((a) => (a.id === actionId ? { ...a, status: 'rejected' } : a)) }));
-      try { await getTransport().reject(actionId); } catch { /* rejection is local-safe: nothing executes */ }
     },
 
     newConversation: () => {
       get().interrupt();
+      stopReceiptPolls();
       set({ messages: [], conversationId: null });
     },
 

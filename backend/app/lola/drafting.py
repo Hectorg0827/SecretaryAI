@@ -160,14 +160,36 @@ async def compose_customer_email(db, authorizer: Authorizer, entity: Optional[Bu
     }
 
 
-def _parse_qty(message: str) -> Optional[int]:
-    for m in _QTY.finditer(message):
+_AMBIGUOUS = -1
+
+
+def _parse_qty(message: str, identifiers: tuple[str, ...] = ()) -> Optional[int]:
+    """
+    The quantity the user asked for, or None (none given) / _AMBIGUOUS.
+
+    Numbers that belong to the matched product's name or SKU ("SKU 1001",
+    "Reserva 12") are removed first, so they can never become the quantity.
+    A number with a unit ("20 units", "5 cajas") wins; otherwise exactly one
+    bare number is required. Two different candidates are ambiguous, never
+    guessed.
+    """
+    text = message
+    for ident in sorted((i for i in identifiers if i), key=len, reverse=True):
+        text = re.sub(r"(?<!\w)" + re.escape(ident) + r"(?!\w)", " ", text, flags=re.IGNORECASE)
+    with_unit: set[int] = set()
+    bare: set[int] = set()
+    for m in _QTY.finditer(text):
         try:
             n = int(m.group(1).replace(",", ""))
         except ValueError:
             continue
-        if 0 < n <= MAX_PO_LINE_QTY:
-            return n
+        if not 0 < n <= MAX_PO_LINE_QTY:
+            continue
+        (with_unit if m.group(2) else bare).add(n)
+    if with_unit:
+        return with_unit.pop() if len(with_unit) == 1 else _AMBIGUOUS
+    if bare:
+        return bare.pop() if len(bare) == 1 else _AMBIGUOUS
     return None
 
 
@@ -201,9 +223,11 @@ async def compose_purchase_order(adapter, message: str) -> dict:
         raise DraftIncomplete("Tell me exactly one product (by name or SKU) for this purchase order"
                               if matches else "I couldn't match a product from your inventory")
     item = matches[0]
-    qty = _parse_qty(message)
+    qty = _parse_qty(message, (str(_get(item, "product_name") or ""), str(_get(item, "sku") or "")))
     if qty is None:
         raise DraftIncomplete("Tell me how many units to order")
+    if qty == _AMBIGUOUS:
+        raise DraftIncomplete("I found more than one possible quantity; say it once, like \"20 units\"")
     try:
         unit_cost = Decimal(str(_get(item, "purchase_cost")))
     except (InvalidOperation, TypeError):

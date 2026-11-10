@@ -44,6 +44,10 @@ class _Query:
 
     def select(self, *a, **k): return self
     def order(self, *a, **k): return self
+
+    def range(self, start, end):
+        self.window = (start, end)
+        return self
     def lt(self, *a, **k): return self
     def limit(self, *a, **k): return self
     def maybe_single(self): return self
@@ -85,6 +89,8 @@ class _Query:
             return type("R", (), {"data": [self.row]})()
         data = [r for r in rows if all(str(r.get(c)) == str(v) for c, v in self.filters)
                 and all(str(r.get(c)) in vs for c, vs in getattr(self, "in_filters", []))]
+        if getattr(self, "window", None):
+            data = data[self.window[0]:self.window[1] + 1]
         return type("R", (), {"data": data})()
 
 

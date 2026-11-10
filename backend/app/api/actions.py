@@ -18,7 +18,7 @@ from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine
 from app.lola.authorization import AuthorizationUnavailable
-from app.lola.governance import check_lola_approval, record_lola_review, visible_lola_drafts
+from app.lola.governance import LOLA_META_KEY, check_lola_approval, record_lola_review, visible_lola_drafts
 from app.utils.audit import write_audit_event
 from app.workflows.execution_gateway import (
     ExecutionDatabaseUnavailable, PostgresDurableGateway,
@@ -280,6 +280,21 @@ async def reject_draft(
     # Idempotency: don't re-process an already-resolved draft.
     if draft.get("status") != "pending":
         return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
+
+    # Lola drafts: the same current-principal and reviewer-scope rules as the
+    # approval path (team, account visibility, role, active membership), so a
+    # manager outside the team — or one demoted since — can't reject it here.
+    # The requester may still withdraw their own request.
+    lola_meta = (draft.get("content") or {}).get(LOLA_META_KEY) if isinstance(draft.get("content"), dict) else None
+    if isinstance(lola_meta, dict) and str(lola_meta.get("requested_by") or "") != str(user["sub"]):
+        try:
+            decision = check_lola_approval(db, draft, user)
+        except AuthorizationUnavailable:
+            raise HTTPException(
+                status_code=503, detail="Approval authorization unavailable; nothing was rejected"
+            ) from None
+        if decision is not None and not decision.allowed:
+            raise HTTPException(status_code=403, detail=decision.reason)
 
     result = await queue.reject(
         draft_id=draft_id,

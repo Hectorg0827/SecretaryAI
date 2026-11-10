@@ -24,6 +24,12 @@ from .journey import LogisticsEvent, SourceType
 log = logging.getLogger(__name__)
 
 TABLE = "logistics_events"
+PAGE_SIZE = 1000          # PostgREST's default max rows per response
+MAX_EVENTS = 200_000      # beyond this, refuse rather than replay a partial log
+
+
+class LedgerTooLarge(RuntimeError):
+    """The event log is too large to replay safely in one request."""
 
 
 class SupabaseEventStore:
@@ -41,15 +47,43 @@ class SupabaseEventStore:
             self._db.table(TABLE).upsert(row, on_conflict="company_id,idempotency_key").execute()
 
     def load(self, company_id: str) -> list[LogisticsEvent]:
-        res = (
-            self._db.table(TABLE).select("*")
-            .eq("company_id", company_id)
-            .order("recorded_at", desc=False)
-            .order("inserted_at", desc=False)
-            .execute()
-        )
+        """
+        Every event of the tenant, in replay order.
+
+        PostgREST caps each response (1,000 rows by default), so the log is
+        read page by page. Pages are ordered by insertion (inserted_at, then
+        the event_id primary key), so events written while we read land after
+        the pages already fetched instead of shifting them; the rows are then
+        sorted into replay order here. A log too large to read safely raises
+        instead of silently returning a partial (stale) history.
+        """
+        rows: list[dict] = []
+        seen: set[str] = set()
+        offset = 0
+        while True:
+            res = (
+                self._db.table(TABLE).select("*")
+                .eq("company_id", company_id)
+                .order("inserted_at", desc=False)
+                .order("event_id", desc=False)
+                .range(offset, offset + PAGE_SIZE - 1)
+                .execute()
+            )
+            page = res.data or []
+            for row in page:
+                key = str(row.get("event_id") or "")
+                if key and key in seen:
+                    continue            # a row moved across a page boundary
+                seen.add(key)
+                rows.append(row)
+            if len(page) < PAGE_SIZE:
+                break
+            offset += PAGE_SIZE
+            if offset >= MAX_EVENTS:
+                raise LedgerTooLarge(f"more than {MAX_EVENTS} logistics events")
+        rows.sort(key=lambda r: (str(r.get("recorded_at") or ""), str(r.get("inserted_at") or "")))
         events = []
-        for row in res.data or []:
+        for row in rows:
             if row.get("company_id") != company_id:
                 continue  # defence in depth
             try:

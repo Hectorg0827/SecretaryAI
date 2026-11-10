@@ -27,8 +27,9 @@ class _Query:
         self.op = "select"
         self.payload: Any = None
         self.filters: list = []
-        self._order: Optional[tuple[str, bool]] = None
+        self._orders: list[tuple[str, bool]] = []
         self._limit: Optional[int] = None
+        self._range: Optional[tuple[int, int]] = None
         self._on_conflict: Optional[str] = None
         self._ignore_dup = False
 
@@ -74,7 +75,11 @@ class _Query:
         return self
 
     def order(self, col, desc=False):
-        self._order = (col, desc)
+        self._orders.append((col, desc))
+        return self
+
+    def range(self, start, end):
+        self._range = (start, end)
         return self
 
     def limit(self, n):
@@ -108,9 +113,10 @@ class _Query:
         rows = self.db.tables.setdefault(self.table, [])
         if self.op == "select":
             out = [copy.deepcopy(r) for r in rows if self._match(r)]
-            if self._order:
-                col, desc = self._order
-                out.sort(key=lambda r: str(r.get(col) or ""), reverse=desc)
+            for col, desc in reversed(self._orders):          # stable: first order() wins
+                out.sort(key=lambda r, c=col: str(r.get(c) or ""), reverse=desc)
+            if self._range is not None:
+                out = out[self._range[0]: self._range[1] + 1]
             if self._limit is not None:
                 out = out[: self._limit]
             return FakeResult(out)

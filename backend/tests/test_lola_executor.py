@@ -96,11 +96,33 @@ class TestPurchaseOrderDrafts:
         ("Reorder 500 cases of something", "couldn't match"),
         ("Reorder Olive Oil 1L and Sea Salt, 50 each", "exactly one product"),
         ("Reorder Olive Oil 1L", "how many"),
+        ("Reorder 5 cases of Olive Oil 1L, make it 8 cases", "more than one possible quantity"),
     ])
     async def test_po_never_guesses(self, msg, why):
         db = seed()
         out = await svc(db, BACK_OFFICE).propose("draft_purchase_order", {"instruction": msg}, adapter=FakeAdapter())
         assert out.status == LolaStatus.FAILED and why in out.message and db.tables["drafts"] == []
+
+    @pytest.mark.parametrize("msg,qty", [
+        ("Create a purchase order for SKU OO1, 20 units", 20),
+        ("Reorder 20 units of Olive Oil 1L", 20),
+        ("Reorder Olive Oil 1L 1,200 cases", 1200),
+        ("Pide 15 cajas de Olive Oil 1L", 15),
+    ])
+    def test_quantity_is_never_taken_from_the_product_identifier(self, msg, qty):
+        from app.lola.drafting import _parse_qty
+        assert _parse_qty(msg, ("Olive Oil 1L", "OO1")) == qty
+
+    @pytest.mark.parametrize("msg,ident,qty", [
+        ("Create a purchase order for SKU 1001, 20 units", ("Widget", "1001"), 20),
+        ("Order Reserva 12, 50 units", ("Reserva 12", "R12"), 50),
+        ("Order Reserva 12, 50", ("Reserva 12", "R12"), 50),
+        ("Order Reserva 12", ("Reserva 12", "R12"), None),
+        ("Order SKU 1001 20 30", ("Widget", "1001"), -1),
+    ])
+    def test_numbers_in_names_and_skus_are_ignored(self, msg, ident, qty):
+        from app.lola.drafting import _parse_qty
+        assert _parse_qty(msg, ident) == qty
 
     async def test_missing_vendor_blocks_approval_until_filled(self):
         db = seed()

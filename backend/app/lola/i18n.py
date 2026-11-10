@@ -141,6 +141,8 @@ MESSAGES_ES: dict[str, str] = {
         "Indícame exactamente un producto (por nombre o SKU) para esta orden de compra",
     "I couldn't match a product from your inventory": "No pude encontrar el producto en tu inventario",
     "Tell me how many units to order": "Dime cuántas unidades pedir",
+    'I found more than one possible quantity; say it once, like "20 units"':
+        'Encontré más de una cantidad posible; dígala una sola vez, por ejemplo "20 unidades"',
     "This item has no readable purchase cost in QuickBooks":
         "Este artículo no tiene un costo de compra legible en QuickBooks",
     "Nothing to remember": "No hay nada que recordar",

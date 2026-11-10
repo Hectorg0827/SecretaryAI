@@ -183,48 +183,56 @@ class CustomsMonitor:
         """
         Parse a customs broker email to extract clearance milestone.
         Returns a CustomsEvent if a milestone is detected.
-        """
-        text = f"{subject}\n{body}".lower()
 
-        # Common negative statements mention the word "released" without a
-        # release occurring. Conflicting/negated signals need source review.
-        if re.search(
+        The result is an *interpretation of an email*.  The journey ledger
+        records it as unverified evidence (SourceType.EMAIL_PARSED); it never
+        becomes an official release on its own.
+
+        Precedence (most cautious first): hold/exam → released → entry filed →
+        duties paid.  Negated language ("NOT released", "pending release",
+        "awaiting clearance") is never read as a release.
+        """
+        from .documents import broker_status
+
+        text = f"{subject}\n{body}".lower()
+        status = broker_status(f"{subject}\n{body}")
+        note = f"From broker email (unverified): {subject[:60]}"
+
+        # Negated release language and unpaid-duty language must never be
+        # read as a release / payment (kept from the integration branch).
+        negated_release = re.search(
             r"\b(?:not(?:\s+yet)?(?:\s+been)?|never|hasn't(?:\s+been)?)"
             r"\s+(?:released|cleared|liberado|despachado)\b",
             text,
-        ):
-            return None
-        if (
+        )
+        duties_unpaid = (
             re.search(
                 r"\b(?:duty payment|duties|aranceles)\b.{0,35}"
                 r"\b(?:pending|due|unpaid|outstanding|not yet paid)\b",
                 text,
             )
             or re.search(r"\b(?:not|never|nothing)\b.{0,24}\bpaid\b", text)
-        ):
-            return None
+        )
 
-        if any(kw in text for kw in ["entry filed", "entrada presentada", "filing submitted"]):
-            return self.log_entry_filed(booking_id, notes=f"Detected from broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["duties paid", "aranceles pagados", "duty payment"]):
-            return self.log_duties_paid(booking_id, 0.0, notes=f"From broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["released", "cleared", "liberado", "despachado", "released from customs"]):
-            return self.log_released(booking_id, days_at_port=0, notes=f"From broker email: {subject[:60]}")
-
-        if any(kw in text for kw in ["hold", "retención", "exam", "revisión", "inspection", "fda", "ttb", "detained"]):
-            # Extract hold reason
+        if status in ("hold", "exam"):
             for issue in CRITICAL_DOC_ISSUES:
                 if issue in text:
                     return self.log_hold(booking_id, issue.title(), days_at_port=0)[0]
-            return self.log_hold(
-                booking_id,
-                "Customs hold — reason under investigation",
-                days_at_port=0,
-            )[0]
+            reason = ("Customs exam ordered" if status == "exam"
+                      else "Customs hold — reason under investigation")
+            return self.log_hold(booking_id, reason, days_at_port=0)[0]
 
-        return None  # No recognizable milestone
+        if status == "released" and not negated_release:
+            return self.log_released(booking_id, days_at_port=0, notes=note)
+
+        if any(kw in text for kw in ["entry filed", "entrada presentada", "filing submitted",
+                                     "entry has been filed"]):
+            return self.log_entry_filed(booking_id, notes=note)
+
+        if not duties_unpaid and any(kw in text for kw in ["duties paid", "aranceles pagados", "duty payment"]):
+            return self.log_duties_paid(booking_id, 0.0, notes=note)
+
+        return None  # No recognizable milestone (includes "not released" with no hold)
 
     # ── Historical Performance ────────────────────────────────────────────────
 

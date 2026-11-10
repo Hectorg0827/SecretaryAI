@@ -1,12 +1,6 @@
-import React from 'react';
-import { ChatInterface } from '../components/chat/ChatInterface';
+import { CommandCenter } from '../lola/components/CommandCenter';
 
+/** /chat is kept for existing links and bookmarks; it now opens Lola. */
 export function Chat() {
-  return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="max-w-3xl mx-auto h-full">
-        <ChatInterface />
-      </div>
-    </div>
-  );
+  return <CommandCenter />;
 }

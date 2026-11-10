@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, Sparkles } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
@@ -15,6 +15,7 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
+  { to: '/lola',      label: 'Lola',      icon: Sparkles,       exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
@@ -22,7 +23,6 @@ const ALL_NAV_ITEMS = [
   // domain owner provides a scoped account read contract.
   { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
   { to: '/insights',  label: 'Insights',  icon: Lightbulb,     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
@@ -84,6 +84,7 @@ export function Sidebar({
   }, []);
 
   const connected = agent?.connected ?? false;
+  const agentConfigured = Boolean(agent?.last_seen);
   const visibleItems = ALL_NAV_ITEMS.filter((item) => (item.roles as readonly string[]).includes(role));
 
   return (
@@ -113,7 +114,7 @@ export function Sidebar({
         <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center shadow-sm">
           <Zap size={14} className="text-white" />
         </div>
-        <span className="font-bold text-white tracking-tight">SecretaryAI</span>
+        <span className="font-bold text-white tracking-tight">Lion BI</span>
         <button
           type="button"
           data-mobile-close="true"
@@ -126,7 +127,7 @@ export function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
+      <nav aria-label="Main" className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         {visibleItems.map(({ to, label, icon: Icon, exact, badge }) => {
           // The dashboard's email-only metric is not the unified Inbox count.
           // The Inbox API count is filtered and paginated; only expose it as a
@@ -182,7 +183,7 @@ export function Sidebar({
           connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-300',
         )}>
           {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
-          <span>{connected ? 'Agent online' : 'Agent offline'}</span>
+          <span>{connected ? 'Agent online' : agentConfigured ? 'Agent offline' : 'Agent not configured'}</span>
           {connected && (
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           )}

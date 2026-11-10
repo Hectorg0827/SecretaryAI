@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     secretaryai_email_delivery_mode: str = "disabled"
     secretaryai_live_email_delivery_approved: bool = False
     secretaryai_staging_email_pilot_enabled: bool = False
+    # Separate, explicitly recipient-scoped identity onboarding email only.
+    # This does not enable any business/customer email flows in staging.
+    secretaryai_invite_delivery_enabled: bool = False
+    secretaryai_invite_email_recipient: str = ""
 
     # Anthropic / Claude
     anthropic_api_key: str
@@ -55,6 +59,8 @@ class Settings(BaseSettings):
 
     # SendGrid
     sendgrid_api_key: str = ""
+    resend_api_key: str = ""
+    resed_api_key: str = ""  # Legacy misspelling on isolated staging service.
     from_email: str = "secretary@secretaryai.com"
     # Optional comma-separated domain allow-list for auto-sent (NOTIFY) alert
     # emails. When set, alerts may only go to these domains. Empty = no restriction.
@@ -183,6 +189,11 @@ class Settings(BaseSettings):
                     "Staging API requires email delivery and pilot workers disabled. "
                     "Pilot execution must use the separate controlled release procedure."
                 )
+            if self.secretaryai_invite_delivery_enabled and not re.fullmatch(
+                r"[^@\s]+@[^@\s]+\.[^@\s]+",
+                self.secretaryai_invite_email_recipient.strip().lower(),
+            ):
+                errors.append("Staging invitation delivery requires one exact email recipient")
             # Even in deliberately free staging, a stray live key must never
             # become usable by an exposed checkout endpoint.
             if self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):

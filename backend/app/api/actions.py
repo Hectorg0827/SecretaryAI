@@ -17,6 +17,8 @@ from app.auth.rbac import get_current_user, require_permission
 from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine
+from app.lola.authorization import AuthorizationUnavailable
+from app.lola.governance import LOLA_META_KEY, check_lola_approval, record_lola_review, visible_lola_drafts
 from app.utils.audit import write_audit_event
 from app.workflows.execution_gateway import (
     ExecutionDatabaseUnavailable, PostgresDurableGateway,
@@ -77,6 +79,22 @@ async def _execute_approved_draft(draft: dict, adapter) -> str:
     )
 
 
+def _dispatch_execution(company_id: str, execution_id: str, action_type: str) -> None:
+    """Hand a queued, approved action to the gated executor (never inline).
+
+    Off unless SECRETARYAI_LOLA_EXECUTOR_ENABLED=1. If dispatch fails the
+    execution simply stays queued in the durable ledger; nothing is lost and
+    nothing is sent twice."""
+    from app.workflows.lola_executor import executor_enabled
+    if not executor_enabled():
+        return
+    try:
+        from tasks.lola_execution import execute
+        execute.delay(company_id, execution_id, action_type)
+    except Exception:
+        log.warning("Could not dispatch execution %s; it remains queued", execution_id)
+
+
 @router.get("/pending")
 async def list_pending_actions(
     user: dict = Depends(require_permission("approve_actions")),
@@ -86,6 +104,9 @@ async def list_pending_actions(
     company_id = user["company_id"]
     queue = ApprovalQueue(db)
     drafts = await queue.get_pending(company_id)
+    # Lola drafts carry account names and instructions: only show them to
+    # reviewers whose team/records they concern (legacy drafts unchanged).
+    drafts = visible_lola_drafts(db, user, drafts)
     return {"drafts": drafts, "company_id": company_id}
 
 
@@ -128,6 +149,20 @@ async def approve_draft(
     if draft.get("status") != "pending":
         return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
 
+    # Lola-originated drafts carry their governance metadata. Enforce
+    # separation of duties (high-risk → independent leadership approver),
+    # approval limits, record-level access for the approver, and re-validate
+    # the REQUESTER's current permissions (stale-permission defence).
+    # Drafts that did not come from Lola are unaffected (returns None).
+    try:
+        lola_decision = check_lola_approval(db, draft, user, body.edited_content)
+    except AuthorizationUnavailable:
+        raise HTTPException(
+            status_code=503, detail="Approval authorization unavailable; nothing was approved"
+        ) from None
+    if lola_decision is not None and not lola_decision.allowed:
+        raise HTTPException(status_code=403, detail=lola_decision.reason)
+
     # Policy gate: enforce the tenant PolicyEngine BEFORE approving/executing, so
     # a human approval can't push an action past a hard ceiling (e.g. an amount
     # over the company's limit). Blocked → 403, draft stays pending.
@@ -149,14 +184,22 @@ async def approve_draft(
     # enqueue together; never approve via PostgREST and enqueue afterward.
     # This mode queues approved email only. No live send or worker dispatch.
     if os.getenv("SECRETARYAI_DURABLE_APPROVAL_ENABLED") == "1":
-        if draft.get("action_type") != "email_reply":
+        action_type = draft.get("action_type")
+        content = draft.get("content") or {}
+        # Only STRUCTURED purchase orders (vendor + lines, as Lola prepares
+        # them) can be executed; legacy free-text PO drafts stay review-only.
+        structured_po = (action_type == "purchase_order" and isinstance(content, dict)
+                         and "vendor_id" in content and isinstance(content.get("lines"), list))
+        if action_type != "email_reply" and not structured_po:
             raise HTTPException(
                 status_code=409,
                 detail="Durable approval is not enabled for this action type",
             )
         try:
             gateway = PostgresDurableGateway.from_environment()
-            durable = await gateway.approve_and_enqueue(
+            approve = (gateway.approve_and_enqueue if action_type == "email_reply"
+                       else gateway.approve_and_enqueue_purchase_order)
+            durable = await approve(
                 company_id=user["company_id"],
                 draft_id=draft_id,
                 actor_id=user["sub"],
@@ -191,14 +234,16 @@ async def approve_draft(
                 detail="Durable approval was not queued; no action executed",
             )
 
+        record_lola_review(db, draft, user["sub"], approved=True)
         write_audit_event(
             db, company_id=user["company_id"],
             event_type="draft_approved", actor_id=user["sub"],
             approved_by=user["sub"], action_class=draft.get("action_type"),
-            metadata={"draft_id": draft_id, "action_type": "email_reply",
+            metadata={"draft_id": draft_id, "action_type": action_type,
                       "execution_status": "queued",
                       "execution_id": durable["execution_id"]},
         )
+        _dispatch_execution(user["company_id"], str(durable["execution_id"]), action_type)
         return {
             "draft_id": draft_id,
             "status": durable.get("status", "approved"),
@@ -236,12 +281,28 @@ async def reject_draft(
     if draft.get("status") != "pending":
         return {"draft_id": draft_id, "status": draft.get("status"), "already_processed": True}
 
+    # Lola drafts: the same current-principal and reviewer-scope rules as the
+    # approval path (team, account visibility, role, active membership), so a
+    # manager outside the team — or one demoted since — can't reject it here.
+    # The requester may still withdraw their own request.
+    lola_meta = (draft.get("content") or {}).get(LOLA_META_KEY) if isinstance(draft.get("content"), dict) else None
+    if isinstance(lola_meta, dict) and str(lola_meta.get("requested_by") or "") != str(user["sub"]):
+        try:
+            decision = check_lola_approval(db, draft, user)
+        except AuthorizationUnavailable:
+            raise HTTPException(
+                status_code=503, detail="Approval authorization unavailable; nothing was rejected"
+            ) from None
+        if decision is not None and not decision.allowed:
+            raise HTTPException(status_code=403, detail=decision.reason)
+
     result = await queue.reject(
         draft_id=draft_id,
         reviewed_by=user["sub"],
         company_id=user["company_id"],
         reason=body.reason,
     )
+    record_lola_review(db, draft, user["sub"], approved=False)
 
     write_audit_event(
         db,

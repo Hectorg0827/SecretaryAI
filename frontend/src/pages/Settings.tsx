@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
   Settings as SettingsIcon, Database, ShieldCheck, CreditCard,
-  Check, AlertTriangle, Loader2, X, ExternalLink, Copy,
+  Check, AlertTriangle, Loader2, X, ExternalLink, Copy, Users,
 } from 'lucide-react';
 import { api, IntegrationsResponse } from '../lib/api';
 import { BillingStatus, type BillingReturn } from '../components/BillingStatus';
 import { useAuth } from '../hooks/useAuth';
+import { TeamSection } from './TeamSection';
+import { OrgAccessSection } from './OrgAccessSection';
 import toast from 'react-hot-toast';
 
 interface Section { id: string; label: string; icon: React.ElementType; }
@@ -14,6 +16,7 @@ interface Section { id: string; label: string; icon: React.ElementType; }
 const SECTIONS: Section[] = [
   { id: 'integrations', label: 'Integrations',    icon: Database     },
   { id: 'security',     label: 'Security',         icon: ShieldCheck  },
+  { id: 'team',         label: 'Team',             icon: Users        },
   { id: 'billing',      label: 'Billing',          icon: CreditCard   },
 ];
 
@@ -482,7 +485,7 @@ function readBillingReturn(): BillingReturn | null {
 
 export function Settings() {
   const { role } = useAuth();
-  const sections = role === 'owner' ? SECTIONS : SECTIONS.filter((section) => section.id !== 'billing');
+  const sections = role === 'owner' ? SECTIONS : SECTIONS.filter((section) => section.id !== 'billing' && section.id !== 'team');
   const [billingReturn] = useState(readBillingReturn);
   const [active, setActive] = useState(() => (billingReturn && role === 'owner' ? 'billing' : 'integrations'));
 
@@ -737,6 +740,12 @@ export function Settings() {
 
           {active === 'security' && (
             <TwoFASection />
+          )}
+          {active === 'team' && role === 'owner' && (
+            <div className="space-y-5">
+              <TeamSection />
+              <OrgAccessSection />
+            </div>
           )}
           {active === 'billing' && role === 'owner' && (
             <div className="rounded-xl border border-slate-200 bg-white px-5">

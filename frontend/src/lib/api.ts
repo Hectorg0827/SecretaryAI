@@ -5,7 +5,8 @@
  */
 
 // Both Vite dev and the deployed web server proxy these same-origin routes.
-const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+// Exported for the Lola transport (Workstream 4).
+export const API_BASE: string = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 function getToken(): string | null {
   return localStorage.getItem('secretary_token');
@@ -121,6 +122,8 @@ export interface DashboardSummary {
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */
   cached: boolean;
+  /** Backend freshness check; null means the field was missing or untrusted. */
+  snapshot_stale: boolean | null;
 }
 
 export type BriefingSectionV1 = 'red_alerts' | 'yellow_alerts' | 'opportunities'
@@ -150,7 +153,7 @@ export interface BriefingTodayResponseV1 {
   audience_role: 'owner' | 'manager';
   created_at: string;
   sections: Record<BriefingSectionV1, BriefingEntryV1[]>;
-  source_coverage: 'dashboard_snapshot_only';
+  source_coverage: 'dashboard_snapshot_only' | 'dashboard_snapshot_plus_purchasing';
   complete_digest: false;
   source_quality: 'partial';
   snapshot_generated_at: string;

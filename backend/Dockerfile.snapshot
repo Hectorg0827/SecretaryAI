@@ -1,0 +1,17 @@
+# Purpose-built Railway cron image: no browser or OS automation dependencies.
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/ ./app/
+COPY tasks/ ./tasks/
+COPY celery_app.py .
+
+RUN addgroup --system snapgroup \
+    && adduser --system --ingroup snapgroup --no-create-home snapuser \
+    && chown -R snapuser:snapgroup /app
+USER snapuser
+
+# Railway supplies its UTC cron schedule; no Celery beat/worker starts here.
+CMD ["python", "-m", "tasks.staging_snapshot_job"]

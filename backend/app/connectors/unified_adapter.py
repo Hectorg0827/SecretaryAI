@@ -237,6 +237,15 @@ class UnifiedDataAdapter:
             raise RuntimeError("QuickBooks Online sandbox connection unavailable")
         return await self._qb.get_bill_read_only(bill_id)
 
+    async def get_qbo_profit_loss_read_only(self, date_from: date, date_to: date) -> dict:
+        """A sandbox-only, GET-only ledger report for the staging finance gate."""
+        from app.config import get_settings
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("Finance comparison requires QuickBooks sandbox")
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("QuickBooks Online sandbox connection unavailable")
+        return await self._qb.get_profit_loss_report_read_only(date_from, date_to)
+
     async def get_purchase_orders(self) -> list[PurchaseOrder]:
         if not self._qb:
             raise RuntimeError("No QB connector configured")
@@ -257,6 +266,27 @@ class UnifiedDataAdapter:
             line_items=line_items,
             ship_date=ship_date,
             memo=memo,
+        )
+
+    def po_execution_target(self) -> tuple[str, Optional[bool]]:
+        """("qbo", is_sandbox) | ("desktop", None) | ("none", None).
+
+        Only QuickBooks Online offers an idempotent create (requestid), so only
+        QBO purchase orders may be executed by an automated worker."""
+        from app.connectors.qb_online import QBOnlineAdapter
+        if isinstance(self._qb, QBOnlineAdapter):
+            return "qbo", bool(self._qb.is_sandbox)
+        return ("desktop", None) if self._qb else ("none", None)
+
+    async def create_purchase_order_idempotent(
+        self, *, vendor_id: str, line_items: list[dict], memo: Optional[str], request_id: str,
+    ) -> PurchaseOrder:
+        """QBO-only idempotent create used by the approved-action executor."""
+        from app.connectors.qb_online import QBOnlineAdapter
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("Idempotent purchase order creation requires QuickBooks Online")
+        return await self._qb.create_purchase_order(
+            vendor_id=vendor_id, line_items=line_items, memo=memo, request_id=request_id,
         )
 
     async def update_invoice_status(

@@ -32,6 +32,7 @@ app = Celery(
         "tasks.connector_health",
         "tasks.ingestion_scheduler",
         "tasks.cu_worker",
+        "tasks.lola_execution",
     ],
 )
 

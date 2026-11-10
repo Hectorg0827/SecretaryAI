@@ -29,6 +29,10 @@ QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company"
 QBO_OAUTH_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 
 
+class QBOReportAuthenticationUnavailable(RuntimeError):
+    """The read-only sandbox report could not obtain valid OAuth credentials."""
+
+
 class QBOnlineAdapter(QuickBooksAdapter):
     def __init__(
         self,
@@ -89,14 +93,26 @@ class QBOnlineAdapter(QuickBooksAdapter):
             "Content-Type": "application/json",
         }
 
-    async def _post(self, entity: str, payload: dict) -> dict:
-        """POST (create) a QBO entity."""
+    @property
+    def is_sandbox(self) -> bool:
+        """True when this connector talks to an Intuit sandbox company."""
+        return self._base_url == QBO_SANDBOX_BASE
+
+    async def _post(self, entity: str, payload: dict, request_id: Optional[str] = None) -> dict:
+        """POST (create) a QBO entity.
+
+        ``request_id`` is Intuit's idempotency key: a retried create with the
+        same requestid returns the original entity instead of a duplicate.
+        """
         url = f"{self._base_url}/{self._realm_id}/{entity}"
+        params = {"minorversion": "70"}
+        if request_id:
+            params["requestid"] = request_id[:50]
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 url,
                 json=payload,
-                params={"minorversion": "70"},
+                params=params,
                 headers=self._headers(),
             )
             if response.status_code == 401:
@@ -104,7 +120,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
                 response = await client.post(
                     url,
                     json=payload,
-                    params={"minorversion": "70"},
+                    params=params,
                     headers=self._headers(),
                 )
             response.raise_for_status()
@@ -149,6 +165,42 @@ class QBOnlineAdapter(QuickBooksAdapter):
 
             response.raise_for_status()
             return response.json()
+
+    async def get_profit_loss_report_read_only(
+        self, date_from: date, date_to: date,
+    ) -> dict:
+        """GET the QBO accrual Profit & Loss report; never issue an entity POST.
+
+        The report is an independent ledger-oriented comparison source, not a
+        certification that invoice headers and recognized revenue must match.
+        """
+        if not isinstance(date_from, date) or not isinstance(date_to, date) or date_from >= date_to:
+            raise ValueError("Profit and Loss requires an increasing date window")
+        url = f"{self._base_url}/{self._realm_id}/reports/ProfitAndLoss"
+        params = {
+            "start_date": date_from.isoformat(),
+            "end_date": date_to.isoformat(),
+            "accounting_method": "Accrual",
+            "summarize_column_by": "Total",
+            "minorversion": "70",
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(url, params=params, headers=self._headers())
+            if response.status_code == 401:
+                try:
+                    await self._refresh_access_token()
+                except Exception:
+                    # Report diagnostics must distinguish an OAuth refresh
+                    # failure from a bad P&L query without exposing token data.
+                    raise QBOReportAuthenticationUnavailable(
+                        "QuickBooks sandbox authorization unavailable"
+                    ) from None
+                response = await client.get(url, params=params, headers=self._headers())
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or "Fault" in payload:
+                raise ValueError("QBO Profit and Loss report envelope invalid")
+            return payload
 
     async def _query_all(self, entity: str, where: str = "") -> list[dict]:
         """Paginate through all results for a QBO entity."""
@@ -417,8 +469,9 @@ class QBOnlineAdapter(QuickBooksAdapter):
         line_items: list[dict],
         ship_date: Optional[date] = None,
         memo: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> PurchaseOrder:
-        """Create a PurchaseOrder in QBO."""
+        """Create a PurchaseOrder in QBO (idempotent when ``request_id`` is given)."""
         qbo_lines = []
         for i, item in enumerate(line_items):
             line: dict = {
@@ -445,7 +498,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
         if memo:
             payload["Memo"] = memo
 
-        data = await self._post("purchaseorder", payload)
+        data = await self._post("purchaseorder", payload, request_id=request_id)
         raw = data.get("PurchaseOrder", data)
         return self._normalize_purchase_order(raw)
 

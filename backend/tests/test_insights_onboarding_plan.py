@@ -127,9 +127,9 @@ def test_roles_without_manage_users_are_refused(role):
     assert _client(role=role).post(URL, json=_body()).status_code == 403
 
 
-def test_manager_is_admitted_through_view_all():
-    # rbac.require_permission treats view_all (owner, manager) as a super-permission.
-    assert _client(role="manager").post(URL, json=_body()).status_code == 200
+def test_manager_cannot_read_owner_only_hr_onboarding_preview():
+    # "view_all" must not bypass the required manage_users permission.
+    assert _client(role="manager").post(URL, json=_body()).status_code == 403
 
 
 def test_tenant_comes_from_the_token():

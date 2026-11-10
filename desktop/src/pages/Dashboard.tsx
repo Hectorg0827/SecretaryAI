@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-shell';
 import { authFetch, clearToken } from '../auth';
+import LolaPanel from '../components/LolaPanel';
 
 const APP_URL =
   (typeof window !== 'undefined' && (window as any).__SECRETARY_APP_URL__) ||
@@ -97,6 +98,8 @@ export default function Dashboard({ onSignOut }: { onSignOut: () => void }) {
             )}
           </>
         )}
+
+        <LolaPanel onOpenApp={(path) => open(`${APP_URL.replace(/\/$/, '')}${path}`)} />
       </main>
     </div>
   );

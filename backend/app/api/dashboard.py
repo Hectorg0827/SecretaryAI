@@ -199,6 +199,8 @@ async def get_dashboard_summary(
         ),
         # Financial figures visible to owner + manager only
         "sales_30d":        round(float(sales_30d), 2) if ("view_financials" in perms or has_view_all) else None,
+        # Ledger comparison is staging-only and always marked not certified.
+        "finance_comparison": cached_payload.get("finance_comparison") if ("view_financials" in perms or has_view_all) else None,
         # Approval count visible to approvers only
         "pending_actions":  pending_count if ("approve_actions" in perms or has_view_all) else None,
         # Email count visible to roles with trigger_actions only

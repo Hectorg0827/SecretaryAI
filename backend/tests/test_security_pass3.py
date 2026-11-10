@@ -277,10 +277,13 @@ class TestChatHistoryScope:
     def test_load_history_filters_by_company(self):
         from app.api.chat import _load_history
         db = MagicMock()
-        _load_history(db, "conv-123", "co-1")
+        _load_history(db, "conv-123", "co-1", "user-1")
         sel = db.table.return_value.select.return_value
         sel.eq.assert_called_with("conversation_id", "conv-123")
         sel.eq.return_value.eq.assert_called_with("company_id", "co-1")
+        # Lion BI: a colleague's conversation id in the same tenant must not
+        # load their history either.
+        sel.eq.return_value.eq.return_value.eq.assert_called_with("user_id", "user-1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

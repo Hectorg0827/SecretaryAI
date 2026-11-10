@@ -18,10 +18,14 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   owner: new Set([
     'view_all', 'manage_users', 'approve_actions', 'manage_billing',
     'view_financials', 'trigger_actions', 'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   manager: new Set([
     'view_all', 'approve_actions', 'trigger_actions', 'view_financials',
     'run_reports', 'draft_purchase_orders',
+    'view_inventory', 'view_orders', 'view_customers', 'view_own_accounts',
+    'view_dashboard', 'manage_inventory',
   ]),
   sales_rep: new Set([
     'view_own_accounts', 'view_inventory',
@@ -40,7 +44,7 @@ export const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
  * No crypto needed on the client — the backend verifies the signature on every
  * API call. We only read the claim for UI gating.
  */
-function parseJwtRole(token: string): string {
+export function parseJwtRole(token: string): string {
   try {
     const base64url = token.split('.')[1];
     // base64url → base64: replace - with + and _ with /
@@ -52,16 +56,27 @@ function parseJwtRole(token: string): string {
   }
 }
 
-export function useAuth() {
-  // Source of truth: the signed JWT token — not the writable localStorage.secretary_role
+/** Pure permission check, shared by useAuth and Lola (no React needed). */
+export function roleHasPermission(role: Role, permission: string): boolean {
+  const perms = ROLE_PERMISSIONS[role] ?? ROLE_PERMISSIONS.viewer;
+  // Match the server's exact RBAC check. "view_all" is a read scope,
+  // never permission to administer billing, users or credentials.
+  return perms.has(permission);
+}
+
+/** Resolve the current role from the stored JWT (UI gating only). */
+export function currentRole(): Role {
   const token = localStorage.getItem('secretary_token') ?? '';
   const raw   = token ? parseJwtRole(token) : 'viewer';
-  const role  = (Object.keys(ROLE_PERMISSIONS).includes(raw) ? raw : 'viewer') as Role;
+  return (Object.keys(ROLE_PERMISSIONS).includes(raw) ? raw : 'viewer') as Role;
+}
+
+export function useAuth() {
+  // Source of truth: the signed JWT token — not the writable localStorage.secretary_role
+  const role = currentRole();
 
   function hasPermission(permission: string): boolean {
-    const perms = ROLE_PERMISSIONS[role];
-    // view_all is a super-permission (owner + manager bypass all checks)
-    return perms.has(permission) || perms.has('view_all');
+    return roleHasPermission(role, permission);
   }
 
   return {

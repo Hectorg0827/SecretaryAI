@@ -1,0 +1,603 @@
+{
+  "contract_version": "1.2.0",
+  "examples": {
+    "answered": {
+      "answer": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [
+        {
+          "department": "sales",
+          "display_name": "Acme Foods",
+          "entity_id": "QB-101",
+          "entity_type": "customer",
+          "evidence": [
+            {
+              "confidence": 100,
+              "data_path": "api",
+              "fetched_at": "2026-11-09T15:00:00Z",
+              "is_stale": false,
+              "note": null,
+              "record_id": "QB-101",
+              "record_type": "customer",
+              "source_system": "supabase.accounts"
+            }
+          ],
+          "match_confidence": 100,
+          "sensitivity": "internal"
+        }
+      ],
+      "evidence": [
+        {
+          "confidence": 100,
+          "data_path": "api",
+          "fetched_at": "2026-11-09T15:00:00Z",
+          "is_stale": false,
+          "note": null,
+          "record_id": "QB-101",
+          "record_type": "customer",
+          "source_system": "quickbooks"
+        }
+      ],
+      "intents": [
+        "account_status"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [],
+      "request_id": "req-0001",
+      "speech": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods",
+      "status": "answered",
+      "tool_results": [
+        {
+          "authorization": {
+            "action": "read",
+            "allowed": true,
+            "basis": [
+              "role:sales_rep",
+              "org_level:employee"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Assigned accounts only",
+            "redacted_fields": [
+              "balance",
+              "credit_limit"
+            ],
+            "resource_type": "customer_account",
+            "scope": "own",
+            "sensitivity_ceiling": "internal"
+          },
+          "data": {
+            "accounts": [
+              {
+                "name": "Acme Foods",
+                "qb_id": "QB-101",
+                "state": "TX"
+              }
+            ],
+            "scope": "own"
+          },
+          "department": "sales",
+          "error_code": null,
+          "evidence": [
+            {
+              "confidence": 100,
+              "data_path": "api",
+              "fetched_at": "2026-11-09T15:00:00Z",
+              "is_stale": false,
+              "note": null,
+              "record_id": "QB-101",
+              "record_type": "customer",
+              "source_system": "quickbooks"
+            }
+          ],
+          "finished_at": "2026-11-09T15:00:00Z",
+          "sensitivity": "internal",
+          "started_at": "2026-11-09T15:00:00Z",
+          "status": "answered",
+          "summary": "1 account(s) in your scope",
+          "tool": "sales.customer_accounts",
+          "warnings": []
+        }
+      ],
+      "withheld": []
+    },
+    "completed": {
+      "answer": "Done and verified.",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [],
+      "evidence": [],
+      "intents": [
+        "general"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [
+        {
+          "action_type": "generate_internal_report",
+          "approved_by": null,
+          "company_id": "00000000-0000-0000-0000-0000000000c1",
+          "created_at": "2026-11-09T15:00:00Z",
+          "draft_id": null,
+          "error_code": null,
+          "execution_id": null,
+          "external_reference": "internal-report:2026-11-09T15:00:00+00:00",
+          "history": [],
+          "idempotency_key": "lola:example",
+          "proposal_id": "prop-0001",
+          "receipt_id": "rcpt-0001",
+          "requested_by": "00000000-0000-0000-0000-0000000000a1",
+          "risk_tier": "routine_automation",
+          "status": "completed",
+          "updated_at": "2026-11-09T15:00:00Z",
+          "verified": true
+        }
+      ],
+      "request_id": "req-0001",
+      "speech": "Done and verified.",
+      "status": "completed",
+      "tool_results": [],
+      "withheld": []
+    },
+    "denied": {
+      "answer": "I can't share HR and payroll information with your current permissions.",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [],
+      "evidence": [],
+      "intents": [
+        "payroll"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [],
+      "request_id": "req-0001",
+      "speech": "I can't share HR and payroll information with your current permissions.",
+      "status": "denied",
+      "tool_results": [
+        {
+          "authorization": {
+            "action": "read",
+            "allowed": false,
+            "basis": [
+              "role:sales_rep"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Payroll information is restricted",
+            "redacted_fields": [],
+            "resource_type": "payroll",
+            "scope": "none",
+            "sensitivity_ceiling": "public"
+          },
+          "data": null,
+          "department": "hr",
+          "error_code": "permission_denied",
+          "evidence": [],
+          "finished_at": "2026-11-09T15:00:00Z",
+          "sensitivity": "restricted",
+          "started_at": "2026-11-09T15:00:00Z",
+          "status": "denied",
+          "summary": "Payroll information is restricted",
+          "tool": "hr.payroll",
+          "warnings": []
+        }
+      ],
+      "withheld": [
+        "I can't share HR and payroll information with your current permissions."
+      ]
+    },
+    "failed": {
+      "answer": "Your company's action policy could not be checked, so nothing was queued",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [],
+      "evidence": [],
+      "intents": [
+        "draft_purchase_order"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [],
+      "request_id": "req-0001",
+      "speech": "Your company's action policy could not be checked, so nothing was queued",
+      "status": "failed",
+      "tool_results": [],
+      "withheld": []
+    },
+    "high_risk": {
+      "answer": "Prepared and waiting for approval. Nothing has been sent.",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [],
+      "evidence": [],
+      "intents": [
+        "draft_purchase_order"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [
+        {
+          "action_type": "draft_purchase_order",
+          "amount": "25000",
+          "approval_roles": [
+            "owner",
+            "manager"
+          ],
+          "authorization": {
+            "action": "read",
+            "allowed": true,
+            "basis": [
+              "role:sales_rep",
+              "org_level:employee"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Assigned accounts only",
+            "redacted_fields": [],
+            "resource_type": "customer_account",
+            "scope": "own",
+            "sensitivity_ceiling": "internal"
+          },
+          "company_id": "00000000-0000-0000-0000-0000000000c1",
+          "created_at": "2026-11-09T15:00:00Z",
+          "description": "Follow up with Acme Foods about their reorder",
+          "entity": null,
+          "evidence": [],
+          "idempotency_key": "lola:example",
+          "payload": {
+            "amount": "25000",
+            "instruction": "Reorder 500 cases"
+          },
+          "proposal_id": "prop-0001",
+          "requested_by": "00000000-0000-0000-0000-0000000000a1",
+          "requires_independent_approval": true,
+          "risk_tier": "high_risk",
+          "title": "Draft purchase order"
+        }
+      ],
+      "receipts": [
+        {
+          "action_type": "draft_purchase_order",
+          "approved_by": null,
+          "company_id": "00000000-0000-0000-0000-0000000000c1",
+          "created_at": "2026-11-09T15:00:00Z",
+          "draft_id": "draft-0001",
+          "error_code": null,
+          "execution_id": null,
+          "external_reference": null,
+          "history": [],
+          "idempotency_key": "lola:example",
+          "proposal_id": "prop-0001",
+          "receipt_id": "rcpt-0001",
+          "requested_by": "00000000-0000-0000-0000-0000000000a1",
+          "risk_tier": "high_risk",
+          "status": "pending_approval",
+          "updated_at": "2026-11-09T15:00:00Z",
+          "verified": false
+        }
+      ],
+      "request_id": "req-0001",
+      "speech": "Prepared and waiting for approval. Nothing has been sent.",
+      "status": "pending_approval",
+      "tool_results": [],
+      "withheld": []
+    },
+    "partial": {
+      "answer": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods\nI can't share financial information with your current permissions.",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [
+        {
+          "department": "sales",
+          "display_name": "Acme Foods",
+          "entity_id": "QB-101",
+          "entity_type": "customer",
+          "evidence": [
+            {
+              "confidence": 100,
+              "data_path": "api",
+              "fetched_at": "2026-11-09T15:00:00Z",
+              "is_stale": false,
+              "note": null,
+              "record_id": "QB-101",
+              "record_type": "customer",
+              "source_system": "supabase.accounts"
+            }
+          ],
+          "match_confidence": 100,
+          "sensitivity": "internal"
+        }
+      ],
+      "evidence": [
+        {
+          "confidence": 100,
+          "data_path": "api",
+          "fetched_at": "2026-11-09T15:00:00Z",
+          "is_stale": false,
+          "note": null,
+          "record_id": "QB-101",
+          "record_type": "customer",
+          "source_system": "quickbooks"
+        }
+      ],
+      "intents": [
+        "account_status",
+        "receivables"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [],
+      "request_id": "req-0001",
+      "speech": "Accounts (1 account(s) in your scope):\n\u2022 Acme Foods\nI can't share financial information with your current permissions.",
+      "status": "partial",
+      "tool_results": [
+        {
+          "authorization": {
+            "action": "read",
+            "allowed": true,
+            "basis": [
+              "role:sales_rep",
+              "org_level:employee"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Assigned accounts only",
+            "redacted_fields": [
+              "balance",
+              "credit_limit"
+            ],
+            "resource_type": "customer_account",
+            "scope": "own",
+            "sensitivity_ceiling": "internal"
+          },
+          "data": {
+            "accounts": [
+              {
+                "name": "Acme Foods",
+                "qb_id": "QB-101",
+                "state": "TX"
+              }
+            ],
+            "scope": "own"
+          },
+          "department": "sales",
+          "error_code": null,
+          "evidence": [
+            {
+              "confidence": 100,
+              "data_path": "api",
+              "fetched_at": "2026-11-09T15:00:00Z",
+              "is_stale": false,
+              "note": null,
+              "record_id": "QB-101",
+              "record_type": "customer",
+              "source_system": "quickbooks"
+            }
+          ],
+          "finished_at": "2026-11-09T15:00:00Z",
+          "sensitivity": "internal",
+          "started_at": "2026-11-09T15:00:00Z",
+          "status": "answered",
+          "summary": "1 account(s) in your scope",
+          "tool": "sales.customer_accounts",
+          "warnings": []
+        },
+        {
+          "authorization": {
+            "action": "read",
+            "allowed": false,
+            "basis": [
+              "role:sales_rep"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Financial information is restricted to finance and leadership",
+            "redacted_fields": [],
+            "resource_type": "receivables",
+            "scope": "none",
+            "sensitivity_ceiling": "public"
+          },
+          "data": null,
+          "department": "finance",
+          "error_code": "permission_denied",
+          "evidence": [],
+          "finished_at": "2026-11-09T15:00:00Z",
+          "sensitivity": "confidential",
+          "started_at": "2026-11-09T15:00:00Z",
+          "status": "denied",
+          "summary": "Financial information is restricted to finance and leadership",
+          "tool": "finance.receivables",
+          "warnings": []
+        }
+      ],
+      "withheld": [
+        "I can't share financial information with your current permissions."
+      ]
+    },
+    "pending_approval": {
+      "answer": "Prepared and waiting for approval. Nothing has been sent.",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [
+        {
+          "department": "sales",
+          "display_name": "Acme Foods",
+          "entity_id": "QB-101",
+          "entity_type": "customer",
+          "evidence": [
+            {
+              "confidence": 100,
+              "data_path": "api",
+              "fetched_at": "2026-11-09T15:00:00Z",
+              "is_stale": false,
+              "note": null,
+              "record_id": "QB-101",
+              "record_type": "customer",
+              "source_system": "supabase.accounts"
+            }
+          ],
+          "match_confidence": 100,
+          "sensitivity": "internal"
+        }
+      ],
+      "evidence": [],
+      "intents": [
+        "draft_email"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [
+        {
+          "action_type": "draft_customer_email",
+          "amount": null,
+          "approval_roles": [
+            "owner",
+            "manager"
+          ],
+          "authorization": {
+            "action": "read",
+            "allowed": true,
+            "basis": [
+              "role:sales_rep",
+              "org_level:employee"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Assigned accounts only",
+            "redacted_fields": [],
+            "resource_type": "customer_account",
+            "scope": "own",
+            "sensitivity_ceiling": "internal"
+          },
+          "company_id": "00000000-0000-0000-0000-0000000000c1",
+          "created_at": "2026-11-09T15:00:00Z",
+          "description": "Follow up with Acme Foods about their reorder",
+          "entity": {
+            "department": "sales",
+            "display_name": "Acme Foods",
+            "entity_id": "QB-101",
+            "entity_type": "customer",
+            "evidence": [
+              {
+                "confidence": 100,
+                "data_path": "api",
+                "fetched_at": "2026-11-09T15:00:00Z",
+                "is_stale": false,
+                "note": null,
+                "record_id": "QB-101",
+                "record_type": "customer",
+                "source_system": "supabase.accounts"
+              }
+            ],
+            "match_confidence": 100,
+            "sensitivity": "internal"
+          },
+          "evidence": [],
+          "idempotency_key": "lola:example",
+          "payload": {
+            "account_id": "QB-101",
+            "account_name": "Acme Foods",
+            "instruction": "Follow up"
+          },
+          "proposal_id": "prop-0001",
+          "requested_by": "00000000-0000-0000-0000-0000000000a1",
+          "requires_independent_approval": false,
+          "risk_tier": "approval_required",
+          "title": "Draft customer email"
+        }
+      ],
+      "receipts": [
+        {
+          "action_type": "draft_customer_email",
+          "approved_by": null,
+          "company_id": "00000000-0000-0000-0000-0000000000c1",
+          "created_at": "2026-11-09T15:00:00Z",
+          "draft_id": "draft-0001",
+          "error_code": null,
+          "execution_id": null,
+          "external_reference": null,
+          "history": [],
+          "idempotency_key": "lola:example",
+          "proposal_id": "prop-0001",
+          "receipt_id": "rcpt-0001",
+          "requested_by": "00000000-0000-0000-0000-0000000000a1",
+          "risk_tier": "approval_required",
+          "status": "pending_approval",
+          "updated_at": "2026-11-09T15:00:00Z",
+          "verified": false
+        }
+      ],
+      "request_id": "req-0001",
+      "speech": "Prepared and waiting for approval. Nothing has been sent.",
+      "status": "pending_approval",
+      "tool_results": [],
+      "withheld": []
+    },
+    "unavailable": {
+      "answer": "Inventory information is unavailable right now (This data source is not connected).",
+      "contract_version": "1.2.0",
+      "conversation_id": "conv-0001",
+      "created_at": "2026-11-09T15:00:00Z",
+      "entities": [],
+      "evidence": [],
+      "intents": [
+        "inventory_check"
+      ],
+      "language": "en",
+      "memory_used": 0,
+      "proposals": [],
+      "receipts": [],
+      "request_id": "req-0001",
+      "speech": "Inventory information is unavailable right now (This data source is not connected).",
+      "status": "unavailable",
+      "tool_results": [
+        {
+          "authorization": {
+            "action": "read",
+            "allowed": true,
+            "basis": [
+              "role:sales_rep",
+              "org_level:employee"
+            ],
+            "evaluated_at": "2026-11-09T15:00:00Z",
+            "policy_version": "1.2.0",
+            "reason": "Assigned accounts only",
+            "redacted_fields": [],
+            "resource_type": "inventory",
+            "scope": "company",
+            "sensitivity_ceiling": "internal"
+          },
+          "data": null,
+          "department": "operations",
+          "error_code": "source_not_connected",
+          "evidence": [],
+          "finished_at": "2026-11-09T15:00:00Z",
+          "sensitivity": "internal",
+          "started_at": "2026-11-09T15:00:00Z",
+          "status": "unavailable",
+          "summary": "This data source is not connected",
+          "tool": "operations.inventory",
+          "warnings": []
+        }
+      ],
+      "withheld": [
+        "Inventory information is unavailable right now (This data source is not connected)."
+      ]
+    }
+  }
+}

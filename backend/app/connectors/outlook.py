@@ -186,6 +186,11 @@ class OutlookConnector:
                 },
                 "saveToSentItems": True,
             }
+            # Graph's sendMail answers 202 with no message id. A client-request-id
+            # (echoed by Graph as request-id) identifies the accepted send.
+            import uuid
+            client_request_id = str(uuid.uuid4())
+            headers = {**headers, "client-request-id": client_request_id, "return-client-request-id": "true"}
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     f"{GRAPH_BASE}/me/sendMail",
@@ -194,7 +199,8 @@ class OutlookConnector:
                     timeout=15,
                 )
                 resp.raise_for_status()
-            return {"status": "sent"}
+            request_id = (getattr(resp, "headers", {}) or {}).get("request-id") or client_request_id
+            return {"status": "sent", "message_id": f"graph-request:{request_id}"}
         except Exception as exc:
             log.error("Outlook send_email_reply failed: %s", exc)
             raise

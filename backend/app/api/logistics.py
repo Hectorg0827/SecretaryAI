@@ -146,6 +146,8 @@ class VendorResponseRequest(BaseModel):
     supplier_id: str = Field(min_length=1, max_length=200)
     email_subject: str = Field(max_length=500)
     email_body: str = Field(min_length=1, max_length=25000)
+    shipment_id: Optional[str] = Field(default=None, max_length=150)  # store as unverified ledger evidence
+    message_id: Optional[str] = Field(default=None, max_length=300)
 
 
 class FreightInvoiceRequest(BaseModel):
@@ -170,6 +172,8 @@ class BrokerEmailRequest(BaseModel):
     booking_id: str = Field(min_length=1, max_length=150)
     subject: str = Field(max_length=500)
     body: str = Field(min_length=1, max_length=25000)
+    shipment_id: Optional[str] = Field(default=None, max_length=150)  # store as unverified ledger evidence
+    message_id: Optional[str] = Field(default=None, max_length=300)
 
 
 class LegacyReceiptLine(BaseModel):
@@ -1278,13 +1282,14 @@ async def evaluate_reorder_queue(
             stock_in_transit=item.stock_in_transit,
             minimum_order_cases=item.minimum_order_cases,
         )
+        # Keys must match ReorderEngine.build_reorder_queue (previously sent
+        # "daily_sales"/"lead_time_days", so every SKU was silently skipped).
         sku_data.append({
             "profile": profile,
             "daily_sales_history": item.daily_sales,
             "lead_time_history": item.lead_time_days,
             "seasonal_indices": _weekly_seasonal_indices(item.seasonal_indices),
             "last_fob_price": item.last_fob_price,
-            "current_fob_price": item.current_fob_price,
         })
 
     results = lm.evaluate_reorder_queue(sku_data)
@@ -1347,6 +1352,7 @@ async def generate_purchase_orders(
 async def parse_vendor_response(
     request: VendorResponseRequest,
     user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
 ):
     """
     Preview a vendor email response without changing an order or pipeline state.
@@ -1368,6 +1374,16 @@ async def parse_vendor_response(
         requested_ship_date="",
     )
     parsed = VendorResponseParser().parse(request.email_subject, request.email_body, po)
+
+    # The parse is an interpretation of an email: if the PO is on a tracked
+    # shipment, record it as UNVERIFIED evidence (never an official milestone).
+    evidence = None
+    if request.shipment_id and parsed.order_confirmed:
+        evidence = _record_email_evidence(
+            user, db, request.shipment_id, "supplier_confirmed",
+            occurred_at=parsed.ship_date or "", source_ref=request.message_id or request.email_subject[:80],
+            payload={"ship_date": parsed.ship_date, "po_number": request.po_number},
+        )
 
     return {
         "po_number": request.po_number,
@@ -1393,6 +1409,13 @@ async def parse_vendor_response(
         "supplier_action_permitted": False,
         "pipeline_status_changed": False,
         "inventory_posted": False,
+        # Workstream 3 detail — still unverified candidates, never confirmations.
+        "full_confirmation": parsed.full_confirmation,
+        "partial_confirmation": parsed.partial_confirmation,
+        "price_changes": parsed.price_changes,
+        "qty_changes": parsed.qty_changes,
+        "verification": "unverified — parsed from email",
+        "ledger_evidence": evidence,
     }
 
 
@@ -1416,7 +1439,7 @@ async def parse_freight_invoice(
         )
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_ref=request.booking_id)
+    booking = FreightBooking(id=request.booking_id, booking_ref=request.booking_id)
     updated = lm.capture_freight_invoice(booking, request.invoice_text, request.total_cases)
     summary = lm.freight_cost_summary(updated)
 
@@ -1517,10 +1540,22 @@ async def parse_broker_email(
     lm = _get_logistics_module(user, db)
     result = lm.parse_broker_email(request.booking_id, request.subject, request.body)
 
+    _MAP = {"released": "customs_released", "hold_placed": "customs_hold",
+            "entry_filed": "entry_filed", "duties_paid": "duties_paid"}
+    evidence = None
+    if request.shipment_id and result["milestone"] in _MAP:
+        evidence = _record_email_evidence(
+            user, db, request.shipment_id, _MAP[result["milestone"]],
+            source_ref=request.message_id or request.subject[:80],
+            payload={"reason": result["event"].hold_reason} if result["event"].hold_reason else {},
+        )
+
     return {
         "booking_id": request.booking_id,
         "status": "analysis_only",
         "candidate_milestone": result["milestone"],
+        "verification": "unverified — parsed from broker email; confirm before relying on it",
+        "ledger_evidence": evidence,
         "candidate_event": {
             "milestone": result["event"].milestone,
             "hold_reason": result["event"].hold_reason,
@@ -1549,7 +1584,7 @@ async def process_warehouse_receipt(
     """
     lm = _get_logistics_module(user, db)
 
-    booking = FreightBooking(booking_ref=request.booking_id)
+    booking = FreightBooking(id=request.booking_id, booking_ref=request.booking_id)
     result = lm.process_warehouse_receipt(
         booking=booking,
         po_number=request.po_number,
@@ -1784,6 +1819,442 @@ async def describe_logistics_module(
     """Return the module's capabilities and current config."""
     lm = _get_logistics_module(user, db)
     return lm.describe()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Product journey (Workstream 3) — provenance ledger, documents, receiving,
+#  monitoring, role-scoped Q&A.  See docs/logistics/INTERFACES.md.
+#
+#  Nothing below books freight, files customs entries, posts stock or money,
+#  or sends external messages.  Stock changes and claims go to the existing
+#  PolicyEngine + ApprovalQueue as pending drafts.
+# ═══════════════════════════════════════════════════════════════════════════
+
+from datetime import date as _date
+
+from app.intelligence.wholesale_distribution.logistics.assistant import LogisticsAssistant
+from app.intelligence.wholesale_distribution.logistics.documents import DocumentIntelligence
+from app.intelligence.wholesale_distribution.logistics.journey import (
+    HUMAN_VERIFIED_SOURCES,
+    MACHINE_SOURCES,
+    ConfirmerRequiredError,
+    LedgerError,
+    RecordNotFoundError,
+    TenantMismatchError,
+    LogisticsEvent,
+    ShipmentLedger,
+    SourceType,
+    StoreUnavailableError,
+)
+from app.intelligence.wholesale_distribution.logistics.landed_cost import landed_cost
+from app.intelligence.wholesale_distribution.logistics.monitoring import LogisticsMonitor
+from app.intelligence.wholesale_distribution.logistics.receiving import (
+    ReceivedLine,
+    ReceivingEvidence,
+    ReceivingReconciler,
+    submit_for_approval,
+)
+from app.intelligence.wholesale_distribution.logistics.store import SupabaseEventStore
+from app.intelligence.wholesale_distribution.logistics.visibility import (
+    LogisticsAccessDenied,
+    LogisticsViewer,
+)
+
+
+def _viewer(user: dict, db) -> LogisticsViewer:
+    """Viewer from the CURRENT database role and Lola's account scope.
+
+    The token only identifies the user; role, financial access and a sales
+    rep's customers are re-read from the database on every request, so a
+    demoted or deactivated user loses access immediately (not at token expiry).
+    """
+    from app.lola.authorization import (
+        AuthorizationDenied, AuthorizationUnavailable, Authorizer, build_principal,
+    )
+    from app.lola.integrations import logistics_viewer_for
+    try:
+        principal = build_principal(db, str(user.get("company_id") or ""), str(user.get("sub") or ""),
+                                    include_delegations=False)
+    except AuthorizationDenied:
+        raise HTTPException(status_code=403, detail="Your account is not active for this company") from None
+    except AuthorizationUnavailable:
+        raise HTTPException(status_code=503, detail="Authorization temporarily unavailable") from None
+    v = logistics_viewer_for(principal, Authorizer(principal, db))
+    # Server-issued shipment assignments for logistics staff (optional claim).
+    v.assigned_shipment_ids = set(user.get("assigned_shipment_ids") or [])
+    try:
+        v.require_access()
+    except LogisticsAccessDenied:
+        raise HTTPException(status_code=403, detail="Your role has no access to logistics data")
+    return v
+
+
+def _operator(user: dict, db) -> LogisticsViewer:
+    v = _viewer(user, db)
+    if not v.can_operate:
+        raise HTTPException(status_code=403, detail="Logistics operations require logistics or management access")
+    return v
+
+
+def _load_ledger(user: dict, db) -> ShipmentLedger:
+    """Rebuild this company's ledger from its event log (company from the JWT only)."""
+    try:
+        return ShipmentLedger.load(user["company_id"], SupabaseEventStore(db))
+    except Exception as exc:  # noqa: BLE001
+        # Exception text can carry request data; log only its type (no log injection).
+        log.error("logistics ledger load failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Logistics data temporarily unavailable")
+
+
+def _ledger_http_error(exc: LedgerError) -> HTTPException:
+    """
+    Map ledger errors to FIXED client messages.  Exception text is logged
+    server-side only (never echoed to the caller).
+    """
+    log.info("logistics ledger rejected request: %s", type(exc).__name__)
+    if isinstance(exc, RecordNotFoundError):
+        return HTTPException(status_code=404, detail="Shipment, order, evidence or exception not found")
+    if isinstance(exc, ConfirmerRequiredError):
+        return HTTPException(status_code=422, detail="This must be confirmed by a named person")
+    if isinstance(exc, TenantMismatchError):
+        return HTTPException(status_code=403, detail="Record belongs to another company")
+    return HTTPException(status_code=422, detail=(
+        "Invalid logistics event — check kind, milestone code and payload (see docs/logistics/INTERFACES.md)"))
+
+
+def _ingest(ledger: ShipmentLedger, event: LogisticsEvent) -> dict:
+    try:
+        return ledger.ingest(event).to_dict()
+    except LedgerError as exc:
+        raise _ledger_http_error(exc)
+    except StoreUnavailableError as exc:
+        log.error("logistics event store write failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Event not saved — store unavailable; nothing was changed")
+
+
+def _record_email_evidence(user: dict, db, shipment_id: str, code: str, occurred_at: str = "",
+                           source_ref: str = "", payload: Optional[dict] = None) -> Optional[dict]:
+    """Store an email interpretation as UNVERIFIED evidence. Best-effort."""
+    try:
+        ledger = ShipmentLedger.load(user["company_id"], SupabaseEventStore(db))
+        if ledger.get(shipment_id) is None:
+            return None
+        return ledger.ingest(LogisticsEvent(
+            company_id=user["company_id"], shipment_id=shipment_id, kind="milestone", code=code,
+            source=SourceType.EMAIL_PARSED, occurred_at=occurred_at, source_ref=source_ref,
+            payload=payload or {},
+        )).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        # shipment_id comes from the request body: never write it raw to the log.
+        log.warning("could not record email evidence: %s", type(exc).__name__)
+        return None
+
+
+def ingest_integration_events(db, company_id: str, events: list[LogisticsEvent]) -> list[dict]:
+    """
+    Server-side entry point for connectors / webhooks / Celery workers that hold
+    authoritative feeds (carrier, terminal, customs, broker EDI, WMS, ERP).
+    Not exposed over HTTP: a person cannot claim a machine source.
+    """
+    ledger = ShipmentLedger.load(company_id, SupabaseEventStore(db))
+    out = []
+    for ev in events:
+        if ev.company_id != company_id:
+            out.append({"applied": False, "message": "company mismatch — rejected"})
+            continue
+        try:
+            out.append(ledger.ingest(ev).to_dict())
+        except (LedgerError, StoreUnavailableError) as exc:
+            log.warning("integration event %s rejected: %s", ev.event_id, exc)
+            out.append({"applied": False, "message": type(exc).__name__})
+    return out
+
+
+class JourneyEventRequest(BaseModel):
+    shipment_id: str
+    kind: str
+    source: str = "user_confirmed"
+    code: str = ""
+    occurred_at: str = ""
+    source_ref: str = ""
+    payload: dict = Field(default_factory=dict)
+
+
+class EvidenceConfirmRequest(BaseModel):
+    occurred_at: str = ""
+    note: str = ""
+
+
+class DocumentIngestRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    doc_id: str = ""
+    hint: str = ""                       # e.g. file name or email subject
+    reviewed: bool = False               # True = I (the caller) reviewed this document
+    received_at: str = ""
+
+
+class ReceiveLineModel(BaseModel):
+    sku: str
+    good_cases: int = Field(ge=0)
+    damaged_cases: int = Field(default=0, ge=0)
+    lot: str = ""
+    damage_description: str = ""
+
+
+class ReceivingEvidenceModel(BaseModel):
+    damage_noted_on_delivery_receipt: Optional[bool] = None
+    seal_intact: Optional[bool] = None
+    seal_number_matches: Optional[bool] = None
+    damage_cause: str = "unknown"
+    photos_attached: bool = False
+    damage_report_doc_id: str = ""
+    delivering_carrier: str = ""
+
+
+class ReceivingRequest(BaseModel):
+    shipment_id: str
+    lines: list[ReceiveLineModel] = Field(min_length=1)
+    evidence: ReceivingEvidenceModel = Field(default_factory=ReceivingEvidenceModel)
+    received_at: str = ""
+    landed_cost_per_case: Optional[dict[str, float]] = None
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+    as_of: Optional[str] = None
+
+
+def _as_of(v: Optional[str]) -> Optional[_date]:
+    if not v:
+        return None
+    try:
+        return _date.fromisoformat(v[:10])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="as_of must be YYYY-MM-DD")
+
+
+@router.post("/journey/events")
+async def record_journey_event(
+    request: JourneyEventRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Record a fact about a shipment from a person.  Only human sources are
+    accepted here: ``user_confirmed`` (you vouch for it — recorded under your
+    user id) or unverified sources (``email_parsed``, ``ai_inferred``,
+    ``manual_note``).  Machine sources come only through connectors.
+    """
+    _operator(user, db)
+    try:
+        source = SourceType(request.source)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"unknown source {request.source!r}")
+    if source in MACHINE_SOURCES or source == SourceType.DOCUMENT_VALIDATED:
+        raise HTTPException(status_code=403, detail=(
+            f"source '{source.value}' can only be recorded by an integration "
+            "(or via /documents/ingest for reviewed documents)"))
+    ledger = _load_ledger(user, db)
+    event = LogisticsEvent(
+        company_id=user["company_id"], shipment_id=request.shipment_id, kind=request.kind,
+        source=source, code=request.code, occurred_at=request.occurred_at,
+        source_ref=request.source_ref, payload=request.payload,
+        confirmed_by=user["sub"] if source in HUMAN_VERIFIED_SOURCES else "",
+    )
+    return _ingest(ledger, event)
+
+
+@router.get("/journey/shipments")
+async def list_journey_shipments(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Shipments this user may see, summarised for their role."""
+    viewer = _viewer(user, db)
+    ledger = _load_ledger(user, db)
+    out = []
+    for s in viewer.visible(ledger.shipments()):
+        d = viewer.project(s)
+        out.append({
+            "shipment_id": d["shipment_id"], "current_stage": d["current_stage"],
+            "current_stage_label": d["current_stage_label"],
+            "container_numbers": d["container_numbers"], "bol_number": d["bol_number"],
+            "po_numbers": d.get("po_numbers", []), "destination": d["destination"],
+            "eta": d["eta"], "open_exceptions": len(d["exceptions"]),
+            "pending_evidence": len(d.get("pending_evidence", [])),
+        })
+    return {"count": len(out), "shipments": out}
+
+
+@router.get("/journey/shipments/{shipment_id}")
+async def get_journey_shipment(
+    shipment_id: str,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Full 14-stage view of one shipment, projected for the caller's role."""
+    viewer = _viewer(user, db)
+    ledger = _load_ledger(user, db)
+    s = ledger.get(shipment_id)
+    if s is None or not viewer.can_see_shipment(s):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    return viewer.project(s)
+
+
+@router.get("/journey/shipments/{shipment_id}/landed-cost")
+async def get_landed_cost(
+    shipment_id: str,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    viewer = _viewer(user, db)
+    if not viewer.can_view_commercial:
+        raise HTTPException(status_code=403, detail="Landed cost requires financial access")
+    ledger = _load_ledger(user, db)
+    s = ledger.get(shipment_id)
+    if s is None or not viewer.can_see_shipment(s):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    return landed_cost(s)
+
+
+@router.post("/journey/evidence/{evidence_id}/confirm")
+async def confirm_journey_evidence(
+    evidence_id: str,
+    request: EvidenceConfirmRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """A named person promotes an unverified report (email / AI / document) to a verified fact."""
+    _operator(user, db)
+    ledger = _load_ledger(user, db)
+    try:
+        return ledger.confirm_evidence(evidence_id, confirmed_by=user["sub"],
+                                       occurred_at=request.occurred_at, note=request.note).to_dict()
+    except LedgerError as exc:
+        raise _ledger_http_error(exc)
+    except StoreUnavailableError:
+        raise HTTPException(status_code=503, detail="Event not saved — store unavailable; nothing was changed")
+
+
+@router.post("/documents/ingest")
+async def ingest_document(
+    request: DocumentIngestRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Identify, extract, validate and link a logistics document.  Extracted
+    values are evidence: unless ``reviewed`` is true (you vouch for the
+    document) any milestone it suggests stays unverified.
+    """
+    _operator(user, db)
+    ledger = _load_ledger(user, db)
+    di = DocumentIntelligence()
+    doc, events = di.process(request.text, ledger, doc_id=request.doc_id, hint=request.hint,
+                             reviewed_by=user["sub"] if request.reviewed else "",
+                             received_at=request.received_at)
+    results = [_ingest(ledger, ev) for ev in events]
+    return {"document": doc.to_dict(), "ledger_results": results,
+            "linked": bool(doc.linked_shipment_id)}
+
+
+@router.post("/receiving/reconcile")
+async def reconcile_receipt(
+    request: ReceivingRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Reconcile a warehouse count against the PO.  Damaged cases are proposed
+    to quarantine; every stock posting and claim is queued for approval via
+    the PolicyEngine + ApprovalQueue.  Nothing is posted or sent.
+    """
+    viewer = _operator(user, db)
+    ledger = _load_ledger(user, db)
+    shipment = ledger.get(request.shipment_id)
+    if shipment is None or not viewer.can_see_shipment(shipment):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    reconciler = ReceivingReconciler(user["company_id"])
+    try:
+        rec = reconciler.reconcile(
+            shipment,
+            [ReceivedLine(**l.model_dump()) for l in request.lines],
+            received_by=user["sub"],
+            evidence=ReceivingEvidence(**request.evidence.model_dump()),
+            received_at=request.received_at,
+            landed_cost_per_case=request.landed_cost_per_case,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid receiving counts (case quantities cannot be negative)")
+
+    # The count was entered by a named person → verified receipt milestone.
+    milestone = _ingest(ledger, LogisticsEvent(
+        company_id=user["company_id"], shipment_id=shipment.shipment_id, kind="milestone",
+        code="warehouse_received", source=SourceType.USER_CONFIRMED, occurred_at=rec.received_at,
+        source_ref=rec.reconciliation_id, confirmed_by=user["sub"],
+    ))
+    summary = _ingest(ledger, reconciler.to_ledger_event(rec, SourceType.USER_CONFIRMED, user["sub"]))
+
+    from app.actions.approval_queue import ApprovalQueue
+    from app.domain.policy import PolicyEngine
+    try:
+        approvals = await submit_for_approval(
+            rec.proposals, PolicyEngine(user["company_id"], db), ApprovalQueue(db))
+    except Exception as exc:  # noqa: BLE001
+        log.error("approval queue submission failed for %s: %s", rec.reconciliation_id, exc)
+        approvals = [{"status": "not_queued", "error": "approval queue unavailable — resubmit"}]
+
+    body = rec.to_dict()
+    if not viewer.can_view_commercial:
+        body.pop("financial_implications", None)
+        for c in body["claims"]:
+            c["claimed_amount_estimate_usd"] = None
+            c["lines"] = [{k: v for k, v in l.items() if k not in ("unit_cost", "extended_cost")}
+                          for l in c["lines"]]
+            c["narrative"] = "[amounts restricted] " + c["narrative"].split(" This draft covers")[0]
+        for l in body["lines"]:
+            l.pop("unit_cost", None)
+            l.pop("landed_cost_per_case", None)
+        for pr in body["proposals"]:
+            pr["amount"] = None
+            pr["proposed_changes"].pop("claim", None)
+        for a in approvals:
+            a.pop("amount", None)
+    body["ledger"] = {"milestone": milestone, "summary": summary}
+    body["approvals"] = approvals
+    return body
+
+
+@router.get("/monitor")
+async def logistics_monitor(
+    as_of: Optional[str] = Query(default=None),
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Prioritized logistics alerts with recommended actions and reviewable drafts (never sent)."""
+    viewer = _viewer(user, db)
+    ledger = _load_ledger(user, db)
+    alerts = LogisticsMonitor(ledger).scan(_as_of(as_of))
+    visible = viewer.filter_alerts(alerts, {s.shipment_id: s for s in ledger.shipments()})
+    return {"count": len(visible), "alerts": visible}
+
+
+@router.post("/ask")
+async def ask_lola_logistics(
+    request: AskRequest,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Answer a logistics question from verified ledger data, scoped to the
+    caller's role.  Callable as a tool by the chat orchestrator.
+    """
+    viewer = _viewer(user, db)
+    ledger = _load_ledger(user, db)
+    return LogisticsAssistant(ledger, viewer).ask(request.question, as_of=_as_of(request.as_of)).to_dict()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

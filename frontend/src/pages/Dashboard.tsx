@@ -11,7 +11,6 @@ import { WorkflowStatusPanel } from '../components/dashboard/WorkflowStatusPanel
 import { ProactiveFeed } from '../components/dashboard/ProactiveFeed';
 import { MorningBriefing } from '../components/dashboard/MorningBriefing';
 import { WeeklyReport } from '../components/dashboard/WeeklyReport';
-import { ChatDrawer } from '../components/chat/ChatDrawer';
 import { SkeletonCard } from '../components/ui/Skeleton';
 import { api, DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
@@ -23,7 +22,7 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError]   = useState(false);
   const summaryRequest = useRef(0);
-  const { role, hasPermission, canApprove, canAccessChat } = useAuth();
+  const { role, hasPermission, canApprove } = useAuth();
 
   const loadSummary = useCallback(async () => {
     const requestId = ++summaryRequest.current;
@@ -55,7 +54,7 @@ export function Dashboard() {
 
   const handleRefresh = () => {
     // This is intentionally a READ ONLY reload. POST /dashboard/refresh
-    // currently schedules a morning-briefing worker and is not safe for UI refresh.
+    // queues a dedicated snapshot worker which may not be provisioned.
     setRefreshing(true);
     void loadSummary();
   };
@@ -88,15 +87,18 @@ export function Dashboard() {
 
       {/* Cache freshness banner */}
       {!loading && summary && (
-        <div className="px-6 pt-3 flex items-center gap-2 text-xs text-slate-400">
+        <div className="px-6 pt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
           {summary.generated_at ? (
             <span>
               Data as of{' '}
-              {new Date(summary.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {new Date(summary.generated_at).toLocaleString()}
             </span>
           ) : (
             <span>Snapshot timestamp unavailable — freshness unverified</span>
           )}
+          {summary.snapshot_stale !== false && <span className="font-semibold text-amber-800" role="alert">
+            {summary.snapshot_stale ? 'Stale accounting snapshot' : 'Snapshot freshness unverified'} — figures are historical, not verified current. Reloading this page does not refresh the source.
+          </span>}
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -184,7 +186,6 @@ export function Dashboard() {
       </div>
 
       {/* Floating live chat drawer — hidden for viewer */}
-      {canAccessChat && <ChatDrawer />}
     </div>
   );
 }

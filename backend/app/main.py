@@ -18,6 +18,7 @@ from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.tenant import TenantMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.utils.log_safety import configure_safe_transport_logging
 
 settings = get_settings()
 
@@ -49,6 +50,9 @@ if _LOG_FORMAT == "json":
         logging.basicConfig(level=logging.INFO)
 else:
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+
+# Keep token-bearing outbound transport URLs out of Railway's retained logs.
+configure_safe_transport_logging()
 
 log = logging.getLogger(__name__)
 
@@ -310,6 +314,8 @@ from app.api import compliance as compliance_router
 app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"], dependencies=_PAID)
 from app.api import insights as insights_router
 app.include_router(insights_router.router,     prefix="/api/insights",       tags=["insights"],   dependencies=_PAID)
+from app.api import lola_bi as lola_bi_router  # Workstream 2: read-only Lola BI tools
+app.include_router(lola_bi_router.router,      prefix="/api/lola/bi",        tags=["lola-bi"],    dependencies=_PAID)
 # connectors is NOT gated at the router level: /heartbeat, /tasks, /task-result,
 # /sync-status and /error authenticate with a *connector* token via
 # get_connector_identity, not a user JWT. A router-wide user-subscription check
@@ -320,6 +326,14 @@ app.include_router(connectors_router.router,   prefix="/api/connectors",     tag
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])
 from app.api import admin as admin_router
 app.include_router(admin_router.router,        prefix="/api/admin",          tags=["admin"])
+# Lola — Lion BI's central intelligence. Paid, like chat: it is the
+# conversational surface over every paid module.
+from app.api import lola as lola_router
+app.include_router(lola_router.router,         prefix="/api/lola",           tags=["lola"],       dependencies=_PAID)
+from app.api import lola_org as lola_org_router  # owner-only org & access administration
+app.include_router(lola_org_router.router,     prefix="/api/lola/org",       tags=["lola"],       dependencies=_PAID)
+from app.api import team as team_router
+app.include_router(team_router.router,          prefix="/api/team",           tags=["team"])
 
 register_error_handlers(app)
 

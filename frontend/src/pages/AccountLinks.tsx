@@ -12,6 +12,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Zap, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { clearSession, saveSession } from '../lib/session';
 
 const inputClass =
   'w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-300 bg-white';
@@ -155,7 +156,7 @@ export function ResetPassword() {
     try {
       await api.auth.resetPassword(token, password);
       // Any session stored in this browser was just ended by the server.
-      localStorage.removeItem('secretary_token');
+      clearSession();
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again.');
@@ -205,9 +206,7 @@ export function AcceptInvite() {
     setLoading(true); setError(null);
     try {
       const session = await api.auth.acceptInvite(token, password, fullName.trim());
-      localStorage.setItem('secretary_token', session.access_token);
-      localStorage.setItem('secretary_company_id', session.company_id);
-      localStorage.setItem('secretary_role', session.role);
+      saveSession(session);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again.');

@@ -1,5 +1,8 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { api, describeApproval } from './api';
+import { setSessionMode } from './session';
+
+beforeEach(() => setSessionMode('token'));
 import { passwordProblem } from '../pages/AccountLinks';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -9,6 +12,7 @@ function jsonResponse(status: number, body: unknown): Response {
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe('approval result is reported honestly', () => {
@@ -107,5 +111,66 @@ describe('an unknown outcome', () => {
     expect(r.ok).toBe(false);
     expect(r.done).toBe(true);
     expect(r.message).toContain('Sent folder');
+  });
+});
+
+describe('cookie sessions (the token never reaches page scripts)', () => {
+  beforeEach(() => setSessionMode('cookie'));
+
+  it('sign-in stores no token — only non-secret flags and the CSRF value', async () => {
+    const { saveSession, isSignedIn, getToken, currentRole } = await import('./session');
+    saveSession({ csrf_token: 'csrf-1', role: 'manager', company_id: 'c1', access_token: 'SHOULD-NOT-BE-KEPT' });
+    expect(isSignedIn()).toBe(true);
+    expect(getToken()).toBeNull();
+    expect(currentRole()).toBe('manager');
+    expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain('SHOULD-NOT-BE-KEPT');
+  });
+
+  it('requests send the cookie and the CSRF header, and no Authorization header', async () => {
+    const { saveSession } = await import('./session');
+    saveSession({ csrf_token: 'csrf-1', role: 'owner', company_id: 'c1' });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.post('/api/users/invite', { email: 'a@b.test', role: 'viewer' });
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.credentials).toBe('include');
+    expect(init.headers['X-CSRF-Token']).toBe('csrf-1');
+    expect(init.headers['X-Session-Mode']).toBe('cookie');
+    expect(init.headers.Authorization).toBeUndefined();
+  });
+
+  it('reads do not send the CSRF value', async () => {
+    const { saveSession } = await import('./session');
+    saveSession({ csrf_token: 'csrf-1', role: 'owner', company_id: 'c1' });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { users: [], roles: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.users.list();
+    expect(fetchMock.mock.calls[0][1].headers['X-CSRF-Token']).toBeUndefined();
+  });
+
+  it('an expired session is refreshed through the cookie, with no token in the body', async () => {
+    const { saveSession, getCsrf } = await import('./session');
+    saveSession({ csrf_token: 'csrf-1', role: 'owner', company_id: 'c1' });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(401, { detail: 'expired' }))
+      .mockResolvedValueOnce(jsonResponse(200, { session: 'cookie', csrf_token: 'csrf-2', role: 'owner', company_id: 'c1' }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.post('/api/x', { a: 1 })).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls[1][0]).toContain('/auth/refresh');
+    expect(fetchMock.mock.calls[1][1].body).toBe('{}');
+    expect(getCsrf()).toBe('csrf-2');
+    expect(fetchMock.mock.calls[2][1].headers['X-CSRF-Token']).toBe('csrf-2');
+  });
+
+  it('a new tab fetches its CSRF value before changing anything', async () => {
+    localStorage.setItem('secretary_signed_in', '1');   // signed in elsewhere; this tab has no CSRF yet
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { role: 'owner', company_id: 'c1', csrf_token: 'csrf-9' }))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.post('/api/x', {});
+    expect(fetchMock.mock.calls[0][0]).toContain('/auth/session');
+    expect(fetchMock.mock.calls[1][1].headers['X-CSRF-Token']).toBe('csrf-9');
   });
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, AlertTriangle, Clock, Search, Users } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { api, Account } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { AccountDetail } from '../components/accounts/AccountDetail';
@@ -14,6 +15,8 @@ const HEALTH_CFG = {
   unknown: { label: 'Unknown', icon: Users,            color: 'text-slate-500',   bg: 'bg-slate-50'   },
 } as const;
 
+type Rep = { id: string; name: string; role: string };
+
 const FILTERS = ['all', 'healthy', 'slowing', 'at_risk', 'dormant'] as const;
 
 function fmt(n: number): string {
@@ -22,7 +25,7 @@ function fmt(n: number): string {
   return `$${n.toFixed(0)}`;
 }
 
-function AccountRow({ account, onClick }: { account: Account; onClick: () => void }) {
+function AccountRow({ account, onClick, reps, onAssign }: { account: Account; onClick: () => void; reps: Rep[] | null; onAssign: (account: Account, userId: string | null) => void }) {
   const cfg  = HEALTH_CFG[account.health_status] ?? HEALTH_CFG.unknown;
   const Icon = cfg.icon;
 
@@ -52,7 +55,22 @@ function AccountRow({ account, onClick }: { account: Account; onClick: () => voi
           ? new Date(account.last_order_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : '—'}
       </td>
-      <td className="px-5 py-3.5 text-xs text-slate-400">{account.assigned_rep ?? '—'}</td>
+      <td className="px-5 py-3.5 text-xs text-slate-400" onClick={(e) => { if (reps) e.stopPropagation(); }}>
+        {reps ? (
+          <>
+            <label className="sr-only" htmlFor={`rep-${account.id}`}>Sales rep for {account.name}</label>
+            <select
+              id={`rep-${account.id}`}
+              value={account.assigned_rep_id ?? ''}
+              onChange={(e) => onAssign(account, e.target.value || null)}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white text-slate-600 max-w-[10rem]"
+            >
+              <option value="">Unassigned</option>
+              {reps.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </>
+        ) : (account.assigned_rep ?? '—')}
+      </td>
     </tr>
   );
 }
@@ -65,12 +83,31 @@ export function Accounts() {
   const [params, setParams]               = useSearchParams();
   const filter = (params.get('filter') ?? 'all') as typeof FILTERS[number];
 
+  // Owners and managers choose which rep looks after each account. A sales
+  // rep only ever receives their own accounts from the server.
+  const [reps, setReps] = useState<Rep[] | null>(null);
+
   useEffect(() => {
     api.accounts.list()
-      .then((r) => setAccounts(r.accounts ?? []))
+      .then((r) => {
+        setAccounts(r.accounts ?? []);
+        if (r.can_assign) api.accounts.reps().then((x) => setReps(x.reps)).catch(() => setReps(null));
+      })
       .catch(() => setAccounts([]))
       .finally(() => setLoading(false));
   }, []);
+
+  const assign = async (account: Account, userId: string | null) => {
+    try {
+      const res = await api.accounts.assignRep(account.id, userId);
+      setAccounts((prev) => prev.map((a) => a.id === account.id
+        ? { ...a, assigned_rep_id: res.assigned_rep_id, assigned_rep: res.assigned_rep }
+        : a));
+      toast.success(userId ? `${account.name} assigned to ${res.assigned_rep}` : `${account.name} is now unassigned`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not change the rep');
+    }
+  };
 
   const filtered = accounts.filter((a) => {
     const matchFilter = filter === 'all' || a.health_status === filter;
@@ -145,7 +182,7 @@ export function Accounts() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filtered.map((a) => <AccountRow key={a.id} account={a} onClick={() => setSelected(a)} />)}
+              {filtered.map((a) => <AccountRow key={a.id} account={a} onClick={() => setSelected(a)} reps={reps} onAssign={assign} />)}
             </tbody>
           </table>
         )}

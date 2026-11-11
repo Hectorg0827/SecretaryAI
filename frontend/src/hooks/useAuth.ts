@@ -1,15 +1,17 @@
 /**
  * useAuth — central role/permission hook.
  *
- * Reads the role from the JWT payload (not localStorage) so it cannot be
- * tampered with via DevTools. The JWT is signed by the backend; modifying
- * the payload would invalidate the signature and all API calls would 403.
+ * The role is used only to decide which screens and buttons to show. The
+ * backend enforces permissions on every request regardless of what the
+ * browser believes.
  *
  * Exposes:
  *   · role           — the raw role string, sourced from JWT
  *   · hasPermission  — checks the ROLE_PERMISSIONS map (mirrors backend rbac.py)
  *   · helper booleans for the most common UI gates
  */
+
+import { currentRole } from '../lib/session';
 
 export type Role = 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
 
@@ -19,7 +21,7 @@ export type Role = 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
 const DATA_PERMISSIONS = [
   'view_all', 'view_dashboard', 'view_financials', 'view_inventory', 'view_orders',
   'view_customers', 'view_own_accounts', 'run_reports', 'manage_inventory',
-  'approve_actions', 'trigger_actions',
+  'approve_actions', 'trigger_actions', 'assign_accounts',
 ];
 
 const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
@@ -30,27 +32,12 @@ const ROLE_PERMISSIONS: Record<Role, Set<string>> = {
   viewer: new Set(['view_dashboard']),
 };
 
-/**
- * Decode the JWT payload section (base64url → JSON) and return the role claim.
- * No crypto needed on the client — the backend verifies the signature on every
- * API call. We only read the claim for UI gating.
- */
-function parseJwtRole(token: string): string {
-  try {
-    const base64url = token.split('.')[1];
-    // base64url → base64: replace - with + and _ with /
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(atob(base64));
-    return typeof payload.role === 'string' ? payload.role : 'viewer';
-  } catch {
-    return 'viewer';
-  }
-}
-
 export function useAuth() {
-  // Source of truth: the signed JWT token — not the writable localStorage.secretary_role
-  const token = localStorage.getItem('secretary_token') ?? '';
-  const raw   = token ? parseJwtRole(token) : 'viewer';
+  // The role comes from the session module: from the signed token in token
+  // mode, or from what the server reported at sign-in in cookie mode. It only
+  // decides what to SHOW — the server checks every request against the real
+  // session, so changing it in the browser grants nothing.
+  const raw   = currentRole();
   const role  = (Object.keys(ROLE_PERMISSIONS).includes(raw) ? raw : 'viewer') as Role;
 
   function hasPermission(permission: string): boolean {
@@ -71,6 +58,7 @@ export function useAuth() {
     canManageIntegrations: hasPermission('manage_integrations'),
     canManageBilling:      hasPermission('manage_billing'),
     canAccessAccounts:  hasPermission('view_all') || hasPermission('view_own_accounts') || hasPermission('view_customers'),
+    canAssignAccounts:  hasPermission('assign_accounts'),
     canAccessInventory: hasPermission('view_inventory') || hasPermission('view_all'),
   };
 }

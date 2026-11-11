@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Zap, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { saveSession } from '../lib/session';
 
 export function Register() {
   const navigate = useNavigate();
@@ -30,18 +31,16 @@ export function Register() {
     setError(null);
 
     try {
-      const data = await api.post<{ access_token?: string; company_id: string; role: string; status?: string; message?: string }>(
+      const data = await api.post<{ access_token?: string; csrf_token?: string; session?: string; company_id: string; role: string; status?: string; message?: string }>(
         '/auth/register',
         { email: email.trim().toLowerCase(), password, company_name: companyName.trim(), full_name: fullName.trim() },
       );
-      if (!data.access_token) {
+      if (data.status === 'verification_required') {
         // The server wants the email address confirmed before the first sign-in.
         setError(data.message ?? 'Check your inbox and confirm your email address to finish signing up.');
         return;
       }
-      localStorage.setItem('secretary_token',     data.access_token);
-      localStorage.setItem('secretary_company_id', data.company_id);
-      localStorage.setItem('secretary_role',       data.role);
+      saveSession(data);
       navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.message ?? 'Registration failed. Please try again.');

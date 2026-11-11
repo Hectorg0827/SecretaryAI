@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, UserPlus, Copy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, InviteResult, TeamMember } from '../../lib/api';
+import { saveSession } from '../../lib/session';
 
 const ROLE_LABELS: Record<string, { label: string; help: string }> = {
   owner:       { label: 'Owner',       help: 'Everything, including billing, team and connections' },
@@ -209,7 +210,7 @@ export function ChangePasswordSection() {
     try {
       const session = await api.auth.changePassword(current, next);
       // The server ended every older session; keep this device signed in.
-      localStorage.setItem('secretary_token', session.access_token);
+      saveSession(session);
       setCurrent(''); setNext(''); setConfirm('');
       toast.success('Password changed. Your other devices were signed out.');
     } catch (err) {

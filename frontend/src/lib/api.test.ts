@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { api } from './api';
+import { setSessionMode } from './session';
 
 /**
  * Security-relevant behavior of the API client: on a 401 it silently refreshes
@@ -16,6 +17,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe('api client 401 → refresh flow', () => {
   beforeEach(() => {
+    setSessionMode('token');
     localStorage.setItem('secretary_token', 'old-token');
   });
   afterEach(() => {

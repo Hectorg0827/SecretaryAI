@@ -2,12 +2,37 @@
 Role-Based Access Control.
 Roles: owner, manager, sales_rep, back_office, viewer
 """
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from app.auth.jwt import decode_access_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# auto_error=False: a browser session may arrive in a cookie instead of the
+# Authorization header (see app/auth/session_cookie.py). A request with
+# neither is still rejected with 401 in session_token() below.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+
+def session_token(request: Request = None, token: Optional[str] = Depends(oauth2_scheme)) -> str:
+    """
+    The caller's session token: `Authorization: Bearer` (desktop, mobile, API)
+    or, failing that, the browser's httpOnly session cookie. A cookie session
+    must also pass the CSRF check on any request that changes something.
+    """
+    if token:
+        return token
+    from app.auth.session_cookie import cookie_token, require_csrf
+    cookie = cookie_token(request)
+    if cookie:
+        require_csrf(request)
+        return cookie
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 # Every permission is listed explicitly per role. There is NO wildcard: a role
 # passes a check only if the permission name is in its own set. ("view_all"
@@ -49,7 +74,7 @@ def has_permission(role: str | None, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(role or "viewer", set())
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+def get_current_user(token: str = Depends(session_token)) -> dict:
     from app.auth.jwt import AuthStoreUnavailable, is_session_superseded, is_token_revoked
     payload = decode_access_token(token)
     if not payload:

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, field_validator
 import re
 
@@ -30,7 +30,10 @@ from app.auth.jwt import (
     hash_password, is_session_superseded, now_ms, revoke_token as revoke_session_token,
     revoke_user_sessions, sessions_ended_since, verify_password,
 )
-from app.auth.rbac import get_current_user, oauth2_scheme, require_permission
+from app.auth.rbac import get_current_user, oauth2_scheme, require_permission, session_token
+from app.auth.session_cookie import (
+    clear_session, cookie_token, csrf_value, require_csrf, session_response, wants_cookie,
+)
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
 from app.utils.safe import is_valid_email, log_safe
@@ -422,14 +425,26 @@ def _refuse_if_account_changed(user_id: str, read_at_ms: int) -> None:
         raise HTTPException(status_code=401, detail="Your account was just updated. Please sign in again.")
 
 
-def _login_response(user: dict) -> dict:
+def _session_reply(request: Request | None, token: str, body: dict, status_code: int = 200):
+    """
+    Hand a new session to the client. A browser that asked for cookie mode gets
+    it in httpOnly cookies and never sees the token; every other client gets
+    the token in the body as before.
+    """
+    if wants_cookie(request):
+        return session_response(token, body, status_code=status_code)
+    return {"access_token": token, "token_type": "bearer", **body}
+
+
+def _login_response(user: dict, request: Request | None = None, extra: dict | None = None):
     token = create_access_token({
         "sub": user["id"],
         "company_id": user["company_id"],
         "role": user["role"],
     })
-    return {"access_token": token, "token_type": "bearer",
-            "company_id": user["company_id"], "role": user["role"]}
+    return _session_reply(request, token, {
+        **(extra or {}), "company_id": user["company_id"], "role": user["role"],
+    })
 
 
 # A real bcrypt hash of a random value, used only to equalise login timing.
@@ -454,7 +469,7 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))):
+async def login(body: LoginRequest, request: Request, _=Depends(require_rate_limit(login_limiter))):
     """
     Authenticate with email + password, optionally with a TOTP code.
 
@@ -509,7 +524,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         _verify_totp(user["id"], secret, body.totp_code)
         _refuse_if_account_changed(user["id"], read_at)
         _audit(user["company_id"], "user_login", user["id"], role=user["role"], two_factor=True)
-        return _login_response(user)
+        return _login_response(user, request)
 
     # ── First-step: email + password ──────────────────────────────────────────
     if not body.email or not body.password:
@@ -603,20 +618,17 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
     except Exception:
         pass
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "company_id": user["company_id"],
-        "role": user["role"],
-    }
+    return _session_reply(request, token, {"company_id": user["company_id"], "role": user["role"]})
 
 
 class RefreshRequest(BaseModel):
-    access_token: str  # the current (possibly expired) token — we re-sign it
+    # The current (possibly expired) token. Omitted by browser clients in
+    # cookie mode — the token is then read from the session cookie.
+    access_token: str | None = None
 
 
 @router.post("/refresh")
-async def refresh_token(body: RefreshRequest):
+async def refresh_token(request: Request, body: RefreshRequest | None = None):
     """
     Issue a new JWT from a recently-valid token, with bounded renewal, revocation
     enforcement, and single-use rotation.
@@ -633,11 +645,21 @@ async def refresh_token(body: RefreshRequest):
     from jose import jwt as jose_jwt, JWTError
     from app.auth.jwt import is_token_revoked
 
+    presented = (body.access_token if body else None) or None
+    from_cookie = False
+    if not presented:
+        presented = cookie_token(request)
+        from_cookie = bool(presented)
+        if from_cookie:
+            require_csrf(request)      # this POST is authenticated by the cookie alone
+    if not presented:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     try:
         # Decode WITHOUT verifying expiry so a just-expired token can still be
         # exchanged — bounded explicitly below.
         payload = jose_jwt.decode(
-            body.access_token,
+            presented,
             settings.secret_key,
             algorithms=["HS256"],
             options={"verify_exp": False},
@@ -711,12 +733,14 @@ async def refresh_token(body: RefreshRequest):
 
     _refuse_if_account_changed(user_id, read_at)
     new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
+    if from_cookie or wants_cookie(request):
+        return session_response(new_token, {"company_id": company_id, "role": role})
     return {"access_token": new_token, "token_type": "bearer"}
 
 
 @router.post("/logout")
 async def logout(
-    token: str = Depends(oauth2_scheme),
+    token: str = Depends(session_token),
     _user: dict = Depends(get_current_user),
 ):
     """
@@ -729,7 +753,23 @@ async def logout(
         # Be honest: the session could NOT be ended server-side.
         raise HTTPException(status_code=503, detail="Could not sign out right now. Please try again.")
     _audit(_user["company_id"], "user_logout", _user.get("sub"))
-    return {"status": "logged_out"}
+    response = JSONResponse({"status": "logged_out"})
+    clear_session(response)     # harmless for clients that never had cookies
+    return response
+
+
+@router.get("/session")
+async def get_session(request: Request, user: dict = Depends(get_current_user)):
+    """
+    Who is signed in, for the web app to decide which screens to show after a
+    page load. Also returns the CSRF value for a cookie session — readable only
+    by this site's own pages (other sites cannot read the response).
+    """
+    return JSONResponse(
+        {"user_id": user.get("sub"), "company_id": user.get("company_id"), "role": user.get("role"),
+         "csrf_token": csrf_value(request) if cookie_token(request) else None},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/me")
@@ -785,7 +825,7 @@ class RegisterRequest(BaseModel):
 
 
 @router.post("/register", status_code=201)
-async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_limiter))):
+async def register(body: RegisterRequest, request: Request, _=Depends(require_rate_limit(login_limiter))):
     """
     Create a new company and owner user, then return a JWT so the user is
     immediately logged in.
@@ -902,12 +942,7 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     except Exception:
         pass
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "company_id": company_id,
-        "role": "owner",
-    }
+    return _session_reply(request, token, {"company_id": company_id, "role": "owner"}, status_code=201)
 
 
 async def _seed_company_defaults(company_id: str, db) -> None:
@@ -1263,7 +1298,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/change-password")
-async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+async def change_password(body: ChangePasswordRequest, request: Request, user: dict = Depends(get_current_user)):
     """Change the signed-in user's password. Other devices are signed out."""
     if not login_email_limiter.is_allowed(f"chpw:{user['sub']}"):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in a few minutes.")
@@ -1286,7 +1321,7 @@ async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_
     # This device stays signed in with a fresh session; every other one is out.
     import time as _time
     _time.sleep(0.002)  # the new token must be issued strictly after the cut-off
-    return {"status": "ok", **_login_response(row)}
+    return _login_response(row, request, extra={"status": "ok"})
 
 
 class AcceptInviteRequest(BaseModel):
@@ -1301,7 +1336,7 @@ class AcceptInviteRequest(BaseModel):
 
 
 @router.post("/accept-invite")
-async def accept_invite(body: AcceptInviteRequest, _=Depends(require_rate_limit(account_link_limiter))):
+async def accept_invite(body: AcceptInviteRequest, request: Request, _=Depends(require_rate_limit(account_link_limiter))):
     """An invited team member chooses a password and is signed in."""
     user = _consume_account_link(body.token, "invite")
     if user.get("password_hash"):
@@ -1313,7 +1348,7 @@ async def accept_invite(body: AcceptInviteRequest, _=Depends(require_rate_limit(
     _audit(user["company_id"], "invite_accepted", user["id"], role=user["role"])
     import time as _time
     _time.sleep(0.002)
-    return _login_response(user)
+    return _login_response(user, request)
 
 
 class TokenRequest(BaseModel):

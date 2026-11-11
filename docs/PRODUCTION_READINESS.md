@@ -160,9 +160,12 @@ time; several P0s were open.
 | # | Sev | Item | Why it is open |
 |---|---|---|---|
 | 53 | P1 | Computer Use: engine drives the *server's* screen, has no per-step approval, sessions are per-process | Needs a redesign (run on the customer's desktop, approval per action). Mitigation: `COMPUTER_USE_ENABLED` now defaults to **false**. Do not enable in a shared deployment |
-| 75 | P2 | Web session token is kept in `localStorage` | Moving to cookies depends on how the web app and API are hosted (same site or not). Mitigated with a strict Content-Security-Policy (`frontend/nginx.conf`) — which only applies when the web app is served by that nginx |
-| 76 | P2 | Sales reps see every account | QuickBooks does not supply a rep→account mapping yet; the filter exists but has nothing to filter on |
+| 75 | P2 | Web session token was kept in `localStorage` | ✅ fixed — browser sessions use an httpOnly, Secure, SameSite=Lax cookie with a CSRF token; the token is never in a response body or page storage. Desktop/mobile keep Bearer. Falls back to the old token mode only when the API is on a different site (`VITE_SESSION_MODE`). Verified in a real browser against the real backend code |
+| 76 | P2 | Sales reps saw every account | ✅ fixed — `account_assignments`; owner/manager assign accounts; a rep's list, detail pages and chat data are limited to their accounts, failing closed |
 | 77 | — | Not verified against real services | No call in this repository has been made to a real QuickBooks, Conductor, Microsoft, Google, SendGrid or Stripe account. Outlook, the Conductor ownership check and webhooks are tested against simulated servers only |
+| 78 | P1 | Workflows only tracked steps | ✅ fixed — draft steps create real drafts, the run waits, approval performs the send/create step and the run completes (`app/workflows/executor.py`). Email drafts use a fixed template, not a model call |
+| 79 | P1 | Approved purchase orders were never written to QuickBooks because drafts had no vendor or lines | ✅ fixed — drafts are built from QuickBooks (vendor, quantity, cost); the "Draft PO" form lets the user choose them; approval creates the order. Without a vendor or cost it still says "enter by hand" |
+| 80 | P1 | Local connector needed the operator's Conductor key on the customer's PC | ✅ contained — off by default on the server (`LOCAL_CONNECTOR_ENABLED`) and the program refuses to start without `SECRETARY_OPERATOR_MODE=1`; the web page no longer tells customers to install it |
 | 58 | P0 | Nothing is deployed | Unchanged — owner action |
 
 Backend suite after Pass 4: **1247 passed, 0 skipped** on Python 3.11 with the

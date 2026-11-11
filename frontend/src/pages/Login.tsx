@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Zap, Loader2, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
+import { saveSession } from '../lib/session';
 
 export function Login() {
   const navigate  = useNavigate();
@@ -35,10 +36,7 @@ export function Login() {
         return;
       }
 
-      const full = data as { access_token: string; company_id: string; role: string };
-      localStorage.setItem('secretary_token', full.access_token);
-      localStorage.setItem('secretary_company_id', full.company_id);
-      localStorage.setItem('secretary_role', full.role);
+      saveSession(data);
       navigate(from, { replace: true });
     } catch (err: any) {
       setError(err.message ?? 'Invalid credentials');

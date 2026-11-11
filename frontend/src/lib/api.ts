@@ -4,38 +4,50 @@
  * All requests are authenticated via JWT Bearer token.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+import {
+  API_BASE, authHeaders, clearSession, credentialOptions, ensureSession, getCsrf, getToken,
+  saveSession, sessionMode,
+} from './session';
 
-function getToken(): string | null {
-  return localStorage.getItem('secretary_token');
-}
+let _refreshing: Promise<boolean> | null = null;
 
-let _refreshing: Promise<string | null> | null = null;
-
-async function _tryRefresh(): Promise<string | null> {
+/**
+ * Exchange the current session for a fresh one. Returns true if the caller
+ * may retry its request.
+ */
+async function _tryRefresh(): Promise<boolean> {
+  const cookieMode = sessionMode() === 'cookie';
   const token = getToken();
-  if (!token) return null;
+  if (!cookieMode && !token) return false;
+  if (cookieMode && !(await ensureSession())) return false;
+  const csrfBefore = getCsrf();
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: token }),
+      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
+      // cookie mode: the token travels in the cookie, never in the body
+      body: JSON.stringify(cookieMode ? {} : { access_token: token }),
+      ...credentialOptions(),
     });
     if (!res.ok) {
-      // Refresh tokens work once. If another browser tab refreshed first, it
-      // has already stored a newer token — use that instead of signing out.
+      // Refresh works once. If another browser tab refreshed first it has
+      // already stored the newer session — use that instead of signing out.
+      if (cookieMode) {
+        sessionStorage.removeItem('secretary_csrf');
+        return (await ensureSession()) && getCsrf() !== csrfBefore;
+      }
       const latest = getToken();
-      return latest && latest !== token ? latest : null;
+      return !!latest && latest !== token;
     }
     const data = await res.json();
-    if (data.access_token) {
-      localStorage.setItem('secretary_token', data.access_token);
-      return data.access_token;
+    if (cookieMode || data.access_token) {
+      saveSession(data);
+      return true;
     }
   } catch {
     // network error — fall through
   }
-  return null;
+  return false;
 }
 
 /** Turn any error body from the backend into one plain sentence. */
@@ -59,34 +71,34 @@ function isPublicAuthPath(path: string): boolean {
   return /^\/auth\/(login|register|refresh|forgot-password|reset-password|accept-invite|verify-email|resend-verification)/.test(path);
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = getToken();
-  const response = await fetch(`${API_BASE}${path}`, {
+function send(method: string, path: string, body?: unknown): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(method) },
     body: body ? JSON.stringify(body) : undefined,
+    ...credentialOptions(),
   });
+}
 
-  if (response.status === 401 && !isPublicAuthPath(path)) {
-    // Attempt a silent token refresh once
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const publicPath = isPublicAuthPath(path);
+  // Cookie mode, fresh tab: fetch this tab's CSRF value before a request that changes something.
+  if (!publicPath && sessionMode() === 'cookie' && method !== 'GET' && !getCsrf()) {
+    await ensureSession();
+  }
+  const response = await send(method, path, body);
+
+  if (response.status === 401 && !publicPath) {
+    // Attempt a silent refresh once
     if (!_refreshing) {
       _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
     }
-    const newToken = await _refreshing;
-    if (newToken) {
-      // Retry the original request with the new token
-      const retry = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+    if (await _refreshing) {
+      const retry = await send(method, path, body);
       if (retry.ok) return retry.json();
     }
-    // Refresh failed — redirect to login
-    localStorage.removeItem('secretary_token');
+    // Refresh failed — sign out locally and go to the sign-in page
+    clearSession();
     window.location.href = '/login';
     throw new Error('Session expired');
   }
@@ -177,6 +189,7 @@ export interface Account {
   current_balance: number;
   avg_order_value: number;
   assigned_rep: string | null;
+  assigned_rep_id?: string | null;
 }
 
 export interface Draft {
@@ -248,6 +261,12 @@ export function describeApproval(r: ApprovalResult | undefined | null): { ok: bo
   return { ok: true, done: true, message: r.execution_detail || 'Approved and done' };
 }
 
+export interface PurchaseOrderOptions {
+  item: { id: string; name: string; unit_cost: number; on_hand: number; weekly_sell_rate: number; suggested_qty: number } | null;
+  vendors: { id: string; name: string }[];
+  preferred_vendor_id: string | null;
+}
+
 export interface TeamMember {
   id: string;
   name: string | null;
@@ -267,7 +286,7 @@ export interface InviteResult {
   note?: string;
 }
 
-type Session = { access_token: string; token_type: string; company_id: string; role: string };
+type Session = { access_token?: string; csrf_token?: string | null; session?: string; company_id: string; role: string };
 
 export interface InboxItem {
   id: string;
@@ -334,7 +353,7 @@ export const api = {
   deleteWithBody: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
 
   connectors: {
-    status:              () => api.get<{ connectors: ConnectorRegistration[] }>('/api/connectors/status'),
+    status:              () => api.get<{ connectors: ConnectorRegistration[]; local_connector_enabled?: boolean }>('/api/connectors/status'),
     detail:              (id: string) => api.get<{ connector: ConnectorRegistration; sync_logs: ConnectorSyncLog[] }>(`/api/connectors/status/${id}`),
     generateSecret:      () => api.post<{ install_secret: string; warning: string }>('/api/connectors/generate-install-secret', {}),
     dispatchTask:        (task_type: string, parameters?: Record<string, unknown>) =>
@@ -379,7 +398,17 @@ export const api = {
   },
 
   accounts: {
-    list: () => api.get<{ accounts: Account[] }>('/api/accounts'),
+    list: () => api.get<{ accounts: Account[]; can_assign?: boolean }>('/api/accounts/'),
+    reps: () => api.get<{ reps: { id: string; name: string; role: string }[] }>('/api/accounts/reps'),
+    assignRep: (accountId: string, userId: string | null) =>
+      api.put<{ account_id: string; assigned_rep_id: string | null; assigned_rep: string | null }>(
+        `/api/accounts/${encodeURIComponent(accountId)}/rep`, { user_id: userId }),
+  },
+
+  purchaseOrders: {
+    options: (itemId: string) => api.get<PurchaseOrderOptions>(`/api/actions/po-options?item_id=${encodeURIComponent(itemId)}`),
+    draft: (body: { item_id: string; product_name: string; vendor_id?: string | null; qty?: number; unit_cost?: number; notes?: string }) =>
+      api.post<{ status: string; draft_id: string; ready_for_quickbooks: boolean; message: string }>('/api/actions/draft-po', body),
   },
 
   inventory: {
@@ -423,7 +452,7 @@ export const api = {
   auth: {
     login: (email: string, password: string, totp_code?: string) =>
       api.post<
-        | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
+        | (Session & { requires_2fa?: false })
         | { requires_2fa: true; pre_auth_token: string }
       >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
     forgotPassword: (email: string) =>
@@ -434,6 +463,7 @@ export const api = {
       api.post<Session>('/auth/accept-invite', { token, password, full_name }),
     verifyEmail: (token: string) =>
       api.post<{ status: string; message: string }>('/auth/verify-email', { token }),
+    logout: () => api.post<{ status: string }>('/auth/logout', {}),
     changePassword: (current_password: string, new_password: string) =>
       api.post<Session & { status: string }>('/auth/change-password', { current_password, new_password }),
   },
@@ -531,14 +561,12 @@ export const api = {
     message: string,
     conversationId?: string,
   ): AsyncGenerator<{ text: string; conversationId?: string }> {
-    const token = getToken();
+    if (sessionMode() === 'cookie' && !getCsrf()) await ensureSession();
     const response = await fetch(`${API_BASE}/api/chat/message`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
       body: JSON.stringify({ message, conversation_id: conversationId }),
+      ...credentialOptions(),
     });
 
     if (!response.ok || !response.body) {

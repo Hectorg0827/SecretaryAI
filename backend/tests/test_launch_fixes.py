@@ -1774,3 +1774,113 @@ class TestLocalConnectorIsOffByDefault:
         with pytest.raises(SystemExit) as exc:
             main.main()
         assert "operator only" in str(exc.value)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Browser sessions in an httpOnly cookie (the token never reaches page scripts).
+# ─────────────────────────────────────────────────────────────────────────────
+
+COOKIE_MODE = {"X-Session-Mode": "cookie"}
+
+
+@pytest.fixture
+def browser(adb):
+    """A browser-like client: keeps cookies, talks HTTPS, sends no Bearer header."""
+    return TestClient(app, base_url="https://testserver")
+
+
+def _browser_login(browser, email="owner@a.test", password="Owner-pass1"):
+    return browser.post("/auth/login", json={"email": email, "password": password}, headers=COOKIE_MODE)
+
+
+class TestCookieSessions:
+    def test_login_puts_the_token_in_an_httponly_cookie_not_in_the_body(self, browser):
+        r = _browser_login(browser)
+        assert r.status_code == 200
+        body = r.json()
+        assert "access_token" not in body and body["session"] == "cookie" and body["role"] == "owner"
+        assert body["csrf_token"]
+        cookies = r.headers.get_list("set-cookie")
+        session = next(c for c in cookies if c.startswith("sai_session="))
+        for flag in ("HttpOnly", "Secure", "SameSite=lax", "Path=/"):
+            assert flag in session, flag
+        # the JWT itself appears nowhere in the body
+        assert session.split("=", 1)[1].split(";")[0] not in r.text
+
+    def test_the_cookie_alone_authenticates_reads(self, browser):
+        _browser_login(browser)
+        r = browser.get("/auth/me")
+        assert r.status_code == 200 and r.json()["email"] == "owner@a.test"
+
+    def test_changes_need_the_csrf_value(self, browser):
+        csrf = _browser_login(browser).json()["csrf_token"]
+        body = {"email": "x@a.test", "role": "viewer"}
+        # what another website can do: make the browser send the cookie, nothing more
+        assert browser.post("/api/users/invite", json=body).status_code == 403
+        assert browser.post("/api/users/invite", json=body, headers={"X-CSRF-Token": "guess"}).status_code == 403
+        # this site's own page knows the value
+        assert browser.post("/api/users/invite", json=body, headers={"X-CSRF-Token": csrf}).status_code == 201
+
+    def test_bearer_clients_are_unaffected(self, client, adb):
+        """Desktop and mobile: token in the body, no cookies, no CSRF header needed."""
+        r = _login(client, "owner@a.test", "Owner-pass1")
+        assert "access_token" in r.json() and "set-cookie" not in r.headers
+        hdr = _bearer(r.json()["access_token"])
+        assert client.post("/api/users/invite", json={"email": "y@a.test", "role": "viewer"}, headers=hdr).status_code == 201
+
+    def test_refresh_rotates_the_cookie_and_needs_csrf(self, browser):
+        csrf = _browser_login(browser).json()["csrf_token"]
+        old = browser.cookies.get("sai_session")
+        assert browser.post("/auth/refresh").status_code == 403           # cross-site style: no CSRF value
+        r = browser.post("/auth/refresh", headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200 and "access_token" not in r.json()
+        assert browser.cookies.get("sai_session") != old
+        assert r.json()["csrf_token"] != csrf                             # new value with the new session
+        assert browser.get("/auth/me").status_code == 200
+        # the old token is used up
+        stale = TestClient(app, base_url="https://testserver")
+        stale.cookies.set("sai_session", old)
+        assert stale.get("/auth/me").status_code == 401
+
+    def test_session_endpoint_bootstraps_a_new_tab(self, browser):
+        csrf = _browser_login(browser).json()["csrf_token"]
+        s = browser.get("/auth/session").json()
+        assert s["role"] == "owner" and s["company_id"] == COMPANY_A and s["csrf_token"] == csrf
+
+    def test_logout_ends_the_session_and_clears_the_cookies(self, browser):
+        csrf = _browser_login(browser).json()["csrf_token"]
+        old = browser.cookies.get("sai_session")
+        assert browser.post("/auth/logout").status_code == 403            # a forged logout is refused too
+        r = browser.post("/auth/logout", headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200
+        cleared = [c for c in r.headers.get_list("set-cookie") if c.startswith("sai_session=")]
+        assert cleared and ("Max-Age=0" in cleared[0] or "expires=" in cleared[0].lower())
+        again = TestClient(app, base_url="https://testserver")
+        again.cookies.set("sai_session", old)
+        assert again.get("/auth/me").status_code == 401
+
+    def test_no_cookie_and_no_header_is_401(self, client, adb):
+        assert client.get("/auth/me").status_code == 401
+
+    def test_register_and_accept_invite_also_use_the_cookie(self, browser, adb):
+        r = browser.post("/auth/register", headers=COOKIE_MODE,
+                         json={"company_name": "Cookie Co", "email": "c@cookie.test", "password": "Cookie-pass1"})
+        assert r.status_code == 201 and "access_token" not in r.json()
+        assert browser.get("/auth/me").json()["email"] == "c@cookie.test"
+
+    def test_change_password_in_cookie_mode_keeps_this_browser_signed_in(self, browser):
+        csrf = _browser_login(browser).json()["csrf_token"]
+        r = browser.post("/auth/change-password", headers={"X-CSRF-Token": csrf, **COOKIE_MODE},
+                         json={"current_password": "Owner-pass1", "new_password": "Fresh-pass9"})
+        assert r.status_code == 200 and "access_token" not in r.json()
+        assert browser.get("/auth/me").status_code == 200
+
+    def test_cookie_is_not_marked_secure_only_in_local_development(self):
+        from app.auth import session_cookie
+        with patch.object(session_cookie, "get_settings") as gs:
+            gs.return_value.debug = True
+            gs.return_value.refresh_token_expire_days = 7
+            gs.return_value.access_token_expire_minutes = 60
+            assert session_cookie._cookie_args()["secure"] is False
+            gs.return_value.debug = False
+            assert session_cookie._cookie_args()["secure"] is True

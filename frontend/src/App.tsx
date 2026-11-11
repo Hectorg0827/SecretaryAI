@@ -18,12 +18,12 @@ import { Connectors } from './pages/Connectors';
 import { AuditLog } from './pages/AuditLog';
 import { AdminDiag } from './pages/AdminDiag';
 import { useAuth, Role } from './hooks/useAuth';
+import { isSignedIn } from './lib/session';
 
 /** Guard: redirects to /login if no JWT is stored. */
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const token = localStorage.getItem('secretary_token');
-  if (!token) {
+  if (!isSignedIn()) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
   return <>{children}</>;

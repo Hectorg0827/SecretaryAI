@@ -202,7 +202,8 @@ app.add_middleware(
     allow_origins=["*"] if _allow_all else _cors_origins,
     allow_credentials=not _allow_all,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID",
+                   "X-CSRF-Token", "X-Session-Mode"],
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────────

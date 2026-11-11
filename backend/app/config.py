@@ -54,8 +54,10 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = ""
 
-    # Computer Use safety
-    computer_use_enabled: bool = True
+    # Computer Use — OFF unless an operator explicitly turns it on. The engine
+    # drives the mouse/keyboard of the machine the backend runs on, so it must
+    # never be on by default in a shared cloud deployment.
+    computer_use_enabled: bool = False
     computer_use_max_steps: int = 50
     computer_use_screenshot_width: int = 1280
     computer_use_screenshot_height: int = 720

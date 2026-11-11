@@ -260,7 +260,7 @@ class DraftPORequest(BaseModel):
 @router.post("/draft-po")
 async def draft_purchase_order(
     body: DraftPORequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("trigger_actions")),
     db=Depends(get_db),
 ):
     """

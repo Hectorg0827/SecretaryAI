@@ -401,12 +401,14 @@ class TestSingleConnectorStatus:
 class TestGenerateInstallSecret:
     @pytest.mark.asyncio
     async def test_non_owner_raises_403(self):
-        from app.api.connectors import generate_install_secret
+        # The role gate is the `manage_integrations` dependency (owner only).
+        from app.auth.rbac import require_permission
         from fastapi import HTTPException
-        db = _make_db()
+        checker = require_permission("manage_integrations")
         with pytest.raises(HTTPException) as exc_info:
-            await generate_install_secret(user=_make_user(role="manager"), db=db)
+            checker(user=_make_user(role="manager"))
         assert exc_info.value.status_code == 403
+        assert checker(user=_make_user(role="owner"))["role"] == "owner"
 
     @pytest.mark.asyncio
     async def test_owner_returns_secret(self):

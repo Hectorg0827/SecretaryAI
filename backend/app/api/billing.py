@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ async def get_subscription(
 @router.post("/checkout")
 async def create_checkout_session(
     body: CheckoutRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """
@@ -179,7 +179,7 @@ async def create_checkout_session(
 
 @router.post("/portal")
 async def create_portal_session(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """
@@ -222,7 +222,7 @@ async def create_portal_session(
 
 @router.get("/invoices")
 async def list_invoices(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """List billing event history for the current company."""

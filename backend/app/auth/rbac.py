@@ -9,25 +9,43 @@ from app.auth.jwt import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+# Every permission is listed explicitly per role. There is NO wildcard: a role
+# passes a check only if the permission name is in its own set. ("view_all"
+# used to act as a super-permission inside require_permission, which silently
+# gave managers owner-only powers such as billing, user and integration
+# management.)
+_DATA_PERMISSIONS: set[str] = {
+    "view_all", "view_dashboard", "view_financials", "view_inventory",
+    "view_orders", "view_customers", "view_own_accounts", "run_reports",
+    "manage_inventory", "approve_actions", "trigger_actions",
+}
+
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "owner": {
-        "view_all", "manage_users", "approve_actions", "manage_billing",
-        "view_financials", "trigger_actions", "run_reports",
+    # Owner: everything, including the account-level powers below.
+    "owner": _DATA_PERMISSIONS | {
+        "manage_users",         # invite / remove staff, company settings
+        "manage_billing",       # subscription and payment
+        "manage_integrations",  # connect / disconnect QuickBooks, Gmail, Outlook
     },
-    "manager": {
-        "view_all", "approve_actions", "trigger_actions", "view_financials",
-        "run_reports",
-    },
+    # Manager: runs the business day to day, but cannot change who has access,
+    # how the company pays, or which outside systems are connected.
+    "manager": set(_DATA_PERMISSIONS),
     "sales_rep": {
-        "view_own_accounts", "view_inventory",
+        "view_own_accounts", "view_inventory", "view_dashboard",
     },
     "back_office": {
         "view_inventory", "view_orders", "run_reports", "view_customers",
+        "view_dashboard",
     },
     "viewer": {
         "view_dashboard",
     },
 }
+
+
+def has_permission(role: str | None, permission: str) -> bool:
+    """True only if `permission` is explicitly granted to `role`."""
+    return permission in ROLE_PERMISSIONS.get(role or "viewer", set())
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
@@ -64,9 +82,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
         role = user.get("role", "viewer")
-        allowed = ROLE_PERMISSIONS.get(role, set())
-        # "view_all" is a super-permission — owner/manager can access everything
-        if permission not in allowed and "view_all" not in allowed:
+        if not has_permission(role, permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{role}' does not have permission: {permission}",

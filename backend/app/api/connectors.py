@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_db, get_current_user
+from app.auth.rbac import require_permission
 from app.auth.jwt import create_access_token
 from app.config import get_settings
 from app.domain.connector_protocol import (
@@ -137,7 +138,7 @@ def _mark_stale_connectors(db, company_id: str) -> None:
 @router.post("/register", response_model=RegisterResponse)
 async def register_connector(
     req: RegisterRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """
@@ -599,7 +600,7 @@ async def get_single_connector_status(
 
 @router.post("/generate-install-secret")
 async def generate_install_secret(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """
@@ -607,10 +608,6 @@ async def generate_install_secret(
     The secret is shown once here; the user copies it into the connector installer.
     Returns the plaintext secret (stored hashed in DB).
     """
-    from app.auth.rbac import require_permission
-    if user.get("role") not in ("owner",):
-        raise HTTPException(status_code=403, detail="Only owners can generate install secrets")
-
     raw_secret = secrets.token_urlsafe(32)
     try:
         db.table("companies").update({

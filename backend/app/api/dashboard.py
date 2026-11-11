@@ -92,19 +92,18 @@ async def get_dashboard_summary(
     # ── Role-based field filtering ──────────────────────────────────────────
     role = user.get("role", "viewer")
     perms = ROLE_PERMISSIONS.get(role, set())
-    has_view_all = "view_all" in perms
 
     return {
         "company_id": company_id,
         "accounts":   accounts,
         # Only roles with inventory access see alerts
-        "inventory_alerts": inventory_alerts if ("view_inventory" in perms or has_view_all) else [],
+        "inventory_alerts": inventory_alerts if "view_inventory" in perms else [],
         # Financial figures visible to owner + manager only
-        "sales_30d":        round(float(sales_30d), 2) if ("view_financials" in perms or has_view_all) else None,
+        "sales_30d":        round(float(sales_30d), 2) if "view_financials" in perms else None,
         # Approval count visible to approvers only
-        "pending_actions":  pending_count if ("approve_actions" in perms or has_view_all) else None,
+        "pending_actions":  pending_count if "approve_actions" in perms else None,
         # Email count visible to roles with trigger_actions only
-        "unread_emails":    unread_count if ("trigger_actions" in perms or has_view_all) else None,
+        "unread_emails":    unread_count if "trigger_actions" in perms else None,
         # Cache metadata — frontend uses this to show "Data as of X"
         "generated_at":     generated_at,
         "cached":           cached,

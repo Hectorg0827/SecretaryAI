@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user, require_permission
+from app.auth.rbac import get_current_user, has_permission, require_permission
 from app.config import get_settings
 from app.utils.encryption import encrypt
 
@@ -96,7 +96,11 @@ async def get_integrations(
         and row.get("qb_connection_status") == "connected"
         and bool(row.get("qbo_realm_id"))
     )
-    qbd_connected = bool(row.get("conductor_end_user_id"))
+    qbd_connected = (
+        bool(row.get("conductor_end_user_id"))
+        and row.get("qb_type") == "desktop"
+        and row.get("qb_connection_status") == "connected"
+    )
     google_connected = bool(row.get("google_access_token"))
 
     return {
@@ -107,7 +111,13 @@ async def get_integrations(
         },
         "quickbooks_desktop": {
             "connected": qbd_connected,
-            "end_user_id": row.get("conductor_end_user_id") if qbd_connected else None,
+            # The end-user ID identifies this company's books at the QuickBooks
+            # bridge — only the role that manages integrations may see it.
+            "end_user_id": (
+                row.get("conductor_end_user_id")
+                if qbd_connected and has_permission(user.get("role"), "manage_integrations")
+                else None
+            ),
         },
         "gmail": {
             "connected": google_connected,
@@ -128,24 +138,51 @@ class QBDConfig(BaseModel):
 @router.post("/integrations/qbd")
 async def save_qbd(
     body: QBDConfig,
-    user: dict = Depends(require_permission("manage_users")),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """
-    Save the QB Desktop Conductor end-user ID for this company.
-    The Conductor API key is an operator secret (env var) — users never enter it.
+    Attach a QB Desktop (Conductor) end-user ID to this company.
+
+    The ID is NOT trusted as typed: all tenants share one operator Conductor
+    key, so accepting an arbitrary ID would let one company read another
+    company's QuickBooks. The ID is accepted only when Conductor confirms it
+    was created for THIS company (sourceId == company_id) and no other company
+    already uses it.
     """
+    from app.api.setup import conductor_end_user_belongs_to
+
     end_user_id = body.end_user_id.strip()
     if not end_user_id:
         raise HTTPException(status_code=400, detail="end_user_id is required")
 
     company_id = user["company_id"]
+
+    if not await conductor_end_user_belongs_to(end_user_id, company_id):
+        log.warning(
+            "Rejected QB Desktop end-user ID for company %s (user %s): not owned by this company",
+            company_id, user.get("sub"),
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="That QuickBooks Desktop connection does not belong to your company. "
+                   "Use the desktop app's setup wizard to connect QuickBooks.",
+        )
+
     try:
+        clash = (
+            db.table("companies").select("id")
+            .eq("conductor_end_user_id", end_user_id).neq("id", company_id).execute()
+        )
+        if clash.data:
+            raise HTTPException(status_code=403, detail="That QuickBooks Desktop connection is already in use.")
         db.table("companies").update({
             "conductor_end_user_id": end_user_id,
             "qb_type": "desktop",
             "qb_connection_status": "connected",
         }).eq("id", company_id).execute()
+    except HTTPException:
+        raise
     except Exception as exc:
         log.error("QB Desktop save failed for company %s: %s", company_id, exc)
         raise HTTPException(status_code=500, detail="Failed to save QB Desktop configuration")
@@ -155,7 +192,7 @@ async def save_qbd(
 
 @router.delete("/integrations/qbd")
 async def disconnect_qbd(
-    user: dict = Depends(require_permission("manage_users")),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """Clear QB Desktop configuration."""

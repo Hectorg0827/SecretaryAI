@@ -26,7 +26,7 @@ from app.auth.oauth import (
     build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
 )
 from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password, revoke_token
-from app.auth.rbac import get_current_user, oauth2_scheme
+from app.auth.rbac import get_current_user, oauth2_scheme, require_permission
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
 from app.utils.rate_limiter import login_limiter, login_email_limiter, require_rate_limit
@@ -73,7 +73,7 @@ _oauth_states_fallback: dict[str, str] = {}
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
 
 @router.get("/qbo/connect-url")
-async def qbo_connect_url(user: dict = Depends(get_current_user)):
+async def qbo_connect_url(user: dict = Depends(require_permission("manage_integrations"))):
     """Return the QBO OAuth consent URL as JSON (frontend handles the redirect)."""
     state = secrets.token_urlsafe(32)
     _state_set(state, user["company_id"])
@@ -82,7 +82,7 @@ async def qbo_connect_url(user: dict = Depends(get_current_user)):
 
 
 @router.get("/qbo/connect")
-async def qbo_connect(user: dict = Depends(get_current_user)):
+async def qbo_connect(user: dict = Depends(require_permission("manage_integrations"))):
     """Initiate QBO OAuth 2.0 — redirect to Intuit consent screen."""
     state = secrets.token_urlsafe(32)
     _state_set(state, user["company_id"])
@@ -153,7 +153,7 @@ async def qbo_callback(
 
 
 @router.delete("/qbo/disconnect")
-async def qbo_disconnect(user: dict = Depends(get_current_user)):
+async def qbo_disconnect(user: dict = Depends(require_permission("manage_integrations"))):
     """Revoke QBO tokens and clear connection in DB."""
     company_id = user["company_id"]
 
@@ -184,7 +184,7 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
 # ─── Google OAuth (Gmail + Sheets) ───────────────────────────────────────────
 
 @router.get("/gmail/connect-url")
-async def gmail_connect_url(user: dict = Depends(get_current_user)):
+async def gmail_connect_url(user: dict = Depends(require_permission("manage_integrations"))):
     """Return the Google OAuth consent URL as JSON (frontend handles the redirect)."""
     state = secrets.token_urlsafe(32)
     _state_set(state, user["company_id"])
@@ -239,7 +239,7 @@ async def gmail_callback(
 
 
 @router.delete("/gmail/disconnect")
-async def gmail_disconnect(user: dict = Depends(get_current_user)):
+async def gmail_disconnect(user: dict = Depends(require_permission("manage_integrations"))):
     """Revoke Google tokens and clear connection in DB."""
     company_id = user["company_id"]
 

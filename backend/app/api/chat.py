@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_adapter, get_db
-from app.auth.rbac import get_current_user, require_permission
+from app.auth.rbac import get_current_user, has_permission, require_permission
 from app.ai.secretary import classify_intent, stream_chat, chat as ai_chat, detect_action_in_response
 from app.ai.data_summarizer import build_query_context
 from app.memory.account_memory import load_account_memory, extract_and_save_memory
@@ -114,12 +114,18 @@ def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
         log.error("Failed to save conversation turn: %s", exc)
 
 
-async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
+async def _fetch_data_for_intent(intent: str, message: str, adapter, role: str = "viewer") -> dict:
     """
     Fetch real QB data matching the classified intent.
     Returns a dict consumed by build_query_context().
+
+    `role` limits what reaches the model: chat must not be a side door around
+    the page-level permission checks, so money figures (revenue totals, top
+    accounts by revenue, balances, order amounts) are only loaded for roles
+    that hold `view_financials`.
     """
     data: dict = {}
+    can_see_money = has_permission(role, "view_financials")
 
     try:
         if intent == "customs_status":
@@ -162,9 +168,9 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                         (str(getattr(inv, "date", "") or inv.get("order_date", "")) for inv in acct_invoices),
                         default="never",
                     ),
-                    "current_balance": float(getattr(specific, "balance", 0)),
+                    "current_balance": float(getattr(specific, "balance", 0)) if can_see_money else None,
                 }
-                data["orders"] = [
+                data["orders"] = [] if not can_see_money else [
                     {
                         "order_date": str(getattr(inv, "date", "") or inv.get("order_date", "")),
                         "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
@@ -240,11 +246,12 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                 }
                 for i in items
             ]
-            data["sales_summary"] = {
-                "total_revenue": float(period.total_revenue),
-                "order_count": period.order_count,
-                "top_accounts": period.top_accounts[:5],
-            }
+            if can_see_money:
+                data["sales_summary"] = {
+                    "total_revenue": float(period.total_revenue),
+                    "order_count": period.order_count,
+                    "top_accounts": period.top_accounts[:5],
+                }
 
     except Exception as exc:
         log.warning("Data fetch for intent '%s' failed: %s", intent, exc)
@@ -308,7 +315,7 @@ async def send_message(
     log.debug("Intent classified: %s for message: %.60s", intent, request.message)
 
     # 3. Fetch real data for the intent
-    data = await _fetch_data_for_intent(intent, request.message, adapter)
+    data = await _fetch_data_for_intent(intent, request.message, adapter, role=user.get("role", "viewer"))
     data_summary = build_query_context(intent, data)
 
     # 4. Build company context for system prompt

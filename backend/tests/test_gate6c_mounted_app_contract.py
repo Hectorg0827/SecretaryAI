@@ -144,6 +144,13 @@ def test_actual_routes_block_stale_manager_after_role_change(actual_app, path):
     result = _get(client, path, old_token)
     assert result.status_code == 403, (path, result.text)
     assert result.headers["cache-control"] == "no-store"
+    # The denial happens in the session middleware before the route executes.
+    # Tracing and security wrappers must still stamp its response.
+    import uuid
+    uuid.UUID(result.headers["x-request-id"])
+    assert result.headers["x-content-type-options"] == "nosniff"
+    assert result.headers["x-frame-options"] == "DENY"
+    assert "default-src" in result.headers["content-security-policy"]
 
 
 @pytest.mark.parametrize("changed", [
@@ -211,3 +218,15 @@ def test_authenticated_employee_check_cannot_be_bypassed_by_query_company(actual
         old_token,
     )
     assert result.status_code == 403
+
+
+def test_finance_allowlist_denial_has_trace_and_hardening_headers(actual_app):
+    client, db, _ = actual_app
+    db.employee()["role"] = "ar_specialist"
+    response = _get(client, "/api/settings/integrations", _jwt(role="ar_specialist"))
+    assert response.status_code == 403
+    import uuid
+    uuid.UUID(response.headers["x-request-id"])
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "default-src" in response.headers["content-security-policy"]

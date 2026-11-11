@@ -200,3 +200,14 @@ def test_nonstaging_is_untouched(setup, monkeypatch):
     db.users["u1"]["role"] = "ar_specialist"
     # Staging-only change: production's existing middleware is unchanged.
     assert _get(client, _token()).status_code == 200
+
+
+def test_global_app_runs_rate_limiter_before_session_lookup():
+    """Throttle untrusted requests before making the new per-request DB query."""
+    from app.main import app
+
+    # Starlette stores user_middleware outermost first (last added first).
+    order = [entry.cls.__name__ for entry in app.user_middleware]
+    assert order.index("FinanceRoleBoundaryMiddleware") < order.index("TenantMiddleware")
+    assert order.index("TenantMiddleware") < order.index("RateLimitMiddleware")
+    assert order.index("RateLimitMiddleware") < order.index("ActiveSessionBoundaryMiddleware")

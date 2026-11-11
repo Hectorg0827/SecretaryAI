@@ -5,6 +5,7 @@ from app.api.deps import get_db
 from app.auth.rbac import get_current_user, has_permission, require_permission
 from app.config import get_settings
 from app.utils.encryption import encrypt
+from app.utils.safe import log_safe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -167,7 +168,7 @@ async def save_qbd(
     if not await conductor_end_user_belongs_to(end_user_id, company_id):
         log.warning(
             "Rejected QB Desktop end-user ID for company %s (user %s): not owned by this company",
-            company_id, user.get("sub"),
+            log_safe(company_id), log_safe(user.get("sub")),
         )
         raise HTTPException(
             status_code=403,

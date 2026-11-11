@@ -74,6 +74,7 @@ INSERT INTO drafts (id, company_id, created_by, action_type, content, status, cr
 UPDATE drafts SET status = 'executing', reviewed_by = '33333333-3333-3333-3333-333333333333', reviewed_at = now() WHERE id = '44444444-4444-4444-4444-444444444444' AND status = 'pending';
 UPDATE drafts SET status = 'pending', execution_status = 'failed', execution_detail = 'x' WHERE id = '44444444-4444-4444-4444-444444444444';
 UPDATE drafts SET status = 'approved', execution_status = 'executed', executed_at = now() WHERE id = '44444444-4444-4444-4444-444444444444';
+UPDATE drafts SET execution_status = 'unknown' WHERE id = '44444444-4444-4444-4444-444444444444';
 UPDATE drafts SET status = 'expired' WHERE id = '44444444-4444-4444-4444-444444444444';
 -- audit trail: a person and a system actor
 INSERT INTO audit_events (id, company_id, event_type, description, metadata, created_at, actor_id, user_id, action_class, approved_by)

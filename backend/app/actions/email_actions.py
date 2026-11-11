@@ -3,19 +3,18 @@ Email action handlers — draft and send emails via SendGrid.
 Direct sends require 'notify' level (pre-approved alert types).
 Customer-facing emails always go through draft_and_wait.
 """
-import re
+from app.utils.safe import is_valid_email
 
 from app.config import get_settings
 
 settings = get_settings()
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _recipient_allowed(to_email: str) -> tuple[bool, str]:
     """Validate an auto-alert recipient: well-formed address + optional domain
     allow-list. Prevents an unvalidated payload from emailing arbitrary addresses."""
-    if not _EMAIL_RE.match(to_email):
+    if not is_valid_email(to_email):
         return False, "Invalid recipient address"
     allow = [d.strip().lower() for d in (settings.alert_email_allowlist or "").split(",") if d.strip()]
     if allow:

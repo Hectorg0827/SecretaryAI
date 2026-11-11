@@ -100,3 +100,12 @@ describe('two tabs refreshing at once', () => {
     expect(localStorage.getItem('secretary_token')).toBe('token-from-other-tab');
   });
 });
+
+describe('an unknown outcome', () => {
+  it('is not shown as success, and leaves the queue so it cannot be sent twice', () => {
+    const r = describeApproval({ draft_id: 'd', status: 'approved', execution_status: 'unknown', execution_detail: 'We could not confirm whether the email to a@b.test was sent. Check your Sent folder before sending it again.' });
+    expect(r.ok).toBe(false);
+    expect(r.done).toBe(true);
+    expect(r.message).toContain('Sent folder');
+  });
+});

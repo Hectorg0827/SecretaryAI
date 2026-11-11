@@ -17,7 +17,6 @@ Rules enforced here (not just in the UI):
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -30,6 +29,7 @@ from app.auth.rbac import ROLE_PERMISSIONS, require_permission
 from app.utils.audit import write_audit_event
 from app.utils.mailer import email_configured, send_system_email
 from app.utils.rate_limiter import password_reset_limiter
+from app.utils.safe import is_valid_email, log_safe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,7 +37,6 @@ router = APIRouter()
 # Roles an owner can hand out. A second owner is allowed (so the business is
 # not locked out if one person leaves), but only by an existing owner.
 ASSIGNABLE_ROLES = tuple(ROLE_PERMISSIONS.keys())
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PUBLIC_FIELDS = "id, name, email, role, is_active, totp_enabled, invited_at, email_verified_at, last_login_at, created_at, password_hash"
 
 
@@ -132,7 +131,7 @@ class InviteRequest(BaseModel):
     @classmethod
     def _email(cls, v: str) -> str:
         v = (v or "").strip().lower()
-        if not _EMAIL_RE.match(v):
+        if not is_valid_email(v):
             raise ValueError("Invalid email address")
         return v
 
@@ -272,6 +271,22 @@ async def update_user(
     except Exception as exc:
         log.error("User update failed: %s", exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+    # Second cut-off, AFTER the change is stored. A sign-in or refresh that read
+    # this person's old role/status while the update was in flight either sees
+    # this cut-off and refuses to issue a token, or issued one before it —
+    # which this cut-off invalidates. Either way nothing built from the old
+    # data survives.
+    if role_changes or deactivating:
+        try:
+            revoke_user_sessions(str(target["id"]))
+        except AuthStoreUnavailable:
+            log.error("Post-change session cut-off failed for user %s", log_safe(target["id"]))
+            raise HTTPException(
+                status_code=503,
+                detail="The change was saved, but we could not confirm this person was signed out. "
+                       "Please apply it again.",
+            )
 
     event = "user_deactivated" if deactivating else "user_reactivated" if reactivating else "user_updated"
     write_audit_event(

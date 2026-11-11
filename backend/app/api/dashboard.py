@@ -333,10 +333,11 @@ async def send_email_reply(
 ):
     """Send a reply email. The user has already reviewed and approved the draft."""
     from app.utils.audit import AuditWriteError, write_audit_event
+    from app.utils.safe import is_valid_email
 
     company_id = user["company_id"]
     to = (body.to or "").strip()
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", to):
+    if not is_valid_email(to):
         raise HTTPException(status_code=422, detail="Please enter a valid recipient email address.")
     if not (body.body or "").strip():
         raise HTTPException(status_code=422, detail="The email has no message text.")

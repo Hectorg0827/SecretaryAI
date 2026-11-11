@@ -9,15 +9,14 @@ stored in the audit row; the recipient, subject and kind of email are.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Optional
 
 from app.config import get_settings
 from app.utils.audit import write_audit_event
+from app.utils.safe import is_valid_email, log_safe
 
 log = logging.getLogger(__name__)
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def email_configured() -> bool:
@@ -53,12 +52,12 @@ def send_system_email(
             metadata={"kind": kind, "to": to, "subject": subject[:200], **extra},
         )
 
-    if not _EMAIL_RE.match(to):
-        log.warning("System email '%s' not sent: invalid recipient", kind)
+    if not is_valid_email(to):
+        log.warning("System email '%s' not sent: invalid recipient", log_safe(kind))
         _audit("email_send_failed", error="invalid recipient")
         return False
     if not settings.sendgrid_api_key:
-        log.warning("System email '%s' not sent: SENDGRID_API_KEY is not set", kind)
+        log.warning("System email '%s' not sent: SENDGRID_API_KEY is not set", log_safe(kind))
         _audit("email_send_failed", error="email delivery is not configured")
         return False
 
@@ -76,7 +75,7 @@ def send_system_email(
         response = SendGridAPIClient(settings.sendgrid_api_key).send(message)
         status_code = getattr(response, "status_code", None)
     except Exception as exc:
-        log.error("System email '%s' failed for company %s: %s", kind, company_id, exc)
+        log.error("System email '%s' failed for company %s: %s", log_safe(kind), log_safe(company_id), log_safe(exc))
         _audit("email_send_failed", error=str(exc)[:300])
         return False
 

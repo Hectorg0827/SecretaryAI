@@ -79,7 +79,7 @@ ALTER TABLE drafts ADD CONSTRAINT drafts_status_check CHECK (status IN (
     'pending', 'executing', 'approved', 'edited_and_approved', 'rejected', 'expired', 'failed'));
 ALTER TABLE drafts DROP CONSTRAINT IF EXISTS drafts_execution_status_check;
 ALTER TABLE drafts ADD CONSTRAINT drafts_execution_status_check CHECK (
-    execution_status IS NULL OR execution_status IN ('executed', 'manual_required', 'failed'));
+    execution_status IS NULL OR execution_status IN ('executed', 'manual_required', 'failed', 'unknown'));
 CREATE INDEX IF NOT EXISTS idx_drafts_company_status ON drafts (company_id, status, created_at DESC);
 
 -- ── action_log: the engine's own trail ───────────────────────────────────────

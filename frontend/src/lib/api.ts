@@ -223,7 +223,7 @@ export interface ApprovalResult {
   draft_id: string;
   status: string;
   already_processed?: boolean;
-  execution_status?: 'executed' | 'manual_required' | 'failed';
+  execution_status?: 'executed' | 'manual_required' | 'failed' | 'unknown';
   execution_detail?: string;
 }
 
@@ -236,6 +236,11 @@ export function describeApproval(r: ApprovalResult | undefined | null): { ok: bo
   if (r.already_processed) return { ok: true, done: true, message: 'This was already handled.' };
   if (r.execution_status === 'failed') {
     return { ok: false, done: false, message: r.execution_detail || 'Approved, but it could not be carried out. It is still in your queue.' };
+  }
+  if (r.execution_status === 'unknown') {
+    // We cannot tell whether it happened. It leaves the queue (so it cannot be
+    // sent twice by a second click) but is clearly NOT reported as success.
+    return { ok: false, done: true, message: r.execution_detail || 'We could not confirm whether this was completed. Please check before doing it again.' };
   }
   if (r.execution_status === 'manual_required') {
     return { ok: true, done: true, message: r.execution_detail || 'Approved. Please complete this step yourself.' };

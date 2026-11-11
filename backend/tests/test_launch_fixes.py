@@ -330,18 +330,19 @@ class TestApprovalIsHonest:
 
     def test_failed_send_is_not_shown_as_approved(self, client, fdb):
         fdb.tables["drafts"].append(_draft())
-        fdb.adapter.send_email_reply = AsyncMock(side_effect=RuntimeError("mailbox not connected"))
+        # a clear "not done": the mail server could not even be reached
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=httpx.ConnectError("could not connect"))
         r = _approve(client)
         assert r.status_code == 200
         assert r.json()["status"] == "pending" and r.json()["execution_status"] == "failed"
         d = fdb.rows("drafts")[0]
         assert d["status"] == "pending" and d["execution_status"] == "failed"
-        assert "mailbox not connected" in d["execution_detail"]
+        assert "was not sent" in d["execution_detail"]
         assert [e["event_type"] for e in fdb.events()] == ["draft_approved", "draft_execution_failed"]
 
     def test_failed_draft_can_be_retried(self, client, fdb):
         fdb.tables["drafts"].append(_draft())
-        fdb.adapter.send_email_reply = AsyncMock(side_effect=[RuntimeError("temporary"), {"status": "sent"}])
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=[httpx.ConnectError("temporary"), {"status": "sent"}])
         assert _approve(client).json()["execution_status"] == "failed"
         assert _approve(client).json()["execution_status"] == "executed"
         assert fdb.rows("drafts")[0]["status"] == "approved"
@@ -445,7 +446,8 @@ class TestApprovalIsHonest:
         r = _approve(client)
         assert r.json()["execution_status"] == "executed"
         kwargs = fdb.adapter.create_purchase_order.await_args.kwargs
-        assert kwargs["vendor_id"] == "V1" and kwargs["line_items"][0]["quantity"] == 40
+        assert kwargs["vendor_id"] == "V1"
+        assert kwargs["line_items"] == [{"item_id": "i1", "description": "", "quantity": "40", "unit_cost": "5"}]
 
     def test_unknown_action_type_never_runs_anything(self, client, fdb):
         fdb.tables["drafts"].append(_draft(action_type="cu_submit_form", content={}))
@@ -1217,3 +1219,213 @@ class TestOutlook:
         assert decrypt(row["ms_refresh_token"], "test-secret-key-32-chars-long!!x") == "RT2"
         # no tokens → no Outlook connector
         assert UnifiedDataAdapter({"id": COMPANY_A})._outlook is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Review follow-ups on the pull request.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPolicyUsesTheRealOrderValue:
+    """A PO's value for policy checks comes from its lines, not a summary field."""
+    DENY_OVER_10K = {"id": "11111111-2222-3333-4444-555555555555", "company_id": COMPANY_A, "is_active": True,
+                     "priority": 1, "action_class": "commit", "effect": "deny", "min_amount": 10000,
+                     "rule_name": "no_orders_over_10k"}
+
+    def _po(self, **content):
+        return _draft(action_type="purchase_order", content={"vendor_id": "V1", **content})
+
+    def test_amount_is_computed_from_lines_when_no_total_is_given(self):
+        from decimal import Decimal
+        from app.api.actions import _content_amount
+        content = {"vendor_id": "V1", "line_items": [{"item_id": "i", "quantity": 2000, "unit_cost": "50"}]}
+        assert _content_amount(content, "purchase_order") == Decimal("100000")
+
+    def test_understated_total_does_not_win(self):
+        from decimal import Decimal
+        from app.api.actions import _content_amount
+        content = {"vendor_id": "V1", "total": 500, "line_items": [{"item_id": "i", "quantity": 2000, "unit_cost": 50}]}
+        assert _content_amount(content, "purchase_order") == Decimal("100000")
+
+    def test_large_order_without_a_total_is_blocked_by_the_amount_rule(self, client, fdb):
+        fdb.tables["policy_rules"].append(self.DENY_OVER_10K)
+        fdb.tables["drafts"].append(self._po(line_items=[{"item_id": "i", "quantity": 2000, "unit_cost": 50}]))
+        assert _approve(client).status_code == 403
+        fdb.adapter.create_purchase_order.assert_not_called()
+
+    def test_large_order_with_a_small_stated_total_is_still_blocked(self, client, fdb):
+        fdb.tables["policy_rules"].append(self.DENY_OVER_10K)
+        fdb.tables["drafts"].append(self._po(total=99, line_items=[{"item_id": "i", "quantity": 2000, "unit_cost": 50}]))
+        assert _approve(client).status_code == 403
+        fdb.adapter.create_purchase_order.assert_not_called()
+
+    def test_small_order_passes_the_same_rule(self, client, fdb):
+        fdb.tables["policy_rules"].append(self.DENY_OVER_10K)
+        fdb.tables["drafts"].append(self._po(line_items=[{"item_id": "i", "quantity": 10, "unit_cost": 50}]))
+        assert _approve(client).json()["execution_status"] == "executed"
+
+    def test_line_without_a_cost_is_never_created_automatically(self, client, fdb):
+        """No cost → the order's value is unknown → a person enters it."""
+        fdb.tables["drafts"].append(self._po(line_items=[{"item_id": "i", "quantity": 2000}]))
+        assert _approve(client).json()["execution_status"] == "manual_required"
+        fdb.adapter.create_purchase_order.assert_not_called()
+
+    def test_edited_lines_are_the_ones_checked(self, client, fdb):
+        fdb.tables["policy_rules"].append(self.DENY_OVER_10K)
+        fdb.tables["drafts"].append(self._po(line_items=[{"item_id": "i", "quantity": 1, "unit_cost": 1}]))
+        edited = {"vendor_id": "V1", "line_items": [{"item_id": "i", "quantity": 5000, "unit_cost": 50}]}
+        assert _approve(client, body={"edited_content": edited}).status_code == 403
+        fdb.adapter.create_purchase_order.assert_not_called()
+
+
+class TestUncertainOutcomeIsNotRetried:
+    """If we cannot tell whether it happened, it must not go back in the queue."""
+
+    def _status_error(self, code):
+        req = httpx.Request("POST", "https://api.example.test/x")
+        return httpx.HTTPStatusError("boom", request=req, response=httpx.Response(code, request=req))
+
+    @pytest.mark.parametrize("exc", [
+        httpx.ReadTimeout("no answer after sending"),
+        httpx.RemoteProtocolError("connection dropped"),
+        RuntimeError("something unexpected"),
+    ])
+    def test_po_with_unknown_outcome_is_closed_not_requeued(self, client, fdb, exc):
+        fdb.tables["drafts"].append(_draft(action_type="purchase_order", content={
+            "vendor_id": "V1", "line_items": [{"item_id": "i", "quantity": 1, "unit_cost": 5}]}))
+        fdb.adapter.create_purchase_order = AsyncMock(side_effect=exc)
+        r = _approve(client)
+        assert r.json()["execution_status"] == "unknown"
+        assert "before creating it again" in r.json()["execution_detail"]
+        d = fdb.rows("drafts")[0]
+        assert d["status"] == "approved" and d["execution_status"] == "unknown"
+        # a second approval cannot create a second order
+        assert _approve(client).json().get("already_processed") is True
+        assert fdb.adapter.create_purchase_order.await_count == 1
+        assert [e["event_type"] for e in fdb.events()] == ["draft_approved", "draft_execution_unknown"]
+
+    def test_5xx_is_unknown(self, client, fdb):
+        fdb.tables["drafts"].append(_draft())
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=self._status_error(502))
+        r = _approve(client)
+        assert r.json()["execution_status"] == "unknown" and "Sent folder" in r.json()["execution_detail"]
+        assert fdb.rows("drafts")[0]["status"] == "approved"
+
+    @pytest.mark.parametrize("make", [
+        lambda self: self._status_error(400),
+        lambda self: self._status_error(403),
+        lambda self: httpx.ConnectError("could not connect"),
+        lambda self: ValueError("No email connector configured"),
+    ])
+    def test_clear_rejections_are_retryable(self, client, fdb, make):
+        fdb.tables["drafts"].append(_draft())
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=make(self))
+        r = _approve(client)
+        assert r.json()["execution_status"] == "failed"
+        assert fdb.rows("drafts")[0]["status"] == "pending"
+
+    def test_internal_error_text_is_not_shown_to_the_user(self, client, fdb):
+        fdb.tables["drafts"].append(_draft())
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=RuntimeError("secret-internal-detail at 10.0.0.5"))
+        assert "secret-internal-detail" not in _approve(client).text
+
+
+class TestNoSessionSurvivesAnAccountChange:
+    """A sign-in that is mid-flight while access is reduced gets no usable token."""
+
+    def test_login_racing_with_deactivation_is_refused(self, client, adb):
+        """The cut-off lands after the login read the (still active) row."""
+        import app.api.auth as auth_mod
+        from app.auth.jwt import revoke_user_sessions
+        real = auth_mod._refuse_if_account_changed
+
+        def account_changes_mid_login(user_id, read_at):
+            revoke_user_sessions(user_id)       # what the owner's change does
+            return real(user_id, read_at)
+
+        with patch.object(auth_mod, "_refuse_if_account_changed", side_effect=account_changes_mid_login):
+            r = _login(client, "staff@a.test", "Staff-pass1")
+        assert r.status_code == 401 and "access_token" not in r.text
+
+    def test_refresh_racing_with_demotion_is_refused(self, client, adb):
+        import app.api.auth as auth_mod
+        from app.auth.jwt import revoke_user_sessions
+        tok = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        real = auth_mod._refuse_if_account_changed
+
+        def account_changes_mid_refresh(user_id, read_at):
+            revoke_user_sessions(user_id)
+            return real(user_id, read_at)
+
+        with patch.object(auth_mod, "_refuse_if_account_changed", side_effect=account_changes_mid_refresh):
+            r = client.post("/auth/refresh", json={"access_token": tok})
+        assert r.status_code == 401
+
+    def test_token_minted_before_the_second_cutoff_is_dead(self, client, adb):
+        """The other interleaving: token issued during the update, before cut-off two."""
+        import time
+        from app.auth.jwt import create_access_token
+        owner = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        import app.api.users as users_mod
+        real_revoke = users_mod.revoke_user_sessions
+        calls = []
+        stale = {}
+
+        def revoke_and_slip_a_token_in(user_id):
+            real_revoke(user_id)
+            calls.append(user_id)
+            if len(calls) == 1:   # between cut-off one and the database update
+                time.sleep(0.003)
+                stale["token"] = create_access_token({"sub": STAFF_ID, "company_id": COMPANY_A, "role": "manager"})
+                time.sleep(0.003)
+
+        with patch.object(users_mod, "revoke_user_sessions", side_effect=revoke_and_slip_a_token_in):
+            assert client.patch(f"/api/users/{STAFF_ID}", json={"role": "viewer"}, headers=_bearer(owner)).status_code == 200
+        assert len(calls) == 2  # before AND after the update
+        assert client.get("/auth/me", headers=_bearer(stale["token"])).status_code == 401
+
+    def test_ordinary_login_after_an_old_change_still_works(self, client, adb):
+        import time
+        from app.auth.jwt import revoke_user_sessions
+        revoke_user_sessions(STAFF_ID)
+        time.sleep(0.01)
+        assert _login(client, "staff@a.test", "Staff-pass1").status_code == 200
+
+    def test_no_token_if_the_store_is_down_at_issue_time(self, client, adb):
+        import app.auth.jwt as jwt_mod
+        broken = MagicMock()
+        broken.get.side_effect = ConnectionError("redis down")
+        jwt_mod._redis_client = broken
+        r = _login(client, "staff@a.test", "Staff-pass1")
+        assert r.status_code == 503 and "access_token" not in r.text
+
+
+class TestInputSafetyHelpers:
+    @pytest.mark.parametrize("good", ["a@b.co", "first.last+tag@sub.example.com"])
+    def test_valid_emails(self, good):
+        from app.utils.safe import is_valid_email
+        assert is_valid_email(good)
+
+    @pytest.mark.parametrize("bad", ["", "a", "a@b", "@b.co", "a@.co", "a@b.", "a b@c.co", "a@b@c.co", "a@b.co\n", None, 5])
+    def test_invalid_emails(self, bad):
+        from app.utils.safe import is_valid_email
+        assert not is_valid_email(bad)
+
+    def test_crafted_long_input_is_rejected_quickly(self):
+        """The old regex took quadratic time on input like this."""
+        import time
+        from app.utils.safe import is_valid_email
+        evil = "!@" + "!." * 200_000
+        start = time.perf_counter()
+        assert not is_valid_email(evil)
+        assert time.perf_counter() - start < 0.05
+
+    def test_log_values_cannot_forge_new_lines(self):
+        from app.utils.safe import log_safe
+        assert "\n" not in log_safe("x\nERROR forged entry\r\nmore") and "\r" not in log_safe("a\rb")
+
+    def test_oauth_error_is_mapped_to_a_fixed_code(self, client, adb):
+        r = client.get("/auth/outlook/callback?error=access_denied", follow_redirects=False)
+        assert r.headers["location"].endswith("outlook=error&reason=access_denied")
+        r = client.get("/auth/qbo/callback?error=https://evil.example/%0d%0aSet-Cookie:x", follow_redirects=False)
+        assert r.headers["location"].endswith("qbo=error&reason=error")
+        assert "evil" not in r.headers["location"]

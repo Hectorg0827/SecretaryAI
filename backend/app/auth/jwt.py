@@ -177,6 +177,37 @@ def revoke_user_sessions(user_id: str) -> None:
         raise AuthStoreUnavailable("session store unavailable") from exc
 
 
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def sessions_ended_since(user_id: str, since_ms: int) -> bool:
+    """
+    True if this user's sessions were ended at or after `since_ms`.
+
+    Sign-in and refresh read the user's row (role, active flag) and only then
+    mint a token. If the account is changed in between, the token would carry
+    the OLD role and be newer than the cut-off. Callers note the time before
+    reading the row and call this just before returning a token: if a cut-off
+    landed in that window, the token is not handed out. Together with the
+    account-change code setting the cut-off both before and after its database
+    update, no token built from pre-change data can survive the change.
+    Raises AuthStoreUnavailable on outage (never fails open: a token is at stake).
+    """
+    if not user_id:
+        return False
+    try:
+        raw = _redis().get(f"{_USER_VALID_FROM_PREFIX}{user_id}")
+    except Exception as exc:
+        raise AuthStoreUnavailable("session store unavailable") from exc
+    if not raw:
+        return False
+    try:
+        return int(raw) >= int(since_ms)
+    except (TypeError, ValueError):
+        return True
+
+
 def is_session_superseded(payload: dict) -> bool:
     """
     True if this token was issued at or before its user's last "end all

@@ -26,6 +26,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.utils.safe import log_safe
+
 log = logging.getLogger(__name__)
 
 VALID_ACTION_CLASSES = {"read", "draft", "commit", "destructive"}
@@ -122,7 +124,7 @@ def write_audit_event(
         # ERROR, not warning: a missing audit record is an incident.
         log.error(
             "AUDIT WRITE FAILED event_type=%s company=%s required=%s error=%s",
-            event_type, company_id, required, exc,
+            log_safe(event_type), log_safe(company_id), required, log_safe(exc),
         )
         if required:
             raise AuditWriteError(

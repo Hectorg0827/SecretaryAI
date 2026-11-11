@@ -12,11 +12,13 @@ these steps, in this order, and stops at the first one that fails:
   5. the action is executed and its real outcome is stored on the draft;
   6. the outcome is audited.
 
-If execution fails, the draft goes back to "pending" with the reason, so the
-queue never shows "approved" for something that did not happen.
+If execution definitely did not happen, the draft goes back to "pending" with
+the reason, so the queue never shows "approved" for something that failed. If
+the outcome is unknown (for example the connection dropped after the request
+was sent), the draft is closed as "unknown" and is NOT offered for retry — a
+blind retry could send the email or create the order twice.
 """
 import logging
-import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -30,6 +32,7 @@ from app.actions.approval_queue import ApprovalQueue
 from app.domain.contracts import ActionClass, ActionProposal
 from app.domain.policy import PolicyEngine, PolicyUnavailableError
 from app.utils.audit import AuditWriteError, write_audit_event
+from app.utils.safe import is_valid_email, log_safe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,26 +47,74 @@ EMAIL_ACTION_TYPES = frozenset({
 })
 PURCHASE_ORDER_ACTION_TYPES = frozenset({"purchase_order", "draft_purchase_order"})
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
 
 @dataclass
 class ExecutionOutcome:
     """What really happened when an approved draft was carried out."""
-    status: str          # 'executed' | 'manual_required' | 'failed'
+    status: str          # 'executed' | 'manual_required' | 'failed' | 'unknown'
     detail: str = ""
 
 
-def _content_amount(content: dict) -> Optional[Decimal]:
-    """Best-effort monetary amount from a draft's content for policy checks."""
+def _to_decimal(value) -> Optional[Decimal]:
+    try:
+        d = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return d if d.is_finite() else None
+
+
+def _purchase_order_lines(content: dict) -> Optional[list[dict]]:
+    """
+    The exact item lines a purchase-order draft would send to QuickBooks, or
+    None if the draft is not specific enough to create automatically.
+
+    Every line must name an item, a positive quantity AND a unit cost. A line
+    without a cost is refused rather than defaulted to 0: the order's value is
+    what the company's spending rules are checked against, so it must be the
+    real one.
+    """
+    raw = content.get("line_items") or []
+    if not content.get("vendor_id") or not isinstance(raw, list) or not raw:
+        return None
+    lines: list[dict] = []
+    for li in raw:
+        if not isinstance(li, dict):
+            return None
+        item_id = li.get("item_id") or li.get("qb_item_id")
+        quantity = _to_decimal(li.get("quantity"))
+        unit_cost = _to_decimal(li.get("unit_cost"))
+        if not item_id or quantity is None or quantity <= 0 or unit_cost is None or unit_cost < 0:
+            return None
+        lines.append({
+            "item_id": str(item_id),
+            "description": str(li.get("description") or li.get("product_name") or ""),
+            "quantity": quantity,
+            "unit_cost": unit_cost,
+        })
+    return lines
+
+
+def _content_amount(content: dict, action_type: str = "") -> Optional[Decimal]:
+    """
+    Monetary amount of a draft, for policy checks.
+
+    For a purchase order that will be created from its lines, the amount is
+    computed from those exact lines (quantity × unit cost) — never trusted from
+    an optional summary field, which could be missing, stale or understated.
+    If a summary is also present, the larger of the two is used.
+    """
+    stated: Optional[Decimal] = None
     for key in ("amount", "total", "total_amount", "subtotal", "value"):
-        v = content.get(key)
-        if v is not None:
-            try:
-                return Decimal(str(v))
-            except (InvalidOperation, ValueError, TypeError):
-                return None
-    return None
+        if content.get(key) is not None:
+            stated = _to_decimal(content.get(key))
+            break
+
+    if action_type in PURCHASE_ORDER_ACTION_TYPES:
+        lines = _purchase_order_lines(content)
+        if lines is not None:
+            computed = sum((li["quantity"] * li["unit_cost"] for li in lines), Decimal("0"))
+            return max(computed, stated) if stated is not None else computed
+    return stated
 
 
 async def _execution_policy_decision(db, company_id: str, requested_by: str,
@@ -75,23 +126,52 @@ async def _execution_policy_decision(db, company_id: str, requested_by: str,
     PolicyUnavailableError and the caller refuses the approval. A rule that
     failed to load must never turn into "allowed".
     """
+    action_type = draft.get("action_type", "") or "unknown"
     proposal = ActionProposal(
-        action_type=draft.get("action_type", "") or "unknown",
+        action_type=action_type,
         action_class=ActionClass.COMMIT,
         description=f"Execute approved draft {draft.get('id')}",
         company_id=company_id,
         requested_by=requested_by,
-        amount=_content_amount(content),
+        amount=_content_amount(content, action_type),
     )
     return await PolicyEngine(company_id, db).evaluate(proposal, strict=True)
+
+
+def _definitely_not_done(exc: Exception) -> bool:
+    """
+    True only when we can be sure the outside system did NOT carry out the
+    request: it was never reached, or it answered with a clear rejection.
+
+    Everything else (a timeout after sending, a dropped connection, a 5xx, an
+    error we do not recognise) is an UNKNOWN outcome — the email may have gone
+    or the order may exist. Those must not be offered for a blind retry, which
+    could send the email or create the order a second time.
+    """
+    import httpx
+    from app.connectors.outlook import OutlookAuthError
+
+    if isinstance(exc, OutlookAuthError):
+        return True                                   # rejected before sending
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return True                                   # never connected
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return 400 <= code < 500 and code != 408      # the request was refused
+    if isinstance(exc, (ValueError, RuntimeError)) and "connector configured" in str(exc):
+        return True                                   # nothing is connected
+    return False
 
 
 async def _execute_approved_draft(draft: dict, adapter) -> ExecutionOutcome:
     """
     Carry out an approved draft and report honestly what happened.
 
-    Never raises: every failure becomes ExecutionOutcome('failed', reason) so
-    the caller can put the draft back in the queue.
+    Never raises. Outcomes:
+      executed        — done;
+      manual_required — approved, but a person must do it;
+      failed          — definitely NOT done (safe to fix and retry);
+      unknown         — it may or may not have happened (do not retry blindly).
     """
     action_type = draft.get("action_type", "") or ""
     content = draft.get("content") or {}
@@ -100,49 +180,51 @@ async def _execute_approved_draft(draft: dict, adapter) -> ExecutionOutcome:
         to = str(content.get("to") or content.get("to_email") or "").strip()
         subject = str(content.get("subject") or "").strip()
         body = str(content.get("body") or "").strip()
-        if not to or not _EMAIL_RE.match(to):
+        if not to or not is_valid_email(to):
             return ExecutionOutcome("failed", "This email has no valid recipient address. Edit the draft and add one.")
         if not body:
             return ExecutionOutcome("failed", "This email has no message text. Edit the draft and add it.")
         try:
             await adapter.send_email_reply(to=to, subject=subject, body=body)
         except Exception as exc:
-            log.error("Approved email draft %s failed to send: %s", draft.get("id"), exc)
-            return ExecutionOutcome("failed", f"The email could not be sent: {exc}")
+            log.error("Approved email draft %s did not complete: %s", log_safe(draft.get("id")), log_safe(exc))
+            if _definitely_not_done(exc):
+                return ExecutionOutcome("failed", "The email was not sent. Check that your mailbox is connected, then try again.")
+            return ExecutionOutcome(
+                "unknown",
+                f"We could not confirm whether the email to {to} was sent. "
+                "Check your Sent folder before sending it again.",
+            )
         return ExecutionOutcome("executed", f"Email sent to {to}")
 
     if action_type in PURCHASE_ORDER_ACTION_TYPES:
-        vendor_id = content.get("vendor_id")
-        line_items = content.get("line_items") or []
-        usable_lines = [
-            li for li in line_items
-            if isinstance(li, dict) and (li.get("item_id") or li.get("qb_item_id")) and li.get("quantity")
-        ]
-        if not vendor_id or not usable_lines or len(usable_lines) != len(line_items):
-            # The draft does not say exactly what to order from whom, so we do
-            # not guess. A person enters it in QuickBooks.
+        lines = _purchase_order_lines(content)
+        if lines is None:
+            # The draft does not say exactly what to order from whom at what
+            # cost, so we do not guess. A person enters it in QuickBooks.
             return ExecutionOutcome(
                 "manual_required",
-                "Approved. This purchase order does not name a QuickBooks vendor and item lines, "
-                "so it was NOT created automatically — please enter it in QuickBooks.",
+                "Approved. This purchase order does not name a QuickBooks vendor and item lines with "
+                "quantities and costs, so it was NOT created automatically — please enter it in QuickBooks.",
             )
         try:
             po = await adapter.create_purchase_order(
-                vendor_id=str(vendor_id),
+                vendor_id=str(content["vendor_id"]),
                 line_items=[
-                    {
-                        "item_id": str(li.get("item_id") or li.get("qb_item_id")),
-                        "description": str(li.get("description") or li.get("product_name") or ""),
-                        "quantity": li["quantity"],
-                        "unit_cost": li.get("unit_cost", 0),
-                    }
-                    for li in usable_lines
+                    {**li, "quantity": str(li["quantity"]), "unit_cost": str(li["unit_cost"])}
+                    for li in lines
                 ],
                 memo=str(content.get("notes") or content.get("memo") or "")[:500] or None,
             )
         except Exception as exc:
-            log.error("Approved PO draft %s failed in QuickBooks: %s", draft.get("id"), exc)
-            return ExecutionOutcome("failed", f"QuickBooks did not accept the purchase order: {exc}")
+            log.error("Approved PO draft %s did not complete: %s", log_safe(draft.get("id")), log_safe(exc))
+            if _definitely_not_done(exc):
+                return ExecutionOutcome("failed", "QuickBooks did not accept the purchase order. Check the vendor and items, then try again.")
+            return ExecutionOutcome(
+                "unknown",
+                "We could not confirm whether QuickBooks created this purchase order. "
+                "Look for it in QuickBooks before creating it again.",
+            )
         return ExecutionOutcome("executed", f"Purchase order created in QuickBooks (id {getattr(po, 'qb_id', '?')})")
 
     return ExecutionOutcome(
@@ -213,7 +295,7 @@ async def approve_draft(
             detail="Your company's action policy could not be checked, so nothing was approved. Please try again.",
         )
     except Exception as exc:
-        log.error("Policy evaluation errored for draft %s — refusing: %s", draft_id, exc)
+        log.error("Policy evaluation errored for draft %s — refusing: %s", log_safe(draft_id), log_safe(exc))
         raise HTTPException(
             status_code=503,
             detail="Your company's action policy could not be checked, so nothing was approved. Please try again.",
@@ -238,7 +320,7 @@ async def approve_draft(
     try:
         claimed = await queue.claim(draft_id, company_id, user["sub"], body.edited_content if edited else None)
     except Exception as exc:
-        log.error("Could not claim draft %s: %s", draft_id, exc)
+        log.error("Could not claim draft %s: %s", log_safe(draft_id), log_safe(exc))
         raise HTTPException(status_code=503, detail="Could not approve right now. Nothing was sent. Please try again.")
     if not claimed:
         return {"draft_id": draft_id, "status": "processing", "already_processed": True}
@@ -284,7 +366,10 @@ async def approve_draft(
     write_audit_event(
         db,
         company_id=company_id,
-        event_type="draft_executed" if outcome.status != "failed" else "draft_execution_failed",
+        event_type={
+            "failed": "draft_execution_failed",
+            "unknown": "draft_execution_unknown",
+        }.get(outcome.status, "draft_executed"),
         actor_id=user["sub"],
         action_class="commit",
         metadata={
@@ -297,7 +382,7 @@ async def approve_draft(
 
     # Resume the linked workflow only if the step really went through.
     workflow_run_id = draft.get("workflow_run_id")
-    if workflow_run_id and outcome.status != "failed":
+    if workflow_run_id and outcome.status in ("executed", "manual_required"):
         try:
             from app.workflows.engine import WorkflowEngine
             WorkflowEngine(db, company_id).resume_after_approval(

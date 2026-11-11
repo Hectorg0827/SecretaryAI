@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db
 from app.auth.rbac import require_permission
 from app.config import get_settings
+from app.utils.safe import log_safe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -72,7 +73,7 @@ async def conductor_end_user_belongs_to(end_user_id: str, company_id: str) -> bo
     try:
         data = await _conductor_get(f"/end-users/{end_user_id}")
     except Exception as exc:
-        log.warning("Conductor end-user ownership check failed for company %s: %s", company_id, exc)
+        log.warning("Conductor end-user ownership check failed for company %s: %s", log_safe(company_id), log_safe(exc))
         return False
     return isinstance(data, dict) and str(data.get("sourceId") or "") == str(company_id)
 
@@ -85,7 +86,7 @@ def _mark_qbd_connected(db, company_id: str) -> None:
             "qb_connection_status": "connected",
         }).eq("id", company_id).execute()
     except Exception as exc:
-        log.error("Could not mark QB Desktop connected for %s: %s", company_id, exc)
+        log.error("Could not mark QB Desktop connected for %s: %s", log_safe(company_id), log_safe(exc))
 
 
 # ── Request / response models ──────────────────────────────────────────────────
@@ -153,7 +154,7 @@ async def start_qb_desktop_setup(
 
     # A stored ID is only reused if Conductor confirms it is this company's.
     if existing_end_user_id and not await conductor_end_user_belongs_to(existing_end_user_id, company_id):
-        log.warning("Stored Conductor end-user for company %s failed ownership check — creating a new one", company_id)
+        log.warning("Stored Conductor end-user for company %s failed ownership check — creating a new one", log_safe(company_id))
         existing_end_user_id = None
 
     # Create EndUser if we don't have one

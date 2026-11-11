@@ -27,12 +27,13 @@ from app.auth.oauth import (
 )
 from app.auth.jwt import (
     AuthStoreUnavailable, claim_jti_once, create_access_token, decode_access_token,
-    hash_password, is_session_superseded, revoke_token as revoke_session_token,
-    revoke_user_sessions, verify_password,
+    hash_password, is_session_superseded, now_ms, revoke_token as revoke_session_token,
+    revoke_user_sessions, sessions_ended_since, verify_password,
 )
 from app.auth.rbac import get_current_user, oauth2_scheme, require_permission
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
+from app.utils.safe import is_valid_email, log_safe
 from app.utils.rate_limiter import (
     account_link_limiter, login_limiter, login_email_limiter, password_reset_limiter,
     require_rate_limit, totp_limiter,
@@ -370,7 +371,7 @@ async def outlook_disconnect(user: dict = Depends(require_permission("manage_int
             "ms_account_email": None,
         }).eq("id", company_id).execute()
     except Exception as exc:
-        log.error("Outlook disconnect failed for %s: %s", company_id, exc)
+        log.error("Outlook disconnect failed for %s: %s", log_safe(company_id), log_safe(exc))
         raise HTTPException(status_code=500, detail="Failed to disconnect Outlook")
     _audit(company_id, "integration_disconnected", user.get("sub"), integration="outlook")
     return {"status": "disconnected"}
@@ -407,6 +408,20 @@ def _verify_totp(user_id: str, secret: str, code: str) -> None:
         raise HTTPException(status_code=401, detail="That code was already used. Wait for the next one.")
 
 
+def _refuse_if_account_changed(user_id: str, read_at_ms: int) -> None:
+    """
+    Do not hand out a session built from account data that changed while we
+    were building it (see sessions_ended_since). The user simply signs in
+    again and gets a session reflecting their current role and status.
+    """
+    try:
+        changed = sessions_ended_since(str(user_id), read_at_ms)
+    except AuthStoreUnavailable:
+        raise HTTPException(status_code=503, detail="Sign-in service temporarily unavailable. Please try again shortly.")
+    if changed:
+        raise HTTPException(status_code=401, detail="Your account was just updated. Please sign in again.")
+
+
 def _login_response(user: dict) -> dict:
     token = create_access_token({
         "sub": user["id"],
@@ -433,7 +448,7 @@ class LoginRequest(BaseModel):
         if v is None:
             return v
         v = v.strip().lower()
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+        if not is_valid_email(v):
             raise ValueError("Invalid email address")
         return v
 
@@ -465,6 +480,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             raise HTTPException(status_code=401, detail="Invalid token scope")
 
         user_id = payload.get("sub")
+        read_at = now_ms()
         try:
             result = (
                 db.table("users")
@@ -491,6 +507,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             raise HTTPException(status_code=500, detail="2FA configuration error")
 
         _verify_totp(user["id"], secret, body.totp_code)
+        _refuse_if_account_changed(user["id"], read_at)
         _audit(user["company_id"], "user_login", user["id"], role=user["role"], two_factor=True)
         return _login_response(user)
 
@@ -508,6 +525,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             headers={"Retry-After": str(login_email_limiter.window_seconds)},
         )
 
+    read_at = now_ms()
     try:
         result = (
             db.table("users")
@@ -558,6 +576,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             raise HTTPException(status_code=500, detail="2FA configuration error")
         _verify_totp(user["id"], secret, body.totp_code)
 
+    _refuse_if_account_changed(user["id"], read_at)
     token = create_access_token({
         "sub": user["id"],
         "company_id": user["company_id"],
@@ -658,6 +677,7 @@ async def refresh_token(body: RefreshRequest):
     # Verify the user still exists and is active, and re-read role/company from
     # the DB so a demoted or moved user does not keep stale privileges for the
     # whole refresh window.
+    read_at = now_ms()
     try:
         from supabase import create_client
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
@@ -689,6 +709,7 @@ async def refresh_token(body: RefreshRequest):
         except AuthStoreUnavailable:
             raise HTTPException(status_code=503, detail="Sign-in service temporarily unavailable. Please try again shortly.")
 
+    _refuse_if_account_changed(user_id, read_at)
     new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
     return {"access_token": new_token, "token_type": "bearer"}
 
@@ -745,7 +766,7 @@ class RegisterRequest(BaseModel):
     @classmethod
     def validate_email(cls, v: str) -> str:
         v = v.strip().lower()
-        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v):
+        if not is_valid_email(v):
             raise ValueError("Invalid email address")
         return v
 
@@ -1152,7 +1173,7 @@ async def forgot_password(body: ForgotPasswordRequest, _=Depends(require_rate_li
 
     generic = {"status": "ok", "message": "If that email has an account, a reset link is on its way."}
     email = (body.email or "").strip().lower()
-    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+    if not is_valid_email(email):
         return generic
     if not password_reset_limiter.is_allowed(email):
         return generic
@@ -1210,6 +1231,9 @@ def _set_password(user: dict, new_password: str, extra: dict | None = None) -> N
         # the password and leave stolen sessions alive.
         revoke_user_sessions(user["id"])
         _db().table("users").update(update).eq("id", user["id"]).execute()
+        # … and again AFTER, so a sign-in that read the old password hash
+        # while this was in flight cannot leave a session behind.
+        revoke_user_sessions(user["id"])
     except AuthStoreUnavailable:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again shortly.")
     except Exception as exc:
@@ -1351,10 +1375,26 @@ async def resend_verification(body: ForgotPasswordRequest, _=Depends(require_rat
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+# Error codes an OAuth provider may send back to a callback (RFC 6749 §4.1.2.1
+# plus the ones Intuit/Google/Microsoft add). Anything else becomes "error".
+_OAUTH_ERROR_CODES = {
+    code: code for code in (
+        "access_denied", "invalid_request", "unauthorized_client",
+        "unsupported_response_type", "invalid_scope", "server_error",
+        "temporarily_unavailable", "interaction_required", "login_required",
+        "consent_required", "account_selection_required", "invalid_client",
+        "invalid_grant",
+    )
+}
+
+
 def _safe_reason(value: str) -> str:
-    """Reduce a provider-supplied error code to a short, URL-safe token."""
-    cleaned = re.sub(r"[^a-zA-Z0-9_]", "", value or "")[:40]
-    return cleaned or "error"
+    """
+    Map a provider-supplied error code to one of a fixed set of constants.
+    The request's text is only ever used as a lookup key; what goes into the
+    redirect URL and the log is always one of our own strings.
+    """
+    return _OAUTH_ERROR_CODES.get((value or "").strip().lower(), "error")
 
 
 def _app_base_url() -> str:

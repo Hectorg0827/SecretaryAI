@@ -112,7 +112,9 @@ class ApprovalQueue:
 
     # ── Approve-and-execute lifecycle ────────────────────────────────────────
     #   pending ──claim──▶ executing ──finish──▶ approved / edited_and_approved
-    #                          └────release───▶ pending (execution failed; retry)
+    #                          │                 (execution_status: executed,
+    #                          │                  manual_required, or unknown)
+    #                          └────release───▶ pending (definitely not done; retry)
 
     async def claim(self, draft_id: str, company_id: str, reviewed_by: str,
                     edited_content: Optional[dict] = None) -> bool:

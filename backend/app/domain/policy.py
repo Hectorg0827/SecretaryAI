@@ -43,6 +43,8 @@ from typing import Any
 
 from app.domain.contracts import ActionClass, ActionDecision, ActionProposal
 
+from app.utils.safe import log_safe
+
 log = logging.getLogger(__name__)
 
 # Redis TTL for cached policy rules (seconds)
@@ -153,7 +155,7 @@ class PolicyEngine:
             self._rules = data or []
         except Exception as exc:
             if strict:
-                log.error("Could not load policy rules for %s: %s — refusing (strict)", self.company_id, exc)
+                log.error("Could not load policy rules for %s: %s — refusing (strict)", log_safe(self.company_id), log_safe(exc))
                 raise PolicyUnavailableError("policy rules unavailable") from exc
             log.warning("Could not load policy rules for %s: %s — using defaults", self.company_id, exc)
             self._rules = []

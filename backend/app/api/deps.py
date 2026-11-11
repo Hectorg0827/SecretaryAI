@@ -71,9 +71,12 @@ def get_adapter(
     if cfg.get("ms_access_token"):
         cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
     if cfg.get("ms_refresh_token"):
+        cfg["_ms_expected_refresh_ciphertext"] = cfg["ms_refresh_token"]
         cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
     if cfg.get("ms_client_secret"):
         cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
+    cfg["ms_client_id"] = cfg.get("ms_client_id") or getattr(settings, "ms_client_id", "")
+    cfg["ms_client_secret"] = cfg.get("ms_client_secret") or getattr(settings, "ms_client_secret", "")
 
     # Build the gmail_credentials dict that GmailConnector expects.
     # Refresh the access token proactively if it is expired before building the adapter.

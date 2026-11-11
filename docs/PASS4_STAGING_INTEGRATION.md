@@ -25,10 +25,21 @@ older tree conflicts extensively with current Gate 6C controls.
    now atomically claims the presented JTI (`SET NX EX`) to reject concurrent
    replay. Frontend adds public recovery pages and an authenticated account
    password page for all staff roles.
+4. Staging-only invitation, Microsoft Outlook, and webhook reliability:
+   manager/departmental invitations now require durable pre-action audit for
+   delivery and acceptance; Outlook has owner-scoped delegated Microsoft Graph
+   OAuth with PKCE, Redis one-time state and a serialized connection generation,
+   encrypted tokens, a separate disconnect operation, and a Settings integration
+   row. Outlook refresh persistence uses tenant-scoped compare-and-set to avoid
+   resurrecting a disconnected account. QBO webhooks verify Intuit HMAC and
+   map external realms to exactly one company; Conductor inbound events require
+   their own webhook secret. Both enqueue the **registered** company-scoped
+   dashboard refresh task; Redis debouncing releases on enqueue failure so
+   providers receive a retryable 503 instead of silently losing work.
 
 ## Local verification (2026-11-11)
 
-- Backend: **2,981 passed / 1 skipped** with in-memory simulated Redis;
+- Backend: **3,004 passed / 1 skipped** with local simulated Redis;
   not a live Redis/Supabase/Railway test.
 - Frontend: **272 passed** in 48 test files; TypeScript, build, and lint
   succeed (13 pre-existing lint warnings, no errors).
@@ -37,6 +48,10 @@ older tree conflicts extensively with current Gate 6C controls.
   role/deactivated sessions through the Gate 6C session verifier.
 - Password recovery tests include single-use tokens, stale-session rejection,
   simultaneous refresh replay, audit outage, and mounted FastAPI route behavior.
+- Batch 4 tests simulate consent exchange, callback replay, active owner
+  revocation, company separation, conditional Outlook token rotation, strict
+  invitation audit failure, signed/unsigned webhooks, duplicate notifications,
+  worker enqueue failure, and Conductor failure auditing. No real customer data.
 
 ## Deployment gates still open
 
@@ -55,8 +70,15 @@ older tree conflicts extensively with current Gate 6C controls.
 - Recovery emails are limited to the configured staging invitation mailbox;
   ordinary customers cannot request reset links until a separately reviewed
   production identity delivery policy is implemented and validated.
-- Continue selective review of Claude Pass 4 invitation
-  acceptance, Outlook connect, and webhook changes against
-  the current staging equivalents; do not duplicate or regress newer logic.
+- Before enabling Outlook in staging, configure a dedicated Microsoft test app
+  with the exact isolated callback, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, and
+  `MS_REDIRECT_URI`; test with an authorized synthetic mailbox. The status UI
+  is not evidence of Graph connectivity until consent and a real read succeed.
+- Conductor's provider event delivery format and verification header must be
+  confirmed against the connected sandbox account before enabling its inbound
+  secret. The separate `CONDUCTOR_WEBHOOK_SECRET` starts disabled when blank.
+- The integration branch does **not** auto-deploy to Railway staging. A
+  reviewed selective merge, environment configuration, webhook subscription
+  setup, and independent live staging acceptance remain separate gates.
 - Use synthetic identities and controlled sandbox providers for staging
   acceptance. Production stays out of scope until separately approved.

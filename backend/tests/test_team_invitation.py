@@ -94,6 +94,7 @@ def setup(monkeypatch):
     )
     monkeypatch.setattr(team, "_audit", Mock())
     monkeypatch.setattr(team, "_require_finance_audit", Mock())
+    monkeypatch.setattr(team, "_require_invitation_audit", Mock())
     return db, redis, settings, sent
 
 
@@ -124,6 +125,34 @@ async def test_only_current_active_owner_can_invite(setup):
         await team.invite_manager(team.InviteManagerRequest(email=EMAIL, full_name="Abel Garcia"), ACTOR)
     assert exc.value.status_code == 403
     assert not redis.data
+
+
+@pytest.mark.asyncio
+async def test_manager_invitation_audit_failure_prevents_token_or_email(setup, monkeypatch):
+    db, redis, _, sent = setup
+    from fastapi import HTTPException
+    def unavailable(*_args):
+        raise HTTPException(status_code=503, detail="Invitation audit unavailable")
+    monkeypatch.setattr(team, "_require_invitation_audit", unavailable)
+    with pytest.raises(HTTPException) as error:
+        await team.invite_manager(team.InviteManagerRequest(email=EMAIL, full_name="Abel Garcia"), ACTOR)
+    assert error.value.status_code == 503
+    assert not redis.data and not sent and len(db.users) == 1
+
+
+@pytest.mark.asyncio
+async def test_invite_acceptance_audit_failure_prevents_account_creation(setup, monkeypatch):
+    db, redis, _, sent = setup
+    await team.invite_manager(team.InviteManagerRequest(email=EMAIL, full_name="Abel Garcia"), ACTOR)
+    assert len(sent) == 1
+    token = sent[0][2].split("#token=")[1]
+    def unavailable(*_args):
+        raise HTTPException(status_code=503, detail="Invitation audit unavailable")
+    monkeypatch.setattr(team, "_require_invitation_audit", unavailable)
+    with pytest.raises(HTTPException) as error:
+        await team.accept_invitation(team.AcceptInviteRequest(token=token, password="StrongSyntheticPassword123!"))
+    assert error.value.status_code == 503
+    assert len(db.users) == 1
 
 
 @pytest.mark.asyncio

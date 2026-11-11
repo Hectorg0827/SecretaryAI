@@ -81,7 +81,7 @@ async def get_integrations(
             .select(
                 "qb_type, qb_connection_status, qbo_realm_id, qbo_connected_at, "
                 "conductor_end_user_id, "
-                "google_access_token, google_connected_at"
+                "google_access_token, google_connected_at, ms_access_token, ms_refresh_token"
             )
             .eq("id", company_id)
             .execute()
@@ -98,6 +98,7 @@ async def get_integrations(
     )
     qbd_connected = bool(row.get("conductor_end_user_id"))
     google_connected = bool(row.get("google_access_token"))
+    outlook_connected = bool(row.get("ms_access_token") and row.get("ms_refresh_token"))
 
     return {
         "quickbooks_online": {
@@ -113,6 +114,7 @@ async def get_integrations(
             "connected": google_connected,
             "connected_at": row.get("google_connected_at"),
         },
+        "outlook": {"connected": outlook_connected},
         # Google Sheets reuses the same Google OAuth token as Gmail
         "google_sheets": {
             "connected": google_connected,

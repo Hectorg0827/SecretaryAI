@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     app_name: str = "SecretaryAI"
     debug: bool = False
     secret_key: str
+    # AES-GCM key for persisted credentials; accepts legacy SECRET_KEY ciphertext
+    # during staged rollout. Use a distinct, random value (not a password).
+    encryption_key: str = ""
+    encryption_key_previous: str = ""
 
     # Supabase
     supabase_url: str
@@ -138,6 +142,13 @@ class Settings(BaseSettings):
                 f"SECRET_KEY must be at least 32 characters (got {len(self.secret_key)}). "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
+
+        if self.encryption_key and len(self.encryption_key) < 32:
+            errors.append("ENCRYPTION_KEY must be at least 32 characters")
+        if self.encryption_key and self.encryption_key == self.secret_key:
+            errors.append("ENCRYPTION_KEY must be different from SECRET_KEY")
+        if self.encryption_key_previous and not self.encryption_key:
+            errors.append("ENCRYPTION_KEY_PREVIOUS requires ENCRYPTION_KEY")
 
         # Staging is an isolated control plane: reject cross-project credentials
         # before any database connection, email call or worker startup. Supabase

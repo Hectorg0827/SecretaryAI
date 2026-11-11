@@ -2,8 +2,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock('../lib/api', () => ({ api: { get: mocks.get, post: mocks.post } }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }));
+vi.mock('../lib/api', () => ({ api: {
+  get: mocks.get, post: mocks.post, patch: mocks.patch, delete: mocks.delete,
+} }));
 
 import { TeamSection } from './TeamSection';
 
@@ -15,6 +17,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.get.mockResolvedValue({ members: [] });
   mocks.post.mockResolvedValue({ status: 'sent', role: 'ar_specialist' });
+  mocks.patch.mockResolvedValue({ status: 'updated' });
+  mocks.delete.mockResolvedValue({ status: 'deactivated' });
 });
 
 afterEach(async () => {
@@ -56,5 +60,39 @@ describe('staging-only role invitations', () => {
     });
     expect(node.textContent).toContain('activate their role');
     expect(node.textContent).not.toContain('Bearer');
+  });
+
+  it('changes staff roles and requires a second step before disabling access', async () => {
+    const staffId = 'd60b1f3e-76b8-4132-bd68-be88151c3554';
+    const member = { id: staffId, full_name: 'Synthetic Manager', email: 'manager@example.com', role: 'manager', is_active: true };
+    mocks.get.mockResolvedValueOnce({ members: [
+      { id: 'owner-id', full_name: 'Owner', email: 'owner@example.com', role: 'owner', is_active: true },
+      member,
+    ] }).mockResolvedValueOnce({ members: [{ ...member, role: 'ar_specialist' }] })
+      .mockResolvedValueOnce({ members: [{ ...member, role: 'ar_specialist', is_active: false }] });
+    const node = await renderTeam();
+    expect(node.textContent).toContain('protected');
+    expect(node.querySelectorAll('select[id^="member-role-"]')).toHaveLength(1);
+    const select = node.querySelector<HTMLSelectElement>(`#member-role-${staffId}`)!;
+    await act(async () => {
+      select.value = 'ar_specialist';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      Array.from(node.querySelectorAll('button')).find((b) => b.textContent === 'Save role')!.click();
+    });
+    expect(mocks.patch).toHaveBeenCalledWith(`/api/team/members/${staffId}/role`, { role: 'ar_specialist' });
+    expect(node.textContent).toContain('old session can no longer access');
+
+    await act(async () => {
+      Array.from(node.querySelectorAll('button')).find((b) => b.textContent === 'Disable')!.click();
+    });
+    expect(mocks.delete).not.toHaveBeenCalled();
+    await act(async () => {
+      Array.from(node.querySelectorAll('button')).find((b) => b.textContent === 'Confirm disable')!.click();
+    });
+    expect(mocks.delete).toHaveBeenCalledWith(`/api/team/members/${staffId}`);
+    expect(node.textContent).toContain('disabled');
+    expect(node.querySelectorAll('select[id^="member-role-"]')).toHaveLength(0);
   });
 });

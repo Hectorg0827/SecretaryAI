@@ -1,7 +1,7 @@
 """
 Role-Based Access Control.
-Departmental finance roles are reserved for staged onboarding; the existing
-database role constraint and invite flow still gate assignment separately.
+Departmental finance roles are staging-invitable with exact read-only scopes;
+the database role constraint and owner-verified invite flow gate assignment.
 """
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer

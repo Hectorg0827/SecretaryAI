@@ -88,8 +88,12 @@ def setup(monkeypatch):
     monkeypatch.setattr(team, "_db", lambda: db)
     monkeypatch.setattr(team, "_redis", lambda: redis)
     monkeypatch.setattr(team, "get_settings", lambda: settings)
-    monkeypatch.setattr(team, "_send_invite_email", lambda email, name, link, _: sent.append((email, name, link)))
+    monkeypatch.setattr(
+        team, "_send_invite_email",
+        lambda email, name, link, _, role="manager": sent.append((email, name, link, role)),
+    )
     monkeypatch.setattr(team, "_audit", Mock())
+    monkeypatch.setattr(team, "_require_finance_audit", Mock())
     return db, redis, settings, sent
 
 
@@ -200,6 +204,121 @@ def test_invalid_invitation_role_and_password_rejected():
         team.InviteManagerRequest(email=EMAIL, full_name="Abel Garcia", role="owner")
     with pytest.raises(ValidationError):
         team.AcceptInviteRequest(token="a" * 44, password="weak")
+    with pytest.raises(ValidationError):
+        team.InviteTeamRequest(email=EMAIL, full_name="Test Role", role="back_office")
+    with pytest.raises(ValidationError):
+        team.InviteTeamRequest(email=EMAIL, full_name="Test Role", role="ar_specialist", company_id="other")
+    with pytest.raises(ValidationError):
+        team.AcceptInviteRequest(token="a" * 44, password="SecurePassword123", role="owner")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,authorized_scopes", [
+    ("finance_controller", {"ar", "ap", "ledger"}),
+    ("ar_specialist", {"ar"}),
+    ("ap_specialist", {"ap"}),
+    ("pricing_billbacks", {"pricing"}),
+])
+async def test_finance_role_invitation_activates_only_server_bound_tenant_and_scope(
+    setup, role, authorized_scopes,
+):
+    from app.auth.rbac import ROLE_PERMISSIONS
+    from app.domain.finance_access import finance_scopes_for_role
+
+    db, redis, settings, sent = setup
+    invitation = team.InviteTeamRequest(email=EMAIL, full_name="Staging Test", role=role)
+    result = await team.invite_manager(invitation, ACTOR)
+    assert result == {"status": "sent", "role": role, "expires_in_hours": 48}
+    assert len(db.users) == 1  # An invite is not an account.
+    assert sent[0][3] == role
+    assert len(redis.data) == 1
+    token = sent[0][2].split("#token=")[1]
+    assert token not in repr(result)
+
+    activated = await team.accept_invitation(
+        team.AcceptInviteRequest(token=token, password="SyntheticPassword987")
+    )
+    assert activated["role"] == role
+    assert db.users[-1]["company_id"] == ACTOR["company_id"]
+    assert db.users[-1]["role"] == role
+    assert db.users[-1]["is_active"] is True
+    assert finance_scopes_for_role(role) == authorized_scopes
+    assert ROLE_PERMISSIONS[role] == {"view_finance_workspace"}
+    with pytest.raises(HTTPException) as replay:
+        await team.accept_invitation(team.AcceptInviteRequest(token=token, password="SyntheticPassword987"))
+    assert replay.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_finance_role_invites_fail_closed_for_manager_disabled_mail_and_wrong_tenant(setup):
+    db, redis, settings, _ = setup
+    invite = team.InviteTeamRequest(email=EMAIL, full_name="Staging Test", role="ar_specialist")
+    with pytest.raises(HTTPException) as denied:
+        await team.invite_manager(invite, {**ACTOR, "role": "manager"})
+    assert denied.value.status_code == 403
+
+    db.users[0]["company_id"] = "wrong-tenant"
+    with pytest.raises(HTTPException) as wrong_tenant:
+        await team.invite_manager(invite, ACTOR)
+    assert wrong_tenant.value.status_code == 403
+    db.users[0]["company_id"] = COMPANY
+
+    settings.secretaryai_invite_delivery_enabled = False
+    with pytest.raises(HTTPException) as disabled:
+        await team.invite_manager(invite, ACTOR)
+    assert disabled.value.status_code == 503
+    assert not redis.data
+
+
+@pytest.mark.asyncio
+async def test_modified_stored_invite_cannot_promote_to_owner(setup):
+    import json
+    db, redis, _, sent = setup
+    invite = team.InviteTeamRequest(email=EMAIL, full_name="Staging Test", role="ar_specialist")
+    await team.invite_manager(invite, ACTOR)
+    key = next(iter(redis.data))
+    token = sent[0][2].split("#token=")[1]
+    assert token not in redis.data[key]  # Only the token digest is stored as key.
+    # Exercise a malformed server-side value without contacting a real provider.
+    payload = json.loads(redis.data[key])
+    payload["role"] = "owner"
+    redis.data[key] = json.dumps(payload)
+    with pytest.raises(HTTPException) as invalid:
+        await team.accept_invitation(team.AcceptInviteRequest(token=token, password="SecurePassword123"))
+    assert invalid.value.status_code == 400
+    assert len(db.users) == 1
+
+
+@pytest.mark.asyncio
+async def test_finance_invitation_requires_durable_audit_before_token_or_activation(setup, monkeypatch):
+    db, redis, _, sent = setup
+    invite = team.InviteTeamRequest(email=EMAIL, full_name="Synthetic Staff", role="ar_specialist")
+
+    def unavailable(*_):
+        raise HTTPException(status_code=503, detail="Finance role audit unavailable")
+
+    monkeypatch.setattr(team, "_require_finance_audit", unavailable)
+    with pytest.raises(HTTPException) as initial:
+        await team.invite_manager(invite, ACTOR)
+    assert initial.value.status_code == 503
+    assert not redis.data and not sent and len(db.users) == 1
+
+    monkeypatch.setattr(team, "_require_finance_audit", Mock())
+    await team.invite_manager(invite, ACTOR)
+    token = sent[0][2].split("#token=")[1]
+    monkeypatch.setattr(team, "_require_finance_audit", unavailable)
+    with pytest.raises(HTTPException) as acceptance:
+        await team.accept_invitation(team.AcceptInviteRequest(token=token, password="SecurePassword123"))
+    assert acceptance.value.status_code == 503
+    assert len(db.users) == 1
+
+
+def test_finance_audit_writer_fail_closed_when_event_not_persisted(monkeypatch):
+    from app.utils import audit
+    monkeypatch.setattr(audit, "write_audit_event", lambda *_args, **_kwargs: None)
+    with pytest.raises(HTTPException) as denied:
+        team._require_finance_audit(FakeDB(), COMPANY, "finance_role_invite_attempt", OWNER, "ap_specialist")
+    assert denied.value.status_code == 503
 
 
 def test_lionbi_lola_resend_invitation_is_branded_and_mocked(monkeypatch):

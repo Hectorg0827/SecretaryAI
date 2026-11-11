@@ -166,12 +166,11 @@ transactions, sends emails, or changes database records. The response is
 | AP Specialist | AP only |
 | Pricing & Billbacks | Pricing status only |
 
-The last four roles are **policy-only reservations**, not active employee
-accounts: the existing database `users.role` CHECK and manager-only invitation
-flow have intentionally NOT been changed by this gate. Role assignment and
-mailbox-verified onboarding must be migrated together, after verifying the
-staging-only database target and all authorization/RLS implications. The new
-roles have only `view_finance_workspace`, no broad `back_office` inheritance.
+At the time of Gate 6A the last four roles were **policy-only reservations**, not
+active employee accounts: the database CHECK and manager-only invitation flow
+were intentionally unchanged. Gate 6B (below) enables their assignment via a
+separate staging-only schema migration and controlled onboarding. The roles
+still have only `view_finance_workspace`, no broad `back_office` inheritance.
 
 The workspace represents unavailable or not-yet-assessed evidence with null
 counts. It never asserts billback validation, income certification, currency,
@@ -179,3 +178,51 @@ cash flow or a reconciled balance. The UI exposes the server-selected sections
 without providing a role/scope selection input. Existing owner and manager
 accounts can use the Finance Workspace now in staging; other existing roles
 retain their prior access and are denied this endpoint.
+
+## Gate 6B — staging finance-role activation and owner invitations
+
+The **staging-only** migration
+`staging_supabase/supabase/migrations/20261111002904_gate6b_finance_department_roles.sql`
+extends the existing `public.users.role` CHECK to admit `finance_controller`,
+`ar_specialist`, `ap_specialist`, and `pricing_billbacks`, preserving all five
+legacy roles. It must be applied only to the separately confirmed
+`SecretaryAI-Staging` Supabase project (`xerktvdgjvjozvckjyfp`); there is no
+production schema migration. The existing tenant `company_id` FK and users RLS
+remain in force, with no new browser-facing table grants or policies.
+
+The existing `POST /api/team/invitations` owner-only endpoint now accepts one
+of five exact roles (Manager or the four finance specialists) but no other
+privileged role or client-provided `company_id`. The sending owner's active
+tenant and owner role are rechecked against current database records before
+invitation; the receiving invitation also rechecks the inviter's active owner
+status before creating a user in that tenant. A 48-hour one-use token is
+stored as a SHA-256 digest in Redis, delivered only to the single explicitly
+allowlisted staging mailbox when delivery is enabled, and never returned to
+the inviter. Finance-role invitation and activation attempts require a durable
+audit **attempt** event; if the write fails, access creation is blocked. A
+separate best-effort outcome event is attempted after account creation. The
+attempt event is mandatory, but outcome event and account insertion are not a
+single atomic transaction; a follow-up database transaction/RPC would be
+needed before any stricter audit guarantee. No accounts or invitations are created by the
+deployment itself.
+
+Finance employees receive only `view_finance_workspace` permission and the
+exact scopes from Gate 6A, verified by the API against **current database
+role and active tenant**, not just a JWT. A signed-token middleware boundary
+also rejects finance employee sessions on **every other API route** by default,
+even when an older endpoint merely checks that a JWT is valid without checking
+the role. The only allowed exceptions are `GET /auth/me`, `POST /auth/logout`,
+and `GET /api/finance/workspace`; the last endpoint does its own authoritative
+current-role/tenant/active-user verification. The middleware checks exact HTTP
+methods and paths, not URL prefixes. They cannot view other finance
+departments, access the generic dashboards/chat, list staff, administer users,
+approve purchase orders, send emails, post payments, or modify pricing. All
+finance data remains unverified sandbox aggregate counts/availability markers;
+financial transaction workflows are explicitly disabled pending later gates.
+
+Rollback: disable invite delivery first, revoke any pending finance tokens,
+and deactivate any finance staff before deploying old app code. Keep the
+finance boundary deployed until those staff accounts are inactive. Only after
+verifying there are **zero** finance-role users may the staging role CHECK be
+restored to its five-role prior definition. Never run rollback or migration
+against production.

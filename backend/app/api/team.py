@@ -1,4 +1,4 @@
-"""Staging-only, mailbox-verified manager invitations.
+"""Staging-only, mailbox-verified owner-controlled team invitations.
 
 Unlike the public company-registration route, this flow never creates another
 company and never gives the inviting owner access to the recipient's token or
@@ -14,7 +14,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.jwt import hash_password
@@ -31,6 +31,16 @@ _TTL_SECONDS = 48 * 60 * 60
 _REDIS_PREFIX = "secretaryai_manager_invite:"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _INVITATION_SUBJECT = "Lion BI staging — Manager invitation"
+_ROLE_LABELS = {
+    "manager": "Manager",
+    "finance_controller": "Finance Controller",
+    "ar_specialist": "Accounts Receivable Specialist",
+    "ap_specialist": "Accounts Payable Specialist",
+    "pricing_billbacks": "Pricing & Billbacks Specialist",
+}
+InvitableRole = Literal[
+    "manager", "finance_controller", "ar_specialist", "ap_specialist", "pricing_billbacks",
+]
 
 
 def _staging_settings():
@@ -66,10 +76,11 @@ def _owner_record(db, actor: dict) -> dict:
     return rows[0]
 
 
-class InviteManagerRequest(BaseModel):
+class InviteTeamRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     email: str = Field(max_length=254)
     full_name: str = Field(min_length=2, max_length=120)
-    role: Literal["manager"] = "manager"
+    role: InvitableRole = "manager"
 
     @field_validator("email")
     @classmethod
@@ -88,7 +99,12 @@ class InviteManagerRequest(BaseModel):
         return value
 
 
+# Preserve the old test/import name while the staging endpoint remains stable.
+InviteManagerRequest = InviteTeamRequest
+
+
 class AcceptInviteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=32, max_length=200)
     password: str
 
@@ -111,18 +127,23 @@ def _invitation_url(raw_token: str) -> str:
     return f"https://{url.hostname}/accept-invite#token={raw_token}"
 
 
-def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
+def _send_invite_email(
+    email: str, full_name: str, link: str, settings, role: InvitableRole = "manager",
+) -> None:
     """One explicitly gated identity email; never use ordinary staging email flows."""
     if not settings.secretaryai_invite_delivery_enabled:
         raise HTTPException(status_code=503, detail="Invitation email delivery is not enabled")
     allowed = settings.secretaryai_invite_email_recipient.strip().lower()
     if not allowed or email != allowed:
         raise HTTPException(status_code=403, detail="Invitation recipient is not authorized in staging")
+    if role not in _ROLE_LABELS:
+        raise HTTPException(status_code=403, detail="Invitation role is not authorized")
 
+    title = _ROLE_LABELS[role]
     body = (
         f"Hello {full_name},\n\n"
         "You have been invited to join Lion Business Intelligence (Lion BI) "
-        "staging as a Manager. "
+        f"staging as a {title}. "
         "To accept, open this link and choose your own password:\n\n"
         f"{link}\n\n"
         "This invitation expires in 48 hours and can be used only once. "
@@ -142,7 +163,8 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
                 json={
                     "from": settings.from_email,
                     "to": [email],
-                    "subject": _INVITATION_SUBJECT,
+                    "subject": (_INVITATION_SUBJECT if role == "manager"
+                                else f"Lion BI staging — {title} invitation"),
                     "text": body,
                 },
                 timeout=10.0,
@@ -160,7 +182,9 @@ def _send_invite_email(email: str, full_name: str, link: str, settings) -> None:
         try:
             resp = SendGridAPIClient(api_key=settings.sendgrid_api_key).send(
                 Mail(from_email=settings.from_email, to_emails=email,
-                     subject=_INVITATION_SUBJECT, plain_text_content=body)
+                     subject=(_INVITATION_SUBJECT if role == "manager"
+                              else f"Lion BI staging — {title} invitation"),
+                     plain_text_content=body)
             )
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError("Email provider rejected invitation")
@@ -180,10 +204,26 @@ def _audit(db, company_id: str, event: str, actor: str | None, metadata: dict) -
         log.warning("Invitation audit event unavailable")
 
 
+def _require_finance_audit(
+    db, company_id: str, event: str, actor: str, role: str,
+) -> None:
+    """A missing audit record must block new finance-role access."""
+    try:
+        from app.utils.audit import write_audit_event
+        audit_id = write_audit_event(
+            db, company_id=company_id, event_type=event, actor_id=actor,
+            metadata={"role": role, "gate": "staging_finance_role"},
+        )
+    except Exception:
+        audit_id = None
+    if not audit_id:
+        raise HTTPException(status_code=503, detail="Finance role audit unavailable")
+
+
 @router.post("/invitations", status_code=201,
              dependencies=[Depends(require_active_subscription())])
 async def invite_manager(
-    body: InviteManagerRequest,
+    body: InviteTeamRequest,
     actor: dict = Depends(get_current_user),
     _=Depends(require_rate_limit(login_limiter)),
 ):
@@ -201,12 +241,16 @@ async def invite_manager(
     if existing:
         raise HTTPException(status_code=409, detail="This email already has an account")
 
+    if body.role != "manager":
+        _require_finance_audit(db, actor["company_id"], "finance_role_invite_attempt",
+                               actor["sub"], body.role)
+
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
     key = f"{_REDIS_PREFIX}{token_hash}"
     data = {
         "company_id": actor["company_id"], "email": body.email,
-        "full_name": body.full_name, "role": "manager", "invited_by": actor["sub"],
+        "full_name": body.full_name, "role": body.role, "invited_by": actor["sub"],
     }
     try:
         if not _redis().setex(key, _TTL_SECONDS, json.dumps(data)):
@@ -215,8 +259,13 @@ async def invite_manager(
         raise HTTPException(status_code=503, detail="Invitation token store unavailable") from None
 
     try:
-        await run_in_threadpool(_send_invite_email, body.email, body.full_name,
-                                _invitation_url(token), settings)
+        args = (body.email, body.full_name, _invitation_url(token), settings)
+        # Keep previously issued Manager invites and existing provider integration
+        # compatible while explicitly naming new departmental roles in the mail.
+        if body.role == "manager":
+            await run_in_threadpool(_send_invite_email, *args)
+        else:
+            await run_in_threadpool(_send_invite_email, *args, body.role)
     except Exception:
         try:
             _redis().delete(key)
@@ -224,8 +273,9 @@ async def invite_manager(
             log.warning("Could not revoke failed invitation token")
         raise
 
-    _audit(db, actor["company_id"], "manager_invited", actor["sub"], {"role": "manager"})
-    return {"status": "sent", "role": "manager", "expires_in_hours": 48}
+    event = "manager_invited" if body.role == "manager" else "finance_role_invited"
+    _audit(db, actor["company_id"], event, actor["sub"], {"role": body.role})
+    return {"status": "sent", "role": body.role, "expires_in_hours": 48}
 
 
 @router.post("/invitations/accept", status_code=201)
@@ -245,7 +295,7 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
 
     try:
         invitation = json.loads(raw)
-        if (invitation.get("role") != "manager" or not _EMAIL.fullmatch(invitation["email"])
+        if (invitation.get("role") not in _ROLE_LABELS or not _EMAIL.fullmatch(invitation["email"])
                 or not invitation.get("company_id") or not invitation.get("invited_by")):
             raise ValueError("Malformed invitation")
     except (KeyError, ValueError, TypeError):
@@ -255,24 +305,29 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
     # An owner who has since lost their permissions cannot onboard an approver.
     _owner_record(db, {"sub": invitation["invited_by"],
                        "company_id": invitation["company_id"], "role": "owner"})
+    if invitation["role"] != "manager":
+        _require_finance_audit(db, invitation["company_id"], "finance_role_activation_attempt",
+                               invitation["invited_by"], invitation["role"])
     try:
         created = (
             db.table("users").insert({
                 "company_id": invitation["company_id"],
                 "email": invitation["email"],
                 "full_name": invitation["full_name"],
-                "role": "manager", "is_active": True,
+                "role": invitation["role"], "is_active": True,
                 "hashed_password": password_hash,
             }).execute().data
         )
     except Exception:
-        log.warning("Manager invitation acceptance failed to create account")
+        log.warning("Team invitation acceptance failed to create account")
         raise HTTPException(status_code=409, detail="Could not activate invitation; ask owner to resend") from None
     if not created:
         raise HTTPException(status_code=503, detail="Account activation unavailable")
-    _audit(db, invitation["company_id"], "manager_invitation_accepted",
-           created[0]["id"], {"role": "manager", "invited_by": invitation["invited_by"]})
-    return {"status": "accepted", "role": "manager", "message": "You can now sign in"}
+    event = ("manager_invitation_accepted" if invitation["role"] == "manager"
+             else "finance_role_invitation_accepted")
+    _audit(db, invitation["company_id"], event, created[0]["id"],
+           {"role": invitation["role"], "invited_by": invitation["invited_by"]})
+    return {"status": "accepted", "role": invitation["role"], "message": "You can now sign in"}
 
 
 @router.get("/members", dependencies=[Depends(require_active_subscription())])

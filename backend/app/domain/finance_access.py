@@ -1,7 +1,7 @@
 """Explicit finance department scopes, distinct from general RBAC roles.
 
-This is a read-only policy foundation. No employee role is assignable until
-the staging database role constraint and invitation workflow are migrated.
+This is a read-only policy. Finance roles are available only to company owners
+through the staging mailbox-verified invitation workflow and DB constraint.
 """
 from __future__ import annotations
 

@@ -18,6 +18,7 @@ from app.utils.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.tenant import TenantMiddleware
+from app.middleware.finance_role_boundary import FinanceRoleBoundaryMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.utils.log_safety import configure_safe_transport_logging
 
@@ -222,7 +223,7 @@ async def custom_docs(request: Request):
 # ── Middleware ─────────────────────────────────────────────────────────────────
 # Starlette wraps in reverse: the LAST add_middleware call is the OUTERMOST.
 # Resulting request order (outer → inner):
-#   CORS → Timeout → Tenant → RateLimit → RequestID → SecurityHeaders → routes
+#   CORS → Timeout → FinanceBoundary → Tenant → RateLimit → RequestID → SecurityHeaders → routes
 # Tenant MUST run before RateLimit so request.state.company_id exists when the
 # limiter builds its key — otherwise every tenant shared one "anonymous" bucket
 # and a single client could 429 the whole user base.
@@ -232,6 +233,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(RateLimitMiddleware, redis_url=settings.redis_url)
 app.add_middleware(TenantMiddleware)
+app.add_middleware(FinanceRoleBoundaryMiddleware)
 # Hard wall-clock guard against hung upstreams (DB/LLM). Generous on purpose:
 # it is a hang guard, not a latency budget — long LLM turns must not be cut.
 app.add_middleware(TimeoutMiddleware, timeout_seconds=120)

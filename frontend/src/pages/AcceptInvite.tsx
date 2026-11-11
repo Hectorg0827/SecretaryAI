@@ -47,7 +47,7 @@ export function AcceptInvite() {
         <p className="text-sm text-slate-600">Meet Lola, your AI business assistant at Lion Business Intelligence.</p>
         {done ? (
           <div role="status" className="space-y-4">
-            <p className="text-emerald-700">Your Manager account is ready. Sign in with your email and new password.</p>
+            <p className="text-emerald-700">Your team account is ready. Sign in with your email and new password. Your access is limited to the role assigned by your company owner.</p>
             <Link className="text-blue-700 underline" to="/login">Go to sign in</Link>
           </div>
         ) : !token ? (
@@ -67,7 +67,7 @@ export function AcceptInvite() {
               onChange={(e) => setConfirmation(e.target.value)} />
             <button type="submit" disabled={!validPassword || password !== confirmation || loading}
               className="w-full rounded-lg bg-blue-600 disabled:opacity-50 px-4 py-2 text-white font-medium">
-              {loading ? 'Activating…' : 'Activate Manager account'}
+              {loading ? 'Activating…' : 'Activate team account'}
             </button>
           </form>
         )}

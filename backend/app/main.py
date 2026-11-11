@@ -224,14 +224,12 @@ async def custom_docs(request: Request):
 # ── Middleware ─────────────────────────────────────────────────────────────────
 # Starlette wraps in reverse: the LAST add_middleware call is the OUTERMOST.
 # Resulting request order (outer → inner):
-#   CORS → Timeout → FinanceBoundary → Tenant → RateLimit → ActiveSessionBoundary → RequestID → SecurityHeaders → routes
+#   CORS → SecurityHeaders → RequestID → Timeout → FinanceBoundary → Tenant → RateLimit → ActiveSessionBoundary → routes
 # Tenant MUST run before RateLimit so request.state.company_id exists when the
 # limiter builds its key — otherwise every tenant shared one "anonymous" bucket
 # and a single client could 429 the whole user base.
 from app.middleware.timeout import TimeoutMiddleware
 
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestIDMiddleware)
 # Staging-only live DB/JTI validation runs after rate limiting and before
 # legacy route handlers; floods cannot perform an unbounded DB lookup first.
 app.add_middleware(ActiveSessionBoundaryMiddleware)
@@ -241,6 +239,11 @@ app.add_middleware(FinanceRoleBoundaryMiddleware)
 # Hard wall-clock guard against hung upstreams (DB/LLM). Generous on purpose:
 # it is a hang guard, not a latency budget — long LLM turns must not be cut.
 app.add_middleware(TimeoutMiddleware, timeout_seconds=120)
+# These wrappers must be OUTSIDE every middleware that can reject a request:
+# stale/revoked identities, finance boundaries, rate limits and timeouts must
+# retain request correlation and security headers even when routes never run.
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 _allow_all = "*" in _cors_origins

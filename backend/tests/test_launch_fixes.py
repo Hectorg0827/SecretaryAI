@@ -557,3 +557,311 @@ class TestAutomaticSendsAreRecorded:
                         headers=_token(sub=USER_ID))
         assert r.status_code == 422
         fdb.adapter.send_email_reply.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Findings 8 + 10 — staff accounts, passwords, and sessions that really end.
+# ─────────────────────────────────────────────────────────────────────────────
+
+OWNER_ID = "10000000-0000-0000-0000-000000000001"
+STAFF_ID = "10000000-0000-0000-0000-000000000002"
+OTHER_ID = "20000000-0000-0000-0000-000000000001"
+
+
+@pytest.fixture
+def adb():
+    """One in-memory DB behind every way the auth code reaches the database."""
+    from app.auth.jwt import hash_password
+    db = FakeSupabase(
+        users=[
+            {"id": OWNER_ID, "company_id": COMPANY_A, "email": "owner@a.test", "role": "owner",
+             "is_active": True, "password_hash": hash_password("Owner-pass1"), "name": "Olive Owner"},
+            {"id": STAFF_ID, "company_id": COMPANY_A, "email": "staff@a.test", "role": "manager",
+             "is_active": True, "password_hash": hash_password("Staff-pass1"), "name": "Sam Staff"},
+            {"id": OTHER_ID, "company_id": COMPANY_B, "email": "owner@b.test", "role": "owner",
+             "is_active": True, "password_hash": hash_password("Other-pass1"), "name": "Bea Other"},
+        ],
+        audit_events=[], companies=[{"id": COMPANY_A, "name": "A"}, {"id": COMPANY_B, "name": "B"}],
+    )
+    db.sent = []
+
+    def fake_send(_db, *, company_id, to, subject, text=None, html=None, kind, actor="system"):
+        db.sent.append({"to": to, "kind": kind, "text": text or html or ""})
+        return True
+
+    app.dependency_overrides[get_db] = lambda: db
+    with patch("supabase.create_client", return_value=db), \
+         patch("app.api.auth._db", return_value=db), \
+         patch("app.api.deps.get_db", return_value=db), \
+         patch("app.utils.mailer.send_system_email", side_effect=fake_send), \
+         patch("app.api.users.send_system_email", side_effect=fake_send), \
+         patch("app.api.users.email_configured", return_value=True):
+        yield db
+    app.dependency_overrides.clear()
+
+
+def _login(client, email, password):
+    return client.post("/auth/login", json={"email": email, "password": password})
+
+
+def _bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _link_token(db, kind):
+    text = [m for m in db.sent if m["kind"] == kind][-1]["text"]
+    return text.split("token=")[1].split()[0]
+
+
+class TestLoginStillWorks:
+    def test_correct_password_logs_in(self, client, adb):
+        r = _login(client, "owner@a.test", "Owner-pass1")
+        assert r.status_code == 200 and r.json()["role"] == "owner"
+        assert client.get("/auth/me", headers=_bearer(r.json()["access_token"])).status_code == 200
+
+    def test_wrong_password_and_unknown_email_look_the_same(self, client, adb):
+        a = _login(client, "owner@a.test", "nope-nope1")
+        b = _login(client, "nobody@a.test", "nope-nope1")
+        assert a.status_code == b.status_code == 401 and a.json() == b.json()
+
+    def test_password_hashes_from_the_old_library_still_verify(self):
+        """A `$2b$` hash produced by passlib+bcrypt before the switch."""
+        from app.auth.jwt import verify_password
+        old = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # "secret"
+        assert verify_password("secret", old) is True
+        assert verify_password("Secret", old) is False
+
+    def test_garbage_hash_never_matches(self):
+        from app.auth.jwt import verify_password
+        assert verify_password("x", "not-a-hash") is False
+        assert verify_password("x", "") is False
+
+
+class TestSessionsReallyEnd:
+    def test_logout_kills_the_token_for_requests_and_refresh(self, client, adb):
+        tok = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        assert client.post("/auth/logout", headers=_bearer(tok)).status_code == 200
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 401
+        assert client.post("/auth/refresh", json={"access_token": tok}).status_code == 401
+
+    def test_store_outage_refuses_instead_of_letting_everyone_in(self, client, adb):
+        tok = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        import app.auth.jwt as jwt_mod
+        broken = MagicMock()
+        broken.exists.side_effect = ConnectionError("redis down")
+        broken.get.side_effect = ConnectionError("redis down")
+        broken.set.side_effect = ConnectionError("redis down")
+        broken.setex.side_effect = ConnectionError("redis down")
+        jwt_mod._redis_client = broken
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 503
+        assert client.post("/auth/refresh", json={"access_token": tok}).status_code == 503
+        assert client.post("/auth/logout", headers=_bearer(tok)).status_code == 503
+
+    def test_operator_can_opt_into_fail_open(self, client, adb):
+        tok = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        import app.auth.jwt as jwt_mod
+        broken = MagicMock()
+        broken.exists.side_effect = ConnectionError("redis down")
+        broken.get.side_effect = ConnectionError("redis down")
+        jwt_mod._redis_client = broken
+        with patch.object(jwt_mod, "_fail_open", return_value=True):
+            assert client.get("/auth/me", headers=_bearer(tok)).status_code == 200
+
+    def test_refresh_token_is_single_use(self, client, adb):
+        tok = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        first = client.post("/auth/refresh", json={"access_token": tok})
+        assert first.status_code == 200
+        assert client.post("/auth/refresh", json={"access_token": tok}).status_code == 401
+        assert client.get("/auth/me", headers=_bearer(first.json()["access_token"])).status_code == 200
+
+    def test_deactivated_user_is_out_immediately(self, client, adb):
+        owner = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        staff = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        assert client.get("/auth/me", headers=_bearer(staff)).status_code == 200
+        r = client.patch(f"/api/users/{STAFF_ID}", json={"is_active": False}, headers=_bearer(owner))
+        assert r.status_code == 200 and r.json()["user"]["is_active"] is False
+        assert client.get("/auth/me", headers=_bearer(staff)).status_code == 401
+        assert client.post("/auth/refresh", json={"access_token": staff}).status_code == 401
+        assert _login(client, "staff@a.test", "Staff-pass1").status_code == 403
+        assert [e["event_type"] for e in adb.events() if e["event_type"].startswith("user_de")] == ["user_deactivated"]
+
+    def test_demoted_user_loses_old_token_and_gets_new_role_on_login(self, client, adb):
+        owner = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        staff = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        assert client.patch(f"/api/users/{STAFF_ID}", json={"role": "viewer"}, headers=_bearer(owner)).status_code == 200
+        assert client.get("/auth/me", headers=_bearer(staff)).status_code == 401
+        import time; time.sleep(0.01)
+        assert _login(client, "staff@a.test", "Staff-pass1").json()["role"] == "viewer"
+
+    def test_two_factor_guessing_is_throttled_per_account(self, client, adb):
+        import pyotp
+        from app.utils.encryption import encrypt
+        from app.config import get_settings
+        secret = pyotp.random_base32()
+        adb.tables["users"][0].update(totp_enabled=True, totp_secret=encrypt(secret, get_settings().secret_key))
+        codes = [_login_2fa(client, "000000") for _ in range(7)]
+        assert codes[:5] == [401] * 5 and 429 in codes[5:]
+
+    def test_two_factor_code_cannot_be_replayed(self, client, adb):
+        import pyotp
+        from app.utils.encryption import encrypt
+        from app.config import get_settings
+        secret = pyotp.random_base32()
+        adb.tables["users"][0].update(totp_enabled=True, totp_secret=encrypt(secret, get_settings().secret_key))
+        code = pyotp.TOTP(secret).now()
+        assert _login_2fa(client, code) == 200
+        assert _login_2fa(client, code) == 401
+
+
+def _login_2fa(client, code):
+    return client.post("/auth/login", json={"email": "owner@a.test", "password": "Owner-pass1", "totp_code": code}).status_code
+
+
+class TestTeamManagement:
+    def _owner(self, client):
+        return _bearer(_login(client, "owner@a.test", "Owner-pass1").json()["access_token"])
+
+    def test_list_shows_only_my_company_and_no_hashes(self, client, adb):
+        r = client.get("/api/users", headers=self._owner(client))
+        assert r.status_code == 200
+        emails = {u["email"] for u in r.json()["users"]}
+        assert emails == {"owner@a.test", "staff@a.test"}
+        assert "password_hash" not in r.text and "$2b$" not in r.text
+
+    @pytest.mark.parametrize("role", ["manager", "sales_rep", "back_office", "viewer"])
+    def test_only_the_owner_manages_users(self, client, adb, role):
+        hdr = _token(role=role, sub=STAFF_ID)
+        assert client.get("/api/users", headers=hdr).status_code == 403
+        assert client.post("/api/users/invite", json={"email": "x@a.test", "role": "viewer"}, headers=hdr).status_code == 403
+        assert client.patch(f"/api/users/{OWNER_ID}", json={"role": "viewer"}, headers=hdr).status_code == 403
+
+    def test_invite_then_accept_then_login(self, client, adb):
+        hdr = self._owner(client)
+        r = client.post("/api/users/invite", json={"email": "New@A.test", "role": "sales_rep", "name": "Nia New"}, headers=hdr)
+        assert r.status_code == 201, r.text
+        assert r.json()["email_sent"] is True and "invite_link" not in r.json()
+        assert r.json()["user"]["pending_invite"] is True
+        new = [u for u in adb.rows("users") if u["email"] == "new@a.test"][0]
+        assert new["company_id"] == COMPANY_A and new["password_hash"] is None
+        # cannot sign in before accepting
+        assert _login(client, "new@a.test", "anything-1").status_code == 401
+
+        token = _link_token(adb, "user_invite")
+        # an invite link is not a login session
+        assert client.get("/auth/me", headers=_bearer(token)).status_code == 401
+        acc = client.post("/auth/accept-invite", json={"token": token, "password": "Brand-new1"})
+        assert acc.status_code == 200 and acc.json()["role"] == "sales_rep"
+        assert client.get("/auth/me", headers=_bearer(acc.json()["access_token"])).status_code == 200
+        # the link works once
+        assert client.post("/auth/accept-invite", json={"token": token, "password": "Brand-new2"}).status_code == 400
+        assert _login(client, "new@a.test", "Brand-new1").status_code == 200
+        types = [e["event_type"] for e in adb.events()]
+        assert "user_invited" in types and "invite_accepted" in types
+
+    def test_invite_link_is_returned_to_owner_when_email_is_not_set_up(self, client, adb):
+        with patch("app.api.users.email_configured", return_value=False):
+            r = client.post("/api/users/invite", json={"email": "p@a.test", "role": "viewer"}, headers=self._owner(client))
+        assert r.status_code == 201 and r.json()["email_sent"] is False
+        assert "/accept-invite?token=" in r.json()["invite_link"]
+
+    def test_cannot_invite_an_existing_email_or_bad_role(self, client, adb):
+        hdr = self._owner(client)
+        assert client.post("/api/users/invite", json={"email": "owner@b.test", "role": "viewer"}, headers=hdr).status_code == 409
+        assert client.post("/api/users/invite", json={"email": "z@a.test", "role": "admin"}, headers=hdr).status_code == 422
+
+    def test_cannot_touch_another_companys_user(self, client, adb):
+        hdr = self._owner(client)
+        assert client.patch(f"/api/users/{OTHER_ID}", json={"is_active": False}, headers=hdr).status_code == 404
+        assert client.post(f"/api/users/{OTHER_ID}/resend-invite", headers=hdr).status_code == 404
+        assert [u for u in adb.rows("users") if u["id"] == OTHER_ID][0]["is_active"] is True
+
+    def test_owner_cannot_lock_themselves_out(self, client, adb):
+        hdr = self._owner(client)
+        assert client.patch(f"/api/users/{OWNER_ID}", json={"is_active": False}, headers=hdr).status_code == 400
+        assert client.patch(f"/api/users/{OWNER_ID}", json={"role": "viewer"}, headers=hdr).status_code == 400
+
+    def test_last_owner_cannot_be_removed_by_a_second_owner(self, client, adb):
+        hdr = self._owner(client)
+        assert client.patch(f"/api/users/{STAFF_ID}", json={"role": "owner"}, headers=hdr).status_code == 200
+        import time; time.sleep(0.01)
+        second = _bearer(_login(client, "staff@a.test", "Staff-pass1").json()["access_token"])
+        # two owners: one may demote the other …
+        assert client.patch(f"/api/users/{OWNER_ID}", json={"role": "manager"}, headers=second).status_code == 200
+        # … but the remaining owner cannot then be removed (by self-rule or count rule)
+        assert client.patch(f"/api/users/{STAFF_ID}", json={"role": "manager"}, headers=second).status_code == 400
+
+
+class TestPasswords:
+    def test_forgot_password_answers_the_same_for_unknown_emails(self, client, adb):
+        a = client.post("/auth/forgot-password", json={"email": "owner@a.test"})
+        b = client.post("/auth/forgot-password", json={"email": "nobody@nowhere.test"})
+        assert a.status_code == b.status_code == 200 and a.json() == b.json()
+        assert [m["to"] for m in adb.sent] == ["owner@a.test"]
+
+    def test_reset_changes_password_signs_out_and_link_dies(self, client, adb):
+        old_session = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        client.post("/auth/forgot-password", json={"email": "owner@a.test"})
+        token = _link_token(adb, "password_reset")
+        assert client.get("/auth/me", headers=_bearer(token)).status_code == 401  # not a session
+        r = client.post("/auth/reset-password", json={"token": token, "new_password": "Fresh-pass9"})
+        assert r.status_code == 200, r.text
+        assert client.get("/auth/me", headers=_bearer(old_session)).status_code == 401
+        assert _login(client, "owner@a.test", "Owner-pass1").status_code == 401
+        import time; time.sleep(0.01)
+        assert _login(client, "owner@a.test", "Fresh-pass9").status_code == 200
+        assert client.post("/auth/reset-password", json={"token": token, "new_password": "Again-pass9"}).status_code == 400
+        assert "password_reset" in [e["event_type"] for e in adb.events()]
+
+    def test_reset_link_dies_if_password_changed_another_way(self, client, adb):
+        from app.auth.jwt import hash_password
+        client.post("/auth/forgot-password", json={"email": "owner@a.test"})
+        token = _link_token(adb, "password_reset")
+        adb.tables["users"][0]["password_hash"] = hash_password("Changed-elsewhere1")
+        assert client.post("/auth/reset-password", json={"token": token, "new_password": "Fresh-pass9"}).status_code == 400
+
+    @pytest.mark.parametrize("scope_link", ["user_invite"])
+    def test_a_link_of_one_kind_cannot_be_used_as_another(self, client, adb, scope_link):
+        hdr = _bearer(_login(client, "owner@a.test", "Owner-pass1").json()["access_token"])
+        client.post("/api/users/invite", json={"email": "k@a.test", "role": "viewer"}, headers=hdr)
+        invite = _link_token(adb, "user_invite")
+        assert client.post("/auth/reset-password", json={"token": invite, "new_password": "Fresh-pass9"}).status_code == 400
+        assert client.post("/auth/verify-email", json={"token": invite}).status_code == 400
+
+    def test_weak_password_is_rejected(self, client, adb):
+        client.post("/auth/forgot-password", json={"email": "owner@a.test"})
+        token = _link_token(adb, "password_reset")
+        assert client.post("/auth/reset-password", json={"token": token, "new_password": "short"}).status_code == 422
+
+    def test_change_password_keeps_this_device_and_drops_the_others(self, client, adb):
+        here = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        elsewhere = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        bad = client.post("/auth/change-password", json={"current_password": "wrong-one1", "new_password": "Fresh-pass9"}, headers=_bearer(here))
+        assert bad.status_code == 400
+        r = client.post("/auth/change-password", json={"current_password": "Owner-pass1", "new_password": "Fresh-pass9"}, headers=_bearer(here))
+        assert r.status_code == 200, r.text
+        assert client.get("/auth/me", headers=_bearer(r.json()["access_token"])).status_code == 200
+        assert client.get("/auth/me", headers=_bearer(elsewhere)).status_code == 401
+        assert client.get("/auth/me", headers=_bearer(here)).status_code == 401
+
+    def test_register_then_verify_email(self, client, adb):
+        r = client.post("/auth/register", json={"company_name": "New Co", "email": "boss@new.test", "password": "Boss-pass1"})
+        assert r.status_code == 201, r.text
+        token = _link_token(adb, "email_verification")
+        assert client.post("/auth/verify-email", json={"token": token}).status_code == 200
+        row = [u for u in adb.rows("users") if u["email"] == "boss@new.test"][0]
+        assert row["email_verified_at"] and row["role"] == "owner"
+
+    def test_unverified_user_blocked_only_when_verification_is_required(self, client, adb):
+        with patch("app.api.auth.settings") as st:
+            st.require_email_verification = True
+            st.secret_key = "test-secret-key-32-chars-long!!x"
+            assert _login(client, "owner@a.test", "Owner-pass1").status_code == 403
+        assert _login(client, "owner@a.test", "Owner-pass1").status_code == 200
+
+
+class TestValidationErrorsDoNotCrash:
+    def test_weak_password_at_signup_is_a_clear_422_not_a_500(self, client, adb):
+        r = client.post("/auth/register", json={"company_name": "X", "email": "a@b.test", "password": "short"})
+        assert r.status_code == 422
+        assert r.json()["message"] == "Password must be at least 8 characters"
+        assert "short" not in r.text  # the rejected password is not echoed back

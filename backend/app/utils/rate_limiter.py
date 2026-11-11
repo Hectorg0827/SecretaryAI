@@ -60,7 +60,7 @@ class RedisRateLimiter:
             return count < self.max_calls
 
         except Exception as exc:
-            log.debug("Redis rate limiter unavailable, using fallback: %s", exc)
+            log.warning("Redis rate limiter unavailable, using per-process fallback: %s", exc)
             # In-process fallback
             window = self._fallback[key]
             while window and now - window[0] > self.window_seconds:
@@ -95,6 +95,18 @@ login_limiter        = RedisRateLimiter(max_calls=5,   window_seconds=60,  prefi
 # not forwarding client IPs, the IP limiter degrades to one global bucket, so
 # brute-force protection must not depend on it alone.
 login_email_limiter = RedisRateLimiter(max_calls=10, window_seconds=300, prefix="rl:login-email")
+
+
+# Authenticator-code guesses, per account (5 per 5 minutes).
+totp_limiter = RedisRateLimiter(max_calls=5, window_seconds=300, prefix="rl:totp")
+
+# Account-link endpoints (reset password, accept invite, confirm email), per
+# client. Separate from the login limiter so using a link does not eat into —
+# or get blocked by — sign-in attempts.
+account_link_limiter = RedisRateLimiter(max_calls=10, window_seconds=60, prefix="rl:acct")
+
+# Password-reset / invite / verification emails, per address (3 per 15 minutes).
+password_reset_limiter = RedisRateLimiter(max_calls=3, window_seconds=900, prefix="rl:pwreset")
 
 
 def get_client_key(request: Request) -> str:

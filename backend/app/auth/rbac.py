@@ -49,7 +49,7 @@ def has_permission(role: str | None, permission: str) -> bool:
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    from app.auth.jwt import is_token_revoked
+    from app.auth.jwt import AuthStoreUnavailable, is_session_superseded, is_token_revoked
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(
@@ -59,8 +59,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         )
     # Only full user-session tokens may act as a user. Special-purpose tokens
     # signed with the same secret (2FA pre-auth "2fa_pending", connector
-    # "connector") must never resolve here — previously a pre-auth token could
-    # call /auth/2fa/setup + /verify and overwrite the victim's TOTP secret.
+    # "connector", invitations, password resets) must never resolve here.
     # Tokens issued before the scope claim existed carry no "scope" and are
     # treated as "access" so existing sessions keep working.
     if payload.get("scope", "access") != "access":
@@ -69,12 +68,34 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             detail="Token is not valid for this endpoint",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    jti = payload.get("jti")
-    if jti and is_token_revoked(jti):
+    if not payload.get("sub") or not payload.get("company_id"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has been revoked",
+            detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        jti = payload.get("jti")
+        if jti and is_token_revoked(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # Deactivated / demoted / password-changed users lose their sessions
+        # immediately, not when the token happens to expire.
+        if is_session_superseded(payload):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session ended; please sign in again",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except AuthStoreUnavailable:
+        # We cannot tell whether this session was logged out or removed, so
+        # we do not let it in.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sign-in service temporarily unavailable. Please try again shortly.",
         )
     return payload
 

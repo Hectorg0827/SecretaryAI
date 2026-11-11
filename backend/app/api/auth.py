@@ -22,14 +22,21 @@ from pydantic import BaseModel, field_validator
 import re
 
 from app.auth.oauth import (
-    build_authorization_url, exchange_code_for_tokens, revoke_token,
+    build_authorization_url, exchange_code_for_tokens, revoke_token as revoke_qbo_token,
     build_google_authorization_url, exchange_google_code_for_tokens, revoke_google_token,
 )
-from app.auth.jwt import create_access_token, decode_access_token, verify_password, hash_password, revoke_token
+from app.auth.jwt import (
+    AuthStoreUnavailable, claim_jti_once, create_access_token, decode_access_token,
+    hash_password, is_session_superseded, revoke_token as revoke_session_token,
+    revoke_user_sessions, verify_password,
+)
 from app.auth.rbac import get_current_user, oauth2_scheme, require_permission
 from app.config import get_settings
 from app.utils.encryption import encrypt, decrypt
-from app.utils.rate_limiter import login_limiter, login_email_limiter, require_rate_limit
+from app.utils.rate_limiter import (
+    account_link_limiter, login_limiter, login_email_limiter, password_reset_limiter,
+    require_rate_limit, totp_limiter,
+)
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -46,28 +53,42 @@ def _redis():
 
 
 def _state_set(state: str, company_id: str) -> None:
+    """Remember which company started an OAuth connect (10 minutes)."""
     try:
-        r = _redis()
-        r.setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id)
+        _redis().setex(f"oauth_state:{state}", _OAUTH_STATE_TTL, company_id)
     except Exception as exc:
-        log.warning("Redis unavailable for OAuth state; using fallback: %s", exc)
-        _oauth_states_fallback[state] = company_id
+        # No per-process fallback: with more than one server process the
+        # callback would land on a worker that never saw the state.
+        log.error("Redis unavailable for OAuth state: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again.")
 
 
 def _state_pop(state: str) -> str | None:
+    """Return the company for an OAuth state and delete it (single use)."""
+    if not state:
+        return None
     try:
         r = _redis()
         key = f"oauth_state:{state}"
-        company_id = r.get(key)
-        if company_id:
-            r.delete(key)
+        pipe = r.pipeline()
+        pipe.get(key)
+        pipe.delete(key)
+        company_id, _ = pipe.execute()
         return company_id
-    except Exception:
-        return _oauth_states_fallback.pop(state, None)
+    except Exception as exc:
+        log.error("Redis unavailable for OAuth state lookup: %s", exc)
+        return None
 
 
-# Fallback for when Redis is unreachable (single-worker dev only)
-_oauth_states_fallback: dict[str, str] = {}
+def _audit(company_id: str, event_type: str, actor_id: str | None = None, **metadata) -> None:
+    """Best-effort audit record for auth / integration events."""
+    try:
+        from app.api.deps import get_db
+        from app.utils.audit import write_audit_event
+        write_audit_event(get_db(), company_id=company_id, event_type=event_type,
+                          actor_id=actor_id, metadata=metadata or None)
+    except Exception as exc:
+        log.error("Auth audit failed for %s: %s", event_type, exc)
 
 
 # ─── QBO OAuth ────────────────────────────────────────────────────────────────
@@ -106,7 +127,7 @@ async def qbo_callback(
     """
     if error:
         log.warning("QBO OAuth error: %s", error)
-        return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason={error}")
+        return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason={_safe_reason(error)}")
 
     company_id = _state_pop(state)
     if not company_id:
@@ -145,6 +166,7 @@ async def qbo_callback(
             "qbo_token_expires_at": expires_at,
         }).eq("id", company_id).execute()
         log.info("QBO tokens stored for company %s (realm %s)", company_id, realm_id)
+        _audit(company_id, "integration_connected", None, integration="quickbooks_online", realm_id=realm_id)
     except Exception as exc:
         log.error("Failed to store QBO tokens for company %s: %s", company_id, exc)
         return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason=db_write")
@@ -166,7 +188,7 @@ async def qbo_disconnect(user: dict = Depends(require_permission("manage_integra
 
         if company.get("qbo_refresh_token"):
             token = decrypt(company["qbo_refresh_token"], settings.secret_key)
-            await revoke_token(token)
+            await revoke_qbo_token(token)
 
         db.table("companies").update({
             "qb_connection_status": "disconnected",
@@ -178,6 +200,7 @@ async def qbo_disconnect(user: dict = Depends(require_permission("manage_integra
         log.error("QBO disconnect failed for %s: %s", company_id, exc)
         raise HTTPException(status_code=500, detail="Failed to disconnect QuickBooks")
 
+    _audit(company_id, "integration_disconnected", user.get("sub"), integration="quickbooks_online")
     return {"status": "disconnected"}
 
 
@@ -204,7 +227,7 @@ async def gmail_callback(
     """
     if error:
         log.warning("Google OAuth error: %s", error)
-        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason={error}")
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason={_safe_reason(error)}")
 
     company_id = _state_pop(state)
     if not company_id:
@@ -231,6 +254,7 @@ async def gmail_callback(
             "google_connected_at":  datetime.now(timezone.utc).isoformat(),
         }).eq("id", company_id).execute()
         log.info("Google tokens stored for company %s", company_id)
+        _audit(company_id, "integration_connected", None, integration="google")
     except Exception as exc:
         log.error("Failed to store Google tokens for company %s: %s", company_id, exc)
         return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason=db_write")
@@ -263,10 +287,54 @@ async def gmail_disconnect(user: dict = Depends(require_permission("manage_integ
         log.error("Google disconnect failed for %s: %s", company_id, exc)
         raise HTTPException(status_code=500, detail="Failed to disconnect Google")
 
+    _audit(company_id, "integration_disconnected", user.get("sub"), integration="google")
     return {"status": "disconnected"}
 
 
 # ─── Local auth ───────────────────────────────────────────────────────────────
+
+def _verify_totp(user_id: str, secret: str, code: str) -> None:
+    """
+    Check a 6-digit authenticator code. Raises HTTPException on any failure.
+
+    * Guessing is throttled per account (not per IP), so a 6-digit code
+      cannot be brute-forced from many addresses.
+    * A code is accepted once: a code seen over someone's shoulder or captured
+      in transit cannot be replayed inside its validity window.
+    """
+    import pyotp
+
+    code = (code or "").strip().replace(" ", "")
+    if not totp_limiter.is_allowed(str(user_id)):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many incorrect codes. Wait a few minutes and try again.",
+            headers={"Retry-After": str(totp_limiter.window_seconds)},
+        )
+    if not (code.isdigit() and len(code) == 6) or not pyotp.TOTP(secret).verify(code, valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid 2FA code")
+    try:
+        first_use = _redis().set(f"totp_used:{user_id}:{code}", "1", nx=True, ex=120)
+    except Exception as exc:
+        log.error("2FA replay check unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    if not first_use:
+        raise HTTPException(status_code=401, detail="That code was already used. Wait for the next one.")
+
+
+def _login_response(user: dict) -> dict:
+    token = create_access_token({
+        "sub": user["id"],
+        "company_id": user["company_id"],
+        "role": user["role"],
+    })
+    return {"access_token": token, "token_type": "bearer",
+            "company_id": user["company_id"], "role": user["role"]}
+
+
+# A real bcrypt hash of a random value, used only to equalise login timing.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
+
 
 class LoginRequest(BaseModel):
     email: str | None = None
@@ -337,17 +405,9 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         except Exception:
             raise HTTPException(status_code=500, detail="2FA configuration error")
 
-        import pyotp
-        if not pyotp.TOTP(secret).verify(body.totp_code, valid_window=1):
-            raise HTTPException(status_code=401, detail="Invalid 2FA code")
-
-        token = create_access_token({
-            "sub": user["id"],
-            "company_id": user["company_id"],
-            "role": user["role"],
-        })
-        return {"access_token": token, "token_type": "bearer",
-                "company_id": user["company_id"], "role": user["role"]}
+        _verify_totp(user["id"], secret, body.totp_code)
+        _audit(user["company_id"], "user_login", user["id"], role=user["role"], two_factor=True)
+        return _login_response(user)
 
     # ── First-step: email + password ──────────────────────────────────────────
     if not body.email or not body.password:
@@ -366,7 +426,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
     try:
         result = (
             db.table("users")
-            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret")
+            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret, email_verified_at")
             .eq("email", body.email.lower().strip())
             .execute()
         )
@@ -375,12 +435,22 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     users = result.data or []
-    if not users or not verify_password(body.password, users[0]["password_hash"]):
+    # An invited user who has not accepted yet has no password: never matches.
+    if not users or not verify_password(body.password, users[0].get("password_hash") or ""):
+        if not users:
+            # Spend the same time as a real check so response time does not
+            # reveal whether the email exists.
+            verify_password(body.password, _DUMMY_PASSWORD_HASH)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     user = users[0]
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Account disabled")
+    if settings.require_email_verification and not user.get("email_verified_at"):
+        raise HTTPException(
+            status_code=403,
+            detail="Please confirm your email address first. Check your inbox for the confirmation link.",
+        )
 
     # ── 2FA enforcement ──────────────────────────────────────────────────────
     if user.get("totp_enabled") and user.get("totp_secret"):
@@ -401,15 +471,20 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             secret = decrypt(user["totp_secret"], settings.secret_key)
         except Exception:
             raise HTTPException(status_code=500, detail="2FA configuration error")
-        import pyotp
-        if not pyotp.TOTP(secret).verify(body.totp_code, valid_window=1):
-            raise HTTPException(status_code=401, detail="Invalid 2FA code")
+        _verify_totp(user["id"], secret, body.totp_code)
 
     token = create_access_token({
         "sub": user["id"],
         "company_id": user["company_id"],
         "role": user["role"],
     })
+
+    try:
+        db.table("users").update(
+            {"last_login_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", user["id"]).execute()
+    except Exception:
+        pass
 
     # Audit successful login (non-fatal)
     try:
@@ -452,7 +527,7 @@ async def refresh_token(body: RefreshRequest):
       (reuse detection).
     """
     from jose import jwt as jose_jwt, JWTError
-    from app.auth.jwt import is_token_revoked, blacklist_jti
+    from app.auth.jwt import is_token_revoked
 
     try:
         # Decode WITHOUT verifying expiry so a just-expired token can still be
@@ -474,9 +549,18 @@ async def refresh_token(body: RefreshRequest):
     if not user_id or not company_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # Enforce revocation (logout / prior rotation): a blacklisted token is dead.
-    if jti and is_token_revoked(jti):
-        raise HTTPException(status_code=401, detail="Token revoked; please log in again")
+    # Only a user-session token can be refreshed into a user-session token.
+    if payload.get("scope", "access") != "access":
+        raise HTTPException(status_code=401, detail="Token is not refreshable")
+
+    # Enforce revocation (logout / prior rotation / removed user).
+    try:
+        if jti and is_token_revoked(jti):
+            raise HTTPException(status_code=401, detail="Token revoked; please log in again")
+        if is_session_superseded(payload):
+            raise HTTPException(status_code=401, detail="Session ended; please log in again")
+    except AuthStoreUnavailable:
+        raise HTTPException(status_code=503, detail="Sign-in service temporarily unavailable. Please try again shortly.")
 
     # Bound the renewal window. A token expired for longer than the refresh
     # window cannot be renewed — this caps the lifetime of a leaked token.
@@ -485,10 +569,6 @@ async def refresh_token(body: RefreshRequest):
         expired_for = datetime.now(timezone.utc).timestamp() - float(exp)
         if expired_for > refresh_window_seconds:
             raise HTTPException(status_code=401, detail="Session expired; please log in again")
-
-    # Only a user-session token can be refreshed into a user-session token.
-    if payload.get("scope", "access") != "access":
-        raise HTTPException(status_code=401, detail="Token is not refreshable")
 
     # Verify the user still exists and is active, and re-read role/company from
     # the DB so a demoted or moved user does not keep stale privileges for the
@@ -513,12 +593,18 @@ async def refresh_token(body: RefreshRequest):
     role = current.get("role") or role
     company_id = current.get("company_id") or company_id
 
-    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
-
-    # Single-use rotation: invalidate the presented token so it can't be reused.
+    # Single-use rotation, atomically: the presented token is consumed BEFORE a
+    # new one is issued, so two requests with the same token cannot both get a
+    # fresh session, and if the store is down no token is issued at all.
     if jti:
-        blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+        try:
+            lifetime = int(refresh_window_seconds + settings.access_token_expire_minutes * 60)
+            if not claim_jti_once(jti, ttl_seconds=lifetime):
+                raise HTTPException(status_code=401, detail="Token already used; please log in again")
+        except AuthStoreUnavailable:
+            raise HTTPException(status_code=503, detail="Sign-in service temporarily unavailable. Please try again shortly.")
 
+    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
     return {"access_token": new_token, "token_type": "bearer"}
 
 
@@ -531,7 +617,12 @@ async def logout(
     Revoke the current JWT by adding its JTI to the Redis blacklist.
     The token becomes invalid immediately, even before its natural expiry.
     """
-    revoke_token(token)
+    try:
+        revoke_session_token(token)
+    except AuthStoreUnavailable:
+        # Be honest: the session could NOT be ended server-side.
+        raise HTTPException(status_code=503, detail="Could not sign out right now. Please try again.")
+    _audit(_user["company_id"], "user_logout", _user.get("sub"))
     return {"status": "logged_out"}
 
 
@@ -576,12 +667,14 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r'[A-Za-z]', v):
-            raise ValueError("Password must contain at least one letter")
-        if not re.search(r'[0-9]', v):
-            raise ValueError("Password must contain at least one number")
+        return validate_new_password(v)
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v or len(v) > 200:
+            raise ValueError("Please enter your company name")
         return v
 
 
@@ -670,6 +763,21 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         "role": "owner",
     })
     log.info("New owner registered: user=%s company=%s", user["id"], company_id)
+
+    # Ask the new owner to confirm their email address (non-fatal).
+    email_sent = False
+    try:
+        email_sent = send_verification_email(user)
+    except Exception as exc:
+        log.warning("Could not send verification email for %s: %s", user["id"], exc)
+
+    if settings.require_email_verification:
+        # No session until the address is confirmed.
+        return {
+            "status": "verification_required",
+            "message": "Check your inbox and confirm your email address to finish signing up.",
+            "email_sent": email_sent,
+        }
 
     # Audit registration (non-fatal)
     try:
@@ -804,6 +912,7 @@ async def twofa_verify(body: TwoFACodeRequest, user: dict = Depends(get_current_
         log.warning("2FA verify Redis cleanup failed for user %s: %s", user_id, exc)
 
     log.info("2FA enabled for user %s", user_id)
+    _audit(user["company_id"], "two_factor_enabled", user_id)
     return {"enabled": True}
 
 
@@ -838,9 +947,7 @@ async def twofa_disable(body: TwoFACodeRequest, user: dict = Depends(get_current
         raise HTTPException(status_code=400, detail="2FA is not enabled for this account")
 
     secret = decrypt(row["totp_secret"], settings.secret_key)
-
-    if not pyotp.TOTP(secret).verify(body.code):
-        raise HTTPException(status_code=400, detail="Invalid verification code")
+    _verify_totp(user_id, secret, body.code)
 
     # Disable 2FA in DB
     try:
@@ -853,10 +960,313 @@ async def twofa_disable(body: TwoFACodeRequest, user: dict = Depends(get_current
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     log.info("2FA disabled for user %s", user_id)
+    _audit(user["company_id"], "two_factor_disabled", user_id)
     return {"enabled": False}
 
 
+# ─── Passwords, invitations and email confirmation ────────────────────────────
+#
+# All three use short-lived, single-purpose, single-use links:
+#   * the token carries a `scope` that get_current_user refuses, so a link can
+#     never be used as a login session;
+#   * it is bound to the account's current password fingerprint, so it dies
+#     the moment the password changes;
+#   * it is consumed atomically on use, so it cannot be replayed.
+
+PASSWORD_RESET_MINUTES = 30
+INVITE_DAYS = 7
+EMAIL_VERIFY_DAYS = 3
+
+
+def validate_new_password(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Password must be at most 72 characters")
+    if not re.search(r'[A-Za-z]', v):
+        raise ValueError("Password must contain at least one letter")
+    if not re.search(r'[0-9]', v):
+        raise ValueError("Password must contain at least one number")
+    return v
+
+
+def _password_fingerprint(password_hash: str | None) -> str:
+    """Opaque marker of the current password, used to tie a link to it."""
+    import hashlib
+    return hashlib.sha256(f"{settings.secret_key}:{password_hash or ''}".encode()).hexdigest()[:24]
+
+
+def make_account_link_token(user: dict, scope: str, lifetime) -> str:
+    return create_access_token(
+        {"sub": user["id"], "scope": scope, "pwv": _password_fingerprint(user.get("password_hash"))},
+        expires_delta=lifetime,
+    )
+
+
+def account_link(path: str, token: str) -> str:
+    return f"{_app_base_url()}{path}?token={token}"
+
+
+def _db():
+    from app.api.deps import get_db
+    return get_db()
+
+
+def _consume_account_link(token: str, scope: str) -> dict:
+    """
+    Validate a single-purpose link token and return the user row.
+    Raises HTTPException(400) with one generic message for every failure, so
+    the response never reveals why a link was refused.
+    """
+    bad = HTTPException(status_code=400, detail="This link is invalid or has expired. Please request a new one.")
+    payload = decode_access_token(token or "")
+    if not payload or payload.get("scope") != scope or not payload.get("sub") or not payload.get("jti"):
+        raise bad
+    try:
+        result = (
+            _db().table("users")
+            .select("id, company_id, email, role, is_active, password_hash, email_verified_at")
+            .eq("id", payload["sub"])
+            .execute()
+        )
+    except Exception as exc:
+        log.error("Account link lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    if not result.data:
+        raise bad
+    user = result.data[0]
+    if not user.get("is_active", True):
+        raise bad
+    if payload.get("pwv") != _password_fingerprint(user.get("password_hash")):
+        raise bad
+    try:
+        remaining = max(60, int(payload["exp"] - datetime.now(timezone.utc).timestamp()))
+        if not claim_jti_once(payload["jti"], ttl_seconds=remaining):
+            raise bad
+    except AuthStoreUnavailable:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again shortly.")
+    return user
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest, _=Depends(require_rate_limit(account_link_limiter))):
+    """
+    Email a password-reset link. Always answers the same way, whether or not
+    the address has an account, so it cannot be used to discover who is a user.
+    """
+    from datetime import timedelta
+    from app.utils.mailer import send_system_email
+
+    generic = {"status": "ok", "message": "If that email has an account, a reset link is on its way."}
+    email = (body.email or "").strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return generic
+    if not password_reset_limiter.is_allowed(email):
+        return generic
+
+    try:
+        result = (
+            _db().table("users")
+            .select("id, company_id, email, is_active, password_hash")
+            .eq("email", email)
+            .execute()
+        )
+    except Exception as exc:
+        log.error("Forgot-password lookup failed: %s", exc)
+        return generic
+
+    user = (result.data or [None])[0]
+    if not user or not user.get("is_active", True) or not user.get("password_hash"):
+        return generic
+
+    from datetime import timedelta as _td
+    token = make_account_link_token(user, "password_reset", _td(minutes=PASSWORD_RESET_MINUTES))
+    send_system_email(
+        _db(), company_id=user["company_id"], to=user["email"],
+        subject="Reset your SecretaryAI password",
+        text=(
+            "Someone asked to reset the password for this SecretaryAI account.\n\n"
+            f"To choose a new password, open this link within {PASSWORD_RESET_MINUTES} minutes:\n"
+            f"{account_link('/reset-password', token)}\n\n"
+            "If you did not ask for this, you can ignore this email — your password has not changed."
+        ),
+        kind="password_reset",
+    )
+    return generic
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _pw(cls, v: str) -> str:
+        return validate_new_password(v)
+
+
+def _set_password(user: dict, new_password: str, extra: dict | None = None) -> None:
+    """Store a new password hash and end every existing session of the user."""
+    update = {
+        "password_hash": hash_password(new_password),
+        "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        **(extra or {}),
+    }
+    try:
+        # End old sessions FIRST: if this cannot be recorded we do not change
+        # the password and leave stolen sessions alive.
+        revoke_user_sessions(user["id"])
+        _db().table("users").update(update).eq("id", user["id"]).execute()
+    except AuthStoreUnavailable:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again shortly.")
+    except Exception as exc:
+        log.error("Password update failed for user %s: %s", user["id"], exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+
+
+@router.post("/reset-password")
+async def reset_password(body: ResetPasswordRequest, _=Depends(require_rate_limit(account_link_limiter))):
+    """Set a new password using an emailed reset link. Signs out all sessions."""
+    user = _consume_account_link(body.token, "password_reset")
+    # Receiving the reset email also proves the address is theirs.
+    extra = {} if user.get("email_verified_at") else {"email_verified_at": datetime.now(timezone.utc).isoformat()}
+    _set_password(user, body.new_password, extra)
+    _audit(user["company_id"], "password_reset", user["id"])
+    return {"status": "ok", "message": "Your password has been changed. Please sign in."}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _pw(cls, v: str) -> str:
+        return validate_new_password(v)
+
+
+@router.post("/change-password")
+async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    """Change the signed-in user's password. Other devices are signed out."""
+    if not login_email_limiter.is_allowed(f"chpw:{user['sub']}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again in a few minutes.")
+    try:
+        result = (
+            _db().table("users").select("id, company_id, role, password_hash, is_active")
+            .eq("id", user["sub"]).execute()
+        )
+    except Exception as exc:
+        log.error("Change-password lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    row = (result.data or [None])[0]
+    if not row or not row.get("is_active", True):
+        raise HTTPException(status_code=401, detail="Account not found")
+    if not verify_password(body.current_password, row.get("password_hash") or ""):
+        raise HTTPException(status_code=400, detail="Your current password is not correct.")
+
+    _set_password(row, body.new_password)
+    _audit(row["company_id"], "password_changed", row["id"])
+    # This device stays signed in with a fresh session; every other one is out.
+    import time as _time
+    _time.sleep(0.002)  # the new token must be issued strictly after the cut-off
+    return {"status": "ok", **_login_response(row)}
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    password: str
+    full_name: str = ""
+
+    @field_validator("password")
+    @classmethod
+    def _pw(cls, v: str) -> str:
+        return validate_new_password(v)
+
+
+@router.post("/accept-invite")
+async def accept_invite(body: AcceptInviteRequest, _=Depends(require_rate_limit(account_link_limiter))):
+    """An invited team member chooses a password and is signed in."""
+    user = _consume_account_link(body.token, "invite")
+    if user.get("password_hash"):
+        raise HTTPException(status_code=400, detail="This invitation was already used. Please sign in.")
+    extra: dict = {"email_verified_at": datetime.now(timezone.utc).isoformat()}
+    if body.full_name.strip():
+        extra["name"] = body.full_name.strip()[:120]
+    _set_password(user, body.password, extra)
+    _audit(user["company_id"], "invite_accepted", user["id"], role=user["role"])
+    import time as _time
+    _time.sleep(0.002)
+    return _login_response(user)
+
+
+class TokenRequest(BaseModel):
+    token: str
+
+
+@router.post("/verify-email")
+async def verify_email(body: TokenRequest, _=Depends(require_rate_limit(account_link_limiter))):
+    """Confirm an email address from the link sent at sign-up."""
+    user = _consume_account_link(body.token, "email_verify")
+    if not user.get("email_verified_at"):
+        try:
+            _db().table("users").update(
+                {"email_verified_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("id", user["id"]).execute()
+        except Exception as exc:
+            log.error("Email verification update failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        _audit(user["company_id"], "email_verified", user["id"])
+    return {"status": "ok", "message": "Your email address is confirmed."}
+
+
+def send_verification_email(user: dict) -> bool:
+    from datetime import timedelta as _td
+    from app.utils.mailer import send_system_email
+    token = make_account_link_token(user, "email_verify", _td(days=EMAIL_VERIFY_DAYS))
+    return send_system_email(
+        _db(), company_id=user["company_id"], to=user["email"],
+        subject="Confirm your email for SecretaryAI",
+        text=(
+            "Welcome to SecretaryAI.\n\n"
+            "Please confirm this is your email address by opening this link:\n"
+            f"{account_link('/verify-email', token)}\n\n"
+            "If you did not create an account, you can ignore this email."
+        ),
+        kind="email_verification",
+    )
+
+
+@router.post("/resend-verification")
+async def resend_verification(body: ForgotPasswordRequest, _=Depends(require_rate_limit(account_link_limiter))):
+    """Send the confirmation email again (same answer whether or not it exists)."""
+    generic = {"status": "ok", "message": "If that account needs confirming, a new link is on its way."}
+    email = (body.email or "").strip().lower()
+    if not password_reset_limiter.is_allowed(f"verify:{email}"):
+        return generic
+    try:
+        result = (
+            _db().table("users").select("id, company_id, email, is_active, password_hash, email_verified_at")
+            .eq("email", email).execute()
+        )
+        user = (result.data or [None])[0]
+        if user and user.get("is_active", True) and not user.get("email_verified_at"):
+            send_verification_email(user)
+    except Exception as exc:
+        log.error("Resend-verification failed: %s", exc)
+    return generic
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _safe_reason(value: str) -> str:
+    """Reduce a provider-supplied error code to a short, URL-safe token."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "", value or "")[:40]
+    return cleaned or "error"
+
 
 def _app_base_url() -> str:
     if settings.frontend_url:

@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 7
     api_key_rotation_hours: int = 24
+    # If Redis (session revocation store) is unreachable, authenticated
+    # requests are refused. Set true only if you accept that logged-out or
+    # removed users may get back in during a Redis outage.
+    auth_fail_open_on_store_outage: bool = False
+    # When true, a new account cannot sign in until its email address has been
+    # confirmed. Needs SENDGRID_API_KEY (the confirmation email must be
+    # deliverable), which is checked at startup.
+    require_email_verification: bool = False
 
     # Google APIs (Gmail + Sheets)
     google_client_id: str = ""
@@ -129,6 +137,12 @@ class Settings(BaseSettings):
             missing = sorted(set(google_fields) - google_set)
             errors.append(
                 f"Partial Google config: {missing} must also be set when using Gmail/Sheets"
+            )
+
+        if self.require_email_verification and not self.sendgrid_api_key:
+            errors.append(
+                "REQUIRE_EMAIL_VERIFICATION is on but SENDGRID_API_KEY is not set — "
+                "nobody could receive the confirmation email, so nobody could sign in"
             )
 
         if errors:

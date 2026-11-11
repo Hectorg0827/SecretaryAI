@@ -97,6 +97,12 @@ def actual_app(monkeypatch):
     monkeypatch.setattr(gate6c, "get_db", lambda: db)
     monkeypatch.setattr(gate6c, "is_token_revoked", lambda jti: jti in revoked)
     monkeypatch.setattr(auth_jwt, "is_token_revoked", lambda jti: jti in revoked)
+    # Both the session middleware AND the real finance router independently
+    # enforce staging-only behavior; mirror the same environment in this test.
+    monkeypatch.setattr(
+        finance_workspace, "get_settings",
+        lambda: SimpleNamespace(secretaryai_deployment_env="staging"),
+    )
 
     def snapshot(_db, _company, _report_type):
         return {

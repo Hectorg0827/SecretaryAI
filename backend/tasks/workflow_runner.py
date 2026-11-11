@@ -27,13 +27,19 @@ def run_all(self):
 
 
 def _process_company(db, company: dict) -> None:
-    from app.workflows.engine import WorkflowEngine
+    from app.workflows.executor import run_steps, start_from_event
     from datetime import datetime, timedelta, timezone
 
-    engine = WorkflowEngine(db, company["id"])
     company_id = company["id"]
+    adapter = None
 
-    # Auto-start workflows for unhandled high-priority feed events
+    def _adapter():
+        nonlocal adapter
+        if adapter is None:
+            adapter = build_adapter(company)
+        return adapter
+
+    # Feed events that should start a workflow
     unhandled = (
         db.table("feed_events")
         .select("*")
@@ -45,33 +51,33 @@ def _process_company(db, company: dict) -> None:
         .execute()
     ).data or []
 
-    TRIGGER_TO_WORKFLOW = {
-        "low_stock":       "low_stock_reorder",
-        "dormant_account": "dormant_account_reactivation",
-        "overdue_invoice": "overdue_outreach",
-    }
+    # One workflow per feed event, ever — otherwise the same customer would be
+    # drafted the same email every hour.
+    previous = (
+        db.table("workflow_runs").select("trigger_data").eq("company_id", company_id).execute()
+    ).data or []
+    started_for = {str((r.get("trigger_data") or {}).get("feed_event_id") or "") for r in previous}
 
     for event in unhandled:
-        wf_name = TRIGGER_TO_WORKFLOW.get(event["event_type"])
-        if not wf_name:
+        if str(event.get("id") or "") in started_for:
             continue
-        # Check if a workflow for this entity is already running
-        existing = (
-            db.table("workflow_runs")
-            .select("id")
-            .eq("company_id", company_id)
-            .eq("workflow_name", wf_name)
-            .in_("status", ["running", "awaiting_approval"])
-            .execute()
-        ).data
-        if not existing:
-            try:
-                run_id = engine.start(wf_name, trigger_data=event.get("action_data", {}))
-                # Mark first step as in-progress (draft created, awaiting approval)
-                engine.advance(run_id, {"auto_started": True}, awaiting_entity_id=event["id"])
-                log.info("Auto-started workflow %s (run %s) for event %s", wf_name, run_id, event["id"])
-            except Exception as exc:
-                log.warning("Failed to start workflow %s: %s", wf_name, exc)
+        try:
+            run_id = asyncio.run(start_from_event(db, _adapter(), company, event))
+            if run_id:
+                started_for.add(str(event.get("id")))
+                log.info("Started workflow run %s for event %s", run_id, event["id"])
+        except Exception as exc:
+            log.warning("Failed to start workflow for event %s: %s", event.get("id"), exc)
+
+    # Runs left 'running' (e.g. a worker stopped mid-step): carry them forward.
+    stalled = (
+        db.table("workflow_runs").select("id").eq("company_id", company_id).eq("status", "running").limit(20).execute()
+    ).data or []
+    for run in stalled:
+        try:
+            asyncio.run(run_steps(db, _adapter(), company, run["id"]))
+        except Exception as exc:
+            log.warning("Failed to continue workflow %s: %s", run.get("id"), exc)
 
     # Expire timed-out awaiting-approval runs (default 48h)
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()

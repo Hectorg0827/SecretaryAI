@@ -1613,3 +1613,135 @@ class TestPurchaseOrderDrafts:
         client.post("/api/actions/draft-po", json={"item_id": "ITEM1", "vendor_id": "V2", "qty": 500}, headers=_token(sub=USER_ID))
         assert _approve(client, draft_id=podb.rows("drafts")[0]["id"]).status_code == 403
         podb.adapter.create_purchase_order.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workflows carry out their steps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def wfdb(podb):
+    """podb (QuickBooks items + vendors) plus customers, a mailbox and workflow tables."""
+    from app.connectors.base import Customer
+    from decimal import Decimal
+    podb.tables.update(workflow_runs=[], feed_events=[], companies=[{"id": COMPANY_A, "name": "Acme Beverage"}])
+    podb.adapter.get_all_customers = AsyncMock(return_value=[
+        Customer(id="c1", qb_id="QB001", name="Corner Deli", email="buyer@deli.test", phone=None, state="CA",
+                 balance=Decimal("420.50"), total_sales=Decimal("9000")),
+        Customer(id="c2", qb_id="QB002", name="No Email Market", email=None, phone=None, state="CA",
+                 balance=Decimal("0"), total_sales=Decimal("100")),
+    ])
+    podb.adapter.send_email_reply = AsyncMock(return_value={"status": "sent"})
+    return podb
+
+
+def _event(event_type, action_data, event_id="ev-1", entity="e1"):
+    return {"id": event_id, "company_id": COMPANY_A, "event_type": event_type, "action_data": action_data,
+            "entity_id": entity, "is_read": False, "is_dismissed": False}
+
+
+COMPANY_ROW = {"id": COMPANY_A, "name": "Acme Beverage"}
+
+
+class TestWorkflowsDoTheirSteps:
+    @pytest.mark.asyncio
+    async def test_overdue_invoice_creates_a_real_email_draft_and_waits(self, wfdb):
+        from app.workflows.executor import start_from_event
+        run_id = await start_from_event(wfdb, wfdb.adapter, COMPANY_ROW,
+                                        _event("overdue_invoice", {"account_name": "Corner Deli", "balance": 420.5}))
+        run = wfdb.rows("workflow_runs")[0]
+        assert run["id"] == run_id and run["status"] == "awaiting_approval" and run["current_step"] == 1
+        d = wfdb.rows("drafts")[0]
+        assert d["action_type"] == "draft_customer_email" and d["workflow_run_id"] == run_id and d["created_by"] == "ai"
+        assert d["content"]["to"] == "buyer@deli.test"
+        assert "$420.50" in d["content"]["body"] and d["content"]["body"].endswith("Acme Beverage")
+        # nothing was sent just by starting the workflow
+        wfdb.adapter.send_email_reply.assert_not_called()
+
+    def test_approving_the_draft_sends_it_and_completes_the_run(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW,
+                                     _event("overdue_invoice", {"account_name": "Corner Deli", "balance": 420.5})))
+        d = wfdb.rows("drafts")[0]
+        out = _approve(client, draft_id=d["id"]).json()
+        assert out["execution_status"] == "executed"
+        wfdb.adapter.send_email_reply.assert_awaited_once()
+        assert wfdb.adapter.send_email_reply.await_args.kwargs["to"] == "buyer@deli.test"
+        run = wfdb.rows("workflow_runs")[0]
+        assert run["status"] == "completed" and run["current_step"] == run["total_steps"] == 4
+        types = [e["event_type"] for e in wfdb.events()]
+        assert types == ["draft_created", "draft_approved", "draft_executed", "workflow_outreach_logged"]
+
+    def test_rejecting_the_draft_cancels_the_run_and_sends_nothing(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("dormant_account", {"account_name": "Corner Deli", "customer_id": "QB001"})))
+        d = wfdb.rows("drafts")[0]
+        assert "Checking in" in d["content"]["subject"]
+        client.post(f"/api/actions/reject/{d['id']}", json={"reason": "not now"}, headers=_token(sub=USER_ID))
+        assert wfdb.rows("workflow_runs")[0]["status"] == "cancelled"
+        wfdb.adapter.send_email_reply.assert_not_called()
+
+    def test_customer_without_an_email_cannot_be_sent_until_fixed(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("dormant_account", {"account_name": "No Email Market", "customer_id": "QB002"})))
+        d = wfdb.rows("drafts")[0]
+        assert d["content"]["to"] == "" and "no email address" in d["content"]["needs"]
+        assert _approve(client, draft_id=d["id"]).json()["execution_status"] == "failed"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "awaiting_approval"   # still waiting, not lost
+        # the approver adds the address and approves again
+        fixed = {**d["content"], "to": "owner@market.test"}
+        assert _approve(client, draft_id=d["id"], body={"edited_content": fixed}).json()["execution_status"] == "executed"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "completed"
+
+    def test_low_stock_drafts_a_po_with_the_usual_vendor_and_approval_creates_it(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("low_stock", {"item_id": "ITEM1", "product_name": "Cola 12pk"})))
+        d = wfdb.rows("drafts")[0]
+        assert d["action_type"] == "purchase_order" and d["content"]["vendor_id"] == "V2"   # QuickBooks' preferred vendor
+        assert d["content"]["line_items"][0]["quantity"] == 60 and d["content"]["total"] == 300.0
+        wfdb.adapter.create_purchase_order.assert_not_called()
+        assert _approve(client, draft_id=d["id"]).json()["execution_status"] == "executed"
+        wfdb.adapter.create_purchase_order.assert_awaited_once()
+        assert wfdb.rows("workflow_runs")[0]["status"] == "completed"
+
+    def test_unknown_outcome_fails_the_run_instead_of_pretending(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("low_stock", {"item_id": "ITEM1", "product_name": "Cola 12pk"})))
+        wfdb.adapter.create_purchase_order = AsyncMock(side_effect=httpx.ReadTimeout("no answer"))
+        assert _approve(client, draft_id=wfdb.rows("drafts")[0]["id"]).json()["execution_status"] == "unknown"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "failed"
+
+    def test_runner_starts_one_workflow_per_event_and_never_repeats_it(self, wfdb):
+        from tasks.workflow_runner import _process_company
+        wfdb.tables["feed_events"] += [
+            _event("overdue_invoice", {"account_name": "Corner Deli", "balance": 10.0}, "ev-1"),
+            _event("dormant_account", {"account_name": "Corner Deli", "customer_id": "QB001"}, "ev-2"),
+        ]
+        with patch("tasks.workflow_runner.build_adapter", return_value=wfdb.adapter):
+            _process_company(wfdb, COMPANY_ROW)
+            _process_company(wfdb, COMPANY_ROW)   # the next hourly run
+        assert len(wfdb.rows("workflow_runs")) == 2 and len(wfdb.rows("drafts")) == 2
+        wfdb.adapter.send_email_reply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_two_customers_with_the_same_name_are_never_guessed_between(self, wfdb):
+        from app.connectors.base import Customer
+        from decimal import Decimal
+        from app.workflows.executor import start_from_event
+        twin = lambda i, mail: Customer(id=i, qb_id=i, name="Twin Foods", email=mail, phone=None, state=None,
+                                        balance=Decimal(0), total_sales=Decimal(0))
+        wfdb.adapter.get_all_customers = AsyncMock(return_value=[twin("A", "a@twin.test"), twin("B", "b@twin.test")])
+        await start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("overdue_invoice", {"account_name": "Twin Foods"}))
+        assert wfdb.rows("drafts")[0]["content"]["to"] == ""
+
+    @pytest.mark.asyncio
+    async def test_a_run_cannot_be_moved_by_another_company(self, wfdb):
+        from app.workflows.executor import run_steps, start_from_event
+        run_id = await start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("overdue_invoice", {"account_name": "Corner Deli"}))
+        assert await run_steps(wfdb, wfdb.adapter, {"id": COMPANY_B, "name": "B"}, run_id) == "missing"
+        assert wfdb.rows("workflow_runs")[0]["current_step"] == 1

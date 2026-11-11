@@ -380,16 +380,16 @@ async def approve_draft(
         },
     )
 
-    # Resume the linked workflow only if the step really went through.
+    # Move the linked workflow on according to what really happened.
     workflow_run_id = draft.get("workflow_run_id")
-    if workflow_run_id and outcome.status in ("executed", "manual_required"):
+    if workflow_run_id:
         try:
-            from app.workflows.engine import WorkflowEngine
-            WorkflowEngine(db, company_id).resume_after_approval(
-                workflow_run_id, approved=True, approved_by=user["sub"]
-            )
+            from app.workflows.executor import after_approval
+            await after_approval(db, adapter, company_id, workflow_run_id, user["sub"],
+                                 outcome.status, outcome.detail)
         except Exception as exc:
-            log.warning("Failed to resume workflow %s after approval: %s", workflow_run_id, exc)
+            log.warning("Failed to continue workflow %s after approval: %s",
+                        log_safe(workflow_run_id), log_safe(exc))
 
     return {
         "draft_id": draft_id,

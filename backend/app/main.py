@@ -224,7 +224,7 @@ async def custom_docs(request: Request):
 # ── Middleware ─────────────────────────────────────────────────────────────────
 # Starlette wraps in reverse: the LAST add_middleware call is the OUTERMOST.
 # Resulting request order (outer → inner):
-#   CORS → Timeout → ActiveSessionBoundary → FinanceBoundary → Tenant → RateLimit → RequestID → SecurityHeaders → routes
+#   CORS → Timeout → FinanceBoundary → Tenant → RateLimit → ActiveSessionBoundary → RequestID → SecurityHeaders → routes
 # Tenant MUST run before RateLimit so request.state.company_id exists when the
 # limiter builds its key — otherwise every tenant shared one "anonymous" bucket
 # and a single client could 429 the whole user base.
@@ -232,12 +232,12 @@ from app.middleware.timeout import TimeoutMiddleware
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# Staging-only live DB/JTI validation runs after rate limiting and before
+# legacy route handlers; floods cannot perform an unbounded DB lookup first.
+app.add_middleware(ActiveSessionBoundaryMiddleware)
 app.add_middleware(RateLimitMiddleware, redis_url=settings.redis_url)
 app.add_middleware(TenantMiddleware)
 app.add_middleware(FinanceRoleBoundaryMiddleware)
-# Staging-only live DB/JTI validation blocks stale Manager/Owner privileges on
-# historical APIs that trust the signed role without checking current staff.
-app.add_middleware(ActiveSessionBoundaryMiddleware)
 # Hard wall-clock guard against hung upstreams (DB/LLM). Generous on purpose:
 # it is a hang guard, not a latency budget — long LLM turns must not be cut.
 app.add_middleware(TimeoutMiddleware, timeout_seconds=120)

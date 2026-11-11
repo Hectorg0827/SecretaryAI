@@ -28,6 +28,9 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+# The local connector is off by default in production; the existing connector
+# tests exercise its code, so they run with it switched on.
+os.environ.setdefault("LOCAL_CONNECTOR_ENABLED", "true")
 
 
 # ─── In-memory Redis for the session-revocation store ────────────────────────

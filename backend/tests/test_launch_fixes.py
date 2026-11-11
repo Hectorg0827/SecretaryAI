@@ -1745,3 +1745,32 @@ class TestWorkflowsDoTheirSteps:
         run_id = await start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("overdue_invoice", {"account_name": "Corner Deli"}))
         assert await run_steps(wfdb, wfdb.adapter, {"id": COMPANY_B, "name": "B"}, run_id) == "missing"
         assert wfdb.rows("workflow_runs")[0]["current_step"] == 1
+
+
+class TestLocalConnectorIsOffByDefault:
+    def test_default_is_off(self):
+        from app.config import Settings
+        assert Settings.model_fields["local_connector_enabled"].default is False
+
+    def test_when_off_nothing_about_the_connector_can_be_set_up(self, client, db):
+        from app.auth.jwt import create_access_token
+        connector_token = create_access_token({"scope": "connector", "registration_id": "r", "company_id": COMPANY_A})
+        with patch("app.api.connectors.get_settings") as gs:
+            gs.return_value.local_connector_enabled = False
+            assert client.post("/api/connectors/generate-install-secret", headers=_token()).status_code == 403
+            assert client.post("/api/connectors/dispatch-task", json={"task_type": "fetch_customers"}, headers=_token()).status_code == 403
+            reg = client.post("/api/connectors/register", headers=_token(), json={
+                "company_id": COMPANY_A, "connector_type": "qb_desktop", "connector_id": "pc", "version": "1", "install_secret": "x"})
+            assert reg.status_code == 403
+            # a connector that registered earlier stops being accepted too
+            assert client.get("/api/connectors/tasks", headers={"Authorization": f"Bearer {connector_token}"}).status_code == 403
+        db.table.return_value.update.assert_not_called()
+
+    def test_connector_program_refuses_to_start_without_operator_mode(self, monkeypatch):
+        import importlib, sys as _sys, pathlib
+        _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+        main = importlib.import_module("connector.main")
+        monkeypatch.delenv("SECRETARY_OPERATOR_MODE", raising=False)
+        with pytest.raises(SystemExit) as exc:
+            main.main()
+        assert "operator only" in str(exc.value)

@@ -280,6 +280,15 @@ import os  # noqa: E402 (after module-level code for clarity)
 
 
 def main() -> None:
+    # This program holds the operator's Conductor key. It is for the operator's
+    # own server only — see connector/README.md. Refuse to start anywhere else.
+    if os.environ.get("SECRETARY_OPERATOR_MODE") != "1":
+        sys.exit(
+            "This connector is for the SecretaryAI operator only and must not be installed on a "
+            "customer's computer.\nCustomers connect QuickBooks Desktop from the desktop app "
+            "(Settings -> QuickBooks Desktop).\nOperators: set SECRETARY_OPERATOR_MODE=1 and "
+            "LOCAL_CONNECTOR_ENABLED=true on the server. See connector/README.md."
+        )
     cfg = ConnectorConfig()
     connector = Connector(cfg)
     try:

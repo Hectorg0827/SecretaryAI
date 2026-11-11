@@ -67,6 +67,16 @@ INSTALL_SECRET_TTL_HOURS = 24
 WRITE_TASK_TYPES = frozenset({"create_invoice", "create_po", "update_item"})
 
 
+def _require_local_connector() -> None:
+    """Refuse connector set-up unless the operator has switched the feature on."""
+    if not getattr(get_settings(), "local_connector_enabled", False):
+        raise HTTPException(
+            status_code=403,
+            detail="The separate local connector is not available. "
+                   "Connect QuickBooks Desktop from the desktop app instead (Settings → QuickBooks Desktop).",
+        )
+
+
 def _hash_install_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
@@ -99,6 +109,7 @@ def get_connector_identity(
     Validates the connector JWT and returns the connector registration row.
     Raises 401 if invalid or registration not found.
     """
+    _require_local_connector()
     if not creds:
         raise HTTPException(status_code=401, detail="Missing connector token")
 
@@ -164,6 +175,7 @@ async def register_connector(
     The connector must store this token securely and use it for all
     subsequent API calls.
     """
+    _require_local_connector()
     if req.company_id != user["company_id"]:
         raise HTTPException(status_code=403, detail="company_id mismatch")
 
@@ -588,6 +600,8 @@ async def get_connector_status(
         ))
 
     return {
+        # Whether a separate local connector can be set up at all (operator setting).
+        "local_connector_enabled": bool(getattr(get_settings(), "local_connector_enabled", False)),
         "connectors": [
             {
                 "id": c.id,
@@ -663,6 +677,7 @@ async def generate_install_secret(
     Only its SHA-256 digest is stored. It works for one registration and
     expires after INSTALL_SECRET_TTL_HOURS.
     """
+    _require_local_connector()
     raw_secret = secrets.token_urlsafe(32)
     try:
         db.table("companies").update({
@@ -712,6 +727,8 @@ async def dispatch_task(
     """
     import uuid
     from app.domain.connector_protocol import QB_DESKTOP_CAPABILITIES, TaskType
+
+    _require_local_connector()
 
     # Dispatching work to the tenant's QuickBooks connector is an action, not a
     # read: only owner/manager may trigger it (viewer/sales_rep/back_office

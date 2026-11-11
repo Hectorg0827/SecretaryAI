@@ -23,6 +23,12 @@ deployment where the operator runs it on their own server):
 - its connector token is saved to `connector_state.json`, readable by the
   owner of the process only.
 
+It is switched off by default in two places, so it cannot be set up by accident:
+
+- the server refuses connector registration, install secrets, task dispatch and
+  connector tokens unless `LOCAL_CONNECTOR_ENABLED=true`;
+- the connector itself refuses to start unless `SECRETARY_OPERATOR_MODE=1`.
+
 Run from the `backend/` directory so the QuickBooks adapter is importable:
 
 ```bash

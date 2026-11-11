@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Shared secret Conductor sends in X-Conductor-Secret on webhook calls.
     # Its own value — never the API key. Conductor webhooks are rejected until set.
     conductor_webhook_secret: str = ""
+    # The separately-installed local connector (connector/). OFF by default:
+    # it needs the operator's Conductor key on the machine it runs on, so it
+    # must never be given to customers. Customers connect QuickBooks Desktop
+    # through the desktop app's wizard, which needs none of this. Turn on only
+    # for an operator-run connector.
+    local_connector_enabled: bool = False
 
     # Intuit / QuickBooks Online
     intuit_client_id: str = ""

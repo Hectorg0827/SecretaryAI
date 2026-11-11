@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import {
   Settings as SettingsIcon, Database, Mail, Package, Zap, ShieldCheck,
-  Check, AlertTriangle, Loader2, X, ExternalLink, Copy,
+  Check, AlertTriangle, Loader2, X, ExternalLink, Copy, Users,
 } from 'lucide-react';
+import { TeamSection, ChangePasswordSection } from '../components/ui/TeamSection';
+import { useAuth } from '../hooks/useAuth';
 import { api, IntegrationsResponse } from '../lib/api';
 import toast from 'react-hot-toast';
 
@@ -14,6 +16,7 @@ const SECTIONS: Section[] = [
   { id: 'email',        label: 'Email Settings',   icon: Mail         },
   { id: 'inventory',    label: 'Inventory Alerts', icon: Package      },
   { id: 'agent',        label: 'Desktop Agent',    icon: Zap          },
+  { id: 'team',         label: 'Team',             icon: Users        },
   { id: 'security',     label: 'Security',         icon: ShieldCheck  },
 ];
 
@@ -379,10 +382,13 @@ interface IntegrationRowProps {
   onConnect: () => void;
   onDisconnect: () => void;
   connectLabel?: string;
+  /** false = show status only (the server only lets the owner change connections) */
+  canManage?: boolean;
 }
 
 function IntegrationRow({
   label, description, connected, loading, onConnect, onDisconnect, connectLabel = 'Connect',
+  canManage = true,
 }: IntegrationRowProps) {
   return (
     <div className="flex items-center gap-4 py-4 border-b border-slate-100 last:border-0">
@@ -401,7 +407,7 @@ function IntegrationRow({
         {connected ? 'Connected' : 'Not connected'}
       </div>
 
-      {loading ? null : connected ? (
+      {loading || !canManage ? null : connected ? (
         <button
           onClick={onDisconnect}
           className="text-xs text-red-500 hover:text-red-600 font-medium border border-red-100 rounded-lg px-2.5 py-1.5 bg-red-50 hover:bg-red-100 transition-colors flex-shrink-0"
@@ -424,6 +430,8 @@ function IntegrationRow({
 
 export function Settings() {
   const [active, setActive] = useState('integrations');
+  const { canManageUsers, canManageIntegrations } = useAuth();
+  const sections = SECTIONS.filter((sec) => sec.id !== 'team' || canManageUsers);
 
   // Integration state
   const [integrations, setIntegrations] = useState<IntegrationsResponse | null>(null);
@@ -460,6 +468,7 @@ export function Settings() {
     const params = new URLSearchParams(window.location.search);
     const qbo   = params.get('qbo');
     const gmail = params.get('gmail');
+    const outlook = params.get('outlook');
     const reason = params.get('reason');
 
     if (qbo === 'connected') {
@@ -476,11 +485,23 @@ export function Settings() {
       toast.error(`Google connection failed${reason ? `: ${reason}` : ''}`);
     }
 
+    if (outlook === 'connected') {
+      toast.success('Outlook connected!');
+      loadIntegrations();
+    } else if (outlook === 'error') {
+      toast.error(
+        reason === 'no_offline_access'
+          ? 'Outlook did not grant ongoing access. Please try again and accept all permissions.'
+          : 'Outlook connection failed. Please try again.',
+      );
+    }
+
     // Clean up URL params without triggering a reload
-    if (qbo || gmail) {
+    if (qbo || gmail || outlook) {
       const clean = new URL(window.location.href);
       clean.searchParams.delete('qbo');
       clean.searchParams.delete('gmail');
+      clean.searchParams.delete('outlook');
       clean.searchParams.delete('reason');
       window.history.replaceState({}, '', clean.toString());
     }
@@ -556,8 +577,32 @@ export function Settings() {
     }
   };
 
+  const connectOutlook = async () => {
+    setLoading('outlook', true);
+    try {
+      const { url } = await api.settings.outlookConnectUrl();
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start Outlook connection');
+      setLoading('outlook', false);
+    }
+  };
+
+  const disconnectOutlook = async () => {
+    setLoading('outlook', true);
+    try {
+      await api.settings.outlookDisconnect();
+      toast.success('Outlook disconnected');
+      await loadIntegrations();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to disconnect Outlook');
+    } finally {
+      setLoading('outlook', false);
+    }
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
-  const activeSection = SECTIONS.find((s) => s.id === active)!;
+  const activeSection = sections.find((sec) => sec.id === active) ?? sections[0];
   const ActiveIcon = activeSection.icon;
 
   return (
@@ -571,7 +616,7 @@ export function Settings() {
           </div>
         </div>
         <nav className="px-2 space-y-0.5">
-          {SECTIONS.map((s) => {
+          {sections.map((s) => {
             const Icon = s.icon;
             return (
               <button
@@ -600,9 +645,16 @@ export function Settings() {
             <h1 className="text-lg font-bold text-slate-900">{activeSection.label}</h1>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5">
+          {active === 'team' && canManageUsers && <TeamSection />}
+
+          <div className={clsx('bg-white rounded-xl border border-slate-100 shadow-sm px-5', (active === 'team' || active === 'security') && 'hidden')}>
             {active === 'integrations' && (
               <>
+                {!canManageIntegrations && (
+                  <p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 mt-4">
+                    Only the account owner can connect or disconnect these. You can see their status here.
+                  </p>
+                )}
                 {/* QB Online */}
                 <IntegrationRow
                   label="QuickBooks Online"
@@ -612,6 +664,7 @@ export function Settings() {
                   onConnect={connectQBO}
                   onDisconnect={disconnectQBO}
                   connectLabel="Connect with Intuit"
+                  canManage={canManageIntegrations}
                 />
 
                 {/* QB Desktop */}
@@ -623,6 +676,7 @@ export function Settings() {
                   onConnect={() => setShowQBDModal(true)}
                   onDisconnect={disconnectQBD}
                   connectLabel="Set up"
+                  canManage={canManageIntegrations}
                 />
 
                 {/* Gmail */}
@@ -634,6 +688,23 @@ export function Settings() {
                   onConnect={connectGmail}
                   onDisconnect={disconnectGmail}
                   connectLabel="Connect with Google"
+                  canManage={canManageIntegrations}
+                />
+
+                {/* Outlook / Microsoft 365 */}
+                <IntegrationRow
+                  label="Outlook"
+                  description={
+                    integrations?.outlook?.account
+                      ? `Connected mailbox: ${integrations.outlook.account}`
+                      : 'Read and reply to customer emails from your Microsoft 365 or Outlook mailbox'
+                  }
+                  connected={integrations?.outlook?.connected ?? false}
+                  loading={integLoading || !!actionLoading['outlook']}
+                  onConnect={connectOutlook}
+                  onDisconnect={disconnectOutlook}
+                  connectLabel="Connect with Microsoft"
+                  canManage={canManageIntegrations}
                 />
 
                 {/* Google Sheets — shares Gmail token */}
@@ -645,6 +716,7 @@ export function Settings() {
                   onConnect={connectGmail}
                   onDisconnect={disconnectGmail}
                   connectLabel="Connect with Google"
+                  canManage={canManageIntegrations}
                 />
 
                 <p className="text-xs text-slate-400 py-3">
@@ -724,10 +796,13 @@ export function Settings() {
           </div>
 
           {active === 'security' && (
-            <TwoFASection />
+            <>
+              <TwoFASection />
+              <ChangePasswordSection />
+            </>
           )}
 
-          {active !== 'integrations' && active !== 'security' && (
+          {active !== 'integrations' && active !== 'security' && active !== 'team' && (
             <div className="mt-5 flex justify-end">
               <button
                 onClick={() => toast.success('Settings saved')}

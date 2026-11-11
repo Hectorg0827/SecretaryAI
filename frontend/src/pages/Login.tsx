@@ -153,7 +153,9 @@ export function Login() {
 
           {!needs2fa && (
             <p className="text-xs text-slate-400 text-center mt-6">
-              Forgot your password? Contact your account owner.
+              <Link to="/forgot-password" className="text-blue-600 hover:underline font-medium">
+                Forgot your password?
+              </Link>
             </p>
           )}
           {!needs2fa && (

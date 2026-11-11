@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { CheckCircle, XCircle, Mail, ShoppingCart, FileText, Loader2, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, Draft } from '../../lib/api';
+import { api, describeApproval, Draft } from '../../lib/api';
 import { Card, CardHeader } from '../ui/Card';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -42,10 +42,10 @@ function DraftCard({ draft, onRemove, canApprove }: { draft: Draft; onRemove: (i
   const approve = async () => {
     setBusy('approve');
     try {
-      await api.actions.approve(draft.id);
-      toast.success('Approved & sent');
-      onRemove(draft.id);
-    } catch { toast.error('Could not approve'); }
+      const outcome = describeApproval(await api.actions.approve(draft.id));
+      if (outcome.ok) toast.success(outcome.message); else toast.error(outcome.message, { duration: 8000 });
+      if (outcome.done) onRemove(draft.id);
+    } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not approve'); }
     finally   { setBusy(null); }
   };
 

@@ -9,6 +9,7 @@ import { Inventory } from './pages/Inventory';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { ForgotPassword, ResetPassword, AcceptInvite, VerifyEmail } from './pages/AccountLinks';
 import Inbox from './pages/Inbox';
 import Work from './pages/Work';
 import { Logistics } from './pages/Logistics';
@@ -153,6 +154,10 @@ export function App() {
         {/* Public */}
         <Route path="/login"    element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password"  element={<ResetPassword />} />
+        <Route path="/accept-invite"   element={<AcceptInvite />} />
+        <Route path="/verify-email"    element={<VerifyEmail />} />
 
         {/* Private — everything else goes through PrivateRoute */}
         <Route

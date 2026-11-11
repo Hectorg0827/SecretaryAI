@@ -33,6 +33,27 @@ async function _tryRefresh(): Promise<string | null> {
   return null;
 }
 
+/** Turn any error body from the backend into one plain sentence. */
+function errorMessage(body: unknown, status: number): string {
+  const b = (body ?? {}) as { detail?: unknown; message?: unknown };
+  if (typeof b.detail === 'string' && b.detail) return b.detail;
+  if (typeof b.message === 'string' && b.message) return b.message;
+  if (Array.isArray(b.detail) && b.detail[0]?.msg) return String(b.detail[0].msg);
+  if (status === 402) return 'Your trial or subscription has ended. The account owner can choose a plan in Settings.';
+  if (status === 403) return 'You do not have permission to do that.';
+  if (status === 429) return 'Too many attempts. Please wait a moment and try again.';
+  if (status >= 500) return 'Something went wrong on our side. Please try again in a moment.';
+  return `Request failed (${status})`;
+}
+
+/**
+ * Sign-in style endpoints answer 401 for "wrong password" / "bad code". That
+ * is an answer to show the user, not an expired session to refresh.
+ */
+function isPublicAuthPath(path: string): boolean {
+  return /^\/auth\/(login|register|refresh|forgot-password|reset-password|accept-invite|verify-email|resend-verification)/.test(path);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   const response = await fetch(`${API_BASE}${path}`, {
@@ -44,7 +65,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && !isPublicAuthPath(path)) {
     // Attempt a silent token refresh once
     if (!_refreshing) {
       _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
@@ -66,8 +87,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail ?? `HTTP ${response.status}`);
+    const error = await response.json().catch(() => null);
+    throw new Error(errorMessage(error, response.status));
   }
 
   return response.json();
@@ -189,7 +210,54 @@ export interface IntegrationsResponse {
   quickbooks_desktop: IntegrationStatus;
   gmail:              IntegrationStatus;
   google_sheets:      IntegrationStatus;
+  outlook?:           IntegrationStatus & { account?: string | null };
 }
+
+/** What really happened when a draft was approved. */
+export interface ApprovalResult {
+  draft_id: string;
+  status: string;
+  already_processed?: boolean;
+  execution_status?: 'executed' | 'manual_required' | 'failed';
+  execution_detail?: string;
+}
+
+/**
+ * Plain-language outcome of an approval. `ok` is false when the action did NOT
+ * happen (the draft is back in the queue), so the UI must not show success.
+ */
+export function describeApproval(r: ApprovalResult | undefined | null): { ok: boolean; done: boolean; message: string } {
+  if (!r) return { ok: true, done: true, message: 'Approved' };
+  if (r.already_processed) return { ok: true, done: true, message: 'This was already handled.' };
+  if (r.execution_status === 'failed') {
+    return { ok: false, done: false, message: r.execution_detail || 'Approved, but it could not be carried out. It is still in your queue.' };
+  }
+  if (r.execution_status === 'manual_required') {
+    return { ok: true, done: true, message: r.execution_detail || 'Approved. Please complete this step yourself.' };
+  }
+  return { ok: true, done: true, message: r.execution_detail || 'Approved and done' };
+}
+
+export interface TeamMember {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
+  is_active: boolean;
+  two_factor: boolean;
+  pending_invite: boolean;
+  invited_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface InviteResult {
+  user?: TeamMember;
+  email_sent: boolean;
+  invite_link?: string;
+  note?: string;
+}
+
+type Session = { access_token: string; token_type: string; company_id: string; role: string };
 
 export interface InboxItem {
   id: string;
@@ -287,7 +355,7 @@ export const api = {
   actions: {
     pending: () => api.get<{ drafts: Draft[] }>('/api/actions/pending'),
     approve: (id: string, edits?: Record<string, unknown>) =>
-      api.post<void>(`/api/actions/approve/${id}`, edits ?? {}),
+      api.post<ApprovalResult>(`/api/actions/approve/${id}`, edits ? { edited_content: edits } : {}),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
   },
@@ -318,6 +386,8 @@ export const api = {
     qboDisconnect: () => api.delete<{ status: string }>('/auth/qbo/disconnect'),
     gmailConnectUrl: () => api.get<{ url: string }>('/auth/gmail/connect-url'),
     gmailDisconnect: () => api.delete<{ status: string }>('/auth/gmail/disconnect'),
+    outlookConnectUrl: () => api.get<{ url: string }>('/auth/outlook/connect-url'),
+    outlookDisconnect: () => api.delete<{ status: string }>('/auth/outlook/disconnect'),
     saveQBD: (endUserId: string) =>
       api.post<{ status: string; end_user_id: string }>('/api/settings/integrations/qbd', { end_user_id: endUserId }),
     disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),
@@ -346,6 +416,25 @@ export const api = {
         | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
         | { requires_2fa: true; pre_auth_token: string }
       >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
+    forgotPassword: (email: string) =>
+      api.post<{ status: string; message: string }>('/auth/forgot-password', { email }),
+    resetPassword: (token: string, new_password: string) =>
+      api.post<{ status: string; message: string }>('/auth/reset-password', { token, new_password }),
+    acceptInvite: (token: string, password: string, full_name: string) =>
+      api.post<Session>('/auth/accept-invite', { token, password, full_name }),
+    verifyEmail: (token: string) =>
+      api.post<{ status: string; message: string }>('/auth/verify-email', { token }),
+    changePassword: (current_password: string, new_password: string) =>
+      api.post<Session & { status: string }>('/auth/change-password', { current_password, new_password }),
+  },
+
+  users: {
+    list: () => api.get<{ users: TeamMember[]; roles: string[] }>('/api/users'),
+    invite: (email: string, role: string, name: string) =>
+      api.post<InviteResult>('/api/users/invite', { email, role, name }),
+    resendInvite: (id: string) => api.post<InviteResult>(`/api/users/${id}/resend-invite`, {}),
+    update: (id: string, changes: { role?: string; is_active?: boolean; name?: string }) =>
+      api.patch<{ user: TeamMember }>(`/api/users/${id}`, changes),
   },
 
   // ── Compliance types ──────────────────────────────────────────────────────────

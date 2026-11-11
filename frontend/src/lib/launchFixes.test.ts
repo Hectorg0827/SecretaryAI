@@ -1,0 +1,83 @@
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { api, describeApproval } from './api';
+import { passwordProblem } from '../pages/AccountLinks';
+
+function jsonResponse(status: number, body: unknown): Response {
+  return { status, ok: status >= 200 && status < 300, json: async () => body } as unknown as Response;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
+
+describe('approval result is reported honestly', () => {
+  it('a failed action is not success and stays in the queue', () => {
+    const r = describeApproval({ draft_id: 'd', status: 'pending', execution_status: 'failed', execution_detail: 'The email could not be sent: mailbox not connected' });
+    expect(r.ok).toBe(false);
+    expect(r.done).toBe(false);
+    expect(r.message).toContain('could not be sent');
+  });
+
+  it('a manual step is explained, not called "sent"', () => {
+    const r = describeApproval({ draft_id: 'd', status: 'approved', execution_status: 'manual_required', execution_detail: 'Approved. … NOT created automatically' });
+    expect(r.ok).toBe(true);
+    expect(r.done).toBe(true);
+    expect(r.message).toContain('NOT created');
+  });
+
+  it('an executed action shows what happened', () => {
+    expect(describeApproval({ draft_id: 'd', status: 'approved', execution_status: 'executed', execution_detail: 'Email sent to a@b.test' }).message)
+      .toBe('Email sent to a@b.test');
+  });
+
+  it('a second click on something already handled is not an error', () => {
+    const r = describeApproval({ draft_id: 'd', status: 'approved', already_processed: true });
+    expect(r.ok && r.done).toBe(true);
+  });
+
+  it('edits are sent in the shape the server reads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { draft_id: 'd', status: 'edited_and_approved' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.actions.approve('d', { to: 'x@y.test' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ edited_content: { to: 'x@y.test' } });
+  });
+});
+
+describe('sign-in errors are shown, not treated as an expired session', () => {
+  it('wrong password: no refresh attempt, message from the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(401, { detail: 'Invalid email or password' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.auth.login('a@b.test', 'nope')).rejects.toThrow('Invalid email or password');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('validation errors use the plain sentence from the server', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(422, {
+      error: 'validation_error', message: 'Password must be at least 8 characters',
+      detail: [{ loc: ['body', 'new_password'], msg: 'Password must be at least 8 characters', type: 'value_error' }],
+    })));
+    await expect(api.auth.resetPassword('t', 'short')).rejects.toThrow('Password must be at least 8 characters');
+  });
+
+  it('an expired trial gets a clear message', async () => {
+    localStorage.setItem('secretary_token', 't');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(402, {})));
+    await expect(api.get('/api/feed/')).rejects.toThrow(/trial or subscription has ended/);
+  });
+});
+
+describe('password rules match the server', () => {
+  it.each([
+    ['short1', 'short1', 'Use at least 8 characters.'],
+    ['12345678', '12345678', 'Include at least one letter.'],
+    ['abcdefgh', 'abcdefgh', 'Include at least one number.'],
+    ['Abcdefg1', 'Abcdefg2', 'The two passwords do not match.'],
+  ])('%s is rejected', (pw, confirm, problem) => {
+    expect(passwordProblem(pw, confirm)).toBe(problem);
+  });
+
+  it('a good password passes', () => {
+    expect(passwordProblem('Abcdefg1', 'Abcdefg1')).toBeNull();
+  });
+});

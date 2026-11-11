@@ -30,10 +30,15 @@ export function Register() {
     setError(null);
 
     try {
-      const data = await api.post<{ access_token: string; company_id: string; role: string }>(
+      const data = await api.post<{ access_token?: string; company_id: string; role: string; status?: string; message?: string }>(
         '/auth/register',
         { email: email.trim().toLowerCase(), password, company_name: companyName.trim(), full_name: fullName.trim() },
       );
+      if (!data.access_token) {
+        // The server wants the email address confirmed before the first sign-in.
+        setError(data.message ?? 'Check your inbox and confirm your email address to finish signing up.');
+        return;
+      }
       localStorage.setItem('secretary_token',     data.access_token);
       localStorage.setItem('secretary_company_id', data.company_id);
       localStorage.setItem('secretary_role',       data.role);

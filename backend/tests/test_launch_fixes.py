@@ -1068,3 +1068,152 @@ class TestWebhooksAndBackgroundJobs:
         assert r.status_code == 200
         job.apply_async.assert_called_once()
         briefing.apply_async.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finding 6 — Outlook can be connected, stays connected, and replies thread.
+# Microsoft is simulated at the HTTP level (httpx.MockTransport).
+# ─────────────────────────────────────────────────────────────────────────────
+
+import httpx  # noqa: E402
+
+
+def _fake_microsoft(handler):
+    """Patch the Outlook connector's HTTP client with a scripted Microsoft."""
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+
+    return patch("app.connectors.outlook.httpx.AsyncClient", side_effect=factory)
+
+
+class TestOutlook:
+    def test_connect_url_is_owner_only_and_needs_server_setup(self, client, db):
+        assert client.get("/auth/outlook/connect-url", headers=_token(role="manager")).status_code == 403
+        with patch("app.auth.oauth.settings") as st:
+            st.ms_client_id = st.ms_client_secret = st.ms_redirect_uri = ""
+            assert client.get("/auth/outlook/connect-url", headers=_token()).status_code == 503
+
+    def test_connect_then_callback_stores_encrypted_tokens_for_the_right_company(self, client, adb):
+        from app.utils.encryption import decrypt
+        with patch("app.auth.oauth.settings") as st:
+            st.ms_client_id, st.ms_client_secret = "cid", "csecret"
+            st.ms_redirect_uri, st.ms_tenant = "https://api.test/auth/outlook/callback", "common"
+            url = client.get("/auth/outlook/connect-url", headers=_token(company_id=COMPANY_A)).json()["url"]
+        assert "login.microsoftonline.com/common" in url and "Mail.Send" in url and "offline_access" in url
+        state = url.split("state=")[1].split("&")[0]
+
+        tokens = {"access_token": "AT-1", "refresh_token": "RT-1", "expires_in": 3600, "account_email": "ops@a.test"}
+        with patch("app.auth.oauth.exchange_ms_code_for_tokens", new=AsyncMock(return_value=tokens)):
+            r = client.get(f"/auth/outlook/callback?code=abc&state={state}", follow_redirects=False)
+            assert r.status_code in (302, 307) and "outlook=connected" in r.headers["location"]
+            # the state is single-use
+            again = client.get(f"/auth/outlook/callback?code=abc&state={state}", follow_redirects=False)
+            assert again.status_code == 400
+
+        a = [c for c in adb.rows("companies") if c["id"] == COMPANY_A][0]
+        b = [c for c in adb.rows("companies") if c["id"] == COMPANY_B][0]
+        assert a["ms_access_token"] != "AT-1" and decrypt(a["ms_access_token"], "test-secret-key-32-chars-long!!x") == "AT-1"
+        assert decrypt(a["ms_refresh_token"], "test-secret-key-32-chars-long!!x") == "RT-1"
+        assert a["ms_account_email"] == "ops@a.test" and "ms_access_token" not in b
+        assert any(e["event_type"] == "integration_connected" and e["metadata"]["integration"] == "outlook" for e in adb.events())
+
+    def test_callback_with_unknown_state_is_rejected(self, client, adb):
+        with patch("app.auth.oauth.exchange_ms_code_for_tokens", new=AsyncMock()) as ex:
+            r = client.get("/auth/outlook/callback?code=abc&state=forged", follow_redirects=False)
+        assert r.status_code == 400
+        ex.assert_not_called()
+
+    def test_a_google_state_cannot_be_used_on_the_outlook_callback(self, client, adb):
+        with patch("app.api.auth.build_google_authorization_url", side_effect=lambda s: f"https://g/?state={s}"):
+            url = client.get("/auth/gmail/connect-url", headers=_token()).json()["url"]
+        state = url.split("state=")[1]
+        r = client.get(f"/auth/outlook/callback?code=abc&state={state}", follow_redirects=False)
+        assert r.status_code == 400
+
+    def test_status_shows_outlook_and_disconnect_clears_tokens(self, client, adb):
+        adb.tables["companies"][0].update(ms_access_token="enc", ms_refresh_token="enc", ms_account_email="ops@a.test")
+        s = client.get("/api/settings/integrations", headers=_token()).json()
+        assert s["outlook"] == {"connected": True, "connected_at": None, "account": "ops@a.test"}
+        assert "enc" not in str(s)
+        assert client.delete("/auth/outlook/disconnect", headers=_token(role="manager")).status_code == 403
+        assert client.delete("/auth/outlook/disconnect", headers=_token()).status_code == 200
+        assert adb.tables["companies"][0]["ms_access_token"] is None
+        assert client.get("/api/settings/integrations", headers=_token()).json()["outlook"]["connected"] is False
+
+    @pytest.mark.asyncio
+    async def test_expired_token_is_refreshed_and_the_new_pair_is_saved(self):
+        from app.connectors.outlook import OutlookConnector
+        saved = {}
+        calls = []
+
+        def microsoft(request: httpx.Request) -> httpx.Response:
+            calls.append((request.method, request.url.path, request.headers.get("authorization")))
+            if request.url.host == "login.microsoftonline.com":
+                assert b"refresh_token=RT-old" in request.content
+                return httpx.Response(200, json={"access_token": "AT-new", "refresh_token": "RT-new", "expires_in": 3600})
+            if request.headers.get("authorization") != "Bearer AT-new":
+                return httpx.Response(401, json={"error": "expired"})
+            return httpx.Response(200, json={"value": [{
+                "id": "m1", "conversationId": "c1", "subject": "PO 123", "isRead": False,
+                "bodyPreview": "Please confirm", "receivedDateTime": "2026-11-10T10:00:00Z",
+                "from": {"emailAddress": {"name": "Vera Vendor", "address": "vera@vendor.test"}}}]})
+
+        conn = OutlookConnector("common", "cid", "cs", "AT-old", "RT-old",
+                                on_token_refresh=lambda a, r, e: saved.update(access=a, refresh=r, expires=e))
+        with _fake_microsoft(microsoft):
+            emails = await conn.get_emails(query="is:unread")
+        assert saved["access"] == "AT-new" and saved["refresh"] == "RT-new" and saved["expires"]
+        assert emails == [{
+            "id": "m1", "thread_id": "c1", "from": "Vera Vendor <vera@vendor.test>", "from_email": "vera@vendor.test",
+            "subject": "PO 123", "snippet": "Please confirm", "date": "2026-11-10T10:00:00Z", "labels": ["UNREAD"]}]
+        # first try with the old token, refresh, retry with the new one
+        assert [c[2] for c in calls if c[1].endswith("/messages")] == ["Bearer AT-old", "Bearer AT-new"]
+
+    @pytest.mark.asyncio
+    async def test_revoked_connection_says_reconnect_instead_of_failing_silently(self):
+        from app.connectors.outlook import OutlookAuthError, OutlookConnector
+
+        def microsoft(request):
+            if request.url.host == "login.microsoftonline.com":
+                return httpx.Response(400, json={"error": "invalid_grant"})
+            return httpx.Response(401)
+
+        conn = OutlookConnector("common", "cid", "cs", "AT", "RT")
+        with _fake_microsoft(microsoft), pytest.raises(OutlookAuthError):
+            await conn.send_email_reply("a@b.test", "s", "b")
+
+    @pytest.mark.asyncio
+    async def test_reply_is_sent_in_the_original_conversation(self):
+        import json
+        from app.connectors.outlook import OutlookConnector
+        seen = []
+
+        def microsoft(request):
+            seen.append((request.url.path, json.loads(request.content)))
+            return httpx.Response(202)
+
+        conn = OutlookConnector("common", "cid", "cs", "AT", "RT")
+        with _fake_microsoft(microsoft):
+            out = await conn.send_email_reply("vera@vendor.test", "Re: PO 123", "Confirmed.", reply_to_id="m1")
+            new = await conn.send_email_reply("vera@vendor.test", "Hello", "Hi.")
+        assert out == {"status": "sent", "mode": "reply"} and new["mode"] == "new"
+        assert seen[0][0] == "/v1.0/me/messages/m1/reply" and seen[0][1]["comment"] == "Confirmed."
+        assert seen[1][0] == "/v1.0/me/sendMail"
+        assert seen[1][1]["message"]["toRecipients"][0]["emailAddress"]["address"] == "vera@vendor.test"
+
+    def test_adapter_builds_outlook_from_decrypted_tokens_and_saves_rotations(self):
+        from app.connectors.unified_adapter import UnifiedDataAdapter
+        from app.utils.encryption import decrypt
+        db = FakeSupabase(companies=[{"id": COMPANY_A}])
+        adapter = UnifiedDataAdapter({"id": COMPANY_A, "ms_access_token": "AT", "ms_refresh_token": "RT",
+                                      "ms_client_id": "cid", "ms_client_secret": "cs"})
+        adapter._db = db
+        assert adapter._outlook is not None
+        adapter._persist_ms_tokens("AT2", "RT2", "2026-11-11T00:00:00+00:00")
+        row = db.rows("companies")[0]
+        assert decrypt(row["ms_refresh_token"], "test-secret-key-32-chars-long!!x") == "RT2"
+        # no tokens → no Outlook connector
+        assert UnifiedDataAdapter({"id": COMPANY_A})._outlook is None

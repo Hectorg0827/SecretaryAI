@@ -73,14 +73,16 @@ class UnifiedDataAdapter:
         if cfg.get("google_credentials"):
             self._sheets = GoogleSheetsConnector(credentials=cfg["google_credentials"])
 
-        # Outlook connector
-        if cfg.get("ms_tenant_id") and cfg.get("ms_access_token"):
+        # Outlook connector (tokens arrive here already decrypted)
+        if cfg.get("ms_access_token") and cfg.get("ms_refresh_token"):
             self._outlook = OutlookConnector(
-                tenant_id=cfg["ms_tenant_id"],
-                client_id=cfg.get("ms_client_id", ""),
-                client_secret=cfg.get("ms_client_secret", ""),
+                tenant_id=cfg.get("ms_tenant_id") or "common",
+                client_id=cfg.get("ms_client_id") or "",
+                client_secret=cfg.get("ms_client_secret") or "",
                 access_token=cfg["ms_access_token"],
-                refresh_token=cfg.get("ms_refresh_token", ""),
+                refresh_token=cfg["ms_refresh_token"],
+                expires_at=cfg.get("ms_token_expires_at"),
+                on_token_refresh=self._persist_ms_tokens,
             )
 
         # Shopify connector
@@ -138,6 +140,26 @@ class UnifiedDataAdapter:
             log.info("QBO tokens refreshed and persisted for company %s", company_id)
         except Exception as exc:
             log.error("Failed to persist refreshed QBO tokens for %s: %s", company_id, exc)
+
+    def _persist_ms_tokens(self, access_token: str, refresh_token: str, expires_at: str) -> None:
+        """Encrypt and save refreshed Outlook tokens (Microsoft rotates them)."""
+        import logging
+        log = logging.getLogger(__name__)
+        company_id = self._config.get("id")
+        if not company_id:
+            return
+        try:
+            from app.api.deps import get_db
+            from app.config import get_settings
+            from app.utils.encryption import encrypt
+            settings = get_settings()
+            (self._db or get_db()).table("companies").update({
+                "ms_access_token": encrypt(access_token, settings.secret_key),
+                "ms_refresh_token": encrypt(refresh_token, settings.secret_key),
+                "ms_token_expires_at": expires_at,
+            }).eq("id", company_id).execute()
+        except Exception as exc:
+            log.error("Failed to persist refreshed Outlook tokens for %s: %s", company_id, exc)
 
     def set_db(self, db) -> None:
         """Attach a DB client so the AccessRouter can log path decisions."""
@@ -328,12 +350,15 @@ class UnifiedDataAdapter:
             return await self._outlook.get_emails(query=query, max_results=max_results)
         return []
 
-    async def send_email_reply(self, to: str, subject: str, body: str) -> dict:
+    async def send_email_reply(self, to: str, subject: str, body: str,
+                               reply_to_id: Optional[str] = None) -> dict:
         """Send an email reply — routes to Gmail or Outlook."""
         if self._gmail:
             return await self._gmail.send_approved_email(to=to, subject=subject, body=body)
         if self._outlook:
-            return await self._outlook.send_email_reply(to=to, subject=subject, body=body)
+            return await self._outlook.send_email_reply(
+                to=to, subject=subject, body=body, reply_to_id=reply_to_id
+            )
         raise ValueError("No email connector configured")
 
     async def mark_email_read(self, email_id: str) -> None:
@@ -386,7 +411,7 @@ class UnifiedDataAdapter:
             except Exception:
                 results["gmail"] = False
         if self._outlook:
-            results["outlook"] = True
+            results["outlook"] = await self._outlook.test_connection()
         if self._sheets:
             results["google_sheets"] = True
         if self._shopify:

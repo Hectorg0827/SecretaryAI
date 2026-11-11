@@ -356,7 +356,9 @@ async def send_email_reply(
         )
 
     try:
-        result = await adapter.send_email_reply(to=to, subject=body.subject, body=body.body)
+        result = await adapter.send_email_reply(
+            to=to, subject=body.subject, body=body.body, reply_to_id=body.email_id or None
+        )
     except Exception as exc:
         log.error("Send email reply failed: %s", exc)
         write_audit_event(

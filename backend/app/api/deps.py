@@ -65,6 +65,17 @@ def get_adapter(
     if cfg.get("google_refresh_token"):
         cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
 
+    # Outlook tokens (encrypted at rest). A value that will not decrypt is
+    # dropped so the mailbox shows as "needs reconnecting" instead of crashing.
+    for _col in ("ms_access_token", "ms_refresh_token"):
+        if cfg.get(_col):
+            try:
+                cfg[_col] = decrypt(cfg[_col], settings.secret_key)
+            except ValueError:
+                cfg[_col] = None
+    cfg["ms_client_id"] = settings.ms_client_id
+    cfg["ms_client_secret"] = settings.ms_client_secret
+
     # Build the gmail_credentials dict that GmailConnector expects.
     # Refresh the access token proactively if it is expired before building the adapter.
     if cfg.get("google_access_token") and cfg.get("google_refresh_token"):

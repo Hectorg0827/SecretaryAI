@@ -291,6 +291,91 @@ async def gmail_disconnect(user: dict = Depends(require_permission("manage_integ
     return {"status": "disconnected"}
 
 
+# ─── Microsoft OAuth (Outlook mail) ───────────────────────────────────────────
+
+@router.get("/outlook/connect-url")
+async def outlook_connect_url(user: dict = Depends(require_permission("manage_integrations"))):
+    """Return the Microsoft sign-in URL for connecting an Outlook mailbox."""
+    from app.auth.oauth import build_ms_authorization_url, microsoft_configured
+    if not microsoft_configured():
+        raise HTTPException(status_code=503, detail="Outlook connection is not set up on this server yet.")
+    state = secrets.token_urlsafe(32)
+    _state_set(f"ms:{state}", user["company_id"])
+    return {"url": build_ms_authorization_url(state)}
+
+
+@router.get("/outlook/callback")
+async def outlook_callback(
+    code: Annotated[str, Query()] = "",
+    state: Annotated[str, Query()] = "",
+    error: Annotated[str, Query()] = "",
+):
+    """
+    Microsoft redirects here after the user approves or declines.
+    The company is taken from the single-use state created by connect-url —
+    never from anything in this request.
+    """
+    from datetime import timedelta
+    from app.auth.oauth import exchange_ms_code_for_tokens
+
+    if error:
+        log.warning("Microsoft OAuth error: %s", _safe_reason(error))
+        return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=error&reason={_safe_reason(error)}")
+
+    company_id = _state_pop(f"ms:{state}") if state else None
+    if not company_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code from Microsoft")
+
+    try:
+        tokens = await exchange_ms_code_for_tokens(code)
+    except Exception as exc:
+        log.error("Microsoft token exchange failed: %s", type(exc).__name__)
+        return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=error&reason=token_exchange")
+
+    if not tokens.get("refresh_token"):
+        # Without it the connection would die within the hour.
+        return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=error&reason=no_offline_access")
+
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=tokens["expires_in"])).isoformat()
+    try:
+        _db().table("companies").update({
+            "ms_tenant_id": settings.ms_tenant or "common",
+            "ms_access_token": encrypt(tokens["access_token"], settings.secret_key),
+            "ms_refresh_token": encrypt(tokens["refresh_token"], settings.secret_key),
+            "ms_token_expires_at": expires_at,
+            "ms_connected_at": datetime.now(timezone.utc).isoformat(),
+            "ms_account_email": tokens.get("account_email") or None,
+        }).eq("id", company_id).execute()
+    except Exception as exc:
+        log.error("Failed to store Microsoft tokens for company %s: %s", company_id, exc)
+        return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=error&reason=db_write")
+
+    _audit(company_id, "integration_connected", None, integration="outlook",
+           account=tokens.get("account_email") or "")
+    return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=connected")
+
+
+@router.delete("/outlook/disconnect")
+async def outlook_disconnect(user: dict = Depends(require_permission("manage_integrations"))):
+    """Forget this company's Outlook tokens."""
+    company_id = user["company_id"]
+    try:
+        _db().table("companies").update({
+            "ms_access_token": None,
+            "ms_refresh_token": None,
+            "ms_token_expires_at": None,
+            "ms_connected_at": None,
+            "ms_account_email": None,
+        }).eq("id", company_id).execute()
+    except Exception as exc:
+        log.error("Outlook disconnect failed for %s: %s", company_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to disconnect Outlook")
+    _audit(company_id, "integration_disconnected", user.get("sub"), integration="outlook")
+    return {"status": "disconnected"}
+
+
 # ─── Local auth ───────────────────────────────────────────────────────────────
 
 def _verify_totp(user_id: str, secret: str, code: str) -> None:

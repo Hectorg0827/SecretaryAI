@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = ""
 
+    # Microsoft (Outlook / Microsoft 365 mail). Register an app in Azure
+    # ("Accounts in any organizational directory and personal Microsoft
+    # accounts"), then set all three. MS_TENANT stays "common" unless the app
+    # is restricted to one organisation.
+    ms_client_id: str = ""
+    ms_client_secret: str = ""
+    ms_redirect_uri: str = ""
+    ms_tenant: str = "common"
+
     # Computer Use — OFF unless an operator explicitly turns it on. The engine
     # drives the mouse/keyboard of the machine the backend runs on, so it must
     # never be on by default in a shared cloud deployment.
@@ -169,6 +178,17 @@ class Settings(BaseSettings):
             errors.append(
                 "REQUIRE_EMAIL_VERIFICATION is on but SENDGRID_API_KEY is not set — "
                 "nobody could receive the confirmation email, so nobody could sign in"
+            )
+
+        ms_fields = {
+            "MS_CLIENT_ID": self.ms_client_id,
+            "MS_CLIENT_SECRET": self.ms_client_secret,
+            "MS_REDIRECT_URI": self.ms_redirect_uri,
+        }
+        ms_set = {k for k, v in ms_fields.items() if v}
+        if ms_set and len(ms_set) != len(ms_fields):
+            errors.append(
+                f"Partial Microsoft config: {sorted(set(ms_fields) - ms_set)} must also be set when using Outlook"
             )
 
         if errors:

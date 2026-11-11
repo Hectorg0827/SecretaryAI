@@ -44,6 +44,8 @@ class Settings(BaseSettings):
 
     # Conductor (QB Desktop)
     conductor_api_key: str = ""
+    # Never reuse the operator's Conductor API key to authenticate inbound webhooks.
+    conductor_webhook_secret: str = ""
 
     # Intuit / QuickBooks Online
     intuit_client_id: str = ""
@@ -79,6 +81,12 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""
+
+    # Microsoft Graph delegated mailbox OAuth (staging-only onboarding).
+    ms_client_id: str = ""
+    ms_client_secret: str = ""
+    ms_redirect_uri: str = ""
+    ms_tenant: str = "common"
 
     # Computer Use safety
     computer_use_enabled: bool = True
@@ -235,6 +243,26 @@ class Settings(BaseSettings):
             errors.append(
                 f"Partial Google config: {missing} must also be set when using Gmail/Sheets"
             )
+
+        ms_fields = {
+            "MS_CLIENT_ID": self.ms_client_id,
+            "MS_CLIENT_SECRET": self.ms_client_secret,
+            "MS_REDIRECT_URI": self.ms_redirect_uri,
+        }
+        ms_set = {k for k, v in ms_fields.items() if v}
+        if ms_set and len(ms_set) != len(ms_fields):
+            errors.append(f"Partial Microsoft config: {sorted(set(ms_fields) - ms_set)}")
+        if ms_set and self.secretaryai_deployment_env.strip().lower() == "staging":
+            try:
+                target = urlsplit(self.ms_redirect_uri)
+                if (target.scheme != "https" or target.hostname != "secretaryai-backend-staging.up.railway.app"
+                        or target.path != "/auth/outlook/callback" or target.port is not None
+                        or target.username or target.password or target.query or target.fragment):
+                    errors.append("MS_REDIRECT_URI must be the exact isolated staging callback")
+            except ValueError:
+                errors.append("MS_REDIRECT_URI is invalid")
+        if ms_set and not re.fullmatch(r"common|organizations|consumers|[0-9a-fA-F-]{36}", self.ms_tenant):
+            errors.append("MS_TENANT must be common, organizations, consumers, or a tenant UUID")
 
         # Billing must not be half-configured in production.
         #

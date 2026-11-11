@@ -525,6 +525,7 @@ export function Settings() {
     const params = new URLSearchParams(window.location.search);
     const qbo   = params.get('qbo');
     const gmail = params.get('gmail');
+    const outlook = params.get('outlook');
     if (qbo === 'connected') {
       toast('Returned from QuickBooks authorization. Verify the status below.');
       loadIntegrations();
@@ -539,11 +540,19 @@ export function Settings() {
       toast.error('Google authorization was not completed.');
     }
 
+    if (outlook === 'connected') {
+      toast('Returned from Microsoft authorization. Verify the Outlook status below.');
+      loadIntegrations();
+    } else if (outlook === 'error') {
+      toast.error('Microsoft authorization was not completed.');
+    }
+
     // Clean up URL params without triggering a reload
-    if (qbo || gmail) {
+    if (qbo || gmail || outlook) {
       const clean = new URL(window.location.href);
       clean.searchParams.delete('qbo');
       clean.searchParams.delete('gmail');
+      clean.searchParams.delete('outlook');
       clean.searchParams.delete('reason');
       window.history.replaceState({}, '', clean.toString());
     }
@@ -618,6 +627,31 @@ export function Settings() {
       toast.error('Failed to disconnect Google');
     } finally {
       setLoading('gmail', false);
+    }
+  };
+
+  const connectOutlook = async () => {
+    setLoading('outlook', true);
+    try {
+      const { url } = await api.settings.outlookConnectUrl();
+      if (!isTrustedConsentUrl(url, 'login.microsoftonline.com')) throw new Error('Untrusted consent URL');
+      window.location.href = url;
+    } catch {
+      toast.error('Could not start Outlook connection');
+      setLoading('outlook', false);
+    }
+  };
+
+  const disconnectOutlook = async () => {
+    setLoading('outlook', true);
+    try {
+      await api.settings.outlookDisconnect();
+      toast.success('Microsoft Outlook disconnected');
+      await loadIntegrations();
+    } catch {
+      toast.error('Failed to disconnect Outlook');
+    } finally {
+      setLoading('outlook', false);
     }
   };
 
@@ -720,6 +754,18 @@ export function Settings() {
                   onConnect={connectGmail}
                   onDisconnect={disconnectGmail}
                   connectLabel="Connect with Google"
+                  canManage={role === 'owner'}
+                />
+
+                {/* Outlook is a separate Microsoft delegated mailbox connection */}
+                <IntegrationRow
+                  label="Microsoft Outlook"
+                  description="Read, triage, and reply through a Microsoft 365 mailbox"
+                  connected={integrations?.outlook?.connected ?? false}
+                  loading={integLoading || !!actionLoading['outlook']}
+                  onConnect={connectOutlook}
+                  onDisconnect={disconnectOutlook}
+                  connectLabel="Connect with Microsoft"
                   canManage={role === 'owner'}
                 />
                 </>

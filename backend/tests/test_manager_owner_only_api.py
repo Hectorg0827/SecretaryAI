@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from app.api import settings as settings_api
 from app.api import setup as setup_api
+from app.api import outlook_oauth as outlook_api
 from app.api.deps import get_db
 from app.auth.rbac import get_current_user
 
@@ -33,6 +34,7 @@ def manager_client():
     app = FastAPI()
     app.include_router(settings_api.router, prefix="/api/settings")
     app.include_router(setup_api.router, prefix="/api/setup")
+    app.include_router(outlook_api.router, prefix="/auth/outlook")
     app.dependency_overrides[get_current_user] = lambda: {
         "sub": "test-manager", "company_id": "tenant-a", "role": "manager"
     }
@@ -45,6 +47,8 @@ def manager_client():
     ("PATCH", "/api/settings/", {"timezone": "UTC"}),
     ("POST", "/api/settings/integrations/qbd", {"end_user_id": "synthetic"}),
     ("DELETE", "/api/settings/integrations/qbd", None),
+    ("GET", "/auth/outlook/connect-url", None),
+    ("DELETE", "/auth/outlook/disconnect", None),
     ("POST", "/api/setup/qb-desktop/start", None),
     ("GET", "/api/setup/qb-desktop/status", None),
     ("POST", "/api/setup/qb-desktop/guidance", {

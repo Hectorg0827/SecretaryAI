@@ -154,26 +154,38 @@ class UnifiedDataAdapter:
             raise RuntimeError("QBO token refresh could not be persisted") from exc
 
     async def _persist_outlook_tokens(self, access_token: str, refresh_token: str) -> None:
-        """Persist rotating Microsoft credentials before treating refresh as complete."""
+        """Persist Microsoft rotation only for the currently connected generation."""
         import logging
 
         log = logging.getLogger(__name__)
         company_id = self._config.get("id")
         if not company_id:
             raise RuntimeError("Cannot persist Outlook token refresh without a company identifier")
+        prior_ciphertext = self._config.get("_ms_expected_refresh_ciphertext")
+        if not prior_ciphertext:
+            raise RuntimeError("Cannot rotate Outlook tokens without a persisted refresh generation")
         try:
-            from supabase import create_client
+            from starlette.concurrency import run_in_threadpool
             from app.config import get_settings
             from app.utils.encryption import encrypt
+            from app.utils.qbo_token_store import create_qbo_client
 
             settings = get_settings()
-            db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-            result = db.table("companies").update({
-                "ms_access_token": encrypt(access_token, settings.secret_key),
-                "ms_refresh_token": encrypt(refresh_token, settings.secret_key),
-            }).eq("id", company_id).execute()
-            if not getattr(result, "data", None):
-                raise RuntimeError("Outlook token persistence matched no company")
+            next_refresh = encrypt(refresh_token, settings.secret_key)
+            next_access = encrypt(access_token, settings.secret_key)
+
+            def persist() -> None:
+                result = create_qbo_client(settings).table("companies").update({
+                    "ms_access_token": next_access,
+                    "ms_refresh_token": next_refresh,
+                }).eq("id", company_id).eq(
+                    "ms_refresh_token", prior_ciphertext
+                ).execute()
+                if len(getattr(result, "data", None) or []) != 1:
+                    raise RuntimeError("Outlook token generation changed")
+
+            await run_in_threadpool(persist)
+            self._config["_ms_expected_refresh_ciphertext"] = next_refresh
             log.info("Outlook tokens refreshed and persisted for a company")
         except Exception as exc:
             log.error("Outlook token refresh could not be persisted")

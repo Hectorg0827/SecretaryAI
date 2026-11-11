@@ -299,6 +299,7 @@ export interface IntegrationsResponse {
   quickbooks_online:  IntegrationStatus;
   quickbooks_desktop: IntegrationStatus;
   gmail:              IntegrationStatus;
+  outlook:            IntegrationStatus;
   google_sheets:      IntegrationStatus;
 }
 
@@ -434,6 +435,8 @@ export const api = {
     qboDisconnect: () => api.delete<{ status: string }>('/auth/qbo/disconnect'),
     gmailConnectUrl: () => api.get<{ url: string }>('/auth/gmail/connect-url'),
     gmailDisconnect: () => api.delete<{ status: string }>('/auth/gmail/disconnect'),
+    outlookConnectUrl: () => api.get<{ url: string }>('/auth/outlook/connect-url'),
+    outlookDisconnect: () => api.delete<{ status: string }>('/auth/outlook/disconnect'),
     saveQBD: (endUserId: string) =>
       api.post<{ status: string; end_user_id: string }>('/api/settings/integrations/qbd', { end_user_id: endUserId }),
     disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),

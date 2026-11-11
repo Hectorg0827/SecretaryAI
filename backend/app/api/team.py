@@ -142,7 +142,7 @@ def _invitation_url(raw_token: str) -> str:
     settings = _staging_settings()
     url = urlsplit(settings.frontend_url)
     if (url.scheme != "https" or url.hostname != "secretaryai-web-staging.up.railway.app"
-            or url.username or url.password or url.query or url.fragment):
+            or url.username or url.password or url.port is not None or url.query or url.fragment):
         raise HTTPException(status_code=503, detail="Invitation URL not configured safely")
     # Fragment is not sent to the web server in HTTP requests or referrer headers.
     return f"https://{url.hostname}/accept-invite#token={raw_token}"
@@ -241,6 +241,21 @@ def _require_finance_audit(
         raise HTTPException(status_code=503, detail="Finance role audit unavailable")
 
 
+def _require_invitation_audit(db, company_id: str, actor_id: str, role: str, event: str) -> None:
+    """Account creation and identity email dispatch require durable audit first."""
+    from app.utils.audit import write_audit_event
+    try:
+        event_id = write_audit_event(
+            db, company_id=company_id, event_type=event, actor_id=actor_id,
+            action_class="commit", capability="team_management", path_used="api",
+            metadata={"role": role, "gate": "staging_invitation"},
+        )
+    except Exception:
+        event_id = None
+    if not event_id:
+        raise HTTPException(status_code=503, detail="Invitation audit unavailable")
+
+
 def _require_team_mutation_audit(
     db, *, company_id: str, actor_id: str, event: str,
     member_id: str, prior_role: str, next_role: str | None = None,
@@ -286,6 +301,8 @@ async def invite_manager(
     if body.role != "manager":
         _require_finance_audit(db, actor["company_id"], "finance_role_invite_attempt",
                                actor["sub"], body.role)
+    _require_invitation_audit(db, actor["company_id"], actor["sub"], body.role,
+                              "team_invitation_requested")
 
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
@@ -347,6 +364,8 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
     # An owner who has since lost their permissions cannot onboard an approver.
     _owner_record(db, {"sub": invitation["invited_by"],
                        "company_id": invitation["company_id"], "role": "owner"})
+    _require_invitation_audit(db, invitation["company_id"], invitation["invited_by"],
+                              invitation["role"], "team_invitation_activation_requested")
     if invitation["role"] != "manager":
         _require_finance_audit(db, invitation["company_id"], "finance_role_activation_attempt",
                                invitation["invited_by"], invitation["role"])

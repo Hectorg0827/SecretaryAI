@@ -24,12 +24,17 @@ class _Query:
         self.table = table
         self.filters = {}
         self.max_rows = None
+        self.changes = None
 
     def select(self, _columns, **_kwargs):
         return self
 
     def eq(self, name, value):
         self.filters[name] = value
+        return self
+
+    def update(self, values):
+        self.changes = values
         return self
 
     def limit(self, count):
@@ -44,6 +49,9 @@ class _Query:
             rows = [record for record in rows if record.get(name) == value]
         if self.max_rows is not None:
             rows = rows[:self.max_rows]
+        if self.changes is not None:
+            for record in rows:
+                record.update(self.changes)
         return SimpleNamespace(data=[dict(record) for record in rows])
 
 
@@ -231,3 +239,31 @@ def test_finance_allowlist_denial_has_trace_and_hardening_headers(actual_app):
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert "default-src" in response.headers["content-security-policy"]
+
+
+def test_finance_employee_can_change_only_their_own_password(actual_app, monkeypatch):
+    from app.api import account_security
+
+    client, db, _ = actual_app
+    db.employee()["role"] = "ar_specialist"
+    other_employee = dict(db.tables["users"][1])
+    token = _jwt(role="ar_specialist")
+    headers = {"Authorization": f"Bearer {token}"}
+    monkeypatch.setattr(account_security, "_settings", lambda: None)
+    monkeypatch.setattr(account_security, "_db", lambda: db)
+    monkeypatch.setattr(account_security, "_CHANGE_LIMITER", SimpleNamespace(is_allowed=lambda _: True))
+    monkeypatch.setattr(account_security, "_require_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(account_security, "verify_password", lambda supplied, _: supplied == "old-password1")
+    monkeypatch.setattr(account_security, "hash_password", lambda _: "synthetic-replacement-hash")
+
+    response = client.post("/auth/change-password", headers=headers, json={
+        "current_password": "old-password1",
+        "new_password": "new-password2",
+    })
+
+    assert response.status_code == 200, response.text
+    assert db.employee()["hashed_password"] == "synthetic-replacement-hash"
+    assert db.tables["users"][1] == other_employee
+    assert _get(client, "/auth/me", token).status_code == 401
+    replacement = response.json()["access_token"]
+    assert _get(client, "/api/settings/integrations", replacement).status_code == 403

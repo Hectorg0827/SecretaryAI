@@ -20,6 +20,8 @@ Authentication
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -54,6 +56,19 @@ from app.domain.contracts import ConnectorStatus
 log = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
+
+# An install secret is shown once, works once, and only for this long.
+INSTALL_SECRET_TTL_HOURS = 24
+
+# Task types that change data in QuickBooks. They are never accepted on the
+# direct dispatch endpoint: a write must start as a draft and be approved in
+# the approval queue (POST /api/actions/approve/{id}), which checks the
+# company's policy and writes the audit record before anything runs.
+WRITE_TASK_TYPES = frozenset({"create_invoice", "create_po", "update_item"})
+
+
+def _hash_install_secret(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
 
 
 # ─── Connector token auth ─────────────────────────────────────────────────────
@@ -152,11 +167,12 @@ async def register_connector(
     if req.company_id != user["company_id"]:
         raise HTTPException(status_code=403, detail="company_id mismatch")
 
-    # Validate install_secret against the company's stored secret
+    # Validate install_secret against the stored DIGEST (the secret itself is
+    # never stored). It is single-use and expires.
     try:
         company = (
             db.table("companies")
-            .select("connector_install_secret")
+            .select("connector_install_secret_hash, connector_install_secret_created_at")
             .eq("id", req.company_id)
             .execute()
         )
@@ -167,11 +183,22 @@ async def register_connector(
     if not company.data:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    stored_secret = (company.data[0] or {}).get("connector_install_secret")
-    if not stored_secret or not secrets.compare_digest(
-        req.install_secret.encode(), stored_secret.encode()
+    row = company.data[0] or {}
+    stored_hash = row.get("connector_install_secret_hash")
+    if not isinstance(stored_hash, str) or not stored_hash or not hmac.compare_digest(
+        _hash_install_secret(req.install_secret), stored_hash
     ):
         raise HTTPException(status_code=403, detail="Invalid install secret")
+
+    created_raw = row.get("connector_install_secret_created_at")
+    try:
+        created_at = datetime.fromisoformat(str(created_raw).replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        created_at = None
+    if created_at is None or datetime.now(timezone.utc) - created_at > timedelta(hours=INSTALL_SECRET_TTL_HOURS):
+        raise HTTPException(status_code=403, detail="Install secret has expired — generate a new one")
 
     now = datetime.now(timezone.utc).isoformat()
     # Upsert registration row
@@ -200,6 +227,23 @@ async def register_connector(
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     registration_id = result.data[0]["id"]
+
+    # Burn the secret: it has done its one job.
+    try:
+        db.table("companies").update({
+            "connector_install_secret_hash": None,
+            "connector_install_secret_created_at": None,
+        }).eq("id", req.company_id).execute()
+    except Exception as exc:
+        log.error("Register: could not clear used install secret: %s", exc)
+
+    from app.utils.audit import write_audit_event
+    write_audit_event(
+        db, company_id=req.company_id, event_type="connector_registered", actor_id=user.get("sub"),
+        capability="connectors",
+        metadata={"registration_id": registration_id, "connector_type": req.connector_type.value,
+                  "connector_id": req.connector_id},
+    )
 
     # Issue connector JWT (long-lived: 100 days)
     connector_token = create_access_token(
@@ -329,13 +373,22 @@ async def fetch_connector_tasks(
             ):
                 continue
 
-            # Atomically mark dispatched — only this connector gets this task
-            db.table("connector_tasks").update({
+            # Claim the task with a compare-and-set on the state we just read:
+            # if another connector (or another poll) changed it in between, the
+            # UPDATE matches nothing and this poll does not get the task.
+            claim = db.table("connector_tasks").update({
                 "status": "dispatched",
                 "dispatched_at": now.isoformat(),
                 "dispatcher_id": connector["id"],
-            }).eq("id", row["id"]).in_("status", ["pending", "dispatched"]).execute()
+            }).eq("id", row["id"]).eq("company_id", connector["company_id"]).eq("status", row["status"])
+            if row["status"] == "dispatched" and row.get("dispatched_at"):
+                claim = claim.eq("dispatched_at", row["dispatched_at"])
+            if not (getattr(claim.execute(), "data", None) or []):
+                continue
 
+            row.setdefault("correlation_id", row.get("task_id") or str(row["id"]))
+            if not row.get("correlation_id"):
+                row["correlation_id"] = row.get("task_id") or str(row["id"])
             tasks_out.append(row)
 
     except Exception as exc:
@@ -582,6 +635,7 @@ async def get_single_connector_status(
             db.table("connector_sync_logs")
             .select("*")
             .eq("connector_id", registration_id)
+            .eq("company_id", company_id)
             .order("started_at", desc=True)
             .limit(20)
             .execute()
@@ -606,21 +660,30 @@ async def generate_install_secret(
     """
     Generate (or rotate) the install_secret for this company.
     The secret is shown once here; the user copies it into the connector installer.
-    Returns the plaintext secret (stored hashed in DB).
+    Only its SHA-256 digest is stored. It works for one registration and
+    expires after INSTALL_SECRET_TTL_HOURS.
     """
     raw_secret = secrets.token_urlsafe(32)
     try:
         db.table("companies").update({
-            "connector_install_secret": raw_secret,
+            "connector_install_secret_hash": _hash_install_secret(raw_secret),
+            "connector_install_secret_created_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", user["company_id"]).execute()
     except Exception as exc:
         log.error("Failed to store install secret: %s", exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
+    from app.utils.audit import write_audit_event
+    write_audit_event(
+        db, company_id=user["company_id"], event_type="connector_install_secret_generated",
+        actor_id=user.get("sub"), capability="connectors",
+    )
+
     return {
         "install_secret": raw_secret,
+        "expires_in_hours": INSTALL_SECRET_TTL_HOURS,
         "warning": "Copy this secret now — it will not be shown again. "
-                   "Use it during connector installation.",
+                   f"It works once and expires in {INSTALL_SECRET_TTL_HOURS} hours.",
     }
 
 
@@ -662,6 +725,13 @@ async def dispatch_task(
     if body.task_type not in valid_types:
         raise HTTPException(status_code=422, detail=f"Unknown task_type '{body.task_type}'")
 
+    # Writes to QuickBooks never go through this endpoint (see WRITE_TASK_TYPES).
+    if body.task_type in WRITE_TASK_TYPES:
+        raise HTTPException(
+            status_code=403,
+            detail="Changes to QuickBooks must be created as a draft and approved in the approval queue.",
+        )
+
     company_id = user["company_id"]
 
     # Verify connector exists and is connected (or stale — still try)
@@ -700,7 +770,8 @@ async def dispatch_task(
             "status": "pending",
             "priority": body.priority,
             "timeout_seconds": body.timeout_seconds,
-            "correlation_id": body.correlation_id,
+            "correlation_id": body.correlation_id or task_id,
+            "requested_by": user.get("sub"),
             "issued_at": now,
         }).execute()
     except Exception as exc:
@@ -710,6 +781,12 @@ async def dispatch_task(
     log.info(
         "Task dispatched: type=%s task_id=%s company=%s",
         body.task_type, task_id, company_id,
+    )
+    from app.utils.audit import write_audit_event
+    write_audit_event(
+        db, company_id=company_id, event_type="connector_task_dispatched", actor_id=user.get("sub"),
+        action_class="read", capability="connectors",
+        metadata={"task_id": task_id, "task_type": body.task_type},
     )
     return {
         "task_id": task_id,

@@ -387,8 +387,9 @@ class TestSingleConnectorStatus:
         }
         db.table.return_value.select.return_value.eq.return_value.eq.return_value \
             .execute.return_value.data = [reg_row]
-        db.table.return_value.select.return_value.eq.return_value.order.return_value \
-            .limit.return_value.execute.return_value.data = []
+        # sync logs are filtered by connector AND company
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value \
+            .order.return_value.limit.return_value.execute.return_value.data = []
         result = await get_single_connector_status(
             registration_id="reg-1", user=_make_user(), db=db
         )

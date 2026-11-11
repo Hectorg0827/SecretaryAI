@@ -297,16 +297,19 @@ You have the current screenshot above. Begin."""
 
     async def _audit(self, event: str, data: dict) -> None:
         log.info("ComputerUse audit: %s %s", event, data)
+        company_id = self.company_config.get("id")
+        if not company_id:
+            return
         try:
             from app.api.deps import get_db
-            db = get_db()
-            db.table("action_log").insert({
-                "event": event,
-                "data": data,
-                "company_id": self.company_config.get("id"),
-                "created_at": __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc
-                ).isoformat(),
-            }).execute()
+            from app.utils.audit import write_audit_event
+            write_audit_event(
+                self._db or get_db(),
+                company_id=company_id,
+                event_type=event,
+                actor_id="ai",
+                path_used="computer_use",
+                metadata=data,
+            )
         except Exception as exc:
-            log.warning("ComputerUse audit write failed (non-fatal): %s", exc)
+            log.error("ComputerUse audit write failed: %s", exc)

@@ -41,40 +41,44 @@ async def generate_morning_briefing(
 
     briefing_text = response.content[0].text
 
-    # ── Send via SendGrid ──────────────────────────────────────────────────────
-    if settings.sendgrid_api_key and recipient_email:
-        try:
-            message = Mail(
-                from_email=settings.from_email,
-                to_emails=recipient_email,
-                subject=f"Good morning — your {company_name} briefing",
-                html_content=_to_html(briefing_text),
-            )
-            sg = SendGridAPIClient(settings.sendgrid_api_key)
-            sg.send(message)
-            log.info("Morning briefing sent to %s for company %s", recipient_email, company_id)
-        except Exception as exc:
-            log.error("SendGrid delivery failed for %s: %s", company_id, exc)
-    else:
-        log.warning(
-            "Morning briefing generated for %s but not delivered "
-            "(SENDGRID_API_KEY or recipient_email not set)",
-            company_id,
-        )
+    # ── Persist + send (every automatic send is written to the audit trail) ──
+    from app.api.deps import get_db
+    from app.utils.mailer import send_system_email
 
-    # ── Persist to DB ──────────────────────────────────────────────────────────
     try:
-        from app.api.deps import get_db
         db = get_db()
-        db.table("morning_briefings").insert({
-            "company_id": company_id,
-            "briefing_text": briefing_text,
-            "recipient_email": recipient_email,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
-            "language": preferred_language,
-        }).execute()
     except Exception as exc:
-        log.error("Could not store morning briefing for %s: %s", company_id, exc)
+        log.error("Morning briefing: database unavailable for %s: %s", company_id, exc)
+        db = None
+
+    delivered = False
+    if recipient_email:
+        delivered = send_system_email(
+            db,
+            company_id=company_id,
+            to=recipient_email,
+            subject=f"Good morning — your {company_name} briefing",
+            html=_to_html(briefing_text),
+            kind="morning_briefing",
+            actor="scheduler",
+        )
+        if delivered:
+            log.info("Morning briefing sent to %s for company %s", recipient_email, company_id)
+    else:
+        log.warning("Morning briefing generated for %s but no recipient email is set", company_id)
+
+    if db is not None:
+        try:
+            db.table("morning_briefings").insert({
+                "company_id": company_id,
+                "briefing_text": briefing_text,
+                "recipient_email": recipient_email,
+                # sent_at is only set when the email really went out
+                "sent_at": datetime.now(timezone.utc).isoformat() if delivered else None,
+                "language": preferred_language,
+            }).execute()
+        except Exception as exc:
+            log.error("Could not store morning briefing for %s: %s", company_id, exc)
 
     return briefing_text
 

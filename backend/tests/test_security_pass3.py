@@ -198,16 +198,34 @@ class TestDispatchTaskGate:
         assert exc.value.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_every_protocol_task_type_is_accepted_for_owner(self):
-        from app.api.connectors import dispatch_task, DispatchTaskRequest
+    async def test_every_read_task_type_is_accepted_for_owner(self):
+        from app.api.connectors import dispatch_task, DispatchTaskRequest, WRITE_TASK_TYPES
         from app.domain.connector_protocol import TaskType
         for t in TaskType:
+            if t.value in WRITE_TASK_TYPES:
+                continue
             out = await dispatch_task(
                 body=DispatchTaskRequest(task_type=t.value),
                 user={"sub": "u1", "role": "owner", "company_id": "c1"},
                 db=self._db_with_connector(),
             )
             assert out["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_write_task_types_cannot_bypass_the_approval_queue(self):
+        """#56 — create_invoice / create_po / update_item are refused here."""
+        from app.api.connectors import dispatch_task, DispatchTaskRequest, WRITE_TASK_TYPES
+        assert WRITE_TASK_TYPES == {"create_invoice", "create_po", "update_item"}
+        for t in WRITE_TASK_TYPES:
+            db = self._db_with_connector()
+            with pytest.raises(HTTPException) as exc:
+                await dispatch_task(
+                    body=DispatchTaskRequest(task_type=t),
+                    user={"sub": "u1", "role": "owner", "company_id": "c1"},
+                    db=db,
+                )
+            assert exc.value.status_code == 403
+            db.table.return_value.insert.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_manager_can_dispatch(self):

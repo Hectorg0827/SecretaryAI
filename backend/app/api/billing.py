@@ -145,7 +145,12 @@ async def create_checkout_session(
         )
 
     # Fetch company email for customer lookup/creation
-    company_result = db.table("companies").select("email,name").eq("id", company_id).execute()
+    # The billing contact is the company's owner (companies has no email).
+    company_result = (
+        db.table("users").select("email")
+        .eq("company_id", company_id).eq("role", "owner").eq("is_active", True)
+        .limit(1).execute()
+    )
     company_email = ""
     if company_result.data:
         company_email = company_result.data[0].get("email", "")

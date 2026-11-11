@@ -24,7 +24,7 @@ class TestInventoryAlertCheck:
 
     def _make_engine(self):
         engine = AsyncMock()
-        engine.process.return_value = {"status": "executed"}
+        engine.process.return_value = {"status": "sent"}
         return engine
 
     @pytest.mark.asyncio
@@ -55,7 +55,7 @@ class TestInventoryAlertCheck:
 
         with patch("app.actions.email_actions.send_alert_email", new_callable=AsyncMock) as mock_email:
             mock_email.return_value = {"status": "sent"}
-            result = await check_and_alert_inventory("co-1", adapter, engine, "user-1")
+            result = await check_and_alert_inventory("co-1", adapter, engine, "user-1", alert_email="owner@test.com")
 
         assert "Gadget X" in result["critical"]
         assert result["alerts_fired"] == 1
@@ -98,7 +98,7 @@ class TestInventoryAlertCheck:
 
         with patch("app.actions.email_actions.send_alert_email", new_callable=AsyncMock) as mock_email:
             mock_email.return_value = {"status": "sent"}
-            result = await check_and_alert_inventory("co-1", adapter, engine, "user-1")
+            result = await check_and_alert_inventory("co-1", adapter, engine, "user-1", alert_email="owner@test.com")
 
         assert len(result["critical"]) == 3
         assert result["alerts_fired"] == 1  # Only one consolidated alert

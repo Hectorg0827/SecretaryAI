@@ -190,6 +190,7 @@ class Connector:
         task_id = task.get("task_id") or task.get("id")
         task_type = task.get("task_type", "unknown")
         parameters = task.get("parameters") or {}
+        corr = task.get("correlation_id") or task_id
         started_at = datetime.now(timezone.utc)
 
         log.info("Executing task %s (type=%s)", task_id, task_type)
@@ -198,21 +199,22 @@ class Connector:
             result_data = await self.executor.execute(task_type, parameters)
             duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
 
-            await self._submit_result(task_id, "completed", result_data, duration_ms)
+            await self._submit_result(task_id, "completed", result_data, duration_ms, correlation_id=corr)
             log.info("Task %s completed in %dms", task_id, duration_ms)
 
         except TaskError as exc:
             duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
             status = "failed" if not exc.recoverable else "failed"
             await self._submit_result(
-                task_id, status, {}, duration_ms, error_message=str(exc)
+                task_id, status, {}, duration_ms, error_message=str(exc), correlation_id=corr
             )
             log.error("Task %s failed: %s", task_id, exc)
 
         except Exception as exc:
             duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
             await self._submit_result(
-                task_id, "failed", {}, duration_ms, error_message=f"Unexpected error: {exc}"
+                task_id, "failed", {}, duration_ms, error_message=f"Unexpected error: {exc}",
+                correlation_id=corr,
             )
             log.error("Task %s unexpected error: %s", task_id, exc)
 
@@ -223,13 +225,17 @@ class Connector:
         data: dict,
         duration_ms: int,
         error_message: str | None = None,
+        correlation_id: str | None = None,
     ) -> None:
         rows = (
             len(data.get("customers") or data.get("invoices") or
-                data.get("items") or data.get("payments") or data.get("vendors") or [])
+                data.get("items") or data.get("payments") or data.get("vendors") or
+                data.get("purchase_orders") or [])
         )
         body: dict = {
             "task_id": task_id,
+            "registration_id": self.cfg.registration_id,
+            "correlation_id": correlation_id or task_id,
             "company_id": self.cfg.company_id,
             "status": status,
             "data": data,

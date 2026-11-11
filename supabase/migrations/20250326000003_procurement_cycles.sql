@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS procurement_cycles (
 -- RLS
 ALTER TABLE procurement_cycles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "company_isolation" ON procurement_cycles;
 CREATE POLICY "company_isolation" ON procurement_cycles
     USING (company_id = (current_setting('app.company_id', true))::uuid);
 
@@ -32,6 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_procurement_cycles_po
     ON procurement_cycles(company_id, po_number);
 
 -- auto-update updated_at
+DROP TRIGGER IF EXISTS set_updated_at ON procurement_cycles;
 CREATE TRIGGER set_updated_at
     BEFORE UPDATE ON procurement_cycles
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();

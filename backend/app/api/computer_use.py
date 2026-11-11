@@ -220,19 +220,16 @@ async def _run_engine(state: "_SessionState", company_config: dict, db) -> None:
         state.status = "done"
         log.info("CU session %s completed successfully", state.session_id)
 
-        # Persist result summary to action_log
-        try:
-            db.table("action_log").insert({
-                "company_id": state.company_id,
-                "session_id": state.session_id,
-                "event": "computer_use_complete",
-                "app_name": state.app_name,
-                "task": state.task,
-                "status": "success",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
-        except Exception as exc:
-            log.warning("Could not write CU audit log: %s", exc)
+        # Record the completed session in the audit trail
+        from app.utils.audit import write_audit_event
+        write_audit_event(
+            db,
+            company_id=state.company_id,
+            event_type="computer_use_session_complete",
+            actor_id="ai",
+            path_used="computer_use",
+            metadata={"session_id": state.session_id, "app_name": state.app_name, "task": state.task},
+        )
 
     except Exception as exc:
         state.status = "error"

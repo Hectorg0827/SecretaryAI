@@ -39,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_connector_registrations_status
     ON connector_registrations (status);
 
 ALTER TABLE connector_registrations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON connector_registrations;
 CREATE POLICY "company_isolation" ON connector_registrations
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -76,6 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_connector_sync_logs_company
     ON connector_sync_logs (company_id, started_at DESC);
 
 ALTER TABLE connector_sync_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON connector_sync_logs;
 CREATE POLICY "company_isolation" ON connector_sync_logs
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -123,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_sessions_status
     WHERE status NOT IN ('completed','cancelled','failed');
 
 ALTER TABLE automation_sessions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON automation_sessions;
 CREATE POLICY "company_isolation" ON automation_sessions
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -168,6 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_rules_company_active
     ON policy_rules (company_id, is_active, priority);
 
 ALTER TABLE policy_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON policy_rules;
 CREATE POLICY "company_isolation" ON policy_rules
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -230,6 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status
     WHERE status NOT IN ('completed','failed','skipped');
 
 ALTER TABLE ingestion_jobs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON ingestion_jobs;
 CREATE POLICY "company_isolation" ON ingestion_jobs
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -280,6 +285,7 @@ CREATE INDEX IF NOT EXISTS idx_browser_jobs_status
     WHERE status NOT IN ('completed','failed','cancelled');
 
 ALTER TABLE browser_jobs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON browser_jobs;
 CREATE POLICY "company_isolation" ON browser_jobs
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -331,6 +337,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_user
 
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 -- Only owners/managers can read audit events; no updates or deletes allowed
+DROP POLICY IF EXISTS "company_read_only" ON audit_events;
 CREATE POLICY "company_read_only" ON audit_events
     FOR SELECT USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -366,6 +373,7 @@ CREATE TABLE IF NOT EXISTS company_features (
 
 -- Insert default row when a company is created (handled in app code)
 ALTER TABLE company_features ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON company_features;
 CREATE POLICY "company_isolation" ON company_features
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -402,6 +410,7 @@ CREATE TABLE IF NOT EXISTS device_push_tokens (
     UNIQUE (company_id, user_id, token)
 );
 ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON device_push_tokens;
 CREATE POLICY "company_isolation" ON device_push_tokens
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
 
@@ -416,5 +425,6 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
     CONSTRAINT uq_report_snapshots_company_type UNIQUE (company_id, report_type)
 );
 ALTER TABLE report_snapshots ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON report_snapshots;
 CREATE POLICY "company_isolation" ON report_snapshots
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);

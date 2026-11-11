@@ -90,8 +90,8 @@ class TestPolicyGate:
         app.dependency_overrides[get_adapter] = lambda: MagicMock()
 
         class _Deny:
-            async def evaluate(self, proposal):
-                return MagicMock(effect="deny")
+            async def evaluate(self, proposal, strict=False):
+                return MagicMock(effect="deny", rule_id=None, rule_name="deny_rule")
 
         with patch("app.api.actions.PolicyEngine", return_value=_Deny()), \
              patch("app.api.actions._execute_approved_draft", new=AsyncMock()) as exec_spy:

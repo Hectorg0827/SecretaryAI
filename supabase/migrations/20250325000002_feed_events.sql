@@ -19,5 +19,6 @@ CREATE INDEX IF NOT EXISTS feed_events_company_idx ON feed_events (company_id, i
 CREATE INDEX IF NOT EXISTS feed_events_entity_idx ON feed_events (company_id, entity_id);
 
 ALTER TABLE feed_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "feed_events_company_isolation" ON feed_events;
 CREATE POLICY "feed_events_company_isolation" ON feed_events
     FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));

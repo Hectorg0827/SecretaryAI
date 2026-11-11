@@ -19,16 +19,17 @@ def check_all(self):
     for company in companies:
         try:
             adapter = build_adapter(company)
-            # action_engine requires async context; pass None — alerts are
-            # logged but not fired in this lightweight task wrapper.
-            # Full alert firing happens inside check_and_alert_inventory when
-            # action_engine is provided.
+            # Alerts go through the ActionEngine: it applies the autonomy
+            # rules, sends the email, and records the action. (This used to
+            # pass None, so critical-stock alerts were computed and never sent.)
+            from app.actions.engine import ActionEngine
             result = asyncio.run(
                 check_and_alert_inventory(
                     company_id=company["id"],
                     adapter=adapter,
-                    action_engine=None,
-                    user_id=company.get("owner_user_id", "system"),
+                    action_engine=ActionEngine(db),
+                    user_id="scheduler",
+                    alert_email=company.get("alert_email"),
                 )
             )
             log.info(

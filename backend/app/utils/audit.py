@@ -1,20 +1,43 @@
 """
-Audit event writer — thin wrapper around the audit_events table (Phase 1 schema).
+Audit event writer — the single way anything is written to `audit_events`.
 
-All privileged actions (approvals, logins, connector registrations, policy decisions)
-should call write_audit_event() for a durable, append-only audit trail.
+Every privileged or automatic action (logins, approvals, emails sent,
+integrations connected, policy decisions, scheduled sends) calls
+write_audit_event(). The table is append-only at the database level.
 
-The function is intentionally non-fatal: if the write fails (e.g. during DB outage)
-it logs a warning and continues. Audit writes must never break the happy path.
+Two modes:
+
+* required=False (default) — for events where the action has ALREADY happened
+  or is harmless (a login, a read). A failed write is logged at ERROR and the
+  request continues.
+* required=True — for actions with outside effects (sending an email, writing
+  to QuickBooks, approving a draft). Call it BEFORE the action. If the audit
+  row cannot be written, AuditWriteError is raised and the caller must not
+  perform the action: nothing with side effects may happen unrecorded.
+
+The row shape here must match the `audit_events` table
+(supabase/migrations). scripts/check_schema_usage.py verifies that in CI.
 """
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
+
+VALID_ACTION_CLASSES = {"read", "draft", "commit", "destructive"}
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+
+
+class AuditWriteError(RuntimeError):
+    """A required audit record could not be written — the action must not run."""
+
+
+def _is_uuid(value: Any) -> bool:
+    return isinstance(value, str) and bool(_UUID_RE.match(value))
 
 
 def write_audit_event(
@@ -31,60 +54,78 @@ def write_audit_event(
     policy_rule_id: Optional[str] = None,
     approved_by: Optional[str] = None,
     metadata: Optional[dict] = None,
+    description: Optional[str] = None,
+    required: bool = False,
 ) -> Optional[str]:
     """
-    Write a single row to audit_events. Returns the event ID or None on failure.
+    Write one row to audit_events. Returns the event ID, or None if a
+    non-required write failed.
 
     Parameters
     ----------
     db            : Supabase client (service-role)
     company_id    : tenant identifier
-    event_type    : e.g. 'draft_approved', 'draft_rejected', 'user_login',
-                    'connector_registered', 'workflow_started', 'policy_blocked'
-    actor_id      : user_id or system identifier
+    event_type    : e.g. 'draft_approved', 'email_sent', 'user_login',
+                    'integration_connected', 'policy_blocked'
+    actor_id      : user id, or a system actor ('ai', 'system', 'scheduler')
     action_class  : 'read' | 'draft' | 'commit' | 'destructive'
-    capability    : e.g. 'customers', 'inventory'
+    capability    : e.g. 'email', 'purchase_orders', 'quickbooks'
     path_used     : 'api' | 'browser' | 'file' | 'computer_use'
     before_snapshot / after_snapshot : state diff (non-PII summary only)
     policy_rule_id: FK to policy_rules if a rule triggered this event
-    approved_by   : user_id of the approver (for approval events)
-    metadata      : freeform extra context
+    approved_by   : user id of the approver (for approval events)
+    metadata      : freeform extra context (never secrets or message bodies)
+    description   : one-line human-readable summary
+    required      : raise AuditWriteError instead of continuing on failure
     """
     event_id = str(uuid.uuid4())
-    try:
-        row: dict[str, Any] = {
-            "id": event_id,
-            "company_id": company_id,
-            "event_type": event_type,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if actor_id is not None:
-            row["actor_id"] = actor_id
-        if action_class is not None:
-            row["action_class"] = action_class
-        if capability is not None:
-            row["capability"] = capability
-        if path_used is not None:
-            row["path_used"] = path_used
-        if before_snapshot is not None:
-            row["before_snapshot"] = before_snapshot
-        if after_snapshot is not None:
-            row["after_snapshot"] = after_snapshot
-        if policy_rule_id is not None:
-            row["policy_rule_id"] = policy_rule_id
-        if approved_by is not None:
-            row["approved_by"] = approved_by
-        if metadata is not None:
-            row["metadata"] = metadata
+    meta: dict[str, Any] = dict(metadata or {})
 
+    # action_class is constrained in the database. Anything else (callers used
+    # to pass an action *type* here, which made the insert fail) is kept as
+    # metadata instead of breaking the write.
+    if action_class is not None and action_class not in VALID_ACTION_CLASSES:
+        meta.setdefault("action_type", action_class)
+        action_class = None
+
+    row: dict[str, Any] = {
+        "id": event_id,
+        "company_id": company_id,
+        "event_type": event_type,
+        "description": description or event_type.replace("_", " "),
+        "metadata": meta,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if actor_id is not None:
+        row["actor_id"] = str(actor_id)
+        if _is_uuid(str(actor_id)):
+            row["user_id"] = str(actor_id)
+    if action_class is not None:
+        row["action_class"] = action_class
+    if capability is not None:
+        row["capability"] = capability
+    if path_used is not None:
+        row["path_used"] = path_used
+    if before_snapshot is not None:
+        row["before_snapshot"] = before_snapshot
+    if after_snapshot is not None:
+        row["after_snapshot"] = after_snapshot
+    if policy_rule_id is not None and _is_uuid(str(policy_rule_id)):
+        row["policy_rule_id"] = str(policy_rule_id)
+    if approved_by is not None:
+        row["approved_by"] = str(approved_by)
+
+    try:
         db.table("audit_events").insert(row).execute()
         return event_id
-
     except Exception as exc:
-        log.warning(
-            "audit_events write failed (non-fatal): event_type=%s company=%s error=%s",
-            event_type,
-            company_id,
-            exc,
+        # ERROR, not warning: a missing audit record is an incident.
+        log.error(
+            "AUDIT WRITE FAILED event_type=%s company=%s required=%s error=%s",
+            event_type, company_id, required, exc,
         )
+        if required:
+            raise AuditWriteError(
+                f"Could not record audit event '{event_type}'"
+            ) from exc
         return None

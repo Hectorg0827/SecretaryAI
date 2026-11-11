@@ -59,6 +59,10 @@ _DEFAULT_EFFECTS: dict[ActionClass, str] = {
 }
 
 
+class PolicyUnavailableError(RuntimeError):
+    """The tenant's policy rules could not be loaded (strict evaluation only)."""
+
+
 class PolicyEngine:
     """
     Evaluates per-tenant policy rules from the DB (with Redis caching).
@@ -78,12 +82,17 @@ class PolicyEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    async def evaluate(self, proposal: ActionProposal) -> ActionDecision:
+    async def evaluate(self, proposal: ActionProposal, strict: bool = False) -> ActionDecision:
         """
         Evaluate an ActionProposal and return an ActionDecision.
         Loads rules from DB (with in-request caching).
+
+        strict=True is for the moment an action is about to really happen
+        (COMMIT / DESTRUCTIVE): if the company's rules cannot be read, raise
+        PolicyUnavailableError instead of silently falling back to defaults —
+        a deny rule that failed to load must not turn into an allow.
         """
-        rules = await self._load_rules()
+        rules = await self._load_rules(strict=strict)
         features = await self._load_features()
 
         for rule in rules:
@@ -126,7 +135,7 @@ class PolicyEngine:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    async def _load_rules(self) -> list[dict]:
+    async def _load_rules(self, strict: bool = False) -> list[dict]:
         if self._rules is not None:
             return self._rules
         try:
@@ -138,8 +147,14 @@ class PolicyEngine:
                 .order("priority", desc=False)
                 .execute()
             )
-            self._rules = result.data or []
+            data = result.data
+            if strict and not isinstance(data, (list, type(None))):
+                raise TypeError(f"unexpected policy_rules payload: {type(data).__name__}")
+            self._rules = data or []
         except Exception as exc:
+            if strict:
+                log.error("Could not load policy rules for %s: %s — refusing (strict)", self.company_id, exc)
+                raise PolicyUnavailableError("policy rules unavailable") from exc
             log.warning("Could not load policy rules for %s: %s — using defaults", self.company_id, exc)
             self._rules = []
         return self._rules

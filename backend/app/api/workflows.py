@@ -2,7 +2,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission
 from app.workflows.engine import WorkflowEngine
 from app.workflows.state import get_workflow_progress
 
@@ -11,17 +11,12 @@ router = APIRouter()
 
 
 def _audit(db, company_id: str, user_id: str, action: str, detail: dict) -> None:
-    """Write a row to action_log for workflow audit trail. Best-effort — never raises."""
-    try:
-        db.table("action_log").insert({
-            "company_id":  company_id,
-            "user_id":     user_id,
-            "action_type": action,
-            "content":     detail,
-            "status":      "completed",
-        }).execute()
-    except Exception as exc:
-        log.warning("Workflow audit log write failed: %s", exc)
+    """Record a workflow action in the audit trail."""
+    from app.utils.audit import write_audit_event
+    write_audit_event(
+        db, company_id=company_id, event_type=action, actor_id=user_id,
+        capability="workflows", metadata=detail,
+    )
 
 
 @router.get("/")
@@ -38,7 +33,7 @@ async def list_workflows(
 @router.post("/{run_id}/cancel")
 async def cancel_workflow(
     run_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("approve_actions")),
     db=Depends(get_db),
 ):
     # Ownership check — a run belonging to another tenant must 404 (IDOR fix).

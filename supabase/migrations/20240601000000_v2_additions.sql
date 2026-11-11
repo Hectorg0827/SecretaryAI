@@ -5,7 +5,7 @@
 -- ============================================================
 -- COMPUTER USE SESSIONS  (audit trail for every CU task)
 -- ============================================================
-CREATE TABLE computer_use_sessions (
+CREATE TABLE IF NOT EXISTS computer_use_sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     user_id         UUID REFERENCES users(id),
@@ -28,7 +28,7 @@ CREATE TABLE computer_use_sessions (
 -- ============================================================
 -- COMPUTER USE BLOCKED ACTIONS  (safety audit)
 -- ============================================================
-CREATE TABLE computer_use_blocked_actions (
+CREATE TABLE IF NOT EXISTS computer_use_blocked_actions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id      UUID REFERENCES computer_use_sessions(id) ON DELETE CASCADE,
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -60,9 +60,9 @@ ALTER TABLE drafts
 -- ============================================================
 -- INDEXES FOR NEW TABLES
 -- ============================================================
-CREATE INDEX idx_cu_sessions_company ON computer_use_sessions(company_id, started_at DESC);
-CREATE INDEX idx_cu_sessions_status ON computer_use_sessions(status) WHERE status = 'running';
-CREATE INDEX idx_cu_blocked_session ON computer_use_blocked_actions(session_id);
+CREATE INDEX IF NOT EXISTS idx_cu_sessions_company ON computer_use_sessions(company_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_cu_sessions_status ON computer_use_sessions(status) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_cu_blocked_session ON computer_use_blocked_actions(session_id);
 
 -- ============================================================
 -- RLS FOR NEW TABLES
@@ -70,9 +70,11 @@ CREATE INDEX idx_cu_blocked_session ON computer_use_blocked_actions(session_id);
 ALTER TABLE computer_use_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE computer_use_blocked_actions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "company_isolation" ON computer_use_sessions;
 CREATE POLICY "company_isolation" ON computer_use_sessions
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON computer_use_blocked_actions;
 CREATE POLICY "company_isolation" ON computer_use_blocked_actions
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
@@ -97,9 +99,10 @@ CREATE TABLE IF NOT EXISTS ingested_files (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE ingested_files ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON ingested_files;
 CREATE POLICY "company_isolation" ON ingested_files
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
-CREATE INDEX idx_ingested_files_company_type ON ingested_files(company_id, report_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ingested_files_company_type ON ingested_files(company_id, report_type, created_at DESC);
 
 -- Access router decision log
 CREATE TABLE IF NOT EXISTS access_router_log (
@@ -115,9 +118,10 @@ CREATE TABLE IF NOT EXISTS access_router_log (
     created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE access_router_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON access_router_log;
 CREATE POLICY "company_isolation" ON access_router_log
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
-CREATE INDEX idx_router_log_company ON access_router_log(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_router_log_company ON access_router_log(company_id, created_at DESC);
 
 -- Desktop agent heartbeat (one row per company, upserted)
 CREATE TABLE IF NOT EXISTS agent_heartbeats (
@@ -128,6 +132,7 @@ CREATE TABLE IF NOT EXISTS agent_heartbeats (
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE agent_heartbeats ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation" ON agent_heartbeats;
 CREATE POLICY "company_isolation" ON agent_heartbeats
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
@@ -146,6 +151,7 @@ CREATE TABLE IF NOT EXISTS follow_up_notes (
     updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE follow_up_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "company_isolation_notes" ON follow_up_notes;
 CREATE POLICY "company_isolation_notes" ON follow_up_notes
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
-CREATE INDEX idx_follow_up_notes_company ON follow_up_notes(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_follow_up_notes_company ON follow_up_notes(company_id, created_at DESC);

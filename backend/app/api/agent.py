@@ -109,7 +109,7 @@ async def trigger_sync(
         raise HTTPException(status_code=404, detail="Company not found")
 
     row = company.data[0]
-    end_user_id: str | None = row.get("qbd_end_user_id")
+    end_user_id: str | None = row.get("conductor_end_user_id") if row.get("qb_type") == "desktop" else None
     if not end_user_id:
         return {"status": "skipped", "message": "QuickBooks Desktop not connected"}
 

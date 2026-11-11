@@ -13,13 +13,19 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 # Supported task types
+# Read-only on purpose: this connector never changes QuickBooks data. Names
+# match TaskType in backend/app/domain/connector_protocol.py.
 SUPPORTED_TASKS = {
     "fetch_customers",
     "fetch_invoices",
     "fetch_inventory",
+    "fetch_items",            # alias of fetch_inventory
+    "fetch_purchase_orders",
     "fetch_payments",
     "fetch_vendors",
     "ping",  # health-check — no QB call needed
+    "get_version",
+    "get_capabilities",
 }
 
 
@@ -32,7 +38,10 @@ class TaskExecutor:
     def _get_adapter(self):
         """Lazy-init the QB Desktop adapter."""
         if self._adapter is None:
-            from backend.app.connectors.qb_desktop import QBDesktopAdapter
+            try:  # run from the backend directory …
+                from app.connectors.qb_desktop import QBDesktopAdapter
+            except ImportError:  # … or from the repository root
+                from backend.app.connectors.qb_desktop import QBDesktopAdapter
             self._adapter = QBDesktopAdapter(
                 api_key=self._api_key,
                 end_user_id=self._end_user_id,
@@ -56,8 +65,17 @@ class TaskExecutor:
         if task_type == "fetch_invoices":
             return await self._fetch_invoices(parameters)
 
-        if task_type == "fetch_inventory":
+        if task_type in ("fetch_inventory", "fetch_items"):
             return await self._fetch_inventory(parameters)
+
+        if task_type == "fetch_purchase_orders":
+            return await self._fetch_purchase_orders(parameters)
+
+        if task_type == "get_version":
+            return {"version": "1.0.0"}
+
+        if task_type == "get_capabilities":
+            return {"capabilities": sorted(SUPPORTED_TASKS)}
 
         if task_type == "fetch_payments":
             return await self._fetch_payments(parameters)
@@ -106,6 +124,14 @@ class TaskExecutor:
             }
         except Exception as exc:
             raise TaskError(f"fetch_inventory failed: {exc}", recoverable=True) from exc
+
+    async def _fetch_purchase_orders(self, params: dict) -> dict:
+        try:
+            qb = self._get_adapter()
+            pos = await qb.get_purchase_orders()
+            return {"purchase_orders": [_serialize(p) for p in pos], "count": len(pos)}
+        except Exception as exc:
+            raise TaskError(f"fetch_purchase_orders failed: {exc}", recoverable=True) from exc
 
     async def _fetch_payments(self, params: dict) -> dict:
         try:

@@ -28,5 +28,6 @@ CREATE INDEX IF NOT EXISTS workflow_runs_company_idx ON workflow_runs (company_i
 CREATE INDEX IF NOT EXISTS workflow_runs_awaiting_idx ON workflow_runs (awaiting_entity_id) WHERE status = 'awaiting_approval';
 
 ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "workflow_runs_company_isolation" ON workflow_runs;
 CREATE POLICY "workflow_runs_company_isolation" ON workflow_runs
     FOR ALL USING (company_id = (SELECT company_id FROM users WHERE id = auth.uid()));

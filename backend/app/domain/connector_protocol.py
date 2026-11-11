@@ -55,9 +55,12 @@ class TaskType(str, Enum):
     FETCH_CUSTOMERS     = "fetch_customers"
     FETCH_INVOICES      = "fetch_invoices"
     FETCH_ITEMS         = "fetch_items"
+    FETCH_INVENTORY     = "fetch_inventory"   # same data as fetch_items
+    FETCH_VENDORS       = "fetch_vendors"
     FETCH_PAYMENTS      = "fetch_payments"
     FETCH_PURCHASE_ORDERS = "fetch_purchase_orders"
-    # Data writes (require policy approval before being dispatched)
+    # Data writes — never dispatched directly; they must go through the
+    # approval queue (see WRITE_TASK_TYPES in app/api/connectors.py)
     CREATE_INVOICE      = "create_invoice"
     CREATE_PO           = "create_po"
     UPDATE_ITEM         = "update_item"

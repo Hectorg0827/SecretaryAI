@@ -87,7 +87,15 @@ class ApprovalQueue:
             update["rejection_reason"] = reason
 
         if hasattr(self._db, "table"):
-            self._db.table("drafts").update(update).eq("id", draft_id).eq("company_id", company_id).execute()
+            # Status filter in the UPDATE: a draft that is being executed (or
+            # was already resolved) cannot be rejected out from under it.
+            result = (
+                self._db.table("drafts").update(update)
+                .eq("id", draft_id).eq("company_id", company_id).eq("status", "pending")
+                .execute()
+            )
+            if not getattr(result, "data", None):
+                return {"draft_id": draft_id, "status": "not_pending"}
         return {"draft_id": draft_id, "status": "rejected"}
 
     async def edit_and_approve(self, draft_id: str, edited_content: dict, reviewed_by: str,
@@ -101,6 +109,54 @@ class ApprovalQueue:
                 "reviewed_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", draft_id).eq("company_id", company_id).execute()
         return {"draft_id": draft_id, "status": "edited_and_approved", "content": edited_content}
+
+    # ── Approve-and-execute lifecycle ────────────────────────────────────────
+    #   pending ──claim──▶ executing ──finish──▶ approved / edited_and_approved
+    #                          └────release───▶ pending (execution failed; retry)
+
+    async def claim(self, draft_id: str, company_id: str, reviewed_by: str,
+                    edited_content: Optional[dict] = None) -> bool:
+        """
+        Atomically move a draft from 'pending' to 'executing'.
+
+        The status filter is part of the UPDATE itself, so when two approvals
+        arrive together the database lets exactly one of them match a row.
+        Returns True only for the caller that won; everyone else must not
+        execute anything.
+        """
+        update: dict = {
+            "status": "executing",
+            "reviewed_by": reviewed_by,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if edited_content is not None:
+            update["content"] = edited_content
+        result = (
+            self._db.table("drafts").update(update)
+            .eq("id", draft_id).eq("company_id", company_id).eq("status", "pending")
+            .execute()
+        )
+        return bool(getattr(result, "data", None))
+
+    async def finish(self, draft_id: str, company_id: str, edited: bool,
+                     execution_status: str, execution_detail: str = "") -> str:
+        """Record the outcome of an executed draft. Returns the final status."""
+        final_status = "edited_and_approved" if edited else "approved"
+        self._db.table("drafts").update({
+            "status": final_status,
+            "execution_status": execution_status,
+            "execution_detail": (execution_detail or "")[:1000],
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", draft_id).eq("company_id", company_id).eq("status", "executing").execute()
+        return final_status
+
+    async def release(self, draft_id: str, company_id: str, execution_detail: str = "") -> None:
+        """Execution failed: put the draft back in the queue with the reason."""
+        self._db.table("drafts").update({
+            "status": "pending",
+            "execution_status": "failed",
+            "execution_detail": (execution_detail or "")[:1000],
+        }).eq("id", draft_id).eq("company_id", company_id).eq("status", "executing").execute()
 
     def expire_old_drafts(self, company_id: str) -> int:
         """

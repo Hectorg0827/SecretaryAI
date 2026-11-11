@@ -4,12 +4,23 @@
 -- so digest() could not be found and every approval failed at runtime
 -- ("function digest(bytea, unknown) does not exist").
 --
--- Add "extensions" AFTER public (it is owned by the platform and not writable
--- by tenant roles). Where pgcrypto is installed in public (plain PostgreSQL,
--- CI) the extra entry is simply unused. No function body changes.
+-- "extensions" goes BEFORE public: it is platform-owned, so a role able to
+-- create objects in public can never shadow digest() there. Where pgcrypto is
+-- installed in public (plain PostgreSQL, CI) the "extensions" entry is unused.
+-- No function body changes. Each function is altered only if it exists, so the
+-- same file is safe in every migration root.
 
-ALTER FUNCTION secretary_internal.approve_and_queue_email(UUID, UUID, UUID, JSONB, TEXT, JSONB)
-    SET search_path = pg_catalog, public, extensions, pg_temp;
-
-ALTER FUNCTION secretary_internal.approve_and_queue_purchase_order(UUID, UUID, UUID, JSONB, TEXT, JSONB)
-    SET search_path = pg_catalog, public, extensions, pg_temp;
+DO $fix$
+DECLARE fn TEXT;
+BEGIN
+    FOREACH fn IN ARRAY ARRAY[
+        'secretary_internal.approve_and_queue_email(uuid,uuid,uuid,jsonb,text,jsonb)',
+        'secretary_internal.approve_and_queue_purchase_order(uuid,uuid,uuid,jsonb,text,jsonb)'
+    ] LOOP
+        IF to_regprocedure(fn) IS NOT NULL THEN
+            EXECUTE format('ALTER FUNCTION %s SET search_path = pg_catalog, extensions, public, pg_temp',
+                           to_regprocedure(fn));
+        END IF;
+    END LOOP;
+END
+$fix$;

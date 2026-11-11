@@ -14,13 +14,15 @@ Project ref: `xerktvdgjvjozvckjyfp`. This root contains exactly 33 byte-preserve
 The `patches/` directory records additive changes applied to staging **after** the immutable 33-file baseline was reconciled. These SQL files are **not** part of the audited migration bundle, are **not** automatically applied by Supabase CLI `db push`, and do not alter its migration-history metadata.
 
 - `20261106030845_qbo_token_refresh_timestamp.sql`: the nullable QuickBooks OAuth refresh timestamp was applied to the staging project via an authenticated, staging-only SQL connector on November 6, 2026 and verified. The patch is idempotent. Do not replay it against production or assume its presence elsewhere.
+- `20261111010558_gate6b_finance_department_roles.sql`: Gate 6B role-constraint change applied **only to staging** using an authenticated Supabase migration operation. Supabase `list_migrations` reports remote version `20261111010558`, name `gate6b_finance_department_roles`, and the live `public.users.users_role_check` constraint includes the four finance roles. The SQL body is byte-identical to the original staging-only source `20261111002904_gate6b_finance_department_roles.sql`, moved here because it was never part of the October 24 immutable 33-file baseline. **Do not replay this patch**; its timestamp identifies the recorded remote migration, not authorization for a CLI migration push.
+
 
 The same additive schema contract is also recorded as a **new, forward-only**
 repository migration at `supabase/migrations/20261106030900_qbo_token_refresh_timestamp.sql`
 for any separately approved future environment rollout. No historical baseline
 file was modified; neither migration is an authorization to change production.
 
-Before making a future change to the migration system, reconcile these recorded patches, staging schema state, and the CLI migration plan explicitly; never infer remote schema parity from the baseline manifest alone.
+Before making a future change to the migration system, reconcile these recorded patches, staging schema state, and the CLI migration plan explicitly; never infer remote schema parity from the baseline manifest alone. **Current known divergence:** the October 24 source manifest covers 33 baseline files, while staging migration history additionally includes later versioned migrations and patches (including Gate 6B). The baseline CI checker validates only those 33 historical sources, not complete current remote migration parity. Future CLI deployments require a separately reviewed, comprehensive migration map and dry-run.
 
 ## Staging history reconciliation — October 25, 2026
 

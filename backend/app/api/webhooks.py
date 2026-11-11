@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter()
 REFRESH_TASK = "tasks.dashboard_refresh.refresh_dashboard_snapshot"
+REFRESH_QUEUE = "dashboard_refresh"
+_QBO_REFRESH_ENTITIES = frozenset({
+    "Account", "Bill", "BillPayment", "CreditMemo", "Customer", "Invoice",
+    "Item", "Payment", "PurchaseOrder", "Vendor", "VendorCredit",
+})
 _DEBOUNCE_SECONDS = 60
 _RELEASE_IF_OWNED = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end"
 
@@ -55,7 +60,11 @@ def _dispatch(company_id: str) -> None:
         from tasks.dashboard_refresh import refresh_dashboard_snapshot
         if refresh_dashboard_snapshot.name != REFRESH_TASK:
             raise RuntimeError("Unexpected worker registration")
-        job = refresh_dashboard_snapshot.apply_async(kwargs={"company_id": company_id})
+        # Route webhook work away from the default queue, which may contain
+        # unrelated email, billing, or other action-producing tasks.
+        job = refresh_dashboard_snapshot.apply_async(
+            kwargs={"company_id": company_id}, queue=REFRESH_QUEUE,
+        )
         if not getattr(job, "id", None):
             raise RuntimeError("No worker job ID")
     except Exception:
@@ -123,9 +132,8 @@ async def handle_qbo_webhook(
         entities = change.get("entities") or []
         if not isinstance(entities, list) or len(entities) > 500:
             raise HTTPException(status_code=400, detail="Invalid webhook payload")
-        if not any(isinstance(item, dict) and item.get("name") in {
-            "Invoice", "Item", "Customer", "Payment", "PurchaseOrder",
-        } for item in entities):
+        if not any(isinstance(item, dict) and item.get("name") in _QBO_REFRESH_ENTITIES
+                   for item in entities):
             continue
         company_id = _company_for("qbo_realm_id", event.get("realmId"))
         if company_id and _queue_refresh(company_id):

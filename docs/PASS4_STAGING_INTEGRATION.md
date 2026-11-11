@@ -1,9 +1,9 @@
 # Lion BI / SecretaryAI: Pass 4 selective staging integration
 
-**Target:** `integrate/pass4-staging-20261111`, an independent review branch. It
-is **not** the production branch, the Railway staging auto-deploy branch, or a
-substitute for a reviewed merge. Do not merge Claude PR #108 wholesale: its
-older tree conflicts extensively with current Gate 6C controls.
+**Target:** `integrate/pass4-gate6c-staging-20261111`, a reviewed local
+integration candidate descended from the current Gate 6C staging head. It is
+**not** the production branch or the Railway staging auto-deploy branch. Do not
+merge Claude PR #108 wholesale: its older tree conflicts with Gate 6C controls.
 
 ## Forward-ported batches
 
@@ -39,7 +39,7 @@ older tree conflicts extensively with current Gate 6C controls.
 
 ## Local verification (2026-11-11)
 
-- Backend: **3,004 passed / 1 skipped** with local simulated Redis;
+- Backend: **3,016 passed / 1 skipped** with local simulated Redis;
   not a live Redis/Supabase/Railway test.
 - Frontend: **272 passed** in 48 test files; TypeScript, build, and lint
   succeed (13 pre-existing lint warnings, no errors).
@@ -50,13 +50,20 @@ older tree conflicts extensively with current Gate 6C controls.
   simultaneous refresh replay, audit outage, and mounted FastAPI route behavior.
 - Batch 4 tests simulate consent exchange, callback replay, active owner
   revocation, company separation, conditional Outlook token rotation, strict
-  invitation audit failure, signed/unsigned webhooks, duplicate notifications,
-  worker enqueue failure, and Conductor failure auditing. No real customer data.
+  invitation audit failure, all 11 subscribed Intuit Development event types,
+  signed/unsigned webhooks, duplicate notifications, worker enqueue failure,
+  dedicated `dashboard_refresh` queue routing, and Conductor failure auditing.
+  No real customer data.
 
 ## Deployment gates still open
 
-- No real QuickBooks/Microsoft/Stripe/Resend account tests and no real DB
-  migration or staging deployment in this integration batch.
+- No live Outlook authorization, Graph mailbox read, or signed provider webhook
+  consumption acceptance has been performed. An existing Railway staging
+  redeploy installed environment variables but is still running the older
+  staging branch; the reviewed Pass 4 code is not deployed yet.
+- The **staging-only** Supabase `companies` schema already includes
+  `ms_tenant_id`, `ms_access_token`, and `ms_refresh_token`; no migration is
+  required for those Outlook fields.
 - Check whether the active Railway staging branch has advanced before
   cherry-picking or opening a PR. Do not blindly overwrite newer Gate 6C.
 - The existing Gate 6C boundary rejects old-role tokens from authenticated
@@ -77,6 +84,21 @@ older tree conflicts extensively with current Gate 6C controls.
 - Conductor's provider event delivery format and verification header must be
   confirmed against the connected sandbox account before enabling its inbound
   secret. The separate `CONDUCTOR_WEBHOOK_SECRET` starts disabled when blank.
+- QuickBooks development subscriptions are configured for Account, Bill,
+  BillPayment, CreditMemo, Customer, Invoice, Item, Payment, PurchaseOrder,
+  Vendor, and VendorCredit; the handler now accepts all eleven.
+- **Worker gate:** the deployed Railway staging environment currently has no
+  confirmed Celery worker. Provision a dedicated, **staging-only** worker from
+  the same reviewed backend commit, consuming only the `dashboard_refresh`
+  queue (e.g. `celery -A celery_app worker -l info --queues=dashboard_refresh
+  --concurrency=1`). Use the existing staging Redis and staging Supabase only,
+  disable any HTTP-only health check for this worker, and verify it never
+  consumes the default `celery` queue. Confirm the dedicated queue is empty
+  before activation; never start a generic worker that might execute older
+  unrelated email, billing, or action tasks.
+- The Railway backend has `FRONTEND_URL` set, but its value is redacted by the
+  connected OAuth integration. Confirm it matches
+  `https://secretaryai-web-staging.up.railway.app` before Outlook consent.
 - The integration branch does **not** auto-deploy to Railway staging. A
   reviewed selective merge, environment configuration, webhook subscription
   setup, and independent live staging acceptance remain separate gates.

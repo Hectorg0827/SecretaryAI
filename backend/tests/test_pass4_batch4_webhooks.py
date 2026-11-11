@@ -98,6 +98,18 @@ def test_signed_qbo_targets_exact_company_and_coalesces(harness):
     assert len(redis.entries) == 2
 
 
+@pytest.mark.parametrize("entity", [
+    "Account", "Bill", "BillPayment", "CreditMemo", "Customer", "Invoice",
+    "Item", "Payment", "PurchaseOrder", "Vendor", "VendorCredit",
+])
+def test_every_subscribed_development_event_queues_refresh(harness, entity):
+    client, _, _, dispatched = harness
+    response = _qbo(client, "realm-1", entity=entity)
+    assert response.status_code == 200
+    assert response.json()["refreshes_queued"] == 1
+    assert dispatched == [COMPANY]
+
+
 def test_qbo_wrong_signature_and_unknown_realm_cannot_dispatch(harness):
     client, _, _, dispatched = harness
     assert _qbo(client, "realm-1", verifier="wrong").status_code == 401
@@ -174,4 +186,4 @@ def test_refresh_task_name_is_registered_and_dispatches_company(monkeypatch):
     job = Mock(return_value=SimpleNamespace(id="synthetic-job"))
     monkeypatch.setattr(refresh_dashboard_snapshot, "apply_async", job)
     webhooks._dispatch(COMPANY)
-    job.assert_called_once_with(kwargs={"company_id": COMPANY})
+    job.assert_called_once_with(kwargs={"company_id": COMPANY}, queue="dashboard_refresh")

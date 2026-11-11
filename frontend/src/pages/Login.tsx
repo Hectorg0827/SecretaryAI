@@ -161,7 +161,7 @@ export function Login() {
 
           {!needs2fa && (
             <p className="text-xs text-slate-600 text-center mt-6">
-              Self-service password recovery is not yet available here. Contact your account administrator or approved support channel.
+              <Link to="/forgot-password" className="text-blue-600 hover:underline font-medium">Forgot your password?</Link>
             </p>
           )}
           {!needs2fa && (

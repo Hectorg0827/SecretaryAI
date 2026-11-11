@@ -35,6 +35,7 @@ const ALL_NAV_ITEMS = [
   { to: '/audit-log',  label: 'Audit Log',  icon: Shield,    exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/admin',      label: 'Diagnostics', icon: Activity,  exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/account-security', label: 'My Password', icon: Shield, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
 ] as const;
 
 export function Sidebar({

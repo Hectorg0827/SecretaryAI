@@ -69,18 +69,19 @@ class OutlookConnector:
                         "client_id": self._client_id,
                         "client_secret": self._client_secret,
                         "refresh_token": self._refresh_token,
-                        "scope": "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send offline_access",
+                        "scope": "offline_access User.Read Mail.ReadWrite Mail.Send",
                     },
                 )
                 resp.raise_for_status()
                 tokens = resp.json()
-                self._access_token = tokens["access_token"]
-                if "refresh_token" in tokens:
-                    self._refresh_token = tokens["refresh_token"]
+                next_access_token = tokens["access_token"]
+                next_refresh_token = tokens.get("refresh_token") or self._refresh_token
                 import inspect
-                persisted = self._on_token_refresh(self._access_token, self._refresh_token)
+                persisted = self._on_token_refresh(next_access_token, next_refresh_token)
                 if inspect.isawaitable(persisted):
                     await persisted
+                self._access_token = next_access_token
+                self._refresh_token = next_refresh_token
         except Exception as exc:
             log.error("Outlook token refresh failed (details withheld)")
             raise

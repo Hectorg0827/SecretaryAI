@@ -17,14 +17,14 @@ FINANCE_EMPLOYEE_ROLES = frozenset({
     "finance_controller", "ar_specialist", "ap_specialist", "pricing_billbacks",
 })
 
-# Method and path must match exactly. These three routes either validate the
-# finance session against the current DB record (workspace), return the caller's
-# own profile (me), or revoke the session (logout). The public login/refresh
-# endpoints work without an Authorization header and remain available.
+# Method and path must match exactly. Finance users can read their scoped
+# workspace and profile, revoke their session, and change their own password.
+# Public login and refresh work without an Authorization header.
 FINANCE_ALLOWED_ENDPOINTS = frozenset({
     ("GET", "/api/finance/workspace"),
     ("GET", "/auth/me"),
     ("POST", "/auth/logout"),
+    ("POST", "/auth/change-password"),
 })
 
 

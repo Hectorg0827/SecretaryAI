@@ -11,6 +11,7 @@ import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { AcceptInvite } from './pages/AcceptInvite';
+import { ChangePassword, ForgotPassword, ResetPassword } from './pages/PasswordSecurity';
 import Inbox from './pages/Inbox';
 import Work from './pages/Work';
 import { Logistics } from './pages/Logistics';
@@ -159,6 +160,7 @@ function AppShell() {
               </RoleGuard>
             }
           />
+          <Route path="/account-security" element={<ChangePassword />} />
           <Route
             path="/logistics"
             element={
@@ -228,6 +230,8 @@ export function App() {
         <Route path="/login"    element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/accept-invite" element={<AcceptInvite />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Private — everything else goes through PrivateRoute */}
         <Route

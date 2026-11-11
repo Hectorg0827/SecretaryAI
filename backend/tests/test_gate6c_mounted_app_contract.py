@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.auth.jwt import create_access_token, decode_access_token
+from app.auth.jwt import create_access_token, decode_access_token, password_session_version
 from app.main import app
 from app.middleware import active_session_boundary as gate6c
 
@@ -24,12 +24,17 @@ class _Query:
         self.table = table
         self.filters = {}
         self.max_rows = None
+        self.changes = None
 
     def select(self, _columns, **_kwargs):
         return self
 
     def eq(self, name, value):
         self.filters[name] = value
+        return self
+
+    def update(self, values):
+        self.changes = values
         return self
 
     def limit(self, count):
@@ -44,6 +49,9 @@ class _Query:
             rows = [record for record in rows if record.get(name) == value]
         if self.max_rows is not None:
             rows = rows[:self.max_rows]
+        if self.changes is not None:
+            for record in rows:
+                record.update(self.changes)
         return SimpleNamespace(data=[dict(record) for record in rows])
 
 
@@ -53,9 +61,9 @@ class _Database:
         self.tables = {
             "users": [
                 {"id": "test-actor-1", "company_id": "test-tenant-a",
-                 "role": "manager", "is_active": True},
+                 "role": "manager", "is_active": True, "hashed_password": "synthetic-hash-test-actor-1"},
                 {"id": "test-finance-2", "company_id": "test-tenant-b",
-                 "role": "ar_specialist", "is_active": True},
+                 "role": "ar_specialist", "is_active": True, "hashed_password": "synthetic-hash-test-finance-2"},
             ],
             "companies": [
                 {"id": "test-tenant-a", "qb_type": None,
@@ -75,7 +83,8 @@ class _Database:
 def _jwt(*, identity="test-actor-1", company="test-tenant-a",
          role="manager", scope="access"):
     return create_access_token({"sub": identity, "company_id": company,
-                                "role": role, "scope": scope})
+                                "role": role, "scope": scope,
+                                "pwd": password_session_version(identity, f"synthetic-hash-{identity}")})
 
 
 def _get(client, path, token):
@@ -230,3 +239,31 @@ def test_finance_allowlist_denial_has_trace_and_hardening_headers(actual_app):
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert "default-src" in response.headers["content-security-policy"]
+
+
+def test_finance_employee_can_change_only_their_own_password(actual_app, monkeypatch):
+    from app.api import account_security
+
+    client, db, _ = actual_app
+    db.employee()["role"] = "ar_specialist"
+    other_employee = dict(db.tables["users"][1])
+    token = _jwt(role="ar_specialist")
+    headers = {"Authorization": f"Bearer {token}"}
+    monkeypatch.setattr(account_security, "_settings", lambda: None)
+    monkeypatch.setattr(account_security, "_db", lambda: db)
+    monkeypatch.setattr(account_security, "_CHANGE_LIMITER", SimpleNamespace(is_allowed=lambda _: True))
+    monkeypatch.setattr(account_security, "_require_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(account_security, "verify_password", lambda supplied, _: supplied == "old-password1")
+    monkeypatch.setattr(account_security, "hash_password", lambda _: "synthetic-replacement-hash")
+
+    response = client.post("/auth/change-password", headers=headers, json={
+        "current_password": "old-password1",
+        "new_password": "new-password2",
+    })
+
+    assert response.status_code == 200, response.text
+    assert db.employee()["hashed_password"] == "synthetic-replacement-hash"
+    assert db.tables["users"][1] == other_employee
+    assert _get(client, "/auth/me", token).status_code == 401
+    replacement = response.json()["access_token"]
+    assert _get(client, "/api/settings/integrations", replacement).status_code == 403

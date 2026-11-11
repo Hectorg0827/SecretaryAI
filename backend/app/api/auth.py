@@ -29,7 +29,7 @@ from app.auth.oauth import (
 )
 from app.auth.jwt import (
     create_access_token, decode_access_token, decode_refresh_candidate,
-    verify_password, hash_password, revoke_token,
+    verify_password, hash_password, revoke_token, password_session_version,
 )
 from app.auth.rbac import get_current_user, oauth2_scheme
 from app.config import get_settings
@@ -379,7 +379,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         try:
             result = (
                 db.table("users")
-                .select("id, company_id, role, is_active, totp_enabled, totp_secret")
+                .select("id, company_id, role, is_active, totp_enabled, totp_secret, hashed_password")
                 .eq("id", user_id)
                 .execute()
             )
@@ -391,6 +391,8 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             raise HTTPException(status_code=401, detail="User not found")
 
         user = result.data[0]
+        if payload.get("pwd") != password_session_version(user["id"], user["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Credentials changed; sign in again")
         if not user.get("is_active", True):
             raise HTTPException(status_code=403, detail="Account disabled")
         if not user.get("totp_enabled") or not user.get("totp_secret"):
@@ -409,6 +411,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             "sub": user["id"],
             "company_id": user["company_id"],
             "role": user["role"],
+            "pwd": password_session_version(user["id"], user["hashed_password"]),
         })
         return {"access_token": token, "token_type": "bearer",
                 "company_id": user["company_id"], "role": user["role"]}
@@ -453,7 +456,8 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
             # token so the frontend can prompt for TOTP without re-sending password.
             from datetime import timedelta
             pre_auth = create_access_token(
-                {"sub": user["id"], "scope": "2fa_pending"},
+                {"sub": user["id"], "scope": "2fa_pending",
+                 "pwd": password_session_version(user["id"], user["hashed_password"])},
                 expires_delta=timedelta(minutes=5),
             )
             return {
@@ -473,6 +477,7 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
         "sub": user["id"],
         "company_id": user["company_id"],
         "role": user["role"],
+        "pwd": password_session_version(user["id"], user["hashed_password"]),
     })
 
     # Audit successful login (non-fatal)
@@ -515,7 +520,7 @@ async def refresh_token(body: RefreshRequest):
       token is issued, so a captured token can't be replayed for a second refresh
       (reuse detection).
     """
-    from app.auth.jwt import is_token_revoked, blacklist_jti
+    from app.auth.jwt import is_token_revoked, claim_jti_once
 
     # Authenticate the HMAC and validate the expiry claim's type without
     # enforcing elapsed time yet. Bounded renewal is enforced below.
@@ -563,7 +568,7 @@ async def refresh_token(body: RefreshRequest):
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
-            .select("is_active, role, company_id")
+            .select("is_active, role, company_id, hashed_password")
             .eq("id", user_id)
             .execute()
         )
@@ -571,24 +576,39 @@ async def refresh_token(body: RefreshRequest):
         log.error("Refresh token DB query failed: %s", exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
-    if not result.data or not result.data[0].get("is_active", True):
+    if (not result.data or len(result.data) != 1
+            or result.data[0].get("is_active") is not True):
         raise HTTPException(status_code=401, detail="User not found or disabled")
 
     current = result.data[0]
-    role = current.get("role") or role
-    company_id = current.get("company_id") or company_id
+    from app.auth.rbac import ROLE_PERMISSIONS
+    if current.get("role") not in ROLE_PERMISSIONS or not current.get("company_id"):
+        raise HTTPException(status_code=401, detail="Invalid account permissions")
+    role = current["role"]
+    company_id = current["company_id"]
 
-    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
+    try:
+        current_pwd = password_session_version(user_id, current.get("hashed_password"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Account credentials unavailable") from None
+    if payload.get("pwd") != current_pwd:
+        raise HTTPException(status_code=401, detail="Credentials changed; please log in again")
 
-    # Single-use rotation: invalidate the presented token so it can't be reused.
+    new_token = create_access_token({"sub": user_id, "company_id": company_id,
+                                     "role": role, "pwd": current_pwd})
+
+    # Single-use rotation with atomic SET NX: simultaneous refresh requests
+    # cannot both pass a separate GET + SET check.
     if jti:
         try:
-            blacklist_jti(jti, ttl_seconds=int(refresh_window_seconds))
+            claimed = claim_jti_once(jti, ttl_seconds=int(refresh_window_seconds))
         except Exception as exc:
             from app.auth.jwt import RevocationStoreUnavailable
             if not isinstance(exc, RevocationStoreUnavailable):
                 raise
             raise HTTPException(status_code=503, detail="Authentication temporarily unavailable") from exc
+        if not claimed:
+            raise HTTPException(status_code=401, detail="Token already used; please log in again")
 
     return {"access_token": new_token, "token_type": "bearer"}
 
@@ -762,6 +782,7 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         "sub": user["id"],
         "company_id": company_id,
         "role": "owner",
+        "pwd": password_session_version(user["id"], password_hash),
     })
     log.info("New owner registered: user=%s company=%s", user["id"], company_id)
 

@@ -1,4 +1,5 @@
 """Finance staging gate: provisional valuations and strict read-only Bill candidate."""
+import json
 import os
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -6,7 +7,8 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-32-chars-long!!x")
@@ -17,6 +19,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
+from app.api import logistics
 from app.api.logistics import (
     ProvisionalPOCostRequest,
     record_provisional_po_cost_assessment,
@@ -24,6 +27,7 @@ from app.api.logistics import (
 )
 from app.services.purchasing_finance import compare_qbo_bill, money, value_receipts
 from app.connectors.qb_online import QBOnlineAdapter
+from app.auth.rbac import get_current_user
 
 
 ASSESSMENT = {
@@ -59,6 +63,64 @@ def test_1200_case_pilot_has_separate_damaged_exposure_and_no_accounting_post():
     }
     assert valuation["valuation_verified"] is False
     assert valuation["accounting_reconciled"] is False
+
+
+def test_valuation_route_preserves_postgrest_decimal_precision():
+    assessment_id = str(uuid4())
+    records = {
+        "purchasing_cost_assessments": {
+            **ASSESSMENT, "po_id": "po-1", "assertion_status": "provisional",
+            "fx_rate_to_usd": 1.0, "landed_cost_total": 120.25,
+            "lines": [{"sku": "QA-1200", "qty_ordered": 1200.0, "unit_cost": 10.0}],
+        },
+        "purchasing_orders": {"po_number": "QA-PO-1200"},
+        "purchasing_order_lines": {**PO_LINES[0], "qty_ordered": 1200.0},
+        "warehouse_receipt_documents": {"id": "receipt-1"},
+        "warehouse_receipt_lines": {
+            "sku": "QA-1200", "accepted_qty": 1180.0,
+            "damaged_qty": 20.0, "quarantined_qty": 0.0,
+        },
+    }
+
+    def table(name):
+        resource = MagicMock()
+
+        def select(columns):
+            row = records[name].copy()
+            for column in columns.split(","):
+                if column.endswith("::text"):
+                    key = column.removesuffix("::text")
+                    row[key] = json.dumps(row[key])
+            query = MagicMock()
+            query.eq.return_value = query
+            query.in_.return_value = query
+            query.limit.return_value = query
+            query.execute.return_value.data = [row]
+            return query
+
+        resource.select.side_effect = select
+        return resource
+
+    db = MagicMock()
+    db.table.side_effect = table
+    app = FastAPI()
+    app.include_router(logistics.router, prefix="/api/logistics")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": "actor-one", "company_id": "tenant-one", "role": "back_office",
+    }
+    app.dependency_overrides[logistics.get_db] = lambda: db
+    response = TestClient(app).get(f"/api/logistics/finance/assessments/{assessment_id}")
+
+    assert response.status_code == 200, response.text
+    valuation = response.json()
+    assert valuation["estimated_order_value"] == "12120.25"
+    assert valuation["estimated_value_by_bucket"] == {
+        "available": "11918.25", "damaged": "202.00",
+        "quarantined": "0.00", "unreceived": "0.00",
+    }
+    assert valuation["supplier_claim_candidate"]["claim_status"] == "unfiled_unverified"
+    assert valuation["accounting_reconciled"] is False
+    db.rpc.assert_not_called()
 
 
 def test_partial_receipt_retains_unreceived_value_and_quarantine():

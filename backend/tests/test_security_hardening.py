@@ -32,9 +32,11 @@ SECRET = settings.secret_key
 
 
 def _make_token(sub="user-1", company_id="co-1", role="owner", jti="jti-1", exp_delta_seconds=3600):
+    from app.auth.jwt import password_session_version
     exp = datetime.now(timezone.utc) + timedelta(seconds=exp_delta_seconds)
     return jose_jwt.encode(
-        {"sub": sub, "company_id": company_id, "role": role, "jti": jti, "exp": exp},
+        {"sub": sub, "company_id": company_id, "role": role, "jti": jti, "exp": exp,
+         "pwd": password_session_version(sub, "synthetic-password-hash")},
         SECRET, algorithm="HS256",
     )
 
@@ -145,18 +147,19 @@ class TestRefreshHardening:
 
         fake_db = MagicMock()
         fake_db.table.return_value.select.return_value.eq.return_value.execute.return_value = \
-            MagicMock(data=[{"is_active": True}])
+            MagicMock(data=[{"is_active": True, "role": "owner", "company_id": "co-1",
+                             "hashed_password": "synthetic-password-hash"}])
 
         with patch("app.auth.jwt.is_token_revoked", return_value=False), \
              patch("supabase.create_client", return_value=fake_db), \
-             patch("app.auth.jwt.blacklist_jti") as spy_blacklist:
+             patch("app.auth.jwt.claim_jti_once", return_value=True) as spy_claim:
             r = client.post("/auth/refresh", json={"access_token": token})
 
         assert r.status_code == 200, r.text
         assert "access_token" in r.json()
-        # Single-use rotation: the presented token's JTI must be blacklisted.
-        spy_blacklist.assert_called_once()
-        assert spy_blacklist.call_args.args[0] == "rotate-me"
+        # Single-use rotation: the presented token's JTI must be atomically claimed.
+        spy_claim.assert_called_once()
+        assert spy_claim.call_args.args[0] == "rotate-me"
 
 
 # ── Security response headers ─────────────────────────────────────────────────

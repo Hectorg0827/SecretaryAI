@@ -7,6 +7,8 @@ every request.
 """
 import uuid
 import logging
+import hmac
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -144,6 +146,33 @@ def blacklist_jti(jti: str, ttl_seconds: int) -> None:
     except Exception as exc:
         _revocation_alarm("blacklist_jti", exc)
         raise RevocationStoreUnavailable("Redis revocation store unavailable") from exc
+
+
+def claim_jti_once(jti: str, ttl_seconds: int) -> bool:
+    """Atomically consume a refresh JTI; exactly one concurrent caller wins."""
+    if not jti or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+        return False
+    try:
+        import redis as redis_lib
+        r = redis_lib.from_url(settings.redis_url, decode_responses=True)
+        # The very same Redis key is consulted by all authenticated routes.
+        return r.set(f"{_REVOKE_PREFIX}{jti}", "1", nx=True, ex=ttl_seconds) is True
+    except Exception as exc:
+        _revocation_alarm("claim_jti_once", exc)
+        raise RevocationStoreUnavailable("Redis revocation store unavailable") from exc
+
+
+def password_session_version(user_id: str, hashed_password: str) -> str:
+    """Bind a session to durable credentials without publishing their bcrypt hash.
+
+    The keyed digest changes whenever the password hash changes. No DB schema
+    migration or process-local revocation state is required. Staging sessions
+    without this claim must re-authenticate when enforcement is enabled.
+    """
+    if not user_id or not hashed_password:
+        raise ValueError("Missing account credential state")
+    message = f"{user_id}:{hashed_password}".encode("utf-8")
+    return hmac.new(settings.secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 def hash_password(password: str) -> str:

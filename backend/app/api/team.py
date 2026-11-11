@@ -1,4 +1,4 @@
-"""Staging-only, mailbox-verified owner-controlled team invitations.
+"""Staging-only, owner-controlled team invitations and staff management.
 
 Unlike the public company-registration route, this flow never creates another
 company and never gives the inviting owner access to the recipient's token or
@@ -12,6 +12,7 @@ import re
 import secrets
 from typing import Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -76,6 +77,21 @@ def _owner_record(db, actor: dict) -> dict:
     return rows[0]
 
 
+def _member_record(db, company_id: str, member_id: UUID) -> dict:
+    """Never resolve an employee outside the authenticated owner's company."""
+    try:
+        rows = (
+            db.table("users").select("id,company_id,role,is_active")
+            .eq("id", str(member_id)).eq("company_id", company_id)
+            .limit(2).execute().data
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Team member lookup unavailable") from None
+    if len(rows or []) != 1:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    return rows[0]
+
+
 class InviteTeamRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(max_length=254)
@@ -117,11 +133,16 @@ class AcceptInviteRequest(BaseModel):
         return value
 
 
+class ChangeTeamRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: InvitableRole
+
+
 def _invitation_url(raw_token: str) -> str:
     settings = _staging_settings()
     url = urlsplit(settings.frontend_url)
     if (url.scheme != "https" or url.hostname != "secretaryai-web-staging.up.railway.app"
-            or url.username or url.password or url.query or url.fragment):
+            or url.username or url.password or url.port is not None or url.query or url.fragment):
         raise HTTPException(status_code=503, detail="Invitation URL not configured safely")
     # Fragment is not sent to the web server in HTTP requests or referrer headers.
     return f"https://{url.hostname}/accept-invite#token={raw_token}"
@@ -220,6 +241,42 @@ def _require_finance_audit(
         raise HTTPException(status_code=503, detail="Finance role audit unavailable")
 
 
+def _require_invitation_audit(db, company_id: str, actor_id: str, role: str, event: str) -> None:
+    """Account creation and identity email dispatch require durable audit first."""
+    from app.utils.audit import write_audit_event
+    try:
+        event_id = write_audit_event(
+            db, company_id=company_id, event_type=event, actor_id=actor_id,
+            action_class="commit", capability="team_management", path_used="api",
+            metadata={"role": role, "gate": "staging_invitation"},
+        )
+    except Exception:
+        event_id = None
+    if not event_id:
+        raise HTTPException(status_code=503, detail="Invitation audit unavailable")
+
+
+def _require_team_mutation_audit(
+    db, *, company_id: str, actor_id: str, event: str,
+    member_id: str, prior_role: str, next_role: str | None = None,
+) -> None:
+    """Refuse privileged writes when a durable pre-action audit is unavailable."""
+    from app.utils.audit import write_audit_event
+
+    try:
+        event_id = write_audit_event(
+            db, company_id=company_id, event_type=event, actor_id=actor_id,
+            action_class="destructive" if next_role is None else "commit",
+            capability="team_management", path_used="api",
+            metadata={"member_id": member_id, "prior_role": prior_role,
+                      "next_role": next_role, "gate": "staging_team_management"},
+        )
+    except Exception:
+        event_id = None
+    if not event_id:
+        raise HTTPException(status_code=503, detail="Team change audit unavailable")
+
+
 @router.post("/invitations", status_code=201,
              dependencies=[Depends(require_active_subscription())])
 async def invite_manager(
@@ -244,6 +301,8 @@ async def invite_manager(
     if body.role != "manager":
         _require_finance_audit(db, actor["company_id"], "finance_role_invite_attempt",
                                actor["sub"], body.role)
+    _require_invitation_audit(db, actor["company_id"], actor["sub"], body.role,
+                              "team_invitation_requested")
 
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
@@ -305,6 +364,8 @@ async def accept_invitation(body: AcceptInviteRequest, _=Depends(require_rate_li
     # An owner who has since lost their permissions cannot onboard an approver.
     _owner_record(db, {"sub": invitation["invited_by"],
                        "company_id": invitation["company_id"], "role": "owner"})
+    _require_invitation_audit(db, invitation["company_id"], invitation["invited_by"],
+                              invitation["role"], "team_invitation_activation_requested")
     if invitation["role"] != "manager":
         _require_finance_audit(db, invitation["company_id"], "finance_role_activation_attempt",
                                invitation["invited_by"], invitation["role"])
@@ -343,3 +404,74 @@ async def list_team_members(actor: dict = Depends(get_current_user)):
     except Exception:
         raise HTTPException(status_code=503, detail="Team members unavailable") from None
     return {"members": rows or []}
+
+
+@router.patch("/members/{member_id}/role", dependencies=[Depends(require_active_subscription())])
+async def change_team_member_role(
+    member_id: UUID, body: ChangeTeamRoleRequest,
+    actor: dict = Depends(get_current_user),
+):
+    _staging_settings()
+    db = _db()
+    _owner_record(db, actor)
+    member = _member_record(db, actor["company_id"], member_id)
+    if member["id"] == actor["sub"] or member["role"] == "owner":
+        raise HTTPException(status_code=403, detail="Company owners cannot be reassigned")
+    if member["is_active"] is not True:
+        raise HTTPException(status_code=409, detail="Team member is not active")
+    if member["role"] == body.role:
+        raise HTTPException(status_code=409, detail="Team member already has this role")
+
+    _require_team_mutation_audit(
+        db, company_id=actor["company_id"], actor_id=actor["sub"],
+        event="team_role_change_requested", member_id=str(member_id),
+        prior_role=member["role"], next_role=body.role,
+    )
+    try:
+        updated = (
+            db.table("users").update({"role": body.role})
+            .eq("id", str(member_id)).eq("company_id", actor["company_id"])
+            .eq("role", member["role"]).eq("is_active", True)
+            .execute().data
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Team role update unavailable") from None
+    if len(updated or []) != 1:
+        raise HTTPException(status_code=409, detail="Team member changed; refresh and retry")
+    _audit(db, actor["company_id"], "team_role_changed", actor["sub"],
+           {"member_id": str(member_id), "prior_role": member["role"], "role": body.role})
+    return {"status": "updated", "member_id": str(member_id), "role": body.role}
+
+
+@router.delete("/members/{member_id}", dependencies=[Depends(require_active_subscription())])
+async def deactivate_team_member(
+    member_id: UUID, actor: dict = Depends(get_current_user),
+):
+    _staging_settings()
+    db = _db()
+    _owner_record(db, actor)
+    member = _member_record(db, actor["company_id"], member_id)
+    if member["id"] == actor["sub"] or member["role"] == "owner":
+        raise HTTPException(status_code=403, detail="Company owners cannot be removed")
+    if member["is_active"] is not True:
+        raise HTTPException(status_code=409, detail="Team member already inactive")
+
+    _require_team_mutation_audit(
+        db, company_id=actor["company_id"], actor_id=actor["sub"],
+        event="team_member_deactivation_requested", member_id=str(member_id),
+        prior_role=member["role"],
+    )
+    try:
+        updated = (
+            db.table("users").update({"is_active": False})
+            .eq("id", str(member_id)).eq("company_id", actor["company_id"])
+            .eq("role", member["role"]).eq("is_active", True)
+            .execute().data
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Team member removal unavailable") from None
+    if len(updated or []) != 1:
+        raise HTTPException(status_code=409, detail="Team member changed; refresh and retry")
+    _audit(db, actor["company_id"], "team_member_deactivated", actor["sub"],
+           {"member_id": str(member_id), "prior_role": member["role"]})
+    return {"status": "deactivated", "member_id": str(member_id)}

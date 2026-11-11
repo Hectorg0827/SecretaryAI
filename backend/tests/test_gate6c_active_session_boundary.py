@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth.jwt import create_access_token
+from app.auth.jwt import create_access_token, password_session_version
 from app.middleware import active_session_boundary as gate6c
 from app.middleware.finance_role_boundary import FinanceRoleBoundaryMiddleware
 
@@ -13,8 +13,10 @@ from app.middleware.finance_role_boundary import FinanceRoleBoundaryMiddleware
 class FakeDB:
     def __init__(self):
         self.users = {
-            "u1": {"id": "u1", "company_id": "co-a", "role": "manager", "is_active": True},
-            "u2": {"id": "u2", "company_id": "co-b", "role": "ar_specialist", "is_active": True},
+            "u1": {"id": "u1", "company_id": "co-a", "role": "manager", "is_active": True,
+                   "hashed_password": "test-hash-u1"},
+            "u2": {"id": "u2", "company_id": "co-b", "role": "ar_specialist", "is_active": True,
+                   "hashed_password": "test-hash-u2"},
         }
         self.unavailable = False
         self.filters = {}
@@ -25,7 +27,7 @@ class FakeDB:
         return self
 
     def select(self, fields):
-        assert fields == "id,company_id,role,is_active"
+        assert fields == "id,company_id,role,is_active,hashed_password"
         return self
 
     def eq(self, field, value):
@@ -47,6 +49,7 @@ class FakeDB:
 def _token(role="manager", sub="u1", company="co-a", scope="access"):
     return create_access_token({
         "sub": sub, "company_id": company, "role": role, "scope": scope,
+        "pwd": password_session_version(sub, f"test-hash-{sub}"),
     })
 
 
@@ -145,6 +148,21 @@ def test_fresh_token_for_updated_role_gets_only_updated_permissions(setup):
     fresh = _token(role="ar_specialist")
     assert _get(client, fresh, "/api/finance/workspace").status_code == 200
     assert _get(client, fresh).status_code == 403
+
+
+def test_legacy_session_without_password_binding_must_sign_in_again(setup):
+    client, _, _ = setup
+    legacy = create_access_token({"sub": "u1", "company_id": "co-a", "role": "manager"})
+    assert _get(client, legacy).status_code == 401
+
+
+def test_password_change_invalidates_old_session_even_without_role_change(setup):
+    client, db, _ = setup
+    old = _token()
+    assert _get(client, old).status_code == 200
+    db.users["u1"]["hashed_password"] = "changed-hash-u1"
+    assert _get(client, old).status_code == 401
+    assert _get(client, _token()).status_code == 401  # stale signed fingerprint
 
 
 def test_revocation_denies_legacy_access(setup):

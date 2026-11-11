@@ -11,7 +11,7 @@ const INVITE_ROLES = [
 ] as const;
 type InviteRole = (typeof INVITE_ROLES)[number][0];
 
-/** Owner-only team invitation UI. The server independently enforces active owner status. */
+/** Owner-only team management; server always re-checks owner and company. */
 export function TeamSection() {
   const [members, setMembers] = useState<Member[]>([]);
   const [name, setName] = useState('');
@@ -20,11 +20,57 @@ export function TeamSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [memberRoles, setMemberRoles] = useState<Record<string, InviteRole>>({});
+  const [busyMember, setBusyMember] = useState<string | null>(null);
+  const [confirmDisable, setConfirmDisable] = useState<string | null>(null);
+
+  const reloadMembers = async () => {
+    const result = await api.get<{ members: Member[] }>('/api/team/members');
+    setMembers(result.members);
+    setMemberRoles(Object.fromEntries(result.members.map((member) => [
+      member.id, INVITE_ROLES.some(([role]) => role === member.role)
+        ? member.role as InviteRole : 'manager',
+    ])));
+  };
 
   useEffect(() => {
-    api.get<{ members: Member[] }>('/api/team/members').then((result) => setMembers(result.members))
+    reloadMembers()
       .catch(() => setError('Could not load team members.'));
   }, []);
+
+  const changeRole = async (member: Member) => {
+    const selected = memberRoles[member.id];
+    if (!selected || selected === member.role) return;
+    setBusyMember(member.id);
+    setError('');
+    setNotice('');
+    try {
+      await api.patch(`/api/team/members/${member.id}/role`, { role: selected });
+      await reloadMembers();
+      setNotice(`Updated ${member.full_name || member.email}'s role. Their old session can no longer access authenticated APIs.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not update team role');
+    } finally {
+      setBusyMember(null);
+    }
+  };
+
+  const disableMember = async (member: Member) => {
+    setBusyMember(member.id);
+    setError('');
+    setNotice('');
+    try {
+      await api.delete(`/api/team/members/${member.id}`);
+      await reloadMembers();
+      setNotice(`Disabled ${member.full_name || member.email}. Their existing session can no longer access authenticated APIs.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not disable team member');
+    } finally {
+      setBusyMember(null);
+      setConfirmDisable(null);
+    }
+  };
 
   const invite = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -70,11 +116,39 @@ export function TeamSection() {
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {sent && <p role="status" className="text-sm text-emerald-700">Invitation accepted by the email provider. The recipient must open their email and activate their role before gaining any access.</p>}
       <h2 className="font-semibold text-slate-800">Current team members</h2>
+      <p className="text-sm text-slate-600">Only the company owner can change staff roles or disable access. Disabled accounts are retained for audit history. You cannot change or disable another owner.</p>
+      {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
       <ul className="divide-y divide-slate-100">
         {members.map((member) => (
-          <li key={member.id} className="py-3 text-sm flex justify-between gap-3">
+          <li key={member.id} className="py-3 text-sm flex flex-wrap justify-between items-center gap-3">
             <span>{member.full_name || member.email} <span className="text-slate-500">({member.email})</span></span>
-            <span className="capitalize">{member.role}{member.is_active ? '' : ' — disabled'}</span>
+            {member.role === 'owner' || !member.is_active ? (
+              <span className="text-slate-600 capitalize">{member.role.replace(/_/g, ' ')}{member.is_active ? ' — protected' : ' — disabled'}</span>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor={`member-role-${member.id}`}>Role for {member.full_name || member.email}</label>
+                <select id={`member-role-${member.id}`} value={memberRoles[member.id] || member.role}
+                  onChange={(event) => setMemberRoles((previous) => ({ ...previous, [member.id]: event.target.value as InviteRole }))}
+                  className="border rounded-lg px-2 py-1.5" disabled={busyMember !== null}>
+                  {INVITE_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+                <button type="button" onClick={() => changeRole(member)}
+                  disabled={busyMember !== null || !memberRoles[member.id] || memberRoles[member.id] === member.role}
+                  className="rounded-lg bg-blue-600 text-white px-3 py-1.5 disabled:opacity-50">Save role</button>
+                {confirmDisable === member.id ? (
+                  <span className="flex gap-2 items-center">
+                    <span className="text-red-700">Disable access?</span>
+                    <button type="button" onClick={() => disableMember(member)} disabled={busyMember !== null}
+                      className="rounded-lg bg-red-700 text-white px-3 py-1.5 disabled:opacity-50">Confirm disable</button>
+                    <button type="button" onClick={() => setConfirmDisable(null)} disabled={busyMember !== null}
+                      className="rounded-lg border px-3 py-1.5">Cancel</button>
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => setConfirmDisable(member.id)} disabled={busyMember !== null}
+                    className="rounded-lg border border-red-300 text-red-700 px-3 py-1.5 disabled:opacity-50">Disable</button>
+                )}
+              </div>
+            )}
           </li>
         ))}
       </ul>

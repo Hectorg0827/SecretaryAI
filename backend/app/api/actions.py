@@ -314,7 +314,27 @@ async def reconcile_draft(
     went_through = body.outcome == "went_through"
     queue = ApprovalQueue(db)
     try:
+        # Check tenant ownership and current state before writing the mandatory
+        # audit intent. The final update below still claims needs_review
+        # atomically so two approvers cannot settle the same draft twice.
+        result = (db.table("drafts").select("id, workflow_run_id")
+                  .eq("id", draft_id).eq("company_id", user["company_id"])
+                  .eq("status", "needs_review").maybe_single().execute())
+        draft = result.data
+        if not draft:
+            raise HTTPException(status_code=404, detail="Nothing to settle for that item")
+        # This action changes whether an external write may be retried. Never
+        # change that state without a durable audit record first.
+        write_audit_event(
+            db, company_id=user["company_id"], event_type="draft_reconciliation_requested",
+            actor_id=user["sub"], action_class="commit",
+            metadata={"draft_id": draft_id, "outcome": body.outcome}, required=True,
+        )
         settled = await queue.reconcile(draft_id, user["company_id"], user["sub"], went_through)
+    except HTTPException:
+        raise
+    except AuditWriteError:
+        raise HTTPException(status_code=503, detail="Audit service unavailable; the action was not changed")
     except Exception as exc:
         log.error("Reconcile failed for draft %s: %s", log_safe(draft_id), log_safe(exc))
         raise HTTPException(status_code=503, detail="Service temporarily unavailable")
@@ -326,6 +346,20 @@ async def reconcile_draft(
         action_class="commit",
         metadata={"draft_id": draft_id, "outcome": body.outcome},
     )
+    # An uncertain workflow waits for this confirmation. A positive result
+    # completes its previously approved step without performing the external
+    # write again; a negative result leaves the workflow awaiting a fresh
+    # human approval of the requeued draft.
+    if went_through and draft.get("workflow_run_id"):
+        try:
+            from app.workflows.executor import after_approval
+            from app.api.deps import get_adapter as build_adapter
+            adapter = build_adapter(user=user, db=db)
+            await after_approval(db, adapter, user["company_id"], draft["workflow_run_id"],
+                                 user["sub"], "executed", "Confirmed by a person after checking")
+        except Exception as exc:
+            log.error("Could not continue reconciled workflow %s: %s",
+                      log_safe(draft["workflow_run_id"]), log_safe(exc))
     return {"draft_id": draft_id, "status": "approved" if went_through else "pending", "outcome": body.outcome}
 
 

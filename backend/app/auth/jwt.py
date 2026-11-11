@@ -245,10 +245,11 @@ def is_session_superseded(payload: dict) -> bool:
 # that is still the row's stamp. So a token built from a pre-change copy of
 # the row can never outlive the change, whatever the timing of the sign-in.
 #
-# The current stamp is cached in Redis for a short time; the database is the
-# source of truth. The code that changes an account writes the new stamp to
-# the cache straight away, so the change takes effect immediately; if that
-# cache write fails, the old value expires within _STAMP_CACHE_SECONDS.
+# The database must be checked on EVERY authenticated request. A cached stamp
+# may be stale after a commit, or a delayed cache fill can overwrite the new
+# value published by another worker. Even a 60-second stale window permits a
+# demoted user to perform privileged actions. Redis still handles JTI and
+# per-user cut-offs; it is never authoritative for the current account stamp.
 
 _STAMP_PREFIX = "session_stamp:"
 _STAMP_CACHE_SECONDS = 60
@@ -267,10 +268,12 @@ def cache_session_stamp(user_id: str, stamp: str) -> None:
         raise AuthStoreUnavailable("session store unavailable") from exc
 
 
-def _load_session_stamp(user_id: str) -> str:
+def _load_session_stamp(user_id: str, db=None) -> str:
     """The stamp on the user's row right now ('' if none / user gone)."""
-    from app.api import deps
-    result = deps.get_db().table("users").select("session_stamp, is_active").eq("id", user_id).execute()
+    if db is None:
+        from app.db import get_db
+        db = get_db()
+    result = db.table("users").select("session_stamp, is_active").eq("id", user_id).execute()
     rows = result.data
     if not isinstance(rows, list) or not rows:
         return "\x00missing"            # no such user: matches no token
@@ -279,37 +282,27 @@ def _load_session_stamp(user_id: str) -> str:
     return rows[0].get("session_stamp") or ""
 
 
-def current_session_stamp(user_id: str) -> str:
-    """Current stamp for a user (cache, else database). Raises AuthStoreUnavailable."""
-    key = f"{_STAMP_PREFIX}{user_id}"
+def current_session_stamp(user_id: str, db=None) -> str:
+    """Authoritative account stamp, read from the database on every request."""
     try:
-        cached = _redis().get(key)
-    except Exception as exc:
-        if not _fail_open():
-            raise AuthStoreUnavailable("session store unavailable") from exc
-        cached = None        # operator opted in: fall through to the database
-    if isinstance(cached, str) and cached.startswith("v:"):
-        return cached[2:]
-    try:
-        stamp = _load_session_stamp(user_id)
+        return _load_session_stamp(user_id, db=db)
     except Exception as exc:
         raise AuthStoreUnavailable("could not verify session") from exc
-    try:
-        _redis().setex(key, _STAMP_CACHE_SECONDS, f"v:{stamp}")
-    except Exception:
-        pass
-    return stamp
 
 
-def session_stamp_ok(payload: dict) -> bool:
+def session_stamp_ok(payload: dict, db=None) -> bool:
     """
-    True if the token's stamp is still the user's stamp. Tokens without an
-    `ss` claim (issued before stamps existed) are covered by the per-user
-    cut-off above instead. Raises AuthStoreUnavailable if it cannot be checked.
+    True only if a stamped token carries the user's current account stamp.
+    Legacy tokens without `ss` remain under the Redis session cut-off until
+    they expire, to avoid invalidating existing desktop/mobile sessions during
+    rollout. Raises AuthStoreUnavailable if an authoritative read fails.
     """
-    if "ss" not in payload or not payload.get("sub"):
+    if not payload.get("sub"):
+        return False
+    if "ss" not in payload:
         return True
-    return current_session_stamp(str(payload["sub"])) == (payload.get("ss") or "")
+    current = current_session_stamp(str(payload["sub"]), db=db)
+    return current == (payload.get("ss") or "")
 
 
 # ── Passwords ────────────────────────────────────────────────────────────────

@@ -1708,13 +1708,39 @@ class TestWorkflowsDoTheirSteps:
         wfdb.adapter.create_purchase_order.assert_awaited_once()
         assert wfdb.rows("workflow_runs")[0]["status"] == "completed"
 
-    def test_unknown_outcome_fails_the_run_instead_of_pretending(self, client, wfdb):
+    def test_unknown_outcome_waits_for_manual_confirmation(self, client, wfdb):
         import asyncio
         from app.workflows.executor import start_from_event
         asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW, _event("low_stock", {"item_id": "ITEM1", "product_name": "Cola 12pk"})))
         wfdb.adapter.create_purchase_order = AsyncMock(side_effect=httpx.ReadTimeout("no answer"))
         assert _approve(client, draft_id=wfdb.rows("drafts")[0]["id"]).json()["execution_status"] == "unknown"
-        assert wfdb.rows("workflow_runs")[0]["status"] == "failed"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "awaiting_approval"
+        assert wfdb.rows("drafts")[0]["status"] == "needs_review"
+        # A human finds the PO in QuickBooks; this resumes the workflow without
+        # creating another PO or sending anything twice.
+        draft_id = wfdb.rows("drafts")[0]["id"]
+        settled = client.post(f"/api/actions/reconcile/{draft_id}",
+                              json={"outcome": "went_through"}, headers=_token(sub=USER_ID))
+        assert settled.status_code == 200
+        assert wfdb.rows("workflow_runs")[0]["status"] == "completed"
+        assert wfdb.adapter.create_purchase_order.await_count == 1
+
+    def test_unknown_outcome_checked_not_sent_can_be_approved_again(self, client, wfdb):
+        import asyncio
+        from app.workflows.executor import start_from_event
+        asyncio.run(start_from_event(wfdb, wfdb.adapter, COMPANY_ROW,
+                                     _event("low_stock", {"item_id": "ITEM1", "product_name": "Cola 12pk"})))
+        draft_id = wfdb.rows("drafts")[0]["id"]
+        wfdb.adapter.create_purchase_order = AsyncMock(side_effect=httpx.ReadTimeout("no answer"))
+        assert _approve(client, draft_id=draft_id).json()["execution_status"] == "unknown"
+        settled = client.post(f"/api/actions/reconcile/{draft_id}",
+                              json={"outcome": "did_not"}, headers=_token(sub=USER_ID))
+        assert settled.status_code == 200
+        assert wfdb.rows("drafts")[0]["status"] == "pending"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "awaiting_approval"
+        wfdb.adapter.create_purchase_order = AsyncMock(return_value=MagicMock(qb_id="PO-123"))
+        assert _approve(client, draft_id=draft_id).json()["execution_status"] == "executed"
+        assert wfdb.rows("workflow_runs")[0]["status"] == "completed"
 
     def test_runner_starts_one_workflow_per_event_and_never_repeats_it(self, wfdb):
         from tasks.workflow_runner import _process_company
@@ -1944,6 +1970,15 @@ class TestNeedsCheckingList:
         assert client.get("/api/actions/needs-reconciliation", headers=_token(role="sales_rep", sub=USER_ID)).status_code == 403
         assert fdb.rows("drafts")[0]["status"] == "needs_review"
 
+    def test_unavailable_audit_log_never_settles_uncertain_action(self, client, fdb):
+        self._uncertain_po(client, fdb)
+        fdb.fail_tables.add("audit_events")
+        result = client.post("/api/actions/reconcile/d-1", json={"outcome": "went_through"},
+                             headers=_token(sub=USER_ID))
+        assert result.status_code == 503
+        assert fdb.rows("drafts")[0]["status"] == "needs_review"
+        assert fdb.adapter.create_purchase_order.await_count == 1
+
 
 class TestSessionStamp:
     """A token is only good while it matches the account state it was built from."""
@@ -1992,6 +2027,19 @@ class TestSessionStamp:
         assert client.get("/auth/me", headers=_bearer(tok)).status_code == 200
         [u for u in adb.rows("users") if u["id"] == STAFF_ID][0]["session_stamp"] = "changed-elsewhere"
         jwt_mod._redis_client.delete(f"session_stamp:{STAFF_ID}")                    # cache expired
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 401
+
+    def test_stale_cache_cannot_allow_old_role_after_database_commit(self, client, adb):
+        """A worker can cache the old stamp after another worker commits a role change."""
+        import app.auth.jwt as jwt_mod
+        tok = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 200
+        # Simulate a stale cache entry left by a racing app worker.
+        jwt_mod._redis_client.setex(f"session_stamp:{STAFF_ID}", 60, "v:")
+        # Simulates another app worker updating the row before publishing to
+        # Redis, or a delayed stale cache write overwriting its publication.
+        user = [u for u in adb.rows("users") if u["id"] == STAFF_ID][0]
+        user.update(role="viewer", session_stamp="new-stamp-from-another-worker")
         assert client.get("/auth/me", headers=_bearer(tok)).status_code == 401
 
     def test_deactivated_user_matches_no_token_even_with_the_right_stamp(self, client, adb):

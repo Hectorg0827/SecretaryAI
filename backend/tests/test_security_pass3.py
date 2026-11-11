@@ -102,6 +102,8 @@ class TestTokenScope:
 
     def test_2fa_setup_rejects_pre_auth_token_end_to_end(self):
         """The concrete bypass: pre-auth token → /auth/2fa/setup must be 401."""
+        from app.db import get_db
+        app.dependency_overrides[get_db] = lambda: MagicMock()
         client = TestClient(app)
         tok = _raw_token(sub="victim", scope="2fa_pending")
         r = client.post("/auth/2fa/setup", headers={"Authorization": f"Bearer {tok}"})

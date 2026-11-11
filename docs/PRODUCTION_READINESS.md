@@ -171,6 +171,26 @@ time; several P0s were open.
 Backend suite after Pass 4: **1247 passed, 0 skipped** on Python 3.11 with the
 pinned requirements. Web: lint 0 errors, typecheck, 16 tests, production build.
 
+### PR #108 reviewer follow-up (November 2026)
+
+- **Role-change races:** newly issued access tokens carry a database session
+  stamp. Protected endpoints now compare that stamp against the **current user's
+  row on every request**, rather than trusting a 60-second Redis cache. A
+  delayed cache write or failed cache update cannot reauthorize a demoted user.
+  The database is fail-closed for these checks. Older tokens without a stamp
+  remain governed by Redis revocation until their existing expiry; do not rely
+  on a Redis restart preserving revocation of these legacy sessions during the
+  rollout. Require users to sign in again if that risk is unacceptable.
+- **Uncertain external effects:** an approval with an unconfirmed QuickBooks or
+  email result remains in `needs_review`; settling it requires a successful
+  audit write **before** changing its state. Manual confirmation of success
+  resumes a linked workflow without repeating the external send/create action.
+  Confirming that nothing happened only requeues the draft for fresh approval.
+- **Verification:** 1,342 backend tests passed on local Python 3.12, including
+  the stale-cache, audit-failure, and workflow-reconciliation regressions. One
+  existing async-mock warning remains. Real vendor-account acceptance tests
+  and a staging deployment have **not** been performed by this reviewer pass.
+
 ### Pre-existing test failures (not caused by this work)
 - `tests/test_wholesale_distribution/test_logistics/test_vendor_tracker.py::test_extracts_ship_date_natural_language` — date-sensitive: the fixture's absolute ship date (`April 20, 2026`) is now in the past and is filtered out. P2; fix by freezing time in the test or accepting past dates. Confirmed failing on the baseline without any of this pass's changes. *(Resolved since: de-flaked with a relative date in `57716d1`.)*
 

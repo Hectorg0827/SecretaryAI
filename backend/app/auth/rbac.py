@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from app.auth.jwt import decode_access_token
+from app.db import get_db
 
 # auto_error=False: a browser session may arrive in a cookie instead of the
 # Authorization header (see app/auth/session_cookie.py). A request with
@@ -74,7 +75,7 @@ def has_permission(role: str | None, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(role or "viewer", set())
 
 
-def get_current_user(token: str = Depends(session_token)) -> dict:
+def get_current_user(token: str = Depends(session_token), db=Depends(get_db)) -> dict:
     from app.auth.jwt import (
         AuthStoreUnavailable, is_session_superseded, is_token_revoked, session_stamp_ok,
     )
@@ -120,7 +121,7 @@ def get_current_user(token: str = Depends(session_token)) -> dict:
             )
         # The token must have been built from the user's CURRENT account state
         # (role, active, password) — see session stamps in app/auth/jwt.py.
-        if not session_stamp_ok(payload):
+        if not session_stamp_ok(payload, db=db):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session ended; please sign in again",

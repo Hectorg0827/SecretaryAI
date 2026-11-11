@@ -206,8 +206,7 @@ async def after_approval(db, adapter, company_id: str, run_id: str, approved_by:
     if execution_status == "failed":
         return                      # the draft is back in the queue; keep waiting
     if execution_status == "unknown":
-        engine.fail(run_id, "The outcome of the approved step could not be confirmed.")
-        return
+        return                      # awaiting human reconciliation, not a failed run
     engine.resume_after_approval(run_id, approved=True, approved_by=approved_by)
     company = {"id": company_id, "name": ""}
     try:

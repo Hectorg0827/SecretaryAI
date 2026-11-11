@@ -11,25 +11,10 @@ from fastapi import Depends, HTTPException
 
 from app.auth.rbac import get_current_user
 from app.config import get_settings
+from app.db import get_db
 from app.utils.encryption import decrypt, encrypt
 
 log = logging.getLogger(__name__)
-
-# ── Module-level Supabase singleton (connection pooling) ──────────────────────
-# Re-using one client avoids creating a new HTTP session per request.
-# The supabase-py client is thread-safe for read operations.
-_db_client = None
-
-
-def get_db():
-    """Return the module-level Supabase service-role client (pooled)."""
-    global _db_client
-    if _db_client is None:
-        from supabase import create_client
-        settings = get_settings()
-        _db_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    return _db_client
-
 
 def _load_company(company_id: str, db):
     """Fetch company row from Supabase."""

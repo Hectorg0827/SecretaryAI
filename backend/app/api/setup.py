@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from app.api.deps import get_db
 from app.auth.rbac import require_permission
 from app.config import get_settings
+from app.utils.safe import log_safe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,6 +54,41 @@ async def _conductor_get(path: str, params: Optional[dict] = None) -> dict:
         return r.json()
 
 
+async def conductor_end_user_belongs_to(end_user_id: str, company_id: str) -> bool:
+    """
+    Ownership check for a Conductor end-user ID.
+
+    Every tenant's QuickBooks Desktop is reached with ONE operator-level
+    Conductor API key plus that tenant's end-user ID, so the ID is effectively
+    the key to a company's books. We create each end-user with
+    `sourceId = <our company_id>` (see start_qb_desktop_setup), so an ID is only
+    ever accepted for a company when Conductor confirms its sourceId is that
+    company. Fails CLOSED: any error, missing key or mismatch returns False.
+    """
+    if not settings.conductor_api_key or not end_user_id or not company_id:
+        return False
+    # IDs are opaque tokens; refuse anything that could alter the request path.
+    if not all(c.isalnum() or c in "_-" for c in end_user_id):
+        return False
+    try:
+        data = await _conductor_get(f"/end-users/{end_user_id}")
+    except Exception as exc:
+        log.warning("Conductor end-user ownership check failed for company %s: %s", log_safe(company_id), log_safe(exc))
+        return False
+    return isinstance(data, dict) and str(data.get("sourceId") or "") == str(company_id)
+
+
+def _mark_qbd_connected(db, company_id: str) -> None:
+    """Record that this company's QuickBooks source is Desktop and is live."""
+    try:
+        db.table("companies").update({
+            "qb_type": "desktop",
+            "qb_connection_status": "connected",
+        }).eq("id", company_id).execute()
+    except Exception as exc:
+        log.error("Could not mark QB Desktop connected for %s: %s", log_safe(company_id), log_safe(exc))
+
+
 # ── Request / response models ──────────────────────────────────────────────────
 
 class StartSetupResponse(BaseModel):
@@ -82,7 +118,7 @@ class GuidanceResponse(BaseModel):
 
 @router.post("/qb-desktop/start", response_model=StartSetupResponse)
 async def start_qb_desktop_setup(
-    user: dict = Depends(require_permission("manage_users")),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """
@@ -114,6 +150,11 @@ async def start_qb_desktop_setup(
         )
         existing_end_user_id: Optional[str] = (row.data or {}).get("conductor_end_user_id")
     except Exception:
+        existing_end_user_id = None
+
+    # A stored ID is only reused if Conductor confirms it is this company's.
+    if existing_end_user_id and not await conductor_end_user_belongs_to(existing_end_user_id, company_id):
+        log.warning("Stored Conductor end-user for company %s failed ownership check — creating a new one", log_safe(company_id))
         existing_end_user_id = None
 
     # Create EndUser if we don't have one
@@ -163,7 +204,7 @@ async def start_qb_desktop_setup(
 
 @router.get("/qb-desktop/status", response_model=StatusResponse)
 async def get_qb_desktop_status(
-    user: dict = Depends(require_permission("manage_users")),
+    user: dict = Depends(require_permission("manage_integrations")),
     db=Depends(get_db),
 ):
     """
@@ -204,6 +245,10 @@ async def get_qb_desktop_status(
             None,
         )
         if qbd_conn and qbd_conn.get("status") == "active":
+            # The wizard finishes here: without this the company row never said
+            # "QuickBooks = Desktop" and the app showed no QuickBooks data.
+            if await conductor_end_user_belongs_to(end_user_id, company_id):
+                _mark_qbd_connected(db, company_id)
             return StatusResponse(
                 connected=True,
                 status="connected",
@@ -233,7 +278,7 @@ async def get_qb_desktop_status(
 @router.post("/qb-desktop/guidance", response_model=GuidanceResponse)
 async def get_setup_guidance(
     body: GuidanceRequest,
-    user: dict = Depends(require_permission("manage_users")),
+    user: dict = Depends(require_permission("manage_integrations")),
 ):
     """
     Agentic visual guidance: the desktop app sends a screenshot and we use

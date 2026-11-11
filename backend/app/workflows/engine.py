@@ -136,7 +136,7 @@ class WorkflowEngine:
                     "at": datetime.now(timezone.utc).isoformat(),
                 })
                 update["step_results"] = results
-        self._db.table("workflow_runs").update(update).eq("id", run_id).execute()
+        self._db.table("workflow_runs").update(update).eq("id", run_id).eq("company_id", self._company_id).execute()
         log.info("Workflow run %s paused for policy approval (rule=%s)", run_id, getattr(decision, "rule_name", "?"))
 
     def advance(self, run_id: str, step_result: dict, awaiting_entity_id: Optional[str] = None) -> None:
@@ -172,7 +172,7 @@ class WorkflowEngine:
         if status == "completed":
             update["completed_at"] = datetime.now(timezone.utc).isoformat()
 
-        self._db.table("workflow_runs").update(update).eq("id", run_id).execute()
+        self._db.table("workflow_runs").update(update).eq("id", run_id).eq("company_id", self._company_id).execute()
 
     def resume_after_approval(self, run_id: str, approved: bool, approved_by: Optional[str] = None) -> None:
         """Called when a pending approval resolves."""
@@ -199,7 +199,7 @@ class WorkflowEngine:
             update["approved_at"] = datetime.now(timezone.utc).isoformat()
         if status == "completed":
             update["completed_at"] = datetime.now(timezone.utc).isoformat()
-        self._db.table("workflow_runs").update(update).eq("id", run_id).execute()
+        self._db.table("workflow_runs").update(update).eq("id", run_id).eq("company_id", self._company_id).execute()
 
     def fail(self, run_id: str, error: str) -> None:
         run = self._get_run(run_id)

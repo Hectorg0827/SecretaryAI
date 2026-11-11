@@ -28,6 +28,32 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+# The local connector is off by default in production; the existing connector
+# tests exercise its code, so they run with it switched on.
+os.environ.setdefault("LOCAL_CONNECTOR_ENABLED", "true")
+
+
+# ─── In-memory Redis for the session-revocation store ────────────────────────
+# Auth now fails CLOSED when Redis is unreachable, so tests get a real (fake)
+# Redis instead of silently running with revocation switched off.
+@pytest.fixture(autouse=True)
+def _fake_auth_redis():
+    import fakeredis
+    import app.auth.jwt as jwt_mod
+    from app.utils import rate_limiter
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    jwt_mod._redis_client = fake
+    jwt_mod.BCRYPT_ROUNDS = 4  # fast hashing in tests; production uses 12
+    # Rate limiters share the same fresh store, so limits are real within a
+    # test and never leak from one test into the next.
+    with patch.object(rate_limiter.RedisRateLimiter, "_redis", lambda self: fake), \
+         patch("app.api.auth._redis", lambda: fake):
+        for obj in vars(rate_limiter).values():
+            if isinstance(obj, rate_limiter.RedisRateLimiter):
+                obj._fallback.clear()
+        yield fake
+    jwt_mod._redis_client = None
 
 
 # ─── Data fixtures ────────────────────────────────────────────────────────────

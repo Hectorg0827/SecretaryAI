@@ -42,6 +42,7 @@ class TestAccountRoleGate:
     def test_viewer_cannot_read_account_detail(self, client):
         # get_adapter is resolved as a dependency; stub it so the role check runs.
         app.dependency_overrides[get_adapter] = lambda: MagicMock()
+        app.dependency_overrides[get_db] = lambda: MagicMock()
         r = client.get(
             "/api/accounts/some-id",
             headers={"Authorization": f"Bearer {_token('viewer')}"},
@@ -90,8 +91,8 @@ class TestPolicyGate:
         app.dependency_overrides[get_adapter] = lambda: MagicMock()
 
         class _Deny:
-            async def evaluate(self, proposal):
-                return MagicMock(effect="deny")
+            async def evaluate(self, proposal, strict=False):
+                return MagicMock(effect="deny", rule_id=None, rule_name="deny_rule")
 
         with patch("app.api.actions.PolicyEngine", return_value=_Deny()), \
              patch("app.api.actions._execute_approved_draft", new=AsyncMock()) as exec_spy:

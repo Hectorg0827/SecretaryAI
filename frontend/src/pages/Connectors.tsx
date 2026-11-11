@@ -167,7 +167,7 @@ CONDUCTOR_END_USER_ID=<your-end-user-id>`;
 
       <div className="space-y-3 text-sm">
         {[
-          { step: '1', label: 'Download the connector', cmd: 'pip install secretaryai-connector' },
+          { step: '1', label: 'On the operator server, from the repository', cmd: 'export SECRETARY_OPERATOR_MODE=1' },
           { step: '2', label: 'Create a .env file in the connector directory', cmd: envBlock },
           { step: '3', label: 'Run the connector', cmd: 'python -m connector.main' },
         ].map(({ step, label, cmd }) => (
@@ -201,11 +201,14 @@ export function Connectors() {
   const [secret, setSecret] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  // The separate local connector is an operator-only feature and is off by default.
+  const [enabled, setEnabled] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await api.connectors.status();
       setConnectors(data.connectors ?? []);
+      setEnabled(!!data.local_connector_enabled);
     } catch {
       toast.error('Failed to load connector status');
     } finally {
@@ -258,16 +261,25 @@ export function Connectors() {
               <RefreshCw size={13} />
               Refresh
             </button>
-            <button
+            {enabled && <button
               onClick={generateSecret}
               disabled={generating}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               <Zap size={13} />
               {generating ? 'Generating…' : 'New Install Secret'}
-            </button>
+            </button>}
           </div>
         </div>
+
+        {!loading && !enabled && (
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm text-blue-900">
+            <strong>You do not need to install anything here.</strong> To connect QuickBooks Desktop, open the
+            SecretaryAI desktop app on the computer that runs QuickBooks and follow the setup steps, or go to
+            Settings → Integrations → QuickBooks Desktop. This page only shows connectors run by your
+            SecretaryAI provider.
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
@@ -314,10 +326,11 @@ export function Connectors() {
             <div className="rounded-xl border-2 border-dashed border-slate-200 bg-white px-8 py-12 text-center space-y-3">
               <WifiOff size={32} className="mx-auto text-slate-300" />
               <div className="text-slate-500 text-sm">No connectors registered yet.</div>
-              <div className="text-slate-400 text-xs max-w-xs mx-auto">
-                Generate an install secret above, then follow the instructions to install the
-                QB Desktop connector on your Windows machine.
-              </div>
+              {enabled && (
+                <div className="text-slate-400 text-xs max-w-xs mx-auto">
+                  Generate an install secret above to register an operator-run connector.
+                </div>
+              )}
             </div>
           ) : (
             connectors.map((c) => <ConnectorRow key={c.id} reg={c} />)

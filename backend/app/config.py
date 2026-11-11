@@ -8,6 +8,13 @@ class Settings(BaseSettings):
     app_name: str = "SecretaryAI"
     debug: bool = False
     secret_key: str
+    # Dedicated key for encrypting stored tokens (QuickBooks, Google, Microsoft,
+    # 2FA secrets). Strongly recommended: without it SECRET_KEY does double duty
+    # (signing logins AND encrypting tokens). Safe to add at any time — see
+    # app/utils/encryption.py. To rotate, move the old value to
+    # ENCRYPTION_KEY_PREVIOUS (comma-separated) and set a new ENCRYPTION_KEY.
+    encryption_key: str = ""
+    encryption_key_previous: str = ""
 
     # Supabase
     supabase_url: str
@@ -24,6 +31,15 @@ class Settings(BaseSettings):
 
     # Conductor (QB Desktop)
     conductor_api_key: str = ""
+    # Shared secret Conductor sends in X-Conductor-Secret on webhook calls.
+    # Its own value — never the API key. Conductor webhooks are rejected until set.
+    conductor_webhook_secret: str = ""
+    # The separately-installed local connector (connector/). OFF by default:
+    # it needs the operator's Conductor key on the machine it runs on, so it
+    # must never be given to customers. Customers connect QuickBooks Desktop
+    # through the desktop app's wizard, which needs none of this. Turn on only
+    # for an operator-run connector.
+    local_connector_enabled: bool = False
 
     # Intuit / QuickBooks Online
     intuit_client_id: str = ""
@@ -48,14 +64,33 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 7
     api_key_rotation_hours: int = 24
+    # If Redis (session revocation store) is unreachable, authenticated
+    # requests are refused. Set true only if you accept that logged-out or
+    # removed users may get back in during a Redis outage.
+    auth_fail_open_on_store_outage: bool = False
+    # When true, a new account cannot sign in until its email address has been
+    # confirmed. Needs SENDGRID_API_KEY (the confirmation email must be
+    # deliverable), which is checked at startup.
+    require_email_verification: bool = False
 
     # Google APIs (Gmail + Sheets)
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""
 
-    # Computer Use safety
-    computer_use_enabled: bool = True
+    # Microsoft (Outlook / Microsoft 365 mail). Register an app in Azure
+    # ("Accounts in any organizational directory and personal Microsoft
+    # accounts"), then set all three. MS_TENANT stays "common" unless the app
+    # is restricted to one organisation.
+    ms_client_id: str = ""
+    ms_client_secret: str = ""
+    ms_redirect_uri: str = ""
+    ms_tenant: str = "common"
+
+    # Computer Use — OFF unless an operator explicitly turns it on. The engine
+    # drives the mouse/keyboard of the machine the backend runs on, so it must
+    # never be on by default in a shared cloud deployment.
+    computer_use_enabled: bool = False
     computer_use_max_steps: int = 50
     computer_use_screenshot_width: int = 1280
     computer_use_screenshot_height: int = 720
@@ -77,6 +112,11 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_publishable_key: str = ""
+    # The paywall switch. When true, the product pages need an active
+    # subscription or a running trial (new companies get a 14-day trial).
+    # Refused at startup unless Stripe is fully configured, so it can never
+    # lock customers out with no way to pay.
+    billing_enforced: bool = False
 
     # Sentry
     sentry_dsn: str = ""
@@ -127,6 +167,34 @@ class Settings(BaseSettings):
             missing = sorted(set(google_fields) - google_set)
             errors.append(
                 f"Partial Google config: {missing} must also be set when using Gmail/Sheets"
+            )
+
+        if self.billing_enforced and not (self.stripe_secret_key and self.stripe_webhook_secret):
+            errors.append(
+                "BILLING_ENFORCED is on but STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET are not set — "
+                "customers would be blocked with no way to pay"
+            )
+
+        if self.encryption_key and len(self.encryption_key) < 32:
+            errors.append("ENCRYPTION_KEY must be at least 32 characters")
+        if self.encryption_key and self.encryption_key == self.secret_key:
+            errors.append("ENCRYPTION_KEY must be different from SECRET_KEY")
+
+        if self.require_email_verification and not self.sendgrid_api_key:
+            errors.append(
+                "REQUIRE_EMAIL_VERIFICATION is on but SENDGRID_API_KEY is not set — "
+                "nobody could receive the confirmation email, so nobody could sign in"
+            )
+
+        ms_fields = {
+            "MS_CLIENT_ID": self.ms_client_id,
+            "MS_CLIENT_SECRET": self.ms_client_secret,
+            "MS_REDIRECT_URI": self.ms_redirect_uri,
+        }
+        ms_set = {k for k, v in ms_fields.items() if v}
+        if ms_set and len(ms_set) != len(ms_fields):
+            errors.append(
+                f"Partial Microsoft config: {sorted(set(ms_fields) - ms_set)} must also be set when using Outlook"
             )
 
         if errors:

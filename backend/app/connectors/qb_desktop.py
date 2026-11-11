@@ -16,6 +16,7 @@ from app.connectors.base import (
     Payment,
     PurchaseOrder,
     QuickBooksAdapter,
+    Vendor,
 )
 
 
@@ -124,6 +125,7 @@ class QBDesktopAdapter(QuickBooksAdapter):
             unit_price=Decimal(str(raw.get("salesPrice", 0))),
             purchase_cost=Decimal(str(raw.get("purchaseCost", 0))),
             reorder_point=Decimal(str(raw["reorderPoint"])) if raw.get("reorderPoint") else None,
+            preferred_vendor_id=(raw.get("preferredVendor") or {}).get("id") or None,
         )
 
     def _normalize_purchase_order(self, raw: dict) -> PurchaseOrder:
@@ -156,6 +158,15 @@ class QBDesktopAdapter(QuickBooksAdapter):
     async def get_inventory(self) -> list[InventoryItem]:
         raw = await self._paginate("/quickbooks-desktop/inventory-items")
         return [self._normalize_inventory_item(i) for i in raw]
+
+    async def get_vendors(self) -> list[Vendor]:
+        raw = await self._paginate("/quickbooks-desktop/vendors")
+        return [
+            Vendor(id=v["id"], qb_id=v["id"], name=v.get("name") or v.get("companyName") or "",
+                   email=v.get("email"))
+            for v in raw
+            if v.get("isActive", True)
+        ]
 
     async def get_purchase_orders(self) -> list[PurchaseOrder]:
         raw = await self._paginate("/quickbooks-desktop/purchase-orders")

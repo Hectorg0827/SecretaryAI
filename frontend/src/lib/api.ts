@@ -4,70 +4,108 @@
  * All requests are authenticated via JWT Bearer token.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+import {
+  API_BASE, authHeaders, clearSession, credentialOptions, ensureSession, getCsrf, getToken,
+  saveSession, sessionMode,
+} from './session';
 
-function getToken(): string | null {
-  return localStorage.getItem('secretary_token');
-}
+let _refreshing: Promise<boolean> | null = null;
 
-let _refreshing: Promise<string | null> | null = null;
-
-async function _tryRefresh(): Promise<string | null> {
+/**
+ * Exchange the current session for a fresh one. Returns true if the caller
+ * may retry its request.
+ */
+async function _tryRefresh(): Promise<boolean> {
+  const cookieMode = sessionMode() === 'cookie';
   const token = getToken();
-  if (!token) return null;
+  if (!cookieMode && !token) return false;
+  if (cookieMode && !(await ensureSession())) return false;
+  const csrfBefore = getCsrf();
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_token: token }),
+      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
+      // cookie mode: the token travels in the cookie, never in the body
+      body: JSON.stringify(cookieMode ? {} : { access_token: token }),
+      ...credentialOptions(),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Refresh works once. If another browser tab refreshed first it has
+      // already stored the newer session — use that instead of signing out.
+      if (cookieMode) {
+        sessionStorage.removeItem('secretary_csrf');
+        return (await ensureSession()) && getCsrf() !== csrfBefore;
+      }
+      const latest = getToken();
+      return !!latest && latest !== token;
+    }
     const data = await res.json();
-    if (data.access_token) {
-      localStorage.setItem('secretary_token', data.access_token);
-      return data.access_token;
+    if (cookieMode || data.access_token) {
+      saveSession(data);
+      return true;
     }
   } catch {
     // network error — fall through
   }
-  return null;
+  return false;
+}
+
+/** Turn any error body from the backend into one plain sentence. */
+function errorMessage(body: unknown, status: number): string {
+  const b = (body ?? {}) as { detail?: unknown; message?: unknown };
+  if (typeof b.detail === 'string' && b.detail) return b.detail;
+  if (typeof b.message === 'string' && b.message) return b.message;
+  if (Array.isArray(b.detail) && b.detail[0]?.msg) return String(b.detail[0].msg);
+  if (status === 402) return 'Your trial or subscription has ended. The account owner can choose a plan in Settings.';
+  if (status === 403) return 'You do not have permission to do that.';
+  if (status === 429) return 'Too many attempts. Please wait a moment and try again.';
+  if (status >= 500) return 'Something went wrong on our side. Please try again in a moment.';
+  return `Request failed (${status})`;
+}
+
+/**
+ * Sign-in style endpoints answer 401 for "wrong password" / "bad code". That
+ * is an answer to show the user, not an expired session to refresh.
+ */
+function isPublicAuthPath(path: string): boolean {
+  return /^\/auth\/(login|register|refresh|forgot-password|reset-password|accept-invite|verify-email|resend-verification)/.test(path);
+}
+
+function send(method: string, path: string, body?: unknown): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(method) },
+    body: body ? JSON.stringify(body) : undefined,
+    ...credentialOptions(),
+  });
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = getToken();
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const publicPath = isPublicAuthPath(path);
+  // Cookie mode, fresh tab: fetch this tab's CSRF value before a request that changes something.
+  if (!publicPath && sessionMode() === 'cookie' && method !== 'GET' && !getCsrf()) {
+    await ensureSession();
+  }
+  const response = await send(method, path, body);
 
-  if (response.status === 401) {
-    // Attempt a silent token refresh once
+  if (response.status === 401 && !publicPath) {
+    // Attempt a silent refresh once
     if (!_refreshing) {
       _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
     }
-    const newToken = await _refreshing;
-    if (newToken) {
-      // Retry the original request with the new token
-      const retry = await fetch(`${API_BASE}${path}`, {
-        method,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${newToken}` },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+    if (await _refreshing) {
+      const retry = await send(method, path, body);
       if (retry.ok) return retry.json();
     }
-    // Refresh failed — redirect to login
-    localStorage.removeItem('secretary_token');
+    // Refresh failed — sign out locally and go to the sign-in page
+    clearSession();
     window.location.href = '/login';
     throw new Error('Session expired');
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail ?? `HTTP ${response.status}`);
+    const error = await response.json().catch(() => null);
+    throw new Error(errorMessage(error, response.status));
   }
 
   return response.json();
@@ -151,6 +189,7 @@ export interface Account {
   current_balance: number;
   avg_order_value: number;
   assigned_rep: string | null;
+  assigned_rep_id?: string | null;
 }
 
 export interface Draft {
@@ -189,7 +228,75 @@ export interface IntegrationsResponse {
   quickbooks_desktop: IntegrationStatus;
   gmail:              IntegrationStatus;
   google_sheets:      IntegrationStatus;
+  outlook?:           IntegrationStatus & { account?: string | null };
 }
+
+/** What really happened when a draft was approved. */
+export interface ApprovalResult {
+  draft_id: string;
+  status: string;
+  already_processed?: boolean;
+  execution_status?: 'executed' | 'manual_required' | 'failed' | 'unknown';
+  execution_detail?: string;
+}
+
+/**
+ * Plain-language outcome of an approval. `ok` is false when the action did NOT
+ * happen (the draft is back in the queue), so the UI must not show success.
+ */
+export function describeApproval(r: ApprovalResult | undefined | null): { ok: boolean; done: boolean; message: string } {
+  if (!r) return { ok: true, done: true, message: 'Approved' };
+  if (r.already_processed) return { ok: true, done: true, message: 'This was already handled.' };
+  if (r.execution_status === 'failed') {
+    return { ok: false, done: false, message: r.execution_detail || 'Approved, but it could not be carried out. It is still in your queue.' };
+  }
+  if (r.execution_status === 'unknown') {
+    // We cannot tell whether it happened. It leaves the queue (so it cannot be
+    // sent twice by a second click) but is clearly NOT reported as success.
+    return { ok: false, done: true, message: (r.execution_detail || 'We could not confirm whether this was completed.') + ' It is now listed under "Needs checking".' };
+  }
+  if (r.execution_status === 'manual_required') {
+    return { ok: true, done: true, message: r.execution_detail || 'Approved. Please complete this step yourself.' };
+  }
+  return { ok: true, done: true, message: r.execution_detail || 'Approved and done' };
+}
+
+export interface PurchaseOrderOptions {
+  item: { id: string; name: string; unit_cost: number; on_hand: number; weekly_sell_rate: number; suggested_qty: number } | null;
+  vendors: { id: string; name: string }[];
+  preferred_vendor_id: string | null;
+}
+
+/** An approved action whose outcome a person still has to confirm. */
+export interface NeedsCheckingItem {
+  id: string;
+  kind: 'email' | 'purchase_order' | 'other';
+  summary: string;
+  how_to_check: string;
+  detail: string | null;
+  attempted_at: string | null;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'owner' | 'manager' | 'sales_rep' | 'back_office' | 'viewer';
+  is_active: boolean;
+  two_factor: boolean;
+  pending_invite: boolean;
+  invited_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface InviteResult {
+  user?: TeamMember;
+  email_sent: boolean;
+  invite_link?: string;
+  note?: string;
+}
+
+type Session = { access_token?: string; csrf_token?: string | null; session?: string; company_id: string; role: string };
 
 export interface InboxItem {
   id: string;
@@ -256,7 +363,7 @@ export const api = {
   deleteWithBody: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
 
   connectors: {
-    status:              () => api.get<{ connectors: ConnectorRegistration[] }>('/api/connectors/status'),
+    status:              () => api.get<{ connectors: ConnectorRegistration[]; local_connector_enabled?: boolean }>('/api/connectors/status'),
     detail:              (id: string) => api.get<{ connector: ConnectorRegistration; sync_logs: ConnectorSyncLog[] }>(`/api/connectors/status/${id}`),
     generateSecret:      () => api.post<{ install_secret: string; warning: string }>('/api/connectors/generate-install-secret', {}),
     dispatchTask:        (task_type: string, parameters?: Record<string, unknown>) =>
@@ -287,7 +394,10 @@ export const api = {
   actions: {
     pending: () => api.get<{ drafts: Draft[] }>('/api/actions/pending'),
     approve: (id: string, edits?: Record<string, unknown>) =>
-      api.post<void>(`/api/actions/approve/${id}`, edits ?? {}),
+      api.post<ApprovalResult>(`/api/actions/approve/${id}`, edits ? { edited_content: edits } : {}),
+    needsChecking: () => api.get<{ items: NeedsCheckingItem[] }>('/api/actions/needs-reconciliation'),
+    settle: (id: string, outcome: 'went_through' | 'did_not') =>
+      api.post<{ draft_id: string; status: string; outcome: string }>(`/api/actions/reconcile/${id}`, { outcome }),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
   },
@@ -301,7 +411,17 @@ export const api = {
   },
 
   accounts: {
-    list: () => api.get<{ accounts: Account[] }>('/api/accounts'),
+    list: () => api.get<{ accounts: Account[]; can_assign?: boolean }>('/api/accounts/'),
+    reps: () => api.get<{ reps: { id: string; name: string; role: string }[] }>('/api/accounts/reps'),
+    assignRep: (accountId: string, userId: string | null) =>
+      api.put<{ account_id: string; assigned_rep_id: string | null; assigned_rep: string | null }>(
+        `/api/accounts/${encodeURIComponent(accountId)}/rep`, { user_id: userId }),
+  },
+
+  purchaseOrders: {
+    options: (itemId: string) => api.get<PurchaseOrderOptions>(`/api/actions/po-options?item_id=${encodeURIComponent(itemId)}`),
+    draft: (body: { item_id: string; product_name: string; vendor_id?: string | null; qty?: number; unit_cost?: number; notes?: string }) =>
+      api.post<{ status: string; draft_id: string; ready_for_quickbooks: boolean; message: string }>('/api/actions/draft-po', body),
   },
 
   inventory: {
@@ -318,6 +438,8 @@ export const api = {
     qboDisconnect: () => api.delete<{ status: string }>('/auth/qbo/disconnect'),
     gmailConnectUrl: () => api.get<{ url: string }>('/auth/gmail/connect-url'),
     gmailDisconnect: () => api.delete<{ status: string }>('/auth/gmail/disconnect'),
+    outlookConnectUrl: () => api.get<{ url: string }>('/auth/outlook/connect-url'),
+    outlookDisconnect: () => api.delete<{ status: string }>('/auth/outlook/disconnect'),
     saveQBD: (endUserId: string) =>
       api.post<{ status: string; end_user_id: string }>('/api/settings/integrations/qbd', { end_user_id: endUserId }),
     disconnectQBD: () => api.delete<{ status: string }>('/api/settings/integrations/qbd'),
@@ -343,9 +465,29 @@ export const api = {
   auth: {
     login: (email: string, password: string, totp_code?: string) =>
       api.post<
-        | { access_token: string; token_type: string; company_id: string; role: string; requires_2fa?: false }
+        | (Session & { requires_2fa?: false })
         | { requires_2fa: true; pre_auth_token: string }
       >('/auth/login', { email, password, ...(totp_code ? { totp_code } : {}) }),
+    forgotPassword: (email: string) =>
+      api.post<{ status: string; message: string }>('/auth/forgot-password', { email }),
+    resetPassword: (token: string, new_password: string) =>
+      api.post<{ status: string; message: string }>('/auth/reset-password', { token, new_password }),
+    acceptInvite: (token: string, password: string, full_name: string) =>
+      api.post<Session>('/auth/accept-invite', { token, password, full_name }),
+    verifyEmail: (token: string) =>
+      api.post<{ status: string; message: string }>('/auth/verify-email', { token }),
+    logout: () => api.post<{ status: string }>('/auth/logout', {}),
+    changePassword: (current_password: string, new_password: string) =>
+      api.post<Session & { status: string }>('/auth/change-password', { current_password, new_password }),
+  },
+
+  users: {
+    list: () => api.get<{ users: TeamMember[]; roles: string[] }>('/api/users'),
+    invite: (email: string, role: string, name: string) =>
+      api.post<InviteResult>('/api/users/invite', { email, role, name }),
+    resendInvite: (id: string) => api.post<InviteResult>(`/api/users/${id}/resend-invite`, {}),
+    update: (id: string, changes: { role?: string; is_active?: boolean; name?: string }) =>
+      api.patch<{ user: TeamMember }>(`/api/users/${id}`, changes),
   },
 
   // ── Compliance types ──────────────────────────────────────────────────────────
@@ -432,14 +574,12 @@ export const api = {
     message: string,
     conversationId?: string,
   ): AsyncGenerator<{ text: string; conversationId?: string }> {
-    const token = getToken();
+    if (sessionMode() === 'cookie' && !getCsrf()) await ensureSession();
     const response = await fetch(`${API_BASE}/api/chat/message`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
       body: JSON.stringify({ message, conversation_id: conversationId }),
+      ...credentialOptions(),
     });
 
     if (!response.ok || !response.body) {

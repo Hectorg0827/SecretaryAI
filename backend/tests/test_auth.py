@@ -17,6 +17,12 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 from app.auth.jwt import create_access_token, decode_access_token, hash_password, verify_password
 
 
+def _stub_db(app):
+    """Isolated RBAC route tests have no Supabase; provide the new auth dependency."""
+    from app.db import get_db
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+
+
 # ─── JWT Tests ─────────────────────────────────────────────────────────────────
 
 class TestJWT:
@@ -136,6 +142,7 @@ class TestGetCurrentUser:
         from app.auth.jwt import create_access_token
 
         app = FastAPI()
+        _stub_db(app)
 
         @app.get("/me")
         def me(user=Depends(get_current_user)):
@@ -154,6 +161,7 @@ class TestGetCurrentUser:
         from app.auth.rbac import get_current_user
 
         app = FastAPI()
+        _stub_db(app)
 
         @app.get("/me")
         def me(user=Depends(get_current_user)):
@@ -170,6 +178,7 @@ class TestRequirePermission:
         from app.auth.rbac import require_permission
 
         app = FastAPI()
+        _stub_db(app)
 
         @app.get("/protected")
         def protected(user=Depends(require_permission(permission))):

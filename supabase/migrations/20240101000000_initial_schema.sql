@@ -12,7 +12,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ============================================================
 -- COMPANIES  (one row per paying customer / tenant)
 -- ============================================================
-CREATE TABLE companies (
+CREATE TABLE IF NOT EXISTS companies (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                    TEXT NOT NULL,
     business_type           TEXT DEFAULT 'importer/distributor',
@@ -42,7 +42,7 @@ CREATE TABLE companies (
 -- ============================================================
 -- USERS
 -- ============================================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     email           TEXT NOT NULL UNIQUE,
@@ -61,7 +61,7 @@ CREATE TABLE users (
 -- ============================================================
 -- ACCOUNTS  (buying customers — synced from QB)
 -- ============================================================
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id              UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     qb_customer_id          TEXT,                   -- QB's internal ID
@@ -88,7 +88,7 @@ CREATE TABLE accounts (
 -- ============================================================
 -- ORDERS / INVOICES  (synced from QB)
 -- ============================================================
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     account_id      UUID REFERENCES accounts(id),
@@ -107,7 +107,7 @@ CREATE TABLE orders (
 -- ============================================================
 -- INVENTORY
 -- ============================================================
-CREATE TABLE inventory (
+CREATE TABLE IF NOT EXISTS inventory (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id          UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     product_name        TEXT NOT NULL,
@@ -135,7 +135,7 @@ CREATE TABLE inventory (
 -- ============================================================
 -- CONVERSATIONS  (AI chat history)
 -- ============================================================
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     user_id     UUID NOT NULL REFERENCES users(id),
@@ -149,7 +149,7 @@ CREATE TABLE conversations (
 -- ============================================================
 -- ACTION LOG  (audit trail — every AI action is recorded)
 -- ============================================================
-CREATE TABLE action_log (
+CREATE TABLE IF NOT EXISTS action_log (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     actor           TEXT NOT NULL,          -- 'ai' or user UUID
@@ -168,7 +168,7 @@ CREATE TABLE action_log (
 -- ============================================================
 -- SYNC CHECKS  (QB ↔ SecretaryAI reconciliation)
 -- ============================================================
-CREATE TABLE sync_checks (
+CREATE TABLE IF NOT EXISTS sync_checks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     check_type      TEXT NOT NULL,          -- 'qb_accounts', 'qb_inventory', etc.
@@ -185,7 +185,7 @@ CREATE TABLE sync_checks (
 -- ============================================================
 -- DRAFTS  (pending approval items from AI)
 -- ============================================================
-CREATE TABLE drafts (
+CREATE TABLE IF NOT EXISTS drafts (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     created_by      TEXT NOT NULL,          -- 'ai' or user UUID
@@ -202,15 +202,15 @@ CREATE TABLE drafts (
 -- ============================================================
 -- INDEXES
 -- ============================================================
-CREATE INDEX idx_accounts_company ON accounts(company_id);
-CREATE INDEX idx_accounts_health ON accounts(company_id, health_status);
-CREATE INDEX idx_orders_company_date ON orders(company_id, order_date DESC);
-CREATE INDEX idx_orders_account ON orders(account_id, order_date DESC);
-CREATE INDEX idx_inventory_company ON inventory(company_id);
-CREATE INDEX idx_inventory_status ON inventory(company_id, stock_status);
-CREATE INDEX idx_conversations_user ON conversations(user_id, updated_at DESC);
-CREATE INDEX idx_action_log_company ON action_log(company_id, created_at DESC);
-CREATE INDEX idx_drafts_pending ON drafts(company_id, status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_accounts_company ON accounts(company_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_health ON accounts(company_id, health_status);
+CREATE INDEX IF NOT EXISTS idx_orders_company_date ON orders(company_id, order_date DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_account ON orders(account_id, order_date DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_company ON inventory(company_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(company_id, stock_status);
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_log_company ON action_log(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_drafts_pending ON drafts(company_id, status) WHERE status = 'pending';
 
 
 -- ============================================================
@@ -229,28 +229,36 @@ ALTER TABLE sync_checks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE drafts ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own company's data
+DROP POLICY IF EXISTS "company_isolation" ON accounts;
 CREATE POLICY "company_isolation" ON accounts
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON orders;
 CREATE POLICY "company_isolation" ON orders
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON inventory;
 CREATE POLICY "company_isolation" ON inventory
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON conversations;
 CREATE POLICY "company_isolation" ON conversations
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON action_log;
 CREATE POLICY "company_isolation" ON action_log
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON sync_checks;
 CREATE POLICY "company_isolation" ON sync_checks
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+DROP POLICY IF EXISTS "company_isolation" ON drafts;
 CREATE POLICY "company_isolation" ON drafts
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
 -- Users can only see other users in their own company
+DROP POLICY IF EXISTS "company_users_isolation" ON users;
 CREATE POLICY "company_users_isolation" ON users
     FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
@@ -266,14 +274,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_companies_updated_at ON companies;
 CREATE TRIGGER trg_companies_updated_at
     BEFORE UPDATE ON companies
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS trg_accounts_updated_at ON accounts;
 CREATE TRIGGER trg_accounts_updated_at
     BEFORE UPDATE ON accounts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+DROP TRIGGER IF EXISTS trg_conversations_updated_at ON conversations;
 CREATE TRIGGER trg_conversations_updated_at
     BEFORE UPDATE ON conversations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();

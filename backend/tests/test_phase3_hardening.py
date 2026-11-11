@@ -57,13 +57,13 @@ class TestAuditWriter:
             event_type="policy_blocked",
             actor_id="u1",
             action_class="commit",
-            policy_rule_id="rule-99",
+            policy_rule_id="11111111-2222-3333-4444-555555555555",
             approved_by="owner-1",
             metadata={"draft_id": "d1"},
         )
         inserted = db.table.return_value.insert.call_args[0][0]
         assert inserted["action_class"] == "commit"
-        assert inserted["policy_rule_id"] == "rule-99"
+        assert inserted["policy_rule_id"] == "11111111-2222-3333-4444-555555555555"
         assert inserted["approved_by"] == "owner-1"
         assert inserted["metadata"]["draft_id"] == "d1"
 

@@ -1,12 +1,15 @@
--- Migration: add expires_at to drafts table for approval expiry (Tier 2-13)
--- Drafts pending beyond this timestamp are auto-archived by the nightly task.
--- Default: 30 days from creation.
+-- Migration: add expires_at to drafts table for approval expiry.
+-- Pending drafts past this timestamp are archived by the nightly task.
+--
+-- This is a plain column the application sets (default: 48 hours after
+-- creation). It was previously declared as a GENERATED column, which Postgres
+-- rejects ("generation expression is not immutable" — timestamptz + interval
+-- depends on the session time zone), so the column never existed and every
+-- draft insert failed.
 
 ALTER TABLE drafts
-  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ
-    GENERATED ALWAYS AS (created_at + INTERVAL '30 days') STORED;
+  ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '48 hours');
 
--- Index to speed up the nightly expiry query
 CREATE INDEX IF NOT EXISTS idx_drafts_expires_at
   ON drafts (expires_at)
   WHERE status = 'pending';

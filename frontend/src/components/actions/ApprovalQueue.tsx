@@ -5,7 +5,8 @@
 import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { CheckCircle, XCircle, Edit2, Mail, ShoppingCart, FileText, Loader2 } from 'lucide-react';
-import { api } from '../../lib/api';
+import toast from 'react-hot-toast';
+import { api, describeApproval } from '../../lib/api';
 
 interface Draft {
   id: string;
@@ -46,8 +47,12 @@ export function ApprovalQueue() {
   const approve = async (draftId: string) => {
     setProcessing(draftId);
     try {
-      await api.post(`/api/actions/approve/${draftId}`, {});
-      setDrafts((prev) => prev.filter((d) => d.id !== draftId));
+      const outcome = describeApproval(await api.actions.approve(draftId));
+      if (outcome.ok) toast.success(outcome.message); else toast.error(outcome.message, { duration: 8000 });
+      // A failed action stays in the queue so it can be fixed and retried.
+      if (outcome.done) setDrafts((prev) => prev.filter((d) => d.id !== draftId));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not approve');
     } finally {
       setProcessing(null);
     }

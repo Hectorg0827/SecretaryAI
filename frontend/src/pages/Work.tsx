@@ -5,7 +5,7 @@ import {
   Check, X, RefreshCw, Briefcase
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
+import { api, describeApproval } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -254,11 +254,11 @@ export default function Work() {
     const draftId = item?.payload?.draft_id;
     if (!draftId) return;
     try {
-      await api.post(`/api/actions/approve/${draftId}`, {});
-      setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
-      toast.success('Approved');
-    } catch {
-      toast.error('Approval failed');
+      const outcome = describeApproval(await api.actions.approve(String(draftId)));
+      if (outcome.ok) toast.success(outcome.message); else toast.error(outcome.message, { duration: 8000 });
+      if (outcome.done) setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, done: true } : i));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Approval failed');
     }
   };
 

@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
+import { clearSession } from '../../lib/session';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
 
@@ -35,10 +36,10 @@ export function Sidebar({ unreadCount = 0 }: { unreadCount?: number }) {
   const [userName, setUserName] = useState<string | null>(null);
   const inboxUnread = useInboxStore((s) => s.unread_count);
 
-  const logout = () => {
-    localStorage.removeItem('secretary_token');
-    localStorage.removeItem('secretary_company_id');
-    localStorage.removeItem('secretary_role');
+  const logout = async () => {
+    // End the session on the server (and clear its cookie), then locally.
+    try { await api.auth.logout(); } catch { /* sign out locally regardless */ }
+    clearSession();
     window.location.href = '/login';
   };
 

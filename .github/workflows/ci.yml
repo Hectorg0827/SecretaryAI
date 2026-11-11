@@ -106,6 +106,19 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # Tauri's generate_context! macro requires frontendDist to exist, even
+      # during clippy/test. Build a CI-only development-mode bundle here;
+      # production packaging retains VITE_API_URL's fail-closed guard.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Prepare desktop frontendDist for Rust checks
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build -- --mode development
       - name: rustfmt
         working-directory: desktop/src-tauri
         run: cargo fmt --all --check
@@ -152,7 +165,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
-      - name: Validate schema applies cleanly
+      - name: Validate schema (fresh, re-run, upgrade) and code/schema agreement
+        env:
+          PGDATABASE: postgres
         run: bash scripts/validate_schema.sh
 
   secret-scan:

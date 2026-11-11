@@ -16,7 +16,7 @@ Baseline commit for the Phase-0 audit: `d8093b23a0490312b57e5091dde0d54fa169311f
 | Gate | Area | Status | Notes |
 |---|---|---|---|
 | G0 | Repository integrity | 🟢 strong | Cargo.lock committed (#16); release workflows consolidated (#13); version single-sourced + CI-enforced (#24). |
-| G1 | Security | 🟢 strong | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection (#33), local-cache encryption (#7) — all fixed + tested. Remaining depth is optional hardening; a secret-history scan ran clean and CI gitleaks was added. |
+| G1 | Security | 🟡 see Pass 4 | Auth/refresh (#19), tenant isolation + 2 P0 IDORs (#27/#28), least-privilege desktop (#8/#9), leaks (#20/#21/#22), consent (#10), action integrity (#30/#31), prompt-injection (#33), local-cache encryption (#7) — all fixed + tested. Remaining depth is optional hardening; a secret-history scan ran clean and CI gitleaks was added. |
 | G2 | Functional product | 🟡 in progress | Desktop auth/API wiring fixed + native UI (#2–#6). Remaining: real integration verification (external accounts) + E2E tests. |
 | G3 | Windows installer | 🟡 wired / 🔒 needs cert | Builds & installs (verified); Authenticode signing WIRED (auto-activates on `WINDOWS_CERTIFICATE` secret). Needs the cert. |
 | G4 | macOS installer | 🟡 wired / 🔒 needs cert | Builds (verified); signing+notarization+stapling WIRED (auto-activate on `APPLE_*` secrets). Needs Apple Developer ID. |
@@ -118,13 +118,78 @@ Full-stack verification on the tip of the default branch: backend pytest, web/de
 | # | Sev | Finding | Evidence | Next step |
 |---|---|---|---|---|
 | 53 | P1 | Computer-Use sessions live in a per-process dict while the image runs `uvicorn --workers 2` → poll/approve/reject land on a different worker and 404; same class in `auth.py` OAuth-state fallback | `api/computer_use.py`, `Dockerfile` | Move session state + approval signal to Redis (or pin CU to one worker) |
-| 54 | P2 | Token revocation, refresh single-use rotation and rate limiting all fail **open** on a Redis outage (logged-out tokens keep working; refresh tokens replayable) | `auth/jwt.py`, `middleware/rate_limit.py` | Policy decision: fail closed (503) on auth-critical paths, or alert loudly |
-| 55 | P2 | Connector install secret stored in plaintext although the docstring says "hashed" | `api/connectors.py` | Store `sha256(secret)`, compare digests (storage-format migration) |
-| 56 | P2 | Write task types (`create_invoice`/`create_po`/`update_item`) dispatched via `/dispatch-task` bypass `PolicyEngine` / the approval queue that `connector_protocol.py` says they require | `api/connectors.py` | Route write types through the approval queue |
+| 54 | P2 | Token revocation, refresh single-use rotation and rate limiting all fail **open** on a Redis outage (logged-out tokens keep working; refresh tokens replayable) | `auth/jwt.py`, `middleware/rate_limit.py` | ✅ fixed in Pass 4 — fails closed (503); opt-out `AUTH_FAIL_OPEN_ON_STORE_OUTAGE` |
+| 55 | P2 | Connector install secret stored in plaintext although the docstring says "hashed" | `api/connectors.py` | ✅ fixed in Pass 4 — SHA-256 digest, single use, 24 h expiry |
+| 56 | P2 | Write task types (`create_invoice`/`create_po`/`update_item`) dispatched via `/dispatch-task` bypass `PolicyEngine` / the approval queue that `connector_protocol.py` says they require | `api/connectors.py` | ✅ fixed in Pass 4 — write task types refused on `/dispatch-task` |
 | 57 | P3 | A few handlers echo raw exception text in error details (`agent.py`, `chat.py`, `dashboard.py`, `admin.py` health payload; `ValueError` handler returns `str(exc)`) | various | Generic client messages; log detail server-side |
 | 58 | **P0 (deployment, not code)** | `api.secretaryai.com` / `app.secretaryai.com` resolve to domain-parking addresses — no backend appears to be deployed there, yet the desktop build bakes that URL in by default. A perfect installer still cannot sign in | DNS + `release-desktop.yml` defaults | Deploy the backend (`RAILWAY_DEPLOYMENT.md`), set the `API_URL` repo variable, then build |
 
 Backend suite after Pass 3: **1086 passed / 4 skipped** (1045 + 41 new). Frontend lint 0 errors, typecheck/build/vitest green; desktop build/typecheck/vitest green; mobile typecheck green; Rust fmt/clippy/test green; version-consistency script green.
+
+### Pass 4 — launch-readiness review and fixes (Nov 2026)
+
+A read-through of the whole codebase against four questions (login/permissions,
+QuickBooks Desktop + Outlook, cross-company data, logging/approval of automatic
+actions), followed by fixes. Method changed in this pass: the schema was
+applied to a real Postgres, and the app's writes were replayed against it —
+which is how most of the items below were found. Earlier passes tested against
+mocks only, so the "G1 Security 🟢 strong" line above was not justified at the
+time; several P0s were open.
+
+| # | Sev | Finding | Status |
+|---|---|---|---|
+| 59 | **P0** | Any owner/manager could attach an arbitrary Conductor end-user ID (`POST /api/settings/integrations/qbd`); with the shared operator key that reached another company's QuickBooks Desktop. The ID was returned to every role | ✅ fixed — accepted only when Conductor reports `sourceId == company_id` and no other company uses it; unique index; hidden from non-owners |
+| 60 | **P0** | Three schema folders that disagreed; none produced a working database (README path: sign-up failed on `password_hash`; the others stopped with errors). CI validated only the wrong one | ✅ fixed — `supabase/migrations` is the single source, re-runnable, with a reconcile migration; `scripts/validate_schema.sh` (fresh / re-run / upgrade + replayed writes) and `scripts/check_schema_usage.py` (code↔schema) run in CI |
+| 61 | **P0** | `passlib 1.7.4` + current `bcrypt` → every `hash()` raised. Fresh installs could not register or log in; the 4 password tests were silently skipped | ✅ fixed — bcrypt used directly and pinned; old hashes still verify |
+| 62 | **P0** | Audit trail wrote nothing: `audit_events` rows used columns the table lacked, `action_class` got action types (check violation), ad-hoc `action_log` inserts used non-existent columns; all failures were swallowed | ✅ fixed — one writer matching the table, `required=True` blocks the action when the record cannot be written, table is append-only |
+| 63 | **P0** | Approval queue broken end to end: draft insert failed (`expires_at` never existed), approved POs were sent to an undefined Celery task, AI draft type names were ignored by the executor, a failed send still showed "approved", approval was not atomic | ✅ fixed — policy (strict) → atomic claim → audit → execute → recorded outcome; failure returns the draft to pending |
+| 64 | P1 | `ActionEngine` ("every action goes through here") was never instantiated; low-stock alerts were passed `None` and never sent | ✅ fixed for alerts (engine wired, sends audited). Note: the workflow engine still only tracks steps — it does not execute them |
+| 65 | P1 | `require_permission` treated `view_all` as a wildcard → managers passed owner-only checks; any role could connect/disconnect QuickBooks/Gmail, approve Computer-Use actions, create PO drafts; chat gave sales reps revenue totals | ✅ fixed — explicit permissions, `manage_integrations` |
+| 66 | P1 | No user management, password reset or email confirmation | ✅ added — `/api/users`, forgot/reset/change password, invitations, optional `REQUIRE_EMAIL_VERIFICATION` |
+| 67 | P1 | Deactivated/demoted users kept access until token expiry; revocation failed open (#54); refresh rotation was not atomic; 2FA codes unthrottled per account and replayable | ✅ fixed |
+| 68 | P1 | Outlook had no connect flow; tokens were never decrypted; rotated refresh tokens were dropped; "reply" sent a new email | ✅ fixed — tested against a simulated Graph API only (see below) |
+| 69 | P1 | QB Desktop: wizard never set `qb_type`; `/api/agent/sync` read a column that does not exist; `connector_tasks` table and install-secret column missing; webhooks dispatched undefined tasks; Conductor webhook secret was the API key | ✅ fixed. The local connector is documented as operator-only (it needs the master Conductor key) |
+| 70 | P1 | Validation errors from custom validators returned HTTP 500 (exception object in the JSON body) | ✅ fixed — 422 with a plain message, input not echoed |
+| 71 | P1 | Web build had no PostCSS config → Tailwind never ran → the production web app was unstyled | ✅ fixed |
+| 72 | P2 | `SECRET_KEY` both signed sessions and encrypted every tenant's tokens; 15 tables without RLS | ✅ fixed — `ENCRYPTION_KEY` (+ rotation), RLS on every table |
+| 73 | P2 | Paywall inert; mock checkout URL in production | ✅ `BILLING_ENFORCED` switch + 14-day trial; no mock URL outside debug |
+| 74 | P2 | Dashboard "Refresh" re-sent the morning briefing email; QBO disconnect called the wrong `revoke_token` and always failed; OAuth state had a per-process fallback | ✅ fixed |
+
+**Still open after Pass 4**
+
+| # | Sev | Item | Why it is open |
+|---|---|---|---|
+| 53 | P1 | Computer Use: engine drives the *server's* screen, has no per-step approval, sessions are per-process | Needs a redesign (run on the customer's desktop, approval per action). Mitigation: `COMPUTER_USE_ENABLED` now defaults to **false**. Do not enable in a shared deployment |
+| 75 | P2 | Web session token was kept in `localStorage` | ✅ fixed — browser sessions use an httpOnly, Secure, SameSite=Lax cookie with a CSRF token; the token is never in a response body or page storage. Desktop/mobile keep Bearer. Falls back to the old token mode only when the API is on a different site (`VITE_SESSION_MODE`). Verified in a real browser against the real backend code |
+| 76 | P2 | Sales reps saw every account | ✅ fixed — `account_assignments`; owner/manager assign accounts; a rep's list, detail pages and chat data are limited to their accounts, failing closed |
+| 77 | — | Not verified against real services | No call in this repository has been made to a real QuickBooks, Conductor, Microsoft, Google, SendGrid or Stripe account. Outlook, the Conductor ownership check and webhooks are tested against simulated servers only |
+| 78 | P1 | Workflows only tracked steps | ✅ fixed — draft steps create real drafts, the run waits, approval performs the send/create step and the run completes (`app/workflows/executor.py`). Email drafts use a fixed template, not a model call |
+| 79 | P1 | Approved purchase orders were never written to QuickBooks because drafts had no vendor or lines | ✅ fixed — drafts are built from QuickBooks (vendor, quantity, cost); the "Draft PO" form lets the user choose them; approval creates the order. Without a vendor or cost it still says "enter by hand" |
+| 80 | P1 | Local connector needed the operator's Conductor key on the customer's PC | ✅ contained — off by default on the server (`LOCAL_CONNECTOR_ENABLED`) and the program refuses to start without `SECRETARY_OPERATOR_MODE=1`; the web page no longer tells customers to install it |
+| 58 | P0 | Nothing is deployed | Unchanged — owner action |
+
+Backend suite after Pass 4: **1247 passed, 0 skipped** on Python 3.11 with the
+pinned requirements. Web: lint 0 errors, typecheck, 16 tests, production build.
+
+### PR #108 reviewer follow-up (November 2026)
+
+- **Role-change races:** newly issued access tokens carry a database session
+  stamp. Protected endpoints now compare that stamp against the **current user's
+  row on every request**, rather than trusting a 60-second Redis cache. A
+  delayed cache write or failed cache update cannot reauthorize a demoted user.
+  The database is fail-closed for these checks. Older tokens without a stamp
+  remain governed by Redis revocation until their existing expiry; do not rely
+  on a Redis restart preserving revocation of these legacy sessions during the
+  rollout. Require users to sign in again if that risk is unacceptable.
+- **Uncertain external effects:** an approval with an unconfirmed QuickBooks or
+  email result remains in `needs_review`; settling it requires a successful
+  audit write **before** changing its state. Manual confirmation of success
+  resumes a linked workflow without repeating the external send/create action.
+  Confirming that nothing happened only requeues the draft for fresh approval.
+- **Verification:** 1,342 backend tests passed on local Python 3.12, including
+  the stale-cache, audit-failure, and workflow-reconciliation regressions. One
+  existing async-mock warning remains. Real vendor-account acceptance tests
+  and a staging deployment have **not** been performed by this reviewer pass.
 
 ### Pre-existing test failures (not caused by this work)
 - `tests/test_wholesale_distribution/test_logistics/test_vendor_tracker.py::test_extracts_ship_date_natural_language` — date-sensitive: the fixture's absolute ship date (`April 20, 2026`) is now in the past and is filtered out. P2; fix by freezing time in the test or accepting past dates. Confirmed failing on the baseline without any of this pass's changes. *(Resolved since: de-flaked with a relative date in `57716d1`.)*

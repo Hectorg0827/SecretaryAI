@@ -24,8 +24,8 @@ CREATE INDEX IF NOT EXISTS report_snapshots_company_type_idx
 -- Row-level security: users can only read snapshots for their own company
 ALTER TABLE report_snapshots ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "report_snapshots_company_isolation"
-    ON report_snapshots
+DROP POLICY IF EXISTS "report_snapshots_company_isolation" ON report_snapshots;
+CREATE POLICY "report_snapshots_company_isolation" ON report_snapshots
     FOR ALL
     USING (
         company_id = (

@@ -147,16 +147,17 @@ class TestRefreshHardening:
         fake_db.table.return_value.select.return_value.eq.return_value.execute.return_value = \
             MagicMock(data=[{"is_active": True}])
 
-        with patch("app.auth.jwt.is_token_revoked", return_value=False), \
-             patch("supabase.create_client", return_value=fake_db), \
-             patch("app.auth.jwt.blacklist_jti") as spy_blacklist:
+        with patch("supabase.create_client", return_value=fake_db):
             r = client.post("/auth/refresh", json={"access_token": token})
+            assert r.status_code == 200, r.text
+            assert "access_token" in r.json()
 
-        assert r.status_code == 200, r.text
-        assert "access_token" in r.json()
-        # Single-use rotation: the presented token's JTI must be blacklisted.
-        spy_blacklist.assert_called_once()
-        assert spy_blacklist.call_args.args[0] == "rotate-me"
+            # Single-use rotation: the presented token is consumed, so a second
+            # refresh with the SAME token is refused (real store, no mocks).
+            from app.auth.jwt import is_token_revoked
+            assert is_token_revoked("rotate-me") is True
+            again = client.post("/auth/refresh", json={"access_token": token})
+            assert again.status_code == 401, again.text
 
 
 # ── Security response headers ─────────────────────────────────────────────────

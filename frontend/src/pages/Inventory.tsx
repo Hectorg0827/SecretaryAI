@@ -1,7 +1,7 @@
+import { DraftPOModal } from '../components/ui/DraftPOModal';
 import React, { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { Package, AlertTriangle, XCircle, ShoppingCart, Search, Loader2 } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { api, InventoryAlert } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 
@@ -62,7 +62,6 @@ export function Inventory() {
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState<FilterType>('all');
-  const [drafting, setDrafting] = useState<string | null>(null);
   const { canDraftPO } = useAuth();
 
   useEffect(() => {
@@ -72,17 +71,8 @@ export function Inventory() {
       .finally(() => setLoading(false));
   }, []);
 
-  const draftPO = async (id: string, name: string) => {
-    setDrafting(id);
-    try {
-      await api.post('/api/actions/draft-po', { item_id: id, product_name: name });
-      toast.success(`PO draft created for ${name} — check approvals`);
-    } catch {
-      toast.error('Could not create PO draft');
-    } finally {
-      setDrafting(null);
-    }
-  };
+  const [poFor, setPoFor] = useState<{ id: string; name: string } | null>(null);
+  const draftPO = (id: string, name: string) => setPoFor({ id, name });
 
   const filtered = items.filter((a) => {
     const matchFilter = filter === 'all' || a.stock_status === filter;
@@ -176,6 +166,7 @@ export function Inventory() {
           </table>
         )}
       </div>
+      {poFor && <DraftPOModal itemId={poFor.id} productName={poFor.name} onClose={() => setPoFor(null)} />}
     </div>
   );
 }

@@ -3,22 +3,18 @@ Email action handlers — draft and send emails via SendGrid.
 Direct sends require 'notify' level (pre-approved alert types).
 Customer-facing emails always go through draft_and_wait.
 """
-import re
-
-import sendgrid
-from sendgrid.helpers.mail import Mail
+from app.utils.safe import is_valid_email
 
 from app.config import get_settings
 
 settings = get_settings()
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _recipient_allowed(to_email: str) -> tuple[bool, str]:
     """Validate an auto-alert recipient: well-formed address + optional domain
     allow-list. Prevents an unvalidated payload from emailing arbitrary addresses."""
-    if not _EMAIL_RE.match(to_email):
+    if not is_valid_email(to_email):
         return False, "Invalid recipient address"
     allow = [d.strip().lower() for d in (settings.alert_email_allowlist or "").split(",") if d.strip()]
     if allow:
@@ -28,8 +24,10 @@ def _recipient_allowed(to_email: str) -> tuple[bool, str]:
     return True, ""
 
 
-async def send_alert_email(payload: dict, company_id: str) -> dict:
-    """Send a pre-approved alert email (NOTIFY level)."""
+async def send_alert_email(payload: dict, company_id: str, db=None) -> dict:
+    """Send a pre-approved alert email (NOTIFY level). The send is audited."""
+    from app.utils.mailer import send_system_email
+
     to_email = payload.get("to_email")
     subject = payload.get("subject", "SecretaryAI Alert")
     body = payload.get("body", "")
@@ -41,19 +39,11 @@ async def send_alert_email(payload: dict, company_id: str) -> dict:
     if not ok:
         return {"status": "error", "message": reason}
 
-    sg = sendgrid.SendGridAPIClient(api_key=settings.sendgrid_api_key)
-    message = Mail(
-        from_email=settings.from_email,
-        to_emails=to_email,
-        subject=subject,
-        plain_text_content=body,
+    sent = send_system_email(
+        db, company_id=company_id, to=str(to_email), subject=subject, text=body,
+        kind=str(payload.get("kind") or "alert"), actor="ai",
     )
-
-    try:
-        response = sg.send(message)
-        return {"status": "sent", "status_code": response.status_code}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return {"status": "sent"} if sent else {"status": "error", "message": "Email could not be delivered"}
 
 
 async def create_draft_email(payload: dict) -> dict:

@@ -20,7 +20,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_adapter, get_db
-from app.auth.rbac import get_current_user, require_permission
+from app.auth.account_scope import visible_customer_ids
+from app.auth.rbac import get_current_user, has_permission, require_permission
 from app.ai.secretary import classify_intent, stream_chat, chat as ai_chat, detect_action_in_response
 from app.ai.data_summarizer import build_query_context
 from app.memory.account_memory import load_account_memory, extract_and_save_memory
@@ -114,12 +115,30 @@ def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
         log.error("Failed to save conversation turn: %s", exc)
 
 
-async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
+async def _fetch_data_for_intent(intent: str, message: str, adapter, role: str = "viewer",
+                                 allowed_customers: set[str] | None = None) -> dict:
     """
     Fetch real QB data matching the classified intent.
     Returns a dict consumed by build_query_context().
+
+    `role` limits what reaches the model: chat must not be a side door around
+    the page-level permission checks, so money figures (revenue totals, top
+    accounts by revenue, balances, order amounts) are only loaded for roles
+    that hold `view_financials`.
     """
     data: dict = {}
+    can_see_money = has_permission(role, "view_financials")
+
+    # `allowed_customers` is None for roles that see every account, or the set
+    # of QuickBooks customer IDs a sales rep is assigned. Customer and invoice
+    # lists are cut down to that set before anything reaches the model.
+    def _mine(rows: list, id_attr: str) -> list:
+        if allowed_customers is None:
+            return rows
+        return [
+            r for r in rows
+            if str(getattr(r, id_attr, None) or (r.get(id_attr, "") if isinstance(r, dict) else "")) in allowed_customers
+        ]
 
     try:
         if intent == "customs_status":
@@ -142,8 +161,8 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
             ]
 
         elif intent == "account_status":
-            customers = await adapter.get_all_customers()
-            invoices = await adapter.get_orders_last_n_days(90)
+            customers = _mine(await adapter.get_all_customers(), "qb_id")
+            invoices = _mine(await adapter.get_orders_last_n_days(90), "customer_id")
             # Try to find a specific account named in the message
             msg_lower = message.lower()
             specific = next(
@@ -162,9 +181,9 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                         (str(getattr(inv, "date", "") or inv.get("order_date", "")) for inv in acct_invoices),
                         default="never",
                     ),
-                    "current_balance": float(getattr(specific, "balance", 0)),
+                    "current_balance": float(getattr(specific, "balance", 0)) if can_see_money else None,
                 }
-                data["orders"] = [
+                data["orders"] = [] if not can_see_money else [
                     {
                         "order_date": str(getattr(inv, "date", "") or inv.get("order_date", "")),
                         "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
@@ -204,8 +223,8 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                     })
 
         elif intent in ("sales_report", "general_question"):
-            customers = await adapter.get_all_customers()
-            invoices = await adapter.get_orders_last_n_days(30)
+            customers = _mine(await adapter.get_all_customers(), "qb_id")
+            invoices = _mine(await adapter.get_orders_last_n_days(30), "customer_id")
             items = await adapter.get_inventory_merged()
 
             from app.intelligence.account_health import score_account
@@ -240,11 +259,12 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                 }
                 for i in items
             ]
-            data["sales_summary"] = {
-                "total_revenue": float(period.total_revenue),
-                "order_count": period.order_count,
-                "top_accounts": period.top_accounts[:5],
-            }
+            if can_see_money:
+                data["sales_summary"] = {
+                    "total_revenue": float(period.total_revenue),
+                    "order_count": period.order_count,
+                    "top_accounts": period.top_accounts[:5],
+                }
 
     except Exception as exc:
         log.warning("Data fetch for intent '%s' failed: %s", intent, exc)
@@ -308,7 +328,10 @@ async def send_message(
     log.debug("Intent classified: %s for message: %.60s", intent, request.message)
 
     # 3. Fetch real data for the intent
-    data = await _fetch_data_for_intent(intent, request.message, adapter)
+    data = await _fetch_data_for_intent(
+        intent, request.message, adapter, role=user.get("role", "viewer"),
+        allowed_customers=visible_customer_ids(db, user),
+    )
     data_summary = build_query_context(intent, data)
 
     # 4. Build company context for system prompt
@@ -324,7 +347,13 @@ async def send_message(
     recent_summaries = load_recent_summaries(db, company_id, user_id)
     # Try to detect account names in message for targeted memory lookup
     account_names = _detect_account_names(request.message, history)
-    account_mem = load_account_memory(db, company_id, account_names)
+    # Saved notes about accounts are only loaded for roles that see every
+    # account; a sales rep must not get notes about accounts that are not theirs
+    # by naming them in a message.
+    account_mem = (
+        load_account_memory(db, company_id, account_names)
+        if visible_customer_ids(db, user) is None else ""
+    )
 
     if recent_summaries or account_mem:
         memory_context = ""

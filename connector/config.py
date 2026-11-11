@@ -50,6 +50,10 @@ class ConnectorConfig:
         state["connector_token"] = token
         state["registration_id"] = registration_id
         _STATE_FILE.write_text(json.dumps(state, indent=2))
+        try:
+            os.chmod(_STATE_FILE, 0o600)  # the token is a credential: owner-only
+        except OSError:
+            pass
         self.connector_token = token
         self.registration_id = registration_id
         log.info("Connector token saved to %s", _STATE_FILE)

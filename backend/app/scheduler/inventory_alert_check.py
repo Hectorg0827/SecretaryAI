@@ -8,7 +8,8 @@ from decimal import Decimal
 log = logging.getLogger(__name__)
 
 
-async def check_and_alert_inventory(company_id: str, adapter, action_engine, user_id: str) -> dict:
+async def check_and_alert_inventory(company_id: str, adapter, action_engine, user_id: str,
+                                    alert_email: str | None = None) -> dict:
     """
     Pull current inventory, evaluate status, fire alerts for critical items.
     """
@@ -41,12 +42,15 @@ async def check_and_alert_inventory(company_id: str, adapter, action_engine, use
             results["low"].append(item["product_name"])
 
     # Fire a single consolidated alert if any critical items
-    if results["critical"] and action_engine:
+    if results["critical"] and action_engine and not alert_email:
+        log.warning("Inventory alert for %s not sent: the company has no alert email set", company_id)
+    if results["critical"] and action_engine and alert_email:
         critical_names = ", ".join(results["critical"][:5])
         try:
-            await action_engine.process(
+            outcome = await action_engine.process(
                 action_type="send_low_stock_alert",
                 payload={
+                    "to_email": alert_email,
                     "subject": f"CRITICAL: {len(results['critical'])} products nearly out of stock",
                     "body": (
                         f"The following products are critically low:\n\n"
@@ -59,7 +63,8 @@ async def check_and_alert_inventory(company_id: str, adapter, action_engine, use
                 company_id=company_id,
                 user_id=user_id,
             )
-            results["alerts_fired"] += 1
+            if isinstance(outcome, dict) and outcome.get("status") == "sent":
+                results["alerts_fired"] += 1
         except Exception as e:
             log.error("Inventory alert: failed to fire alert: %s", e)
 

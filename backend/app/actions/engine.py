@@ -137,6 +137,7 @@ class ActionEngine:
             result = await self._execute(action_type, payload, company_id)
             if self._notifier:
                 await self._notifier.notify(user_id, action_type, result)
+            failed = isinstance(result, dict) and result.get("status") == "error"
             await log_action(
                 self._db,
                 company_id=company_id,
@@ -144,7 +145,8 @@ class ActionEngine:
                 action_type=action_type,
                 autonomy_level=level,
                 payload=payload,
-                status="executed",
+                # never record "executed" for a notification that did not go out
+                status="failed" if failed else "executed",
             )
             return result
 
@@ -184,12 +186,12 @@ class ActionEngine:
             try:
                 self._db.table("accounts").upsert({
                     "company_id": company_id,
-                    "qb_id": account_id,
+                    "qb_customer_id": account_id,
                     "name": account_name,
                     "health_status": result.status,
                     "health_score": result.score,
                     "last_health_check": datetime.now(timezone.utc).isoformat(),
-                }, on_conflict="company_id,qb_id").execute()
+                }, on_conflict="company_id,qb_customer_id").execute()
             except Exception:
                 pass
             return {"status": "ok", "health_status": result.status, "health_score": result.score}
@@ -199,9 +201,9 @@ class ActionEngine:
             new_qty = payload.get("quantity", 0)
             try:
                 self._db.table("inventory").update({
-                    "warehouse_qty": int(new_qty),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }).eq("company_id", company_id).eq("qb_id", item_id).execute()
+                    "warehouse_1_qty": int(new_qty),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                }).eq("company_id", company_id).eq("qb_item_id", item_id).execute()
             except Exception:
                 pass
             return {"status": "ok", "item_id": item_id, "new_qty": new_qty}
@@ -213,12 +215,17 @@ class ActionEngine:
             "send_low_stock_alert": send_alert_email,
             "send_dormant_account_alert": send_alert_email,
             "send_sync_break_alert": send_alert_email,
+            "send_anomaly_alert": send_alert_email,
+            "send_weekly_report": send_alert_email,
         }
 
         handler = handlers.get(action_type)
         if handler:
             import asyncio
-            result = handler(payload, company_id)
+            if handler is send_alert_email:
+                result = handler({**payload, "kind": action_type}, company_id, self._db)
+            else:
+                result = handler(payload, company_id)
             if asyncio.iscoroutine(result):
                 return await result
             return result

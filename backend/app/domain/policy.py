@@ -43,6 +43,8 @@ from typing import Any
 
 from app.domain.contracts import ActionClass, ActionDecision, ActionProposal
 
+from app.utils.safe import log_safe
+
 log = logging.getLogger(__name__)
 
 # Redis TTL for cached policy rules (seconds)
@@ -57,6 +59,10 @@ _DEFAULT_EFFECTS: dict[ActionClass, str] = {
     ActionClass.COMMIT:      "require_approval",
     ActionClass.DESTRUCTIVE: "deny",
 }
+
+
+class PolicyUnavailableError(RuntimeError):
+    """The tenant's policy rules could not be loaded (strict evaluation only)."""
 
 
 class PolicyEngine:
@@ -78,12 +84,17 @@ class PolicyEngine:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    async def evaluate(self, proposal: ActionProposal) -> ActionDecision:
+    async def evaluate(self, proposal: ActionProposal, strict: bool = False) -> ActionDecision:
         """
         Evaluate an ActionProposal and return an ActionDecision.
         Loads rules from DB (with in-request caching).
+
+        strict=True is for the moment an action is about to really happen
+        (COMMIT / DESTRUCTIVE): if the company's rules cannot be read, raise
+        PolicyUnavailableError instead of silently falling back to defaults —
+        a deny rule that failed to load must not turn into an allow.
         """
-        rules = await self._load_rules()
+        rules = await self._load_rules(strict=strict)
         features = await self._load_features()
 
         for rule in rules:
@@ -126,7 +137,7 @@ class PolicyEngine:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    async def _load_rules(self) -> list[dict]:
+    async def _load_rules(self, strict: bool = False) -> list[dict]:
         if self._rules is not None:
             return self._rules
         try:
@@ -138,8 +149,14 @@ class PolicyEngine:
                 .order("priority", desc=False)
                 .execute()
             )
-            self._rules = result.data or []
+            data = result.data
+            if strict and not isinstance(data, (list, type(None))):
+                raise TypeError(f"unexpected policy_rules payload: {type(data).__name__}")
+            self._rules = data or []
         except Exception as exc:
+            if strict:
+                log.error("Could not load policy rules for %s: %s — refusing (strict)", log_safe(self.company_id), log_safe(exc))
+                raise PolicyUnavailableError("policy rules unavailable") from exc
             log.warning("Could not load policy rules for %s: %s — using defaults", self.company_id, exc)
             self._rules = []
         return self._rules

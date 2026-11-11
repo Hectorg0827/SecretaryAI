@@ -64,14 +64,18 @@ class TestErrorHandlers:
         body = resp.json()
         assert body["error"] == "validation_error"
         assert "detail" in body
-        assert body["message"] == "Request validation failed"
+        # The message is the first problem in plain words, and what the user
+        # typed is never echoed back.
+        assert body["message"] == "Field required"
+        assert all("input" not in d and "ctx" not in d for d in body["detail"])
 
     def test_value_error_returns_400(self):
         resp = self.client.get("/value-error")
         assert resp.status_code == 400
         body = resp.json()
         assert body["error"] == "bad_request"
-        assert "bad value here" in body["message"]
+        # Internal error text is logged, not returned to the caller.
+        assert "bad value here" not in body["message"]
 
     def test_permission_error_returns_403(self):
         resp = self.client.get("/permission-error")

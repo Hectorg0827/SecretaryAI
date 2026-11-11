@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_db
-from app.auth.rbac import get_current_user
+from app.auth.rbac import get_current_user, require_permission
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ async def get_subscription(
 @router.post("/checkout")
 async def create_checkout_session(
     body: CheckoutRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """
@@ -131,6 +131,9 @@ async def create_checkout_session(
 
     # Mock mode — Stripe not configured
     if not _stripe_available:
+        if not settings.debug:
+            # Never hand a customer a pretend checkout page.
+            raise HTTPException(status_code=503, detail="Online payment is not set up yet. Please contact support.")
         log.warning("Stripe not configured — returning mock checkout URL")
         return {
             "checkout_url": f"https://mock-stripe.example.com/checkout?plan={body.plan_id}&period={body.billing_period}",
@@ -145,7 +148,12 @@ async def create_checkout_session(
         )
 
     # Fetch company email for customer lookup/creation
-    company_result = db.table("companies").select("email,name").eq("id", company_id).execute()
+    # The billing contact is the company's owner (companies has no email).
+    company_result = (
+        db.table("users").select("email")
+        .eq("company_id", company_id).eq("role", "owner").eq("is_active", True)
+        .limit(1).execute()
+    )
     company_email = ""
     if company_result.data:
         company_email = company_result.data[0].get("email", "")
@@ -179,7 +187,7 @@ async def create_checkout_session(
 
 @router.post("/portal")
 async def create_portal_session(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """
@@ -191,6 +199,8 @@ async def create_portal_session(
         raise HTTPException(status_code=400, detail="User has no associated company")
 
     if not _stripe_available:
+        if not settings.debug:
+            raise HTTPException(status_code=503, detail="Online payment is not set up yet. Please contact support.")
         log.warning("Stripe not configured — returning mock portal URL")
         return {"portal_url": "https://mock-stripe.example.com/portal"}
 
@@ -222,7 +232,7 @@ async def create_portal_session(
 
 @router.get("/invoices")
 async def list_invoices(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("manage_billing")),
     db=Depends(get_db),
 ):
     """List billing event history for the current company."""

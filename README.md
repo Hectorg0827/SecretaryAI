@@ -65,8 +65,32 @@ npm run tauri:build:macos
 npm run tauri:build:macos-arm
 ```
 
+### Settings you must decide before real customers
+See `backend/.env.example` for every setting. The ones that matter for safety:
+
+| Setting | Recommended | What it does |
+|---|---|---|
+| `ENCRYPTION_KEY` | set it | Separate key for encrypting stored QuickBooks/Google/Microsoft tokens |
+| `COMPUTER_USE_ENABLED` | `false` | Screen control is not safe for a shared deployment |
+| `CONDUCTOR_WEBHOOK_SECRET` | set it | Its own secret for Conductor webhooks (not the API key) |
+| `SENDGRID_API_KEY` | set it | Needed for invitations, password resets, briefings and alerts |
+| `BILLING_ENFORCED` | `true` once Stripe works | Turns the paywall on (new companies get a 14-day trial) |
+| `REQUIRE_EMAIL_VERIFICATION` | `true` once email works | New accounts confirm their email before signing in |
+
 ### Database
-Run `database/schema.sql` in your Supabase SQL editor.
+There is one source of truth for the database: `supabase/migrations/`.
+
+- **Simplest:** open `database/schema.sql`, paste it into the Supabase SQL
+  editor, and run it. That one file contains every migration in order. It is
+  safe to run on a brand-new database and safe to run again later to bring an
+  existing database up to date.
+- **With the Supabase CLI:** `supabase db push`.
+
+`database/schema.sql` is generated — never edit it by hand. After changing a
+migration run `scripts/build_schema.sh`. CI runs `scripts/validate_schema.sh`,
+which builds a real Postgres database from the migrations (empty database,
+re-run, and upgrade from the old layout) and then checks that every table and
+column the backend code uses actually exists.
 
 ## Cross-Platform Support
 

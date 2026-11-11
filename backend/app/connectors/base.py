@@ -41,6 +41,16 @@ class InventoryItem:
     unit_price: Decimal
     purchase_cost: Decimal
     reorder_point: Optional[Decimal]
+    # The vendor QuickBooks lists as the usual supplier of this item, if any.
+    preferred_vendor_id: Optional[str] = None
+
+
+@dataclass
+class Vendor:
+    id: str
+    qb_id: str
+    name: str
+    email: Optional[str] = None
 
 
 @dataclass
@@ -89,6 +99,10 @@ class QuickBooksAdapter(ABC):
 
     @abstractmethod
     async def get_purchase_orders(self) -> list[PurchaseOrder]: ...
+
+    async def get_vendors(self) -> list["Vendor"]:
+        """Vendors (suppliers) that purchase orders can be raised against."""
+        return []
 
     @abstractmethod
     async def test_connection(self) -> bool: ...

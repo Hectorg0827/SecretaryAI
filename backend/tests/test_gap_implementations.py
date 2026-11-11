@@ -33,7 +33,8 @@ def _make_db(company_row=None):
     company_row = company_row or {
         "id": "co-1",
         "name": "Test Co",
-        "qbd_end_user_id": "eu_test123",
+        "conductor_end_user_id": "eu_test123",
+        "qb_type": "desktop",
         "qbo_access_token": None,
         "qbo_refresh_token": None,
         "google_access_token": None,
@@ -172,7 +173,7 @@ class TestMorningBriefing:
 
         with (
             patch("app.scheduler.morning_briefing.anthropic.AsyncAnthropic") as mock_anthropic,
-            patch("app.scheduler.morning_briefing.SendGridAPIClient") as mock_sg,
+            patch("app.utils.mailer.send_system_email", return_value=True) as mock_send,
             patch("app.api.deps.get_db", return_value=mock_db),
             patch("app.scheduler.morning_briefing.settings") as mock_settings,
         ):
@@ -191,7 +192,9 @@ class TestMorningBriefing:
             )
 
             assert len(result) > 0
-            mock_sg.return_value.send.assert_called_once()
+            mock_send.assert_called_once()
+            assert mock_send.call_args.kwargs["kind"] == "morning_briefing"
+            assert mock_send.call_args.kwargs["to"] == "owner@test.com"
 
     @pytest.mark.asyncio
     async def test_stores_briefing_in_db(self):
@@ -590,7 +593,7 @@ class TestComputerUseEngineAudit:
 
     @pytest.mark.asyncio
     async def test_audit_writes_to_action_log(self):
-        """_audit should insert a row to the action_log table."""
+        """_audit should insert a row into the audit trail (audit_events)."""
         mock_db = _make_db()
 
         with patch("app.api.deps.get_db", return_value=mock_db):
@@ -599,9 +602,10 @@ class TestComputerUseEngineAudit:
                 engine = ComputerUseEngine.__new__(ComputerUseEngine)
                 engine.company_config = {"id": "co-1"}
                 engine.safety = MagicMock()
+                engine._db = None
                 await engine._audit("test_event", {"key": "value"})
 
-        mock_db.table.assert_any_call("action_log")
+        mock_db.table.assert_any_call("audit_events")
 
     @pytest.mark.asyncio
     async def test_audit_failure_does_not_raise(self):
@@ -611,6 +615,7 @@ class TestComputerUseEngineAudit:
             engine = ComputerUseEngine.__new__(ComputerUseEngine)
             engine.company_config = {"id": "co-1"}
             engine.safety = MagicMock()
+            engine._db = None
 
             try:
                 await engine._audit("crash_test", {})

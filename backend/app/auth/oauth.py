@@ -183,3 +183,61 @@ def refresh_google_token_if_needed(credentials_dict: dict) -> tuple[dict, bool]:
     except Exception:
         # If refresh fails, return original — caller handles the downstream error
         return credentials_dict, False
+
+
+# ─── Microsoft (Outlook) OAuth ────────────────────────────────────────────────
+
+def microsoft_configured() -> bool:
+    return bool(settings.ms_client_id and settings.ms_client_secret and settings.ms_redirect_uri)
+
+
+def build_ms_authorization_url(state: str) -> str:
+    """Build the Microsoft sign-in URL for connecting an Outlook mailbox."""
+    from app.connectors.outlook import MS_AUTH_URL, MS_SCOPES
+    params = {
+        "client_id": settings.ms_client_id,
+        "response_type": "code",
+        "redirect_uri": settings.ms_redirect_uri,
+        "response_mode": "query",
+        "scope": MS_SCOPES,
+        "state": state,
+        "prompt": "select_account",
+    }
+    return f"{MS_AUTH_URL.format(tenant=settings.ms_tenant or 'common')}?{urlencode(params)}"
+
+
+async def exchange_ms_code_for_tokens(code: str) -> dict:
+    """Exchange a Microsoft authorization code for access + refresh tokens."""
+    from app.connectors.outlook import GRAPH_BASE, MS_SCOPES, MS_TOKEN_URL
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            MS_TOKEN_URL.format(tenant=settings.ms_tenant or "common"),
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": settings.ms_redirect_uri,
+                "client_id": settings.ms_client_id,
+                "client_secret": settings.ms_client_secret,
+                "scope": MS_SCOPES,
+            },
+        )
+        response.raise_for_status()
+        tokens = response.json()
+        # Which mailbox was connected (shown in Settings so the owner can check).
+        account_email = ""
+        try:
+            me = await client.get(
+                f"{GRAPH_BASE}/me",
+                params={"$select": "mail,userPrincipalName"},
+                headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            )
+            if me.status_code == 200:
+                account_email = me.json().get("mail") or me.json().get("userPrincipalName") or ""
+        except Exception:
+            pass
+    return {
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens.get("refresh_token", ""),
+        "expires_in": int(tokens.get("expires_in", 3600)),
+        "account_email": account_email,
+    }

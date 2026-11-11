@@ -25,6 +25,11 @@ PUBLIC_PATHS = {
     "/auth/login",
     "/auth/register",
     "/auth/refresh",
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/accept-invite",
+    "/auth/verify-email",
+    "/auth/resend-verification",
     "/webhooks/stripe",
     "/api/billing/plans",
     "/api/billing/webhook",
@@ -46,6 +51,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
         # This middleware adds structured logging for tenant context.
 
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not token:
+            # browser sessions arrive in a cookie (app/auth/session_cookie.py)
+            token = request.cookies.get("sai_session", "")
         company_id = None
 
         if token:

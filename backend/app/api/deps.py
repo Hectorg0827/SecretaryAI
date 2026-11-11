@@ -11,25 +11,10 @@ from fastapi import Depends, HTTPException
 
 from app.auth.rbac import get_current_user
 from app.config import get_settings
+from app.db import get_db
 from app.utils.encryption import decrypt, encrypt
 
 log = logging.getLogger(__name__)
-
-# ── Module-level Supabase singleton (connection pooling) ──────────────────────
-# Re-using one client avoids creating a new HTTP session per request.
-# The supabase-py client is thread-safe for read operations.
-_db_client = None
-
-
-def get_db():
-    """Return the module-level Supabase service-role client (pooled)."""
-    global _db_client
-    if _db_client is None:
-        from supabase import create_client
-        settings = get_settings()
-        _db_client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    return _db_client
-
 
 def _load_company(company_id: str, db):
     """Fetch company row from Supabase."""
@@ -64,6 +49,17 @@ def get_adapter(
         cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
     if cfg.get("google_refresh_token"):
         cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+
+    # Outlook tokens (encrypted at rest). A value that will not decrypt is
+    # dropped so the mailbox shows as "needs reconnecting" instead of crashing.
+    for _col in ("ms_access_token", "ms_refresh_token"):
+        if cfg.get(_col):
+            try:
+                cfg[_col] = decrypt(cfg[_col], settings.secret_key)
+            except ValueError:
+                cfg[_col] = None
+    cfg["ms_client_id"] = settings.ms_client_id
+    cfg["ms_client_secret"] = settings.ms_client_secret
 
     # Build the gmail_credentials dict that GmailConnector expects.
     # Refresh the access token proactively if it is expired before building the adapter.

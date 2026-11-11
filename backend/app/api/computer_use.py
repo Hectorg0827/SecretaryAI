@@ -108,7 +108,7 @@ class ApprovalRequest(BaseModel):
 @router.post("/start", response_model=StartResponse)
 async def start_session(
     req: StartRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("approve_actions")),
     db=Depends(get_db),
 ):
     """
@@ -122,8 +122,8 @@ async def start_session(
     # (Was `require_permission(user, "computer_use")`, a broken call: that helper
     # is a dependency FACTORY taking one arg, so this raised at runtime and the
     # permission name did not exist.)
-    if user.get("role") not in ("owner", "manager"):
-        raise HTTPException(status_code=403, detail="Not authorized to start a Computer Use session")
+    # Role gate is enforced by the `approve_actions` dependency above
+    # (owner / manager only) — on start, poll, approve AND reject.
 
     session_id = str(uuid.uuid4())
     company = db.table("companies").select("*").eq("id", user["company_id"]).execute()
@@ -144,7 +144,7 @@ async def start_session(
 @router.get("/sessions/{session_id}", response_model=SessionStatusResponse)
 async def get_session(
     session_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("approve_actions")),
 ):
     """Poll the status of a running Computer Use session."""
     state = _sessions.get(session_id)
@@ -169,7 +169,7 @@ async def get_session(
 @router.post("/approve")
 async def approve_action(
     req: ApprovalRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("approve_actions")),
 ):
     """Approve a pending Computer Use action."""
     state = _sessions.get(req.session_id)
@@ -190,7 +190,7 @@ async def approve_action(
 @router.post("/reject")
 async def reject_action(
     req: ApprovalRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("approve_actions")),
 ):
     """Reject a pending Computer Use action (stops the session)."""
     state = _sessions.get(req.session_id)
@@ -220,19 +220,16 @@ async def _run_engine(state: "_SessionState", company_config: dict, db) -> None:
         state.status = "done"
         log.info("CU session %s completed successfully", state.session_id)
 
-        # Persist result summary to action_log
-        try:
-            db.table("action_log").insert({
-                "company_id": state.company_id,
-                "session_id": state.session_id,
-                "event": "computer_use_complete",
-                "app_name": state.app_name,
-                "task": state.task,
-                "status": "success",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }).execute()
-        except Exception as exc:
-            log.warning("Could not write CU audit log: %s", exc)
+        # Record the completed session in the audit trail
+        from app.utils.audit import write_audit_event
+        write_audit_event(
+            db,
+            company_id=state.company_id,
+            event_type="computer_use_session_complete",
+            actor_id="ai",
+            path_used="computer_use",
+            metadata={"session_id": state.session_id, "app_name": state.app_name, "task": state.task},
+        )
 
     except Exception as exc:
         state.status = "error"

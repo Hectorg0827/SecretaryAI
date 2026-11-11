@@ -1,5 +1,14 @@
 """
 Built-in workflow definitions.
+
+How a run moves (see app/workflows/executor.py):
+  1. a "draft_*" step creates a real draft in the approval queue;
+  2. "await_approval" waits for an owner or manager;
+  3. approving the draft performs the "send_*" / "create_*" step — that is the
+     only place an email is sent or QuickBooks is written;
+  4. any closing step (e.g. logging the outreach) runs, and the run completes.
+Rejecting the draft cancels the run.
+
 Each workflow is a list of steps with type, params, autonomy_level, and action_class.
 
 action_class values (mirrors ActionClass enum):
@@ -34,11 +43,11 @@ WORKFLOWS: dict[str, dict] = {
             },
             {
                 "step": 3,
-                "name": "Send to Vendor",
-                "action_type": "send_vendor_email",
+                "name": "Create Purchase Order",
+                "action_type": "create_purchase_order",
                 "action_class": "commit",
                 "autonomy": "draft_and_wait",
-                "description": "Email approved PO to vendor",
+                "description": "Approval creates the order in QuickBooks (or tells you to enter it by hand)",
             },
         ],
     },

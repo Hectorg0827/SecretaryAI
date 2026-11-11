@@ -14,6 +14,7 @@ from app.api import chat, dashboard, accounts, inventory, settings as settings_r
 from app.api import docs as docs_router
 from app.api import briefing as briefing_router
 from app.api import finance_workspace as finance_workspace_router
+from app.api import account_security as account_security_router
 from app.utils.error_handler import register_error_handlers
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -313,6 +314,7 @@ app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=
 app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
 app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
 app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
+app.include_router(account_security_router.router, prefix="/auth",          tags=["account-security"])
 app.include_router(setup.router,            prefix="/api/setup",         tags=["setup"])
 app.include_router(billing.router,          prefix="/api/billing",       tags=["billing"])
 

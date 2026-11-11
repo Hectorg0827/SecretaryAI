@@ -79,10 +79,10 @@ class FakeDB:
         self.race_role = None
         self.audits = []
         self.users = [
-            {"id": OWNER, "company_id": COMPANY, "role": "owner", "is_active": True},
-            {"id": STAFF, "company_id": COMPANY, "role": "manager", "is_active": True},
-            {"id": OUTSIDER, "company_id": OTHER_COMPANY, "role": "manager", "is_active": True},
-            {"id": SECOND_OWNER, "company_id": COMPANY, "role": "owner", "is_active": True},
+            {"id": OWNER, "company_id": COMPANY, "role": "owner", "is_active": True, "hashed_password": "test-owner-hash"},
+            {"id": STAFF, "company_id": COMPANY, "role": "manager", "is_active": True, "hashed_password": "test-staff-hash"},
+            {"id": OUTSIDER, "company_id": OTHER_COMPANY, "role": "manager", "is_active": True, "hashed_password": "test-outsider-hash"},
+            {"id": SECOND_OWNER, "company_id": COMPANY, "role": "owner", "is_active": True, "hashed_password": "test-second-owner-hash"},
         ]
 
     def table(self, table):
@@ -103,9 +103,11 @@ def staging(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_owner_changes_staff_role_and_stale_role_session_is_denied(staging, monkeypatch):
+    from app.auth.jwt import password_session_version
     monkeypatch.setattr(gate6c, "get_db", lambda: staging)
     monkeypatch.setattr(gate6c, "is_token_revoked", lambda _jti: False)
-    old_payload = {"sub": STAFF, "company_id": COMPANY, "role": "manager", "jti": "old-token"}
+    old_payload = {"sub": STAFF, "company_id": COMPANY, "role": "manager", "jti": "old-token",
+                   "pwd": password_session_version(STAFF, "test-staff-hash")}
     assert gate6c._session_check(old_payload) is None
 
     result = await team.change_team_member_role(
@@ -123,9 +125,11 @@ async def test_owner_changes_staff_role_and_stale_role_session_is_denied(staging
 
 @pytest.mark.asyncio
 async def test_owner_soft_removal_blocks_existing_session(staging, monkeypatch):
+    from app.auth.jwt import password_session_version
     monkeypatch.setattr(gate6c, "get_db", lambda: staging)
     monkeypatch.setattr(gate6c, "is_token_revoked", lambda _jti: False)
-    payload = {"sub": STAFF, "company_id": COMPANY, "role": "manager", "jti": "old-token"}
+    payload = {"sub": STAFF, "company_id": COMPANY, "role": "manager", "jti": "old-token",
+               "pwd": password_session_version(STAFF, "test-staff-hash")}
     result = await team.deactivate_team_member(UUID(STAFF), ACTOR)
     assert result == {"status": "deactivated", "member_id": STAFF}
     assert staging.users[1]["is_active"] is False
@@ -158,7 +162,8 @@ async def test_only_active_current_owner_can_mutate_staff(staging, operation):
     with pytest.raises(HTTPException) as exc:
         await call(ACTOR)
     assert exc.value.status_code == 403
-    assert staging.users[1] == {"id": STAFF, "company_id": COMPANY, "role": "manager", "is_active": True}
+    assert staging.users[1] == {"id": STAFF, "company_id": COMPANY, "role": "manager",
+                                "is_active": True, "hashed_password": "test-staff-hash"}
     assert not staging.audits
 
 

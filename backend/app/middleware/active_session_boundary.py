@@ -7,23 +7,26 @@ Connector tokens are separate machine credentials, permitted only on their
 exact connector endpoints and validated there by get_connector_identity.
 """
 from fastapi.security.utils import get_authorization_scheme_param
+from hmac import compare_digest
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.api.deps import get_db
-from app.auth.jwt import decode_access_token, is_token_revoked
+from app.auth.jwt import decode_access_token, is_token_revoked, password_session_version
 from app.auth.rbac import ROLE_PERMISSIONS
 from app.config import get_settings
 
-# Login and refresh must remain available to a demoted or deactivated user.
-# These endpoints authenticate the credentials/body themselves; no user session
-# authorization is performed here. CORS preflight is handled separately.
+# Login, refresh and password recovery authenticate their own credentials/body.
+# They must remain reachable even if a prior session is stale or deactivated.
+# CORS preflight is handled separately.
 _SESSION_BOOTSTRAP = frozenset({
     ("POST", "/auth/login"),
     ("POST", "/auth/register"),
     ("POST", "/auth/refresh"),
+    ("POST", "/auth/forgot-password"),
+    ("POST", "/auth/reset-password"),
 })
 _CONNECTOR_MACHINE_ROUTES = frozenset({
     ("POST", "/api/connectors/heartbeat"),
@@ -56,7 +59,7 @@ def _session_check(payload: dict) -> tuple[int, str] | None:
     try:
         result = (
             get_db().table("users")
-            .select("id,company_id,role,is_active")
+            .select("id,company_id,role,is_active,hashed_password")
             .eq("id", user_id).eq("company_id", company_id)
             .limit(2).execute()
         )
@@ -70,6 +73,15 @@ def _session_check(payload: dict) -> tuple[int, str] | None:
             or rows[0].get("role") != role
             or rows[0].get("is_active") is not True):
         return 403, "Session permissions changed; sign in again"
+    # Legacy access JWTs without a credential fingerprint cannot be proven
+    # safe following a password reset. Staging rollout requires a fresh login.
+    fingerprint = payload.get("pwd")
+    try:
+        expected = password_session_version(user_id, rows[0].get("hashed_password"))
+    except (TypeError, ValueError):
+        return 503, "Session credential verification unavailable"
+    if not isinstance(fingerprint, str) or not compare_digest(fingerprint, expected):
+        return 401, "Session credentials changed; sign in again"
     return None
 
 

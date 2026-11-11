@@ -16,16 +16,27 @@ older tree conflicts extensively with current Gate 6C controls.
    changes. Privileged writes fail closed if the pre-action audit fails, and
    use conditional updates to reject concurrent changes. The web Settings
    team section shows Save role and a two-step Disable confirmation.
+3. Staging-only password recovery and session security: 30-minute one-time
+   opaque reset links in Redis, a generic non-enumerating request response,
+   staging mailbox allowlist, current-password changes, conditional account
+   writes, and durable account-security audit gates. Every new access/refresh
+   JWT carries a keyed fingerprint of the current `users.hashed_password`;
+   Gate 6C rejects stale fingerprints on every API request. Refresh rotation
+   now atomically claims the presented JTI (`SET NX EX`) to reject concurrent
+   replay. Frontend adds public recovery pages and an authenticated account
+   password page for all staff roles.
 
 ## Local verification (2026-11-11)
 
-- Backend: **2,970 passed / 1 skipped** with in-memory simulated Redis;
+- Backend: **2,981 passed / 1 skipped** with in-memory simulated Redis;
   not a live Redis/Supabase/Railway test.
-- Frontend: **269 passed** in 47 test files; TypeScript, build, and lint
+- Frontend: **272 passed** in 48 test files; TypeScript, build, and lint
   succeed (13 pre-existing lint warnings, no errors).
 - Role and removal tests include: current owner status, tenant boundaries,
   protected owners, audit outage, concurrent update, and rejection of stale
   role/deactivated sessions through the Gate 6C session verifier.
+- Password recovery tests include single-use tokens, stale-session rejection,
+  simultaneous refresh replay, audit outage, and mounted FastAPI route behavior.
 
 ## Deployment gates still open
 
@@ -37,8 +48,15 @@ older tree conflicts extensively with current Gate 6C controls.
   APIs. A demoted user may obtain a new **lower-privilege** token through
   `/auth/refresh`; deactivated users cannot. True all-device forced logout
   on role change is **not** implemented in this batch.
-- Continue selective review of Claude Pass 4 password recovery, invitation
-  acceptance, one-time refresh, Outlook connect, and webhook changes against
+- **Rollout effect:** staging's old access tokens without the new password
+  fingerprint are rejected with 401; testers must sign in again after the
+  eventual reviewed deployment. There is no silent backward-compatible
+  bypass for a pre-reset JWT. No production token behavior has been changed.
+- Recovery emails are limited to the configured staging invitation mailbox;
+  ordinary customers cannot request reset links until a separately reviewed
+  production identity delivery policy is implemented and validated.
+- Continue selective review of Claude Pass 4 invitation
+  acceptance, Outlook connect, and webhook changes against
   the current staging equivalents; do not duplicate or regress newer logic.
 - Use synthetic identities and controlled sandbox providers for staging
   acceptance. Production stays out of scope until separately approved.

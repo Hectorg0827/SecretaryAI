@@ -131,6 +131,9 @@ async def create_checkout_session(
 
     # Mock mode — Stripe not configured
     if not _stripe_available:
+        if not settings.debug:
+            # Never hand a customer a pretend checkout page.
+            raise HTTPException(status_code=503, detail="Online payment is not set up yet. Please contact support.")
         log.warning("Stripe not configured — returning mock checkout URL")
         return {
             "checkout_url": f"https://mock-stripe.example.com/checkout?plan={body.plan_id}&period={body.billing_period}",
@@ -196,6 +199,8 @@ async def create_portal_session(
         raise HTTPException(status_code=400, detail="User has no associated company")
 
     if not _stripe_available:
+        if not settings.debug:
+            raise HTTPException(status_code=503, detail="Online payment is not set up yet. Please contact support.")
         log.warning("Stripe not configured — returning mock portal URL")
         return {"portal_url": "https://mock-stripe.example.com/portal"}
 

@@ -206,26 +206,33 @@ app.add_middleware(
 )
 
 # ── Routers ────────────────────────────────────────────────────────────────────
-app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"])
-app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"])
-app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"])
-app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"])
+# PAID = needs an active subscription or trial when BILLING_ENFORCED=true.
+# Sign-in, billing, settings, team management and setup stay reachable so an
+# expired account can still log in and pay.
+from fastapi import Depends as _Depends
+from app.middleware.subscription_guard import require_active_subscription
+PAID = [_Depends(require_active_subscription())]
+
+app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"], dependencies=PAID)
+app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"], dependencies=PAID)
+app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"], dependencies=PAID)
+app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"], dependencies=PAID)
 app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
 app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
-app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"])
+app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"], dependencies=PAID)
 app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
-app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"])
+app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"], dependencies=PAID)
 app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"])
-app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"])
-app.include_router(workflows.router,        prefix="/api/workflows",      tags=["workflows"])
-app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"])
+app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"], dependencies=PAID)
+app.include_router(workflows.router,        prefix="/api/workflows",      tags=["workflows"], dependencies=PAID)
+app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"], dependencies=PAID)
 app.include_router(setup.router,            prefix="/api/setup",         tags=["setup"])
-app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"])
+app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"], dependencies=PAID)
 app.include_router(billing.router,             prefix="/api/billing",       tags=["billing"])
 from app.api import logistics as logistics_router
-app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"])
+app.include_router(logistics_router.router,    prefix="/api/logistics",      tags=["logistics"], dependencies=PAID)
 from app.api import compliance as compliance_router
-app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"])
+app.include_router(compliance_router.router,   prefix="/api/compliance",     tags=["compliance"], dependencies=PAID)
 from app.api import connectors as connectors_router
 app.include_router(connectors_router.router,   prefix="/api/connectors",     tags=["connectors"])
 app.include_router(docs_router.router,         prefix="/api/docs",           tags=["docs"])

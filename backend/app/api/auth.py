@@ -751,6 +751,10 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
 
     user = user_result.data[0]
 
+    # Start the free trial (non-fatal)
+    from app.middleware.subscription_guard import start_trial
+    start_trial(db, company_id)
+
     # Seed per-company defaults (non-fatal — log and continue if fails)
     try:
         await _seed_company_defaults(company_id, db)

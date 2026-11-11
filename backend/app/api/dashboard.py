@@ -120,8 +120,9 @@ async def trigger_dashboard_refresh(
     Enqueue an immediate dashboard snapshot refresh for this company.
     Only roles with 'run_reports' permission (back_office, manager, owner) may call this.
     """
-    from tasks.morning_briefing import send_morning_briefing_all
-    send_morning_briefing_all.apply_async(kwargs={"company_id": user["company_id"]})
+    # Rebuild the snapshot only — this must never send the briefing email.
+    from tasks.data_refresh import refresh_company
+    refresh_company.apply_async(kwargs={"company_id": user["company_id"], "reason": "manual_refresh"})
     return {"status": "refresh_queued", "company_id": user["company_id"]}
 
 

@@ -865,3 +865,206 @@ class TestValidationErrorsDoNotCrash:
         assert r.status_code == 422
         assert r.json()["message"] == "Password must be at least 8 characters"
         assert "short" not in r.text  # the rejected password is not echoed back
+
+
+class TestEncryptionKeySeparation:
+    """Finding 11 — stored tokens no longer depend on the login-signing key."""
+    SK = "test-secret-key-32-chars-long!!x"
+    EK = "a-different-encryption-key-of-40-chars!!"
+
+    def _settings(self, **kw):
+        return MagicMock(secret_key=self.SK, encryption_key=kw.get("ek", ""), encryption_key_previous=kw.get("prev", ""))
+
+    def test_without_a_dedicated_key_nothing_changes(self):
+        from app.utils.encryption import decrypt, encrypt
+        with patch("app.config.get_settings", return_value=self._settings()):
+            assert decrypt(encrypt("tok", self.SK), self.SK) == "tok"
+
+    def test_values_written_with_the_old_key_still_open_after_adding_a_key(self):
+        from app.utils.encryption import decrypt, encrypt
+        with patch("app.config.get_settings", return_value=self._settings()):
+            old = encrypt("refresh-token", self.SK)
+        with patch("app.config.get_settings", return_value=self._settings(ek=self.EK)):
+            assert decrypt(old, self.SK) == "refresh-token"
+
+    def test_new_values_cannot_be_opened_with_the_login_key_alone(self):
+        from app.utils.encryption import decrypt, encrypt
+        with patch("app.config.get_settings", return_value=self._settings(ek=self.EK)):
+            new = encrypt("refresh-token", self.SK)
+        with patch("app.config.get_settings", return_value=self._settings()):
+            with pytest.raises(ValueError):
+                decrypt(new, self.SK)
+
+    def test_rotation_keeps_previous_key_readable(self):
+        from app.utils.encryption import decrypt, encrypt
+        with patch("app.config.get_settings", return_value=self._settings(ek=self.EK)):
+            v = encrypt("t", self.SK)
+        newer = "yet-another-encryption-key-of-40-chars!!"
+        with patch("app.config.get_settings", return_value=self._settings(ek=newer, prev=self.EK)):
+            assert decrypt(v, self.SK) == "t"
+
+    def test_tampered_value_is_rejected_without_detail(self):
+        from app.utils.encryption import decrypt, encrypt
+        v = encrypt("t", self.SK)
+        with pytest.raises(ValueError) as exc:
+            decrypt(v[:-4] + "AAAA", self.SK)
+        assert str(exc.value) == "Decryption failed"
+
+    def test_same_value_for_both_keys_is_refused_at_startup(self):
+        from app.config import Settings
+        with pytest.raises(ValueError):
+            Settings(secret_key=self.SK, encryption_key=self.SK, supabase_url="x", supabase_anon_key="x",
+                     supabase_service_role_key="x", database_url="x", anthropic_api_key="x", _env_file=None)
+
+
+class TestPaywall:
+    """Finding 12 — the paywall exists, is one switch, and cannot strand customers."""
+
+    def _sub(self, **kw):
+        return {"status": "active", "updated_at": None, "trial_end": None, **kw}
+
+    def test_rule(self):
+        from datetime import datetime, timedelta, timezone
+        from app.middleware.subscription_guard import subscription_allows_access as ok
+        now = datetime.now(timezone.utc)
+        iso = lambda d: (now + timedelta(days=d)).isoformat()
+        assert ok(self._sub(status="active"))
+        assert ok(self._sub(status="trialing", trial_end=iso(3)))
+        assert not ok(self._sub(status="trialing", trial_end=iso(-1)))
+        assert ok(self._sub(status="past_due", updated_at=iso(-3)))
+        assert not ok(self._sub(status="canceled", updated_at=iso(-30)))
+        assert not ok(None)
+
+    def _client_with(self, enforced, subs):
+        db = FakeSupabase(company_subscriptions=subs, feed_events=[], subscription_plans=[])
+        app.dependency_overrides[get_db] = lambda: db
+        return db
+
+    def test_off_by_default_nothing_is_blocked(self, client):
+        self._client_with(False, [])
+        try:
+            assert client.get("/api/feed/", headers=_token()).status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_when_on_unpaid_company_gets_402_but_can_still_reach_billing(self, client):
+        self._client_with(True, [])
+        try:
+            with patch("app.config.get_settings") as gs:
+                gs.return_value.billing_enforced = True
+                assert client.get("/api/feed/", headers=_token()).status_code == 402
+                assert client.get("/api/billing/subscription", headers=_token()).status_code == 200
+                assert client.get("/api/billing/plans").status_code == 200
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_when_on_paid_and_trialing_companies_get_in_and_others_do_not(self, client):
+        from datetime import datetime, timedelta, timezone
+        future = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        self._client_with(True, [
+            {"company_id": COMPANY_A, "status": "trialing", "trial_end": future, "created_at": "2026-01-01"},
+            {"company_id": COMPANY_B, "status": "canceled", "updated_at": "2026-01-01T00:00:00+00:00", "created_at": "2026-01-01"},
+        ])
+        try:
+            with patch("app.config.get_settings") as gs:
+                gs.return_value.billing_enforced = True
+                assert client.get("/api/feed/", headers=_token(company_id=COMPANY_A)).status_code == 200
+                # B's lapsed subscription does not ride on A's trial
+                assert client.get("/api/feed/", headers=_token(company_id=COMPANY_B)).status_code == 402
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_cannot_switch_on_without_stripe(self):
+        from app.config import Settings
+        base = dict(secret_key="test-secret-key-32-chars-long!!x", supabase_url="x", supabase_anon_key="x",
+                    supabase_service_role_key="x", database_url="x", anthropic_api_key="x", _env_file=None)
+        with pytest.raises(ValueError):
+            Settings(billing_enforced=True, **base)
+        assert Settings(billing_enforced=True, stripe_secret_key="sk", stripe_webhook_secret="wh", **base).billing_enforced
+
+    def test_registration_starts_a_trial(self, client, adb):
+        r = client.post("/auth/register", json={"company_name": "Trial Co", "email": "t@trial.test", "password": "Trial-pass1"})
+        assert r.status_code == 201
+        subs = adb.rows("company_subscriptions")
+        assert len(subs) == 1 and subs[0]["status"] == "trialing" and subs[0]["trial_end"]
+
+    def test_no_pretend_checkout_in_production(self, client):
+        db = FakeSupabase(subscription_plans=[{"id": "starter", "name": "Starter"}])
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            with patch("app.api.billing._stripe_available", False), patch("app.api.billing.settings") as st:
+                st.debug = False
+                r = client.post("/api/billing/checkout", json={"plan_id": "starter", "billing_period": "monthly"}, headers=_token())
+            assert r.status_code == 503 and "mock" not in r.text
+        finally:
+            app.dependency_overrides.clear()
+
+
+class TestWebhooksAndBackgroundJobs:
+    """Finding 5 — notifications reach a job that exists, for the right company."""
+
+    def test_every_dispatched_job_name_is_a_registered_job(self):
+        """Approved POs and webhooks used to be sent to job names nobody handled."""
+        import pathlib, re
+        import celery_app  # registers every task module
+        for mod in celery_app.app.conf.include:
+            __import__(mod)
+        registered = set(celery_app.app.tasks.keys())
+        root = pathlib.Path(__file__).resolve().parent.parent
+        used: dict[str, str] = {}
+        for path in list((root / "app").rglob("*.py")) + list((root / "tasks").rglob("*.py")) + [root / "celery_app.py"]:
+            if path.name == "base.py" and path.parent.name == "tasks":
+                continue  # only mentions a test-patch path in a comment
+            for name in re.findall(r'"(tasks\.[a-z_]+\.[a-z_]+)"', path.read_text()):
+                used.setdefault(name, str(path.relative_to(root)))
+        missing = {n: f for n, f in used.items() if n not in registered}
+        assert not missing, f"jobs requested but never defined: {missing}"
+        assert "tasks.data_refresh.refresh_company" in registered
+
+    def _signed(self, body: bytes, token="verifier"):
+        import base64, hashlib, hmac
+        return base64.b64encode(hmac.new(token.encode(), body, hashlib.sha256).digest()).decode()
+
+    def test_qbo_webhook_refreshes_only_the_matching_company(self, client):
+        import json
+        db = FakeSupabase(companies=[{"id": COMPANY_A, "qbo_realm_id": "111"}, {"id": COMPANY_B, "qbo_realm_id": "222"}])
+        body = json.dumps({"eventNotifications": [
+            {"realmId": "222", "dataChangeEvent": {"entities": [{"name": "Invoice", "id": "9"}, {"name": "Item", "id": "3"}]}},
+            {"realmId": "999", "dataChangeEvent": {"entities": [{"name": "Invoice", "id": "1"}]}},
+        ]}).encode()
+        with patch("app.api.webhooks._db", return_value=db), patch("app.api.webhooks.settings") as st, \
+             patch("app.api.webhooks._dispatch", return_value=True) as dispatch:
+            st.intuit_webhook_verifier_token = "verifier"
+            r = client.post("/webhooks/qbo", content=body,
+                            headers={"intuit-signature": self._signed(body), "content-type": "application/json"})
+        assert r.status_code == 200 and r.json()["refreshes_queued"] == 1
+        dispatch.assert_called_once_with("tasks.data_refresh.refresh_company", company_id=COMPANY_B, reason="qbo_webhook")
+
+    def test_qbo_webhook_with_bad_signature_is_rejected(self, client):
+        with patch("app.api.webhooks.settings") as st, patch("app.api.webhooks._dispatch") as dispatch:
+            st.intuit_webhook_verifier_token = "verifier"
+            r = client.post("/webhooks/qbo", content=b"{}", headers={"intuit-signature": "nope"})
+        assert r.status_code == 401
+        dispatch.assert_not_called()
+
+    def test_conductor_webhook_needs_its_own_secret_not_the_api_key(self, client):
+        db = FakeSupabase(companies=[{"id": COMPANY_A, "conductor_end_user_id": "end_usr_1"}])
+        payload = {"event": "sync.completed", "endUserId": "end_usr_1"}
+        with patch("app.api.webhooks._db", return_value=db), patch("app.api.webhooks.settings") as st, \
+             patch("app.api.webhooks._dispatch", return_value=True) as dispatch:
+            st.conductor_api_key = "ck_master"
+            st.conductor_webhook_secret = ""
+            assert client.post("/webhooks/conductor", json=payload, headers={"X-Conductor-Secret": "ck_master"}).status_code == 401
+            st.conductor_webhook_secret = "whsec_1"
+            assert client.post("/webhooks/conductor", json=payload, headers={"X-Conductor-Secret": "ck_master"}).status_code == 401
+            ok = client.post("/webhooks/conductor", json=payload, headers={"X-Conductor-Secret": "whsec_1"})
+        assert ok.status_code == 200
+        dispatch.assert_called_once_with("tasks.data_refresh.refresh_company", company_id=COMPANY_A, reason="conductor_webhook")
+
+    def test_refresh_button_does_not_send_the_morning_email(self, client, db):
+        with patch("tasks.data_refresh.refresh_company") as job, \
+             patch("tasks.morning_briefing.send_morning_briefing_all") as briefing:
+            r = client.post("/api/dashboard/refresh", headers=_token())
+        assert r.status_code == 200
+        job.apply_async.assert_called_once()
+        briefing.apply_async.assert_not_called()

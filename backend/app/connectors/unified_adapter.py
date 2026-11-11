@@ -200,6 +200,12 @@ class UnifiedDataAdapter:
             raise RuntimeError("No QB connector configured")
         return await self._qb.get_purchase_orders()
 
+    async def get_vendors(self) -> list:
+        """Vendors (suppliers) from QuickBooks."""
+        if not self._qb:
+            raise RuntimeError("No QB connector configured")
+        return await self._qb.get_vendors()
+
     async def create_purchase_order(
         self,
         vendor_id: str,

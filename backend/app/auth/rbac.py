@@ -18,6 +18,7 @@ _DATA_PERMISSIONS: set[str] = {
     "view_all", "view_dashboard", "view_financials", "view_inventory",
     "view_orders", "view_customers", "view_own_accounts", "run_reports",
     "manage_inventory", "approve_actions", "trigger_actions",
+    "assign_accounts",   # decide which sales rep looks after which customer
 }
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {

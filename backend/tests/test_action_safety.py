@@ -42,6 +42,7 @@ class TestAccountRoleGate:
     def test_viewer_cannot_read_account_detail(self, client):
         # get_adapter is resolved as a dependency; stub it so the role check runs.
         app.dependency_overrides[get_adapter] = lambda: MagicMock()
+        app.dependency_overrides[get_db] = lambda: MagicMock()
         r = client.get(
             "/api/accounts/some-id",
             headers={"Authorization": f"Bearer {_token('viewer')}"},

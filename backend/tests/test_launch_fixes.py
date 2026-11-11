@@ -1429,3 +1429,187 @@ class TestInputSafetyHelpers:
         r = client.get("/auth/qbo/callback?error=https://evil.example/%0d%0aSet-Cookie:x", follow_redirects=False)
         assert r.headers["location"].endswith("qbo=error&reason=error")
         assert "evil" not in r.headers["location"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sales reps see only their own accounts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+REP_ID = "30000000-0000-0000-0000-000000000003"
+REP2_ID = "30000000-0000-0000-0000-000000000004"
+
+
+@pytest.fixture
+def accdb(mock_adapter):
+    db = FakeSupabase(
+        users=[
+            {"id": OWNER_ID, "company_id": COMPANY_A, "email": "o@a.test", "name": "Olive", "role": "owner", "is_active": True},
+            {"id": REP_ID, "company_id": COMPANY_A, "email": "r@a.test", "name": "Rita Rep", "role": "sales_rep", "is_active": True},
+            {"id": REP2_ID, "company_id": COMPANY_A, "email": "r2@a.test", "name": "Ravi Rep", "role": "sales_rep", "is_active": True},
+            {"id": OTHER_ID, "company_id": COMPANY_B, "email": "o@b.test", "name": "Bea", "role": "sales_rep", "is_active": True},
+        ],
+        account_assignments=[{"company_id": COMPANY_A, "qb_customer_id": "QB001", "user_id": REP_ID}],
+        audit_events=[],
+    )
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_adapter] = lambda: mock_adapter
+    yield db
+    app.dependency_overrides.clear()
+
+
+def _ids(resp):
+    return sorted(a["id"] for a in resp.json()["accounts"])
+
+
+class TestSalesRepsSeeOnlyTheirAccounts:
+    def test_owner_and_back_office_see_all(self, client, accdb):
+        assert _ids(client.get("/api/accounts/", headers=_token(role="owner", sub=OWNER_ID))) == ["QB001", "QB002", "QB003"]
+        assert len(_ids(client.get("/api/accounts/", headers=_token(role="back_office", sub=OWNER_ID)))) == 3
+
+    def test_rep_sees_only_assigned_accounts(self, client, accdb):
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP_ID))) == ["QB001"]
+
+    def test_rep_with_no_accounts_sees_none(self, client, accdb):
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP2_ID))) == []
+
+    def test_rep_cannot_open_someone_elses_account(self, client, accdb):
+        hdr = _token(role="sales_rep", sub=REP_ID)
+        assert client.get("/api/accounts/QB001", headers=hdr).status_code == 200
+        assert client.get("/api/accounts/QB002", headers=hdr).status_code == 404
+
+    def test_if_assignments_cannot_be_read_a_rep_sees_nothing(self, client, accdb):
+        accdb.fail_tables.add("account_assignments")
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP_ID))) == []
+        assert client.get("/api/accounts/QB001", headers=_token(role="sales_rep", sub=REP_ID)).status_code == 404
+
+    def test_another_companys_assignment_does_not_count(self, client, accdb):
+        accdb.tables["account_assignments"].append({"company_id": COMPANY_B, "qb_customer_id": "QB002", "user_id": REP_ID})
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP_ID))) == ["QB001"]
+
+    def test_manager_assigns_and_the_rep_then_sees_it(self, client, accdb):
+        mgr = _token(role="manager", sub=OWNER_ID)
+        r = client.put("/api/accounts/QB002/rep", json={"user_id": REP2_ID}, headers=mgr)
+        assert r.status_code == 200 and r.json()["assigned_rep"] == "Ravi Rep"
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP2_ID))) == ["QB002"]
+        listed = {a["id"]: a for a in client.get("/api/accounts/", headers=mgr).json()["accounts"]}
+        assert listed["QB002"]["assigned_rep"] == "Ravi Rep" and listed["QB003"]["assigned_rep"] is None
+        # reassigning moves it (one rep per account)
+        client.put("/api/accounts/QB002/rep", json={"user_id": REP_ID}, headers=mgr)
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP2_ID))) == []
+        # clearing
+        assert client.put("/api/accounts/QB002/rep", json={"user_id": None}, headers=mgr).status_code == 200
+        assert _ids(client.get("/api/accounts/", headers=_token(role="sales_rep", sub=REP_ID))) == ["QB001"]
+        assert [e["event_type"] for e in accdb.events()] == ["account_assigned", "account_assigned", "account_unassigned"]
+
+    @pytest.mark.parametrize("role", ["sales_rep", "back_office", "viewer"])
+    def test_only_owner_or_manager_can_assign(self, client, accdb, role):
+        assert client.put("/api/accounts/QB002/rep", json={"user_id": REP_ID}, headers=_token(role=role, sub=REP_ID)).status_code == 403
+        assert client.get("/api/accounts/reps", headers=_token(role=role, sub=REP_ID)).status_code == 403
+
+    def test_cannot_assign_to_another_companys_user_or_unknown_account(self, client, accdb):
+        mgr = _token(role="manager", sub=OWNER_ID)
+        assert client.put("/api/accounts/QB002/rep", json={"user_id": OTHER_ID}, headers=mgr).status_code == 404
+        assert client.put("/api/accounts/NOPE/rep", json={"user_id": REP_ID}, headers=mgr).status_code == 404
+        assert len(accdb.rows("account_assignments")) == 1
+
+    def test_reps_list_is_this_company_only(self, client, accdb):
+        reps = client.get("/api/accounts/reps", headers=_token(role="owner", sub=OWNER_ID)).json()["reps"]
+        assert {r["name"] for r in reps} == {"Olive", "Rita Rep", "Ravi Rep"}
+        assert reps[0]["role"] == "sales_rep"
+
+    @pytest.mark.asyncio
+    async def test_chat_only_loads_the_reps_own_customers(self, mock_adapter):
+        from app.api.chat import _fetch_data_for_intent
+        mine = await _fetch_data_for_intent("account_status", "how are my accounts?", mock_adapter,
+                                            role="sales_rep", allowed_customers={"QB001"})
+        assert [a["name"] for a in mine["accounts"]] == ["Acme Corp"]
+        everyone = await _fetch_data_for_intent("account_status", "how are my accounts?", mock_adapter,
+                                                role="owner", allowed_customers=None)
+        assert len(everyone["accounts"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_chat_cannot_be_asked_about_another_reps_account_by_name(self, mock_adapter):
+        from app.api.chat import _fetch_data_for_intent
+        data = await _fetch_data_for_intent("account_status", "what is the balance of Global Imports LLC?", mock_adapter,
+                                            role="sales_rep", allowed_customers={"QB001"})
+        assert "account" not in data and "Global Imports" not in str(data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Purchase-order drafts carry a real vendor and lines.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def podb():
+    from app.connectors.base import InventoryItem, Vendor
+    from decimal import Decimal
+    db = FakeSupabase(drafts=[], audit_events=[], policy_rules=[], company_features=[])
+    adapter = MagicMock()
+    adapter.get_inventory_merged = AsyncMock(return_value=[
+        {"qb_id": "ITEM1", "product_name": "Cola 12pk", "total_qty": 20, "weekly_sell_rate": 10.0, "purchase_cost": 5.0},
+        {"qb_id": "ITEM2", "product_name": "No-cost item", "total_qty": 0, "weekly_sell_rate": 0, "purchase_cost": 0},
+    ])
+    adapter.get_inventory_qb = AsyncMock(return_value=[
+        InventoryItem(id="ITEM1", qb_id="ITEM1", name="Cola 12pk", sku=None, quantity_on_hand=Decimal(20),
+                      unit_price=Decimal(9), purchase_cost=Decimal(5), reorder_point=None, preferred_vendor_id="V2"),
+    ])
+    adapter.get_vendors = AsyncMock(return_value=[
+        Vendor(id="V1", qb_id="V1", name="Zed Supply"), Vendor(id="V2", qb_id="V2", name="Acme Bottling")])
+    adapter.create_purchase_order = AsyncMock(return_value=MagicMock(qb_id="PO-9"))
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_adapter] = lambda: adapter
+    db.adapter = adapter
+    yield db
+    app.dependency_overrides.clear()
+
+
+class TestPurchaseOrderDrafts:
+    def test_options_offer_vendors_cost_and_a_suggested_quantity(self, client, podb):
+        r = client.get("/api/actions/po-options?item_id=ITEM1", headers=_token(sub=USER_ID)).json()
+        assert r["item"] == {"id": "ITEM1", "name": "Cola 12pk", "unit_cost": 5.0, "on_hand": 20.0,
+                             "weekly_sell_rate": 10.0, "suggested_qty": 60}   # 8 weeks × 10 − 20 on hand
+        assert [v["name"] for v in r["vendors"]] == ["Acme Bottling", "Zed Supply"]
+        assert r["preferred_vendor_id"] == "V2"
+
+    def test_draft_with_vendor_then_approval_creates_the_order_in_quickbooks(self, client, podb):
+        r = client.post("/api/actions/draft-po", json={"item_id": "ITEM1", "vendor_id": "V2", "qty": 40},
+                        headers=_token(sub=USER_ID))
+        assert r.status_code == 200 and r.json()["ready_for_quickbooks"] is True
+        d = podb.rows("drafts")[0]
+        assert d["content"]["vendor_name"] == "Acme Bottling" and d["content"]["total"] == 200.0
+        assert d["content"]["line_items"] == [{"item_id": "ITEM1", "product_name": "Cola 12pk",
+                                               "description": "Cola 12pk", "quantity": 40, "unit_cost": 5.0}]
+        out = _approve(client, draft_id=d["id"]).json()
+        assert out["execution_status"] == "executed" and "PO-9" in out["execution_detail"]
+        kw = podb.adapter.create_purchase_order.await_args.kwargs
+        assert kw["vendor_id"] == "V2" and kw["line_items"][0]["quantity"] == "40" and kw["line_items"][0]["unit_cost"] == "5.0"
+
+    def test_the_cost_comes_from_quickbooks_unless_the_user_overrides_it(self, client, podb):
+        client.post("/api/actions/draft-po", json={"item_id": "ITEM1", "vendor_id": "V1", "qty": 10, "unit_cost": 4.5},
+                    headers=_token(sub=USER_ID))
+        assert podb.rows("drafts")[0]["content"]["total"] == 45.0
+
+    def test_unknown_vendor_is_refused(self, client, podb):
+        r = client.post("/api/actions/draft-po", json={"item_id": "ITEM1", "vendor_id": "V999", "qty": 1}, headers=_token(sub=USER_ID))
+        assert r.status_code == 422 and podb.rows("drafts") == []
+
+    def test_without_a_vendor_the_draft_says_it_needs_manual_entry(self, client, podb):
+        r = client.post("/api/actions/draft-po", json={"item_id": "ITEM1"}, headers=_token(sub=USER_ID))
+        assert r.json()["ready_for_quickbooks"] is False and "by hand" in r.json()["message"]
+        d = podb.rows("drafts")[0]
+        assert "line_items" not in d["content"] and d["content"]["qty"] == 60
+        assert _approve(client, draft_id=d["id"]).json()["execution_status"] == "manual_required"
+        podb.adapter.create_purchase_order.assert_not_called()
+
+    def test_item_with_no_cost_on_file_is_never_sent_at_zero(self, client, podb):
+        client.post("/api/actions/draft-po", json={"item_id": "ITEM2", "vendor_id": "V1", "qty": 5}, headers=_token(sub=USER_ID))
+        c = podb.rows("drafts")[0]["content"]
+        assert "line_items" not in c and "no unit cost" in c["incomplete_reason"]
+
+    def test_spending_rule_applies_to_the_drafted_total(self, client, podb):
+        podb.tables["policy_rules"].append({"id": "11111111-2222-3333-4444-555555555555", "company_id": COMPANY_A,
+                                            "is_active": True, "priority": 1, "action_class": "commit",
+                                            "effect": "deny", "min_amount": 1000, "rule_name": "cap"})
+        client.post("/api/actions/draft-po", json={"item_id": "ITEM1", "vendor_id": "V2", "qty": 500}, headers=_token(sub=USER_ID))
+        assert _approve(client, draft_id=podb.rows("drafts")[0]["id"]).status_code == 403
+        podb.adapter.create_purchase_order.assert_not_called()

@@ -460,9 +460,26 @@ async def reject_draft(
 
 class DraftPORequest(BaseModel):
     item_id: str
-    product_name: str
-    qty: Optional[int] = None
+    product_name: str = ""
+    qty: Optional[float] = None
+    vendor_id: Optional[str] = None
+    unit_cost: Optional[float] = None
     notes: Optional[str] = None
+
+
+@router.get("/po-options")
+async def purchase_order_options(
+    item_id: str,
+    user: dict = Depends(require_permission("trigger_actions")),
+    adapter=Depends(get_adapter),
+):
+    """
+    What the "Draft PO" form needs for one item: its cost and suggested
+    quantity, the vendor QuickBooks lists as its usual supplier, and the
+    company's vendors to choose from.
+    """
+    from app.actions.po_builder import po_options
+    return await po_options(adapter, item_id)
 
 
 @router.post("/draft-po")
@@ -470,32 +487,56 @@ async def draft_purchase_order(
     body: DraftPORequest,
     user: dict = Depends(require_permission("trigger_actions")),
     db=Depends(get_db),
+    adapter=Depends(get_adapter),
 ):
     """
-    Create a Draft PO for a low/critical stock item.
-    Queued for human approval before any PO is actually sent to a vendor.
+    Create a purchase-order draft, queued for approval.
+
+    With a vendor, quantity and cost the draft carries the exact QuickBooks
+    lines, so approving it creates the order in QuickBooks. Without them it is
+    still queued, and approval tells the user to enter it by hand.
     """
+    from app.actions.po_builder import POBuildError, build_po_content
+
     company_id = user["company_id"]
     queue = ApprovalQueue(db)
+
+    try:
+        content = await build_po_content(
+            adapter,
+            item_id=body.item_id,
+            product_name=body.product_name,
+            vendor_id=body.vendor_id,
+            qty=body.qty,
+            unit_cost=body.unit_cost,
+            notes=body.notes,
+        )
+    except POBuildError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     draft_id = await queue.enqueue(
         company_id=company_id,
         action_type="purchase_order",
-        content={
-            "item_id":      body.item_id,
-            "product_name": body.product_name,
-            "qty":          body.qty,
-            "notes":        body.notes or f"Auto-drafted PO for low stock: {body.product_name}",
-        },
+        content=content,
         created_by=user["sub"],
     )
+    ready = bool(content.get("line_items"))
     write_audit_event(
         db, company_id=company_id, event_type="draft_created", actor_id=user["sub"],
         action_class="draft", capability="purchase_orders",
-        metadata={"draft_id": draft_id, "action_type": "purchase_order", "product_name": body.product_name, "qty": body.qty},
+        metadata={"draft_id": draft_id, "action_type": "purchase_order",
+                  "product_name": content.get("product_name"), "qty": content.get("qty"),
+                  "vendor_id": content.get("vendor_id"), "total": content.get("total")},
     )
+    name = content.get("product_name") or "this item"
     return {
         "status":   "queued",
         "draft_id": draft_id,
-        "message":  f"PO draft created for {body.product_name} — pending approval",
+        "ready_for_quickbooks": ready,
+        "message": (
+            f"PO draft for {name} is waiting for approval. Approving it will create the order in QuickBooks."
+            if ready else
+            f"PO draft for {name} is waiting for approval. It has no vendor or cost yet, "
+            "so it will need to be entered in QuickBooks by hand."
+        ),
     }

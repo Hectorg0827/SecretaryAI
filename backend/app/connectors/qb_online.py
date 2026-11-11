@@ -15,6 +15,7 @@ from app.connectors.base import (
     Payment,
     PurchaseOrder,
     QuickBooksAdapter,
+    Vendor,
 )
 
 QBO_BASE = "https://quickbooks.api.intuit.com/v3/company"
@@ -205,6 +206,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
             unit_price=Decimal(str(raw.get("UnitPrice", 0))),
             purchase_cost=Decimal(str(raw.get("PurchaseCost", 0))),
             reorder_point=Decimal(str(raw["ReorderPoint"])) if raw.get("ReorderPoint") else None,
+            preferred_vendor_id=(raw.get("PrefVendorRef") or {}).get("value") or None,
         )
 
     def _normalize_purchase_order(self, raw: dict) -> PurchaseOrder:
@@ -236,6 +238,17 @@ class QBOnlineAdapter(QuickBooksAdapter):
     async def get_inventory(self) -> list[InventoryItem]:
         raw = await self._query_all("Item", "Type = 'Inventory'")
         return [self._normalize_inventory_item(i) for i in raw]
+
+    async def get_vendors(self) -> list[Vendor]:
+        raw = await self._query_all("Vendor", "Active = True")
+        return [
+            Vendor(
+                id=v["Id"], qb_id=v["Id"],
+                name=v.get("DisplayName") or v.get("CompanyName") or "",
+                email=(v.get("PrimaryEmailAddr") or {}).get("Address"),
+            )
+            for v in raw
+        ]
 
     async def get_purchase_orders(self) -> list[PurchaseOrder]:
         raw = await self._query_all("PurchaseOrder")

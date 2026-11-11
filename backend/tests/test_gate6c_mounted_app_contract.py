@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.auth.jwt import create_access_token, decode_access_token
+from app.auth.jwt import create_access_token, decode_access_token, password_session_version
 from app.main import app
 from app.middleware import active_session_boundary as gate6c
 
@@ -53,9 +53,9 @@ class _Database:
         self.tables = {
             "users": [
                 {"id": "test-actor-1", "company_id": "test-tenant-a",
-                 "role": "manager", "is_active": True},
+                 "role": "manager", "is_active": True, "hashed_password": "synthetic-hash-test-actor-1"},
                 {"id": "test-finance-2", "company_id": "test-tenant-b",
-                 "role": "ar_specialist", "is_active": True},
+                 "role": "ar_specialist", "is_active": True, "hashed_password": "synthetic-hash-test-finance-2"},
             ],
             "companies": [
                 {"id": "test-tenant-a", "qb_type": None,
@@ -75,7 +75,8 @@ class _Database:
 def _jwt(*, identity="test-actor-1", company="test-tenant-a",
          role="manager", scope="access"):
     return create_access_token({"sub": identity, "company_id": company,
-                                "role": role, "scope": scope})
+                                "role": role, "scope": scope,
+                                "pwd": password_session_version(identity, f"synthetic-hash-{identity}")})
 
 
 def _get(client, path, token):

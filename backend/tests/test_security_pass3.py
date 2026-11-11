@@ -122,12 +122,15 @@ class TestRefreshHardening:
 
     def test_refresh_reloads_role_and_company_from_db(self):
         """A demoted user must not keep the old role for the refresh window."""
+        from app.auth.jwt import password_session_version
         client = TestClient(app)
-        tok = _raw_token(sub="u1", company_id="c-old", role="owner", scope="access")
+        tok = _raw_token(sub="u1", company_id="c-old", role="owner", scope="access",
+                         pwd=password_session_version("u1", "synthetic-password-hash"))
 
         db = MagicMock()
         db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[{"is_active": True, "role": "viewer", "company_id": "c-new"}]
+            data=[{"is_active": True, "role": "viewer", "company_id": "c-new",
+                   "hashed_password": "synthetic-password-hash"}]
         )
         with patch("supabase.create_client", return_value=db):
             r = client.post("/auth/refresh", json={"access_token": tok})

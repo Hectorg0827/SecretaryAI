@@ -9,6 +9,7 @@ Base path: /api/logistics
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date, timedelta
@@ -1025,7 +1026,7 @@ async def record_provisional_po_cost_assessment(
 def _load_finance_assessment(db, company_id: str, assessment_id: UUID) -> tuple[dict, dict, list[dict]]:
     assessments = _read_purchasing_rows(
         db.table("purchasing_cost_assessments")
-        .select("id,po_id,assessment_key,currency,fx_rate_to_usd,landed_cost_total,lines,"
+        .select("id,po_id,assessment_key,currency,fx_rate_to_usd::text,landed_cost_total::text,lines::text,"
                 "assertion_status,created_by,created_at")
         .eq("company_id", company_id).eq("id", str(assessment_id)).limit(2)
     )
@@ -1033,7 +1034,12 @@ def _load_finance_assessment(db, company_id: str, assessment_id: UUID) -> tuple[
         raise HTTPException(status_code=404, detail="Cost assessment not found")
     if len(assessments) != 1:
         raise HTTPException(status_code=503, detail="Ambiguous finance assessment")
+    # Preserve exact PostgreSQL NUMERIC values through JSON decoding.
     assessment = assessments[0]
+    try:
+        assessment = {**assessment, "lines": json.loads(assessment["lines"], parse_float=Decimal)}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Finance assessment lines unavailable") from exc
     orders = _read_purchasing_rows(
         db.table("purchasing_orders").select("id,po_number,supplier_ref,status")
         .eq("company_id", company_id).eq("id", assessment["po_id"]).limit(2)
@@ -1041,7 +1047,7 @@ def _load_finance_assessment(db, company_id: str, assessment_id: UUID) -> tuple[
     if len(orders) != 1:
         raise HTTPException(status_code=503, detail="Finance purchase order unavailable")
     lines = _read_purchasing_rows(
-        db.table("purchasing_order_lines").select("sku,qty_ordered,qty_received")
+        db.table("purchasing_order_lines").select("sku,qty_ordered::text,qty_received")
         .eq("company_id", company_id).eq("po_id", assessment["po_id"]).limit(101)
     )
     if len(lines) > 100:
@@ -1069,7 +1075,7 @@ async def preview_provisional_po_valuation(
     if documents:
         posted_lines = _read_purchasing_rows(
             db.table("warehouse_receipt_lines")
-            .select("receipt_id,sku,accepted_qty,damaged_qty,quarantined_qty")
+            .select("receipt_id,sku,accepted_qty::text,damaged_qty::text,quarantined_qty::text")
             .eq("company_id", company_id)
             .in_("receipt_id", [row["id"] for row in documents]).limit(1001)
         )

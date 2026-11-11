@@ -27,7 +27,8 @@ from app.auth.oauth import (
 )
 from app.auth.jwt import (
     AuthStoreUnavailable, claim_jti_once, create_access_token, decode_access_token,
-    hash_password, is_session_superseded, now_ms, revoke_token as revoke_session_token,
+    cache_session_stamp, hash_password, is_session_superseded, new_session_stamp, now_ms,
+    revoke_token as revoke_session_token,
     revoke_user_sessions, sessions_ended_since, verify_password,
 )
 from app.auth.rbac import get_current_user, oauth2_scheme, require_permission, session_token
@@ -130,7 +131,7 @@ async def qbo_callback(
     On error: redirect to an error page.
     """
     if error:
-        log.warning("QBO OAuth error: %s", error)
+        log.warning("QuickBooks sign-in was declined or failed at the provider")
         return RedirectResponse(url=f"{_app_base_url()}/settings?qbo=error&reason={_safe_reason(error)}")
 
     company_id = _state_pop(state)
@@ -230,7 +231,7 @@ async def gmail_callback(
     Stores encrypted access + refresh tokens, then redirects back to the app.
     """
     if error:
-        log.warning("Google OAuth error: %s", error)
+        log.warning("Google sign-in was declined or failed at the provider")
         return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason={_safe_reason(error)}")
 
     company_id = _state_pop(state)
@@ -323,7 +324,7 @@ async def outlook_callback(
     from app.auth.oauth import exchange_ms_code_for_tokens
 
     if error:
-        log.warning("Microsoft OAuth error: %s", _safe_reason(error))
+        log.warning("Microsoft sign-in was declined or failed at the provider")
         return RedirectResponse(url=f"{_app_base_url()}/settings?outlook=error&reason={_safe_reason(error)}")
 
     company_id = _state_pop(f"ms:{state}") if state else None
@@ -441,6 +442,8 @@ def _login_response(user: dict, request: Request | None = None, extra: dict | No
         "sub": user["id"],
         "company_id": user["company_id"],
         "role": user["role"],
+        # the stamp from the SAME row the role came from
+        "ss": user.get("session_stamp") or "",
     })
     return _session_reply(request, token, {
         **(extra or {}), "company_id": user["company_id"], "role": user["role"],
@@ -499,7 +502,7 @@ async def login(body: LoginRequest, request: Request, _=Depends(require_rate_lim
         try:
             result = (
                 db.table("users")
-                .select("id, company_id, role, is_active, totp_enabled, totp_secret")
+                .select("id, company_id, role, is_active, totp_enabled, totp_secret, session_stamp")
                 .eq("id", user_id)
                 .execute()
             )
@@ -544,7 +547,7 @@ async def login(body: LoginRequest, request: Request, _=Depends(require_rate_lim
     try:
         result = (
             db.table("users")
-            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret, email_verified_at")
+            .select("id, company_id, role, password_hash, is_active, totp_enabled, totp_secret, email_verified_at, session_stamp")
             .eq("email", body.email.lower().strip())
             .execute()
         )
@@ -596,6 +599,7 @@ async def login(body: LoginRequest, request: Request, _=Depends(require_rate_lim
         "sub": user["id"],
         "company_id": user["company_id"],
         "role": user["role"],
+        "ss": user.get("session_stamp") or "",   # same row as the role above
     })
 
     try:
@@ -705,7 +709,7 @@ async def refresh_token(request: Request, body: RefreshRequest | None = None):
         db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         result = (
             db.table("users")
-            .select("is_active, role, company_id")
+            .select("is_active, role, company_id, session_stamp")
             .eq("id", user_id)
             .execute()
         )
@@ -719,6 +723,11 @@ async def refresh_token(request: Request, body: RefreshRequest | None = None):
     current = result.data[0]
     role = current.get("role") or role
     company_id = current.get("company_id") or company_id
+    stamp = current.get("session_stamp") or ""
+    # The presented token must have been built from the account's current
+    # state: compared here against the row itself, not a cache.
+    if "ss" in payload and (payload.get("ss") or "") != stamp:
+        raise HTTPException(status_code=401, detail="Session ended; please log in again")
 
     # Single-use rotation, atomically: the presented token is consumed BEFORE a
     # new one is issued, so two requests with the same token cannot both get a
@@ -732,7 +741,7 @@ async def refresh_token(request: Request, body: RefreshRequest | None = None):
             raise HTTPException(status_code=503, detail="Sign-in service temporarily unavailable. Please try again shortly.")
 
     _refuse_if_account_changed(user_id, read_at)
-    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role})
+    new_token = create_access_token({"sub": user_id, "company_id": company_id, "role": role, "ss": stamp})
     if from_cookie or wants_cookie(request):
         return session_response(new_token, {"company_id": company_id, "role": role})
     return {"access_token": new_token, "token_type": "bearer"}
@@ -911,6 +920,7 @@ async def register(body: RegisterRequest, request: Request, _=Depends(require_ra
         "sub": user["id"],
         "company_id": company_id,
         "role": "owner",
+        "ss": user.get("session_stamp") or "",
     })
     log.info("New owner registered: user=%s company=%s", user["id"], company_id)
 
@@ -1256,9 +1266,13 @@ class ResetPasswordRequest(BaseModel):
 
 def _set_password(user: dict, new_password: str, extra: dict | None = None) -> None:
     """Store a new password hash and end every existing session of the user."""
+    stamp = new_session_stamp()
     update = {
         "password_hash": hash_password(new_password),
         "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        # New stamp in the SAME update: every token built from the old row
+        # (old password) stops matching.
+        "session_stamp": stamp,
         **(extra or {}),
     }
     try:
@@ -1269,6 +1283,8 @@ def _set_password(user: dict, new_password: str, extra: dict | None = None) -> N
         # … and again AFTER, so a sign-in that read the old password hash
         # while this was in flight cannot leave a session behind.
         revoke_user_sessions(user["id"])
+        cache_session_stamp(str(user["id"]), stamp)
+        user["session_stamp"] = stamp      # the caller's next token uses it
     except AuthStoreUnavailable:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again shortly.")
     except Exception as exc:

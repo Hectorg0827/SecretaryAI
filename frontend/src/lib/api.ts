@@ -253,7 +253,7 @@ export function describeApproval(r: ApprovalResult | undefined | null): { ok: bo
   if (r.execution_status === 'unknown') {
     // We cannot tell whether it happened. It leaves the queue (so it cannot be
     // sent twice by a second click) but is clearly NOT reported as success.
-    return { ok: false, done: true, message: r.execution_detail || 'We could not confirm whether this was completed. Please check before doing it again.' };
+    return { ok: false, done: true, message: (r.execution_detail || 'We could not confirm whether this was completed.') + ' It is now listed under "Needs checking".' };
   }
   if (r.execution_status === 'manual_required') {
     return { ok: true, done: true, message: r.execution_detail || 'Approved. Please complete this step yourself.' };
@@ -265,6 +265,16 @@ export interface PurchaseOrderOptions {
   item: { id: string; name: string; unit_cost: number; on_hand: number; weekly_sell_rate: number; suggested_qty: number } | null;
   vendors: { id: string; name: string }[];
   preferred_vendor_id: string | null;
+}
+
+/** An approved action whose outcome a person still has to confirm. */
+export interface NeedsCheckingItem {
+  id: string;
+  kind: 'email' | 'purchase_order' | 'other';
+  summary: string;
+  how_to_check: string;
+  detail: string | null;
+  attempted_at: string | null;
 }
 
 export interface TeamMember {
@@ -385,6 +395,9 @@ export const api = {
     pending: () => api.get<{ drafts: Draft[] }>('/api/actions/pending'),
     approve: (id: string, edits?: Record<string, unknown>) =>
       api.post<ApprovalResult>(`/api/actions/approve/${id}`, edits ? { edited_content: edits } : {}),
+    needsChecking: () => api.get<{ items: NeedsCheckingItem[] }>('/api/actions/needs-reconciliation'),
+    settle: (id: string, outcome: 'went_through' | 'did_not') =>
+      api.post<{ draft_id: string; status: string; outcome: string }>(`/api/actions/reconcile/${id}`, { outcome }),
     reject:  (id: string, reason?: string) =>
       api.post<void>(`/api/actions/reject/${id}`, { reason: reason ?? 'Rejected by user' }),
   },

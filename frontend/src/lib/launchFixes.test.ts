@@ -111,6 +111,7 @@ describe('an unknown outcome', () => {
     expect(r.ok).toBe(false);
     expect(r.done).toBe(true);
     expect(r.message).toContain('Sent folder');
+    expect(r.message).toContain('Needs checking');
   });
 });
 

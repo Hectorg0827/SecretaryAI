@@ -24,7 +24,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_db
-from app.auth.jwt import AuthStoreUnavailable, revoke_user_sessions
+from app.auth.jwt import (
+    AuthStoreUnavailable, cache_session_stamp, new_session_stamp, revoke_user_sessions,
+)
 from app.auth.rbac import ROLE_PERMISSIONS, require_permission
 from app.utils.audit import write_audit_event
 from app.utils.mailer import email_configured, send_system_email
@@ -254,6 +256,15 @@ async def update_user(
     if not update:
         return {"user": _public(target)}
 
+    # A reduction in access writes a new session stamp IN THE SAME UPDATE as
+    # the change. Tokens carry the stamp of the row they were built from, so
+    # any token built from the old row — including one a sign-in is minting
+    # at this very moment — stops being accepted.
+    new_stamp = None
+    if role_changes or deactivating:
+        new_stamp = new_session_stamp()
+        update["session_stamp"] = new_stamp
+
     # End their sessions BEFORE saving a reduction in access. If that cannot be
     # recorded we stop: otherwise the person would keep their old access until
     # their token expired.
@@ -280,6 +291,7 @@ async def update_user(
     if role_changes or deactivating:
         try:
             revoke_user_sessions(str(target["id"]))
+            cache_session_stamp(str(target["id"]), new_stamp)
         except AuthStoreUnavailable:
             log.error("Post-change session cut-off failed for user %s", log_safe(target["id"]))
             raise HTTPException(
@@ -292,7 +304,7 @@ async def update_user(
     write_audit_event(
         db, company_id=company_id, event_type=event, actor_id=user["sub"],
         before_snapshot={"role": target.get("role"), "is_active": target.get("is_active", True)},
-        after_snapshot={k: v for k, v in update.items() if k in ("role", "is_active")},
+        after_snapshot={k: v for k, v in update.items() if k in ("role", "is_active")},  # never the stamp
         metadata={"user_id": str(target["id"]), "email": target.get("email")},
     )
     row = (saved.data or [None])[0] or {**target, **update}

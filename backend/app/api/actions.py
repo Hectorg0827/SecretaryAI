@@ -245,6 +245,90 @@ async def list_pending_actions(
     return {"drafts": drafts, "company_id": company_id}
 
 
+def _reconciliation_item(draft: dict) -> dict:
+    """What a person needs in order to go and check one uncertain action."""
+    content = draft.get("content") or {}
+    action_type = draft.get("action_type") or ""
+    if action_type in EMAIL_ACTION_TYPES:
+        to = content.get("to") or content.get("to_email") or "the recipient"
+        kind, summary = "email", f"Email to {to}: {content.get('subject') or '(no subject)'}"
+        how = (f"Open the Sent folder of the connected mailbox and look for a message to {to} "
+               "sent at about the time shown. If it is there, it went through.")
+    elif action_type in PURCHASE_ORDER_ACTION_TYPES:
+        vendor = content.get("vendor_name") or content.get("vendor_id") or "the vendor"
+        total = content.get("total")
+        amount = f" for ${float(total):,.2f}" if isinstance(total, (int, float)) else ""
+        kind, summary = "purchase_order", f"Purchase order to {vendor}{amount} ({content.get('product_name') or 'items'})"
+        how = (f"In QuickBooks, open Purchase Orders and look for a new order to {vendor} dated today"
+               f"{amount}. If it is there, it went through.")
+    else:
+        kind, summary = "other", action_type.replace("_", " ")
+        how = "Check the system this action was for."
+    return {
+        "id": draft.get("id"),
+        "action_type": action_type,
+        "kind": kind,
+        "summary": summary,
+        "how_to_check": how,
+        "detail": draft.get("execution_detail"),
+        "attempted_at": draft.get("executed_at") or draft.get("reviewed_at"),
+        "approved_by": draft.get("reviewed_by"),
+        "content": content,
+    }
+
+
+@router.get("/needs-reconciliation")
+async def list_needs_reconciliation(
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """
+    Approved actions whose outcome could not be confirmed (the connection
+    dropped, the service answered with an error after the request was sent…).
+    They stay here — never shown as simply "approved" — until a person checks
+    and settles each one.
+    """
+    queue = ApprovalQueue(db)
+    items = await queue.get_needs_review(user["company_id"])
+    return {"items": [_reconciliation_item(d) for d in items]}
+
+
+class ReconcileRequest(BaseModel):
+    outcome: str   # "went_through" | "did_not"
+
+
+@router.post("/reconcile/{draft_id}")
+async def reconcile_draft(
+    draft_id: str,
+    body: ReconcileRequest,
+    user: dict = Depends(require_permission("approve_actions")),
+    db=Depends(get_db),
+):
+    """
+    A person has checked an uncertain action and records what happened.
+    Nothing is sent or created here. "did_not" only puts the draft back in the
+    approval queue; sending it again still takes a fresh approval.
+    """
+    if body.outcome not in ("went_through", "did_not"):
+        raise HTTPException(status_code=422, detail="outcome must be 'went_through' or 'did_not'")
+    went_through = body.outcome == "went_through"
+    queue = ApprovalQueue(db)
+    try:
+        settled = await queue.reconcile(draft_id, user["company_id"], user["sub"], went_through)
+    except Exception as exc:
+        log.error("Reconcile failed for draft %s: %s", log_safe(draft_id), log_safe(exc))
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+    if not settled:
+        # not this company's, not found, or already settled — all look the same
+        raise HTTPException(status_code=404, detail="Nothing to settle for that item")
+    write_audit_event(
+        db, company_id=user["company_id"], event_type="draft_reconciled", actor_id=user["sub"],
+        action_class="commit",
+        metadata={"draft_id": draft_id, "outcome": body.outcome},
+    )
+    return {"draft_id": draft_id, "status": "approved" if went_through else "pending", "outcome": body.outcome}
+
+
 class ApprovalRequest(BaseModel):
     edited_content: Optional[dict] = None
 

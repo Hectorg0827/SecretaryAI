@@ -238,6 +238,80 @@ def is_session_superseded(payload: dict) -> bool:
     return int(issued_ms) <= valid_from_ms
 
 
+# ── Per-user session stamp ────────────────────────────────────────────────────
+# users.session_stamp is rewritten in the same database update that reduces a
+# user's access. A token carries the stamp (`ss`) that was on the row it was
+# built from — read in the same query as the role — and is accepted only while
+# that is still the row's stamp. So a token built from a pre-change copy of
+# the row can never outlive the change, whatever the timing of the sign-in.
+#
+# The current stamp is cached in Redis for a short time; the database is the
+# source of truth. The code that changes an account writes the new stamp to
+# the cache straight away, so the change takes effect immediately; if that
+# cache write fails, the old value expires within _STAMP_CACHE_SECONDS.
+
+_STAMP_PREFIX = "session_stamp:"
+_STAMP_CACHE_SECONDS = 60
+
+
+def new_session_stamp() -> str:
+    import secrets
+    return secrets.token_hex(8)
+
+
+def cache_session_stamp(user_id: str, stamp: str) -> None:
+    """Publish a user's current stamp. Raises AuthStoreUnavailable on failure."""
+    try:
+        _redis().setex(f"{_STAMP_PREFIX}{user_id}", _STAMP_CACHE_SECONDS, f"v:{stamp or ''}")
+    except Exception as exc:
+        raise AuthStoreUnavailable("session store unavailable") from exc
+
+
+def _load_session_stamp(user_id: str) -> str:
+    """The stamp on the user's row right now ('' if none / user gone)."""
+    from app.api import deps
+    result = deps.get_db().table("users").select("session_stamp, is_active").eq("id", user_id).execute()
+    rows = result.data
+    if not isinstance(rows, list) or not rows:
+        return "\x00missing"            # no such user: matches no token
+    if rows[0].get("is_active") is False:
+        return "\x00inactive"           # deactivated: matches no token
+    return rows[0].get("session_stamp") or ""
+
+
+def current_session_stamp(user_id: str) -> str:
+    """Current stamp for a user (cache, else database). Raises AuthStoreUnavailable."""
+    key = f"{_STAMP_PREFIX}{user_id}"
+    try:
+        cached = _redis().get(key)
+    except Exception as exc:
+        if not _fail_open():
+            raise AuthStoreUnavailable("session store unavailable") from exc
+        cached = None        # operator opted in: fall through to the database
+    if isinstance(cached, str) and cached.startswith("v:"):
+        return cached[2:]
+    try:
+        stamp = _load_session_stamp(user_id)
+    except Exception as exc:
+        raise AuthStoreUnavailable("could not verify session") from exc
+    try:
+        _redis().setex(key, _STAMP_CACHE_SECONDS, f"v:{stamp}")
+    except Exception:
+        pass
+    return stamp
+
+
+def session_stamp_ok(payload: dict) -> bool:
+    """
+    True if the token's stamp is still the user's stamp. Tokens without an
+    `ss` claim (issued before stamps existed) are covered by the per-user
+    cut-off above instead. Raises AuthStoreUnavailable if it cannot be checked.
+    """
+    if "ss" not in payload or not payload.get("sub"):
+        return True
+    return current_session_stamp(str(payload["sub"])) == (payload.get("ss") or "")
+
+
 # ── Passwords ────────────────────────────────────────────────────────────────
 # bcrypt is used directly. (passlib 1.7.4 — unmaintained — breaks with
 # bcrypt >= 4.1/5.0: every hash() raised, so nobody could register or log in

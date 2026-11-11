@@ -143,7 +143,12 @@ class ApprovalQueue:
     async def finish(self, draft_id: str, company_id: str, edited: bool,
                      execution_status: str, execution_detail: str = "") -> str:
         """Record the outcome of an executed draft. Returns the final status."""
-        final_status = "edited_and_approved" if edited else "approved"
+        # An outcome we could not confirm is never recorded as plain "approved":
+        # it waits in the "needs checking" list until a person confirms it.
+        if execution_status == "unknown":
+            final_status = "needs_review"
+        else:
+            final_status = "edited_and_approved" if edited else "approved"
         self._db.table("drafts").update({
             "status": final_status,
             "execution_status": execution_status,
@@ -159,6 +164,40 @@ class ApprovalQueue:
             "execution_status": "failed",
             "execution_detail": (execution_detail or "")[:1000],
         }).eq("id", draft_id).eq("company_id", company_id).eq("status", "executing").execute()
+
+    async def get_needs_review(self, company_id: str) -> list[dict]:
+        """Approved actions whose outcome a person still has to confirm."""
+        result = (
+            self._db.table("drafts").select("*")
+            .eq("company_id", company_id).eq("status", "needs_review")
+            .order("created_at", desc=True).execute()
+        )
+        return result.data or []
+
+    async def reconcile(self, draft_id: str, company_id: str, reviewed_by: str, went_through: bool) -> bool:
+        """
+        A person checked and says what happened. Atomic on status='needs_review'
+        so two people cannot settle the same item differently.
+          went_through=True  → approved / executed
+          went_through=False → back to pending (they may approve it again)
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        update = {
+            "status": "approved" if went_through else "pending",
+            "execution_status": "executed" if went_through else "failed",
+            "execution_detail": (
+                "Confirmed by a person: it went through." if went_through
+                else "Checked by a person: it did not go through. It can be approved again."
+            ),
+            "reconciled_by": reviewed_by,
+            "reconciled_at": now,
+        }
+        result = (
+            self._db.table("drafts").update(update)
+            .eq("id", draft_id).eq("company_id", company_id).eq("status", "needs_review")
+            .execute()
+        )
+        return bool(getattr(result, "data", None))
 
     def expire_old_drafts(self, company_id: str) -> int:
         """

@@ -1297,7 +1297,7 @@ class TestUncertainOutcomeIsNotRetried:
         assert r.json()["execution_status"] == "unknown"
         assert "before creating it again" in r.json()["execution_detail"]
         d = fdb.rows("drafts")[0]
-        assert d["status"] == "approved" and d["execution_status"] == "unknown"
+        assert d["status"] == "needs_review" and d["execution_status"] == "unknown"
         # a second approval cannot create a second order
         assert _approve(client).json().get("already_processed") is True
         assert fdb.adapter.create_purchase_order.await_count == 1
@@ -1308,7 +1308,7 @@ class TestUncertainOutcomeIsNotRetried:
         fdb.adapter.send_email_reply = AsyncMock(side_effect=self._status_error(502))
         r = _approve(client)
         assert r.json()["execution_status"] == "unknown" and "Sent folder" in r.json()["execution_detail"]
-        assert fdb.rows("drafts")[0]["status"] == "approved"
+        assert fdb.rows("drafts")[0]["status"] == "needs_review"
 
     @pytest.mark.parametrize("make", [
         lambda self: self._status_error(400),
@@ -1884,3 +1884,128 @@ class TestCookieSessions:
             assert session_cookie._cookie_args()["secure"] is False
             gs.return_value.debug = False
             assert session_cookie._cookie_args()["secure"] is True
+
+
+class TestNeedsCheckingList:
+    """An uncertain outcome stays visible until a person settles it."""
+
+    def _uncertain_po(self, client, fdb):
+        fdb.tables["drafts"].append(_draft(action_type="purchase_order", content={
+            "vendor_id": "V1", "vendor_name": "Acme Bottling", "product_name": "Cola 12pk", "total": 300.0,
+            "line_items": [{"item_id": "i", "quantity": 60, "unit_cost": 5}]}))
+        fdb.adapter.create_purchase_order = AsyncMock(side_effect=httpx.ReadTimeout("no answer"))
+        out = _approve(client).json()
+        assert out["status"] == "needs_review"
+        return out
+
+    def test_it_is_never_labelled_approved_and_is_listed_with_how_to_check(self, client, fdb):
+        self._uncertain_po(client, fdb)
+        assert fdb.rows("drafts")[0]["status"] == "needs_review"
+        items = client.get("/api/actions/needs-reconciliation", headers=_token(sub=USER_ID)).json()["items"]
+        assert len(items) == 1
+        it = items[0]
+        assert it["id"] == "d-1" and it["kind"] == "purchase_order"
+        assert "Acme Bottling" in it["summary"] and "$300.00" in it["summary"]
+        assert "QuickBooks" in it["how_to_check"] and it["approved_by"] == USER_ID
+        # and it is not in the ordinary pending list
+        assert client.get("/api/actions/pending", headers=_token(sub=USER_ID)).json()["drafts"] == []
+
+    def test_email_item_says_where_to_look(self, client, fdb):
+        fdb.tables["drafts"].append(_draft())
+        fdb.adapter.send_email_reply = AsyncMock(side_effect=httpx.ReadTimeout("no answer"))
+        _approve(client)
+        it = client.get("/api/actions/needs-reconciliation", headers=_token(sub=USER_ID)).json()["items"][0]
+        assert it["kind"] == "email" and "buyer@acme.com" in it["summary"] and "Sent folder" in it["how_to_check"]
+
+    def test_confirming_it_went_through_closes_it_without_sending_anything(self, client, fdb):
+        self._uncertain_po(client, fdb)
+        r = client.post("/api/actions/reconcile/d-1", json={"outcome": "went_through"}, headers=_token(sub=USER_ID))
+        assert r.status_code == 200
+        d = fdb.rows("drafts")[0]
+        assert d["status"] == "approved" and d["execution_status"] == "executed" and d["reconciled_by"] == USER_ID
+        assert fdb.adapter.create_purchase_order.await_count == 1          # nothing new was sent
+        assert fdb.events()[-1]["event_type"] == "draft_reconciled"
+        # settled once
+        assert client.post("/api/actions/reconcile/d-1", json={"outcome": "did_not"}, headers=_token(sub=USER_ID)).status_code == 404
+
+    def test_saying_it_did_not_only_requeues_it_for_a_fresh_approval(self, client, fdb):
+        self._uncertain_po(client, fdb)
+        client.post("/api/actions/reconcile/d-1", json={"outcome": "did_not"}, headers=_token(sub=USER_ID))
+        assert fdb.rows("drafts")[0]["status"] == "pending"
+        assert fdb.adapter.create_purchase_order.await_count == 1          # still nothing new sent
+        fdb.adapter.create_purchase_order = AsyncMock(return_value=MagicMock(qb_id="PO-2"))
+        assert _approve(client).json()["execution_status"] == "executed"   # only a new approval sends
+
+    def test_other_companies_and_non_approvers_cannot_see_or_settle(self, client, fdb):
+        self._uncertain_po(client, fdb)
+        other = _token(company_id=COMPANY_B, sub=USER_ID)
+        assert client.get("/api/actions/needs-reconciliation", headers=other).json()["items"] == []
+        assert client.post("/api/actions/reconcile/d-1", json={"outcome": "went_through"}, headers=other).status_code == 404
+        assert client.get("/api/actions/needs-reconciliation", headers=_token(role="sales_rep", sub=USER_ID)).status_code == 403
+        assert fdb.rows("drafts")[0]["status"] == "needs_review"
+
+
+class TestSessionStamp:
+    """A token is only good while it matches the account state it was built from."""
+
+    def test_token_carries_the_stamp_of_the_row_it_was_built_from(self, client, adb):
+        from app.auth.jwt import decode_access_token
+        adb.tables["users"][1]["session_stamp"] = "abc123"
+        tok = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        assert decode_access_token(tok)["ss"] == "abc123"
+
+    def test_token_minted_from_the_old_row_after_every_check_is_still_refused(self, client, adb):
+        """
+        The reviewer's interleaving: the sign-in read the OLD row and passed every
+        check, the demotion then committed, and only afterwards was the token
+        minted. Its issue time is newer than any cut-off — the stamp stops it.
+        """
+        import time
+        from app.auth.jwt import create_access_token
+        owner = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        old_row = dict([u for u in adb.rows("users") if u["id"] == STAFF_ID][0])      # read before the change
+        assert client.patch(f"/api/users/{STAFF_ID}", json={"role": "viewer"}, headers=_bearer(owner)).status_code == 200
+        time.sleep(0.01)                                                              # well after both cut-offs
+        late = create_access_token({"sub": STAFF_ID, "company_id": COMPANY_A, "role": old_row["role"],
+                                    "ss": old_row.get("session_stamp") or ""})
+        assert client.get("/auth/me", headers=_bearer(late)).status_code == 401
+        assert client.post("/auth/refresh", json={"access_token": late}).status_code == 401
+        # a sign-in built from the NEW row works and has the new role
+        fresh = _login(client, "staff@a.test", "Staff-pass1").json()
+        assert fresh["role"] == "viewer"
+        assert client.get("/auth/me", headers=_bearer(fresh["access_token"])).status_code == 200
+
+    def test_stamp_is_written_in_the_same_update_as_the_change(self, client, adb):
+        owner = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        before = [u for u in adb.rows("users") if u["id"] == STAFF_ID][0].get("session_stamp")
+        client.patch(f"/api/users/{STAFF_ID}", json={"is_active": False}, headers=_bearer(owner))
+        after = [u for u in adb.rows("users") if u["id"] == STAFF_ID][0]
+        assert after["is_active"] is False and after["session_stamp"] and after["session_stamp"] != before
+        # a rename alone does not sign anyone out
+        client.patch(f"/api/users/{OWNER_ID}", json={"name": "Olive O."}, headers=_bearer(owner))
+        assert client.get("/auth/me", headers=_bearer(owner)).status_code == 200
+
+    def test_even_if_the_cache_was_never_updated_the_database_decides(self, client, adb):
+        """Cache write lost: once the short cache expires, the row's stamp is what counts."""
+        import app.auth.jwt as jwt_mod
+        tok = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 200
+        [u for u in adb.rows("users") if u["id"] == STAFF_ID][0]["session_stamp"] = "changed-elsewhere"
+        jwt_mod._redis_client.delete(f"session_stamp:{STAFF_ID}")                    # cache expired
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 401
+
+    def test_deactivated_user_matches_no_token_even_with_the_right_stamp(self, client, adb):
+        import app.auth.jwt as jwt_mod
+        tok = _login(client, "staff@a.test", "Staff-pass1").json()["access_token"]
+        [u for u in adb.rows("users") if u["id"] == STAFF_ID][0]["is_active"] = False   # changed outside the API
+        jwt_mod._redis_client.delete(f"session_stamp:{STAFF_ID}")
+        assert client.get("/auth/me", headers=_bearer(tok)).status_code == 401
+
+    def test_password_change_rewrites_the_stamp(self, client, adb):
+        tok = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        other = _login(client, "owner@a.test", "Owner-pass1").json()["access_token"]
+        r = client.post("/auth/change-password", headers=_bearer(tok),
+                        json={"current_password": "Owner-pass1", "new_password": "Fresh-pass9"})
+        assert r.status_code == 200
+        assert client.get("/auth/me", headers=_bearer(other)).status_code == 401
+        assert client.get("/auth/me", headers=_bearer(r.json()["access_token"])).status_code == 200

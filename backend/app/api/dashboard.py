@@ -81,6 +81,16 @@ async def get_dashboard_summary(
     except Exception as exc:
         log.warning("Dashboard summary: pending count failed: %s", exc)
 
+    needs_review_count = 0
+    try:
+        nr = (
+            db.table("drafts").select("id", count="exact")
+            .eq("company_id", company_id).eq("status", "needs_review").execute()
+        )
+        needs_review_count = nr.count or 0
+    except Exception as exc:
+        log.warning("Dashboard summary: needs-review count failed: %s", exc)
+
     # ── Unread email count — always live (real-time inbox) ─────────────────
     unread_count = 0
     try:
@@ -102,6 +112,8 @@ async def get_dashboard_summary(
         "sales_30d":        round(float(sales_30d), 2) if "view_financials" in perms else None,
         # Approval count visible to approvers only
         "pending_actions":  pending_count if "approve_actions" in perms else None,
+        # Approved actions whose outcome a person still has to confirm
+        "needs_review_actions": needs_review_count if "approve_actions" in perms else None,
         # Email count visible to roles with trigger_actions only
         "unread_emails":    unread_count if "trigger_actions" in perms else None,
         # Cache metadata — frontend uses this to show "Data as of X"

@@ -75,7 +75,9 @@ def has_permission(role: str | None, permission: str) -> bool:
 
 
 def get_current_user(token: str = Depends(session_token)) -> dict:
-    from app.auth.jwt import AuthStoreUnavailable, is_session_superseded, is_token_revoked
+    from app.auth.jwt import (
+        AuthStoreUnavailable, is_session_superseded, is_token_revoked, session_stamp_ok,
+    )
     payload = decode_access_token(token)
     if not payload:
         raise HTTPException(
@@ -111,6 +113,14 @@ def get_current_user(token: str = Depends(session_token)) -> dict:
         # Deactivated / demoted / password-changed users lose their sessions
         # immediately, not when the token happens to expire.
         if is_session_superseded(payload):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session ended; please sign in again",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        # The token must have been built from the user's CURRENT account state
+        # (role, active, password) — see session stamps in app/auth/jwt.py.
+        if not session_stamp_ok(payload):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session ended; please sign in again",

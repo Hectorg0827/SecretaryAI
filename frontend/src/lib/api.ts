@@ -21,7 +21,12 @@ async function _tryRefresh(): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: token }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Refresh tokens work once. If another browser tab refreshed first, it
+      // has already stored a newer token — use that instead of signing out.
+      const latest = getToken();
+      return latest && latest !== token ? latest : null;
+    }
     const data = await res.json();
     if (data.access_token) {
       localStorage.setItem('secretary_token', data.access_token);

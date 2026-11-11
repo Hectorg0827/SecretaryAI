@@ -81,3 +81,22 @@ describe('password rules match the server', () => {
     expect(passwordProblem('Abcdefg1', 'Abcdefg1')).toBeNull();
   });
 });
+
+describe('two tabs refreshing at once', () => {
+  it('uses the token the other tab already stored instead of signing out', async () => {
+    localStorage.setItem('secretary_token', 'old-token');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(401, { detail: 'expired' }))
+      // our refresh loses the race: the other tab used the token first …
+      .mockImplementationOnce(async () => {
+        localStorage.setItem('secretary_token', 'token-from-other-tab');
+        return jsonResponse(401, { detail: 'Token already used; please log in again' });
+      })
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.get<{ ok: boolean }>('/api/dashboard/summary')).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls[2][1].headers.Authorization).toBe('Bearer token-from-other-tab');
+    expect(localStorage.getItem('secretary_token')).toBe('token-from-other-tab');
+  });
+});

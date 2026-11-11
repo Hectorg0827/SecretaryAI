@@ -65,6 +65,18 @@ npm run tauri:build:macos
 npm run tauri:build:macos-arm
 ```
 
+### Settings you must decide before real customers
+See `backend/.env.example` for every setting. The ones that matter for safety:
+
+| Setting | Recommended | What it does |
+|---|---|---|
+| `ENCRYPTION_KEY` | set it | Separate key for encrypting stored QuickBooks/Google/Microsoft tokens |
+| `COMPUTER_USE_ENABLED` | `false` | Screen control is not safe for a shared deployment |
+| `CONDUCTOR_WEBHOOK_SECRET` | set it | Its own secret for Conductor webhooks (not the API key) |
+| `SENDGRID_API_KEY` | set it | Needed for invitations, password resets, briefings and alerts |
+| `BILLING_ENFORCED` | `true` once Stripe works | Turns the paywall on (new companies get a 14-day trial) |
+| `REQUIRE_EMAIL_VERIFICATION` | `true` once email works | New accounts confirm their email before signing in |
+
 ### Database
 There is one source of truth for the database: `supabase/migrations/`.
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Loader2, AlertCircle, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { LolaOrb } from '../components/lola/LolaOrb';
+import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { LionBrand } from '../components/lola/LionBrand';
 import { api } from '../lib/api';
 
@@ -70,7 +71,7 @@ export function Login() {
       <div className="relative z-10 mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-4 md:min-h-[75vh] md:grid-cols-[1fr_460px] md:items-center md:px-10 md:pt-0">
         <section className="hidden max-w-lg flex-col items-start gap-6 md:flex" aria-label="Lola business assistant">
           <div className="w-36"><LolaOrb /></div>
-          <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-[#e5c38b]"><Sparkles size={14} /> Meet Lola</div>
+          <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-[#e5c38b]"><LolaGlyph size={16} /> Meet Lola</div>
           <h1 className="text-5xl font-semibold leading-[1.08] tracking-[-0.045em] text-white">
             Your business.<br /><span className="text-[#dfc08c]">One conversation.</span>
           </h1>

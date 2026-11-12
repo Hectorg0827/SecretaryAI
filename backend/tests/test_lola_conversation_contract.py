@@ -209,3 +209,22 @@ async def test_stream_reports_persistence_failure_instead_of_claiming_completion
         payload = "".join(str(chunk) for chunk in [part async for part in response.body_iterator])
     assert "Conversation could not be saved" in payload
     assert '"done": true' not in payload
+
+
+@pytest.mark.asyncio
+async def test_general_business_context_accepts_object_invoices_with_zero_and_empty_items():
+    from datetime import date
+    from decimal import Decimal
+    from app.api.chat import _fetch_data_for_intent
+    inv = SimpleNamespace(
+        customer_id="synthetic-customer", customer_name="Synthetic",
+        date=date.today(), total=Decimal("0"), line_items=[],
+    )
+    adapter = SimpleNamespace(
+        get_all_customers=AsyncMock(return_value=[]),
+        get_orders_last_n_days=AsyncMock(return_value=[inv]),
+        get_inventory_merged=AsyncMock(return_value=[]),
+    )
+    data = await _fetch_data_for_intent("general_question", "Today's status", adapter)
+    assert data["sales_summary"]["order_count"] == 1
+    assert data["sales_summary"]["total_revenue"] == 0

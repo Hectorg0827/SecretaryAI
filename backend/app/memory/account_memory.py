@@ -93,8 +93,18 @@ def extract_and_save_memory(db, company_id: str, account_name: str, ai_response:
         except Exception as exc:
             log.warning("Memory extraction failed for %s: %s", account_name, exc)
 
+    # The chat endpoint already runs inside an async event loop. Never call
+    # run_until_complete() or asyncio.run() inside that loop: both raise and
+    # silently discard account-memory work. Schedule it instead.
     try:
-        asyncio.get_event_loop().run_until_complete(_extract())
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        import asyncio as _asyncio
-        _asyncio.run(_extract())
+        asyncio.run(_extract())
+    else:
+        task = loop.create_task(_extract())
+        def _observe(done_task):
+            try:
+                done_task.result()
+            except Exception:
+                log.exception("Account memory background extraction failed")
+        task.add_done_callback(_observe)

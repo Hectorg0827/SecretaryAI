@@ -550,48 +550,89 @@ export const api = {
       api.get('/api/logistics/describe'),
   },
 
-  /** Streaming chat — async generator of SSE events with text and conversationId */
+  /** SSE conversation stream: token refresh, complete-frame parsing and fail-closed completion. */
   async *streamChat(
     message: string,
     conversationId?: string,
   ): AsyncGenerator<{ text: string; conversationId?: string }> {
-    const token = getToken();
-    const response = await fetch(`${API_BASE}/api/chat/message`, {
+    const body = JSON.stringify({ message, conversation_id: conversationId });
+    const call = (token: string | null) => fetch(`${API_BASE}/api/chat/message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ message, conversation_id: conversationId }),
+      body,
     });
 
-    if (!response.ok || !response.body) {
-      throw new Error(`Chat request failed: ${response.status}`);
+    let response = await call(getToken());
+    if (response.status === 401) {
+      if (!_refreshing) {
+        _refreshing = _tryRefresh().finally(() => { _refreshing = null; });
+      }
+      const newToken = await _refreshing;
+      if (!newToken) {
+        localStorage.removeItem('secretary_token');
+        localStorage.removeItem('secretary_company_id');
+        localStorage.removeItem('secretary_role');
+        window.location.href = '/login';
+        throw new Error('Session expired. Please sign in again.');
+      }
+      response = await call(newToken);
     }
+    if (!response.ok) throw await responseError(response);
+    if (!response.body) throw new Error('Lola response has no stream.');
 
-    const reader  = response.body.getReader();
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let completed = false;
+    let hasText = false;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';   // keep incomplete last line
-      for (const line of lines) {
-        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) buffer += decoder.decode();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        if (done && buffer) {
+          lines.push(buffer);
+          buffer = '';
+        }
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (!data || data === '[DONE]') continue;
+          let payload: Record<string, unknown>;
           try {
-            const payload = JSON.parse(line.slice(6));
-            yield {
-              text: payload.text ?? '',
-              conversationId: payload.conversation_id,
-            };
+            const value = JSON.parse(data) as unknown;
+            if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+            payload = value as Record<string, unknown>;
           } catch {
-            // non-JSON line — skip
+            continue;
+          }
+          if (typeof payload.error === 'string') {
+            throw new Error('Lola could not complete the response.');
+          }
+          if (payload.done === true) completed = true;
+          const conversationId = typeof payload.conversation_id === 'string'
+            ? payload.conversation_id : undefined;
+          if (typeof payload.text === 'string' && payload.text.length > 0) {
+            hasText = true;
+            yield { text: payload.text, conversationId };
+          } else if (conversationId) {
+            yield { text: '', conversationId };
           }
         }
+        if (done) break;
       }
+    } finally {
+      reader.releaseLock();
+    }
+    if (!completed || !hasText) {
+      throw new Error('Lola response was incomplete. Please try again.');
     }
   },
+
 };

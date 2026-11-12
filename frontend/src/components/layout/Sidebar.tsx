@@ -119,16 +119,16 @@ export function Sidebar({
     >
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-4 py-5 border-b border-[#30354a]">
-        <LionBrand />
         <button
           type="button"
           data-mobile-close="true"
           aria-label="Close navigation"
-          className="ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
+          className="order-2 ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
           onClick={onMobileClose}
         >
           <span aria-hidden="true">×</span>
         </button>
+        <div className="order-1"><LionBrand /></div>
       </div>
 
       {/* Navigation */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Loader2, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
@@ -13,7 +13,8 @@ const QUICK_PROMPTS = [
 ];
 
 export function ChatInterface() {
-  const { messages, isStreaming, sendMessage, clearConversation } = useChatStore();
+  const { messages, isStreaming, conversationId, sendMessage, clearConversation, conversations, historyLoading, historyError, loadConversations, openConversation } = useChatStore();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -39,8 +40,37 @@ export function ChatInterface() {
     <section className="lola-chat" aria-label="Lola conversation">
       <div className="lola-chat__topline">
         <div className="lola-chat__identity"><Sparkles size={16} /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
-        <button type="button" className="lola-chat__clear" onClick={clearConversation} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={17} /></button>
+        <div className="lola-chat__controls">
+          <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
+            aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>
+            <History size={16} /> <span>Recent</span>
+          </button>
+          <button type="button" className="lola-chat__clear" onClick={() => { clearConversation(); setHistoryOpen(false); }}
+            disabled={isStreaming} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={17} /></button>
+        </div>
       </div>
+      {historyOpen && (
+        <div id="lola-chat-history" className="lola-chat__history" aria-label="Your saved conversations">
+          <div className="lola-chat__history-heading">
+            <strong>Recent conversations</strong>
+            <button type="button" onClick={() => void loadConversations()} disabled={historyLoading}>Refresh</button>
+          </div>
+          {historyLoading ? <p className="lola-chat__history-state" role="status">Loading saved conversations…</p>
+            : historyError ? <p className="lola-chat__history-state" role="alert">{historyError}</p>
+            : conversations.length === 0 ? <p className="lola-chat__history-state">No saved conversations yet.</p>
+            : <div className="lola-chat__history-list">
+                {conversations.map((conversation) => (
+                  <button type="button" key={conversation.conversation_id}
+                    className={conversation.conversation_id === conversationId ? 'is-active' : ''}
+                    onClick={async () => { if (await openConversation(conversation.conversation_id)) setHistoryOpen(false); }}
+                    disabled={isStreaming || historyLoading}
+                    title={conversation.preview || 'Untitled conversation'}>
+                    {conversation.preview || 'Untitled conversation'}
+                  </button>
+                ))}
+              </div>}
+        </div>
+      )}
       <div className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">
         {messages.length === 0 && (
           <div className="lola-chat__welcome">

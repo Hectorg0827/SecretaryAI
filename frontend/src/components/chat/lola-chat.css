@@ -1,0 +1,34 @@
+.lola-chat{height:100%;min-height:0;display:flex;flex-direction:column;color:#f4f1fa;background:radial-gradient(ellipse at 50% 24%,rgba(79,61,148,.17),transparent 65%),#0b1020;font-family:inherit}
+.lola-chat__topline{height:68px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:12px 22px;border-bottom:1px solid rgba(209,193,237,.13);background:rgba(14,19,36,.95)}
+.lola-chat__identity{display:flex;align-items:center;gap:12px;color:#e8c78d}
+.lola-chat__identity>div{display:flex;flex-direction:column;gap:2px}
+.lola-chat__identity strong{font-size:15px;letter-spacing:.025em;color:#f7f4ff}
+.lola-chat__identity small{font-size:11px;color:#a6afc7}
+.lola-chat__clear{display:grid;place-items:center;width:36px;height:36px;border:1px solid #303c57;border-radius:11px;background:#171f34;color:#c5ccdd;cursor:pointer}
+.lola-chat__clear:hover{border-color:#d8b980;color:#f7db9c}
+.lola-chat__messages{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:22px;padding:25px clamp(16px,5vw,34px)}
+.lola-chat__welcome{margin:auto 0;display:flex;align-items:center;flex-direction:column;text-align:center;gap:10px;padding:24px 0}
+.lola-chat__welcome .lola-orb{width:140px;margin:0 auto}
+.lola-chat__eyebrow{font-size:10px;letter-spacing:.23em;color:#e4c18c;font-weight:700}
+.lola-chat__welcome h2{font-size:clamp(21px,3vw,28px);letter-spacing:-.035em;font-weight:600;line-height:1.2}
+.lola-chat__welcome p{font-size:13px;color:#a9b5d0;max-width:340px;line-height:1.6}
+.lola-chat__prompts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:20px;width:100%;max-width:460px}
+.lola-chat__prompts button{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:8px;border:1px solid #34415c;background:rgba(26,35,59,.82);color:#d5dbea;border-radius:13px;padding:13px;font-size:12px;cursor:pointer}
+.lola-chat__prompts button:hover{border-color:#c6a775;background:#26304a}
+.lola-chat__prompts button svg{flex-shrink:0;color:#e4c18c;transform:rotate(45deg)}
+.lola-chat__thinking{display:flex;align-items:center;gap:9px;font-size:12px;color:#b5a2e4}
+.lola-chat__bottom{flex-shrink:0;padding:14px clamp(14px,4vw,28px) 17px;border-top:1px solid rgba(209,193,237,.13);background:#0e1426}
+.lola-chat__composer{display:flex;align-items:flex-end;gap:10px;border:1px solid #49516e;background:#1a2239;border-radius:17px;padding:10px}
+.lola-chat__composer:focus-within{border-color:#c7aee9;box-shadow:0 0 0 2px rgba(153,112,229,.16)}
+.lola-chat__composer textarea{flex:1;min-width:0;max-height:130px;resize:vertical;border:0;outline:0;background:transparent;color:#f5f3ff;font:inherit;font-size:14px;line-height:1.5;padding:6px}
+.lola-chat__composer textarea::placeholder{color:#9ba5c1}
+.lola-chat__composer button{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:#dfc18e;color:#12192c;cursor:pointer;flex-shrink:0}
+.lola-chat__composer button:disabled{opacity:.45;cursor:not-allowed}
+.lola-chat__privacy{display:flex;align-items:center;justify-content:center;gap:6px;color:#8b98b3;font-size:10px;margin-top:10px;text-align:center}
+.lola-chat__message{display:flex;align-items:flex-start;gap:9px;max-width:94%}
+.lola-chat__message--user{align-self:flex-end;flex-direction:row-reverse}
+.lola-chat__avatar{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border-radius:10px;color:#e4c18c;background:#272844;border:1px solid #4a446a}
+.lola-chat__bubble{border:1px solid #303b56;border-radius:17px 17px 17px 5px;padding:14px 16px;color:#e4e8f3;background:#1a243a;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+.lola-chat__message--user .lola-chat__bubble{border-color:#65598a;border-radius:17px 17px 5px 17px;background:#302c50;color:#faf8ff}
+@media(max-width:600px){.lola-chat__topline{height:60px;padding:10px 16px}.lola-chat__messages{padding:18px 15px;gap:18px}.lola-chat__prompts{grid-template-columns:1fr}.lola-chat__welcome .lola-orb{width:110px}.lola-chat__welcome{padding:10px 0}.lola-chat__bubble{padding:12px 13px}.lola-chat__bottom{padding:11px 12px 14px}}
+@media(prefers-reduced-motion:reduce){.lola-chat *{scroll-behavior:auto}}

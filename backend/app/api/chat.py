@@ -350,9 +350,24 @@ async def send_message(
     intent = await classify_intent(request.message)
     log.debug("Intent classified: %s for message: %.60s", intent, request.message)
 
-    # 3. Fetch real data for the intent
-    data = await _fetch_data_for_intent(intent, request.message, adapter)
+    # 3. Authorize the data scope BEFORE retrieving records. Sales reps have
+    # view_inventory but no verified account assignment or financial scope.
+    # A general-question intent previously loaded all company invoices and
+    # customers; never let it do that for a rep.
+    role = user.get("role", "viewer")
+    if role == "sales_rep" and intent not in {"inventory_check", "general_question"}:
+        raise HTTPException(status_code=403, detail="This business data requires a higher permission")
+    if role == "sales_rep" and intent == "general_question":
+        data = {}
+    else:
+        data = await _fetch_data_for_intent(intent, request.message, adapter)
     data_summary = build_query_context(intent, data)
+    if role == "sales_rep" and intent == "general_question":
+        data_summary = (
+            "No business data was retrieved for this question. "
+            "Do not infer or invent company-wide sales, customer, account, or financial records. "
+            "The user's verified data scope is inventory only."
+        )
 
     # 4. Build company context for system prompt
     company_context = {
@@ -364,10 +379,11 @@ async def send_message(
     }
 
     # Load memory context
-    recent_summaries = load_recent_summaries(db, company_id, user_id)
-    # Try to detect account names in message for targeted memory lookup
-    account_names = _detect_account_names(request.message, history)
-    account_mem = load_account_memory(db, company_id, account_names)
+    # Sales reps must not inherit historical company-wide summaries or
+    # account memory that predates the permission hardening.
+    recent_summaries = [] if role == "sales_rep" else load_recent_summaries(db, company_id, user_id)
+    account_names = [] if role == "sales_rep" else _detect_account_names(request.message, history)
+    account_mem = [] if role == "sales_rep" else load_account_memory(db, company_id, account_names)
 
     if recent_summaries or account_mem:
         memory_context = ""

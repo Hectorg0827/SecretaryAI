@@ -277,13 +277,24 @@ class TestTaskResultTenantScope:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestChatHistoryScope:
-    def test_load_history_filters_by_company(self):
+    def test_load_history_filters_by_tenant_and_user(self):
         from app.api.chat import _load_history
         db = MagicMock()
-        _load_history(db, "conv-123", "co-1")
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+            {"messages": [{"role": "user", "content": "hello"}]}
+        ]
+        history = _load_history(db, "conv-123", "co-1", "user-1")
+        assert history == [{"role": "user", "content": "hello"}]
         sel = db.table.return_value.select.return_value
-        sel.eq.assert_called_with("conversation_id", "conv-123")
-        sel.eq.return_value.eq.assert_called_with("company_id", "co-1")
+        sel.eq.assert_called_once_with("id", "conv-123")
+        sel.eq.return_value.eq.assert_called_once_with("company_id", "co-1")
+        sel.eq.return_value.eq.return_value.eq.assert_called_once_with("user_id", "user-1")
+
+    def test_missing_history_returns_empty(self):
+        from app.api.chat import _load_history
+        db = MagicMock()
+        db.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        assert _load_history(db, "missing", "co-1", "user-1") == []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

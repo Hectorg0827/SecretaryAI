@@ -3,6 +3,8 @@ import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Sparkles, Vol
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
+import { LionBrand } from '../components/lola/LionBrand';
+import { BRAND_LABELS } from '../lib/brand';
 import { useAuth } from '../hooks/useAuth';
 import { api, type DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
@@ -215,12 +217,12 @@ export function LolaHome() {
   return (
     <div className="lola-home">
       <header className="lola-home__header">
-        <div className="lola-home__breadcrumb"><Sparkles size={15} /> LION BI <span>/</span> LOLA</div>
+        <div className="lola-home__brand"><LionBrand showSubtitle={false} /></div>
         <div className="lola-home__header-actions">
           <span className="lola-home__private"><ShieldCheck size={14} /> Your access level: {role.replace(/_/g, ' ')}</span>
           <button className="lola-home__voice-toggle" type="button" aria-label={`Automatic Lola voice greeting ${voiceGreeting ? 'on' : 'off'}`} aria-pressed={voiceGreeting} onClick={toggleGreeting}>
             {voiceGreeting ? <Volume2 size={16} /> : <VolumeX size={16} />}
-            <span>Voice greeting</span>
+            <span>{BRAND_LABELS.voiceGreeting}</span>
             <span className={`lola-home__switch ${voiceGreeting ? 'lola-home__switch--on' : ''}`} aria-hidden="true"><i /></span>
           </button>
         </div>

@@ -63,7 +63,7 @@ export function Login() {
           <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center shadow-lg">
             <Zap size={20} className="text-white" />
           </div>
-          <span className="text-2xl font-bold text-white tracking-tight">SecretaryAI</span>
+          <span className="text-2xl font-bold text-white tracking-tight">Lola</span>
         </div>
 
         {/* Card */}

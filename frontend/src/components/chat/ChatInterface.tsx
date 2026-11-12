@@ -39,7 +39,7 @@ export function ChatInterface() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-green-400 rounded-full" />
-          <span className="font-semibold text-gray-800">SecretaryAI</span>
+          <span className="font-semibold text-gray-800">Lola</span>
         </div>
         <button
           onClick={clearConversation}

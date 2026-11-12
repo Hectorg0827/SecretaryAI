@@ -57,23 +57,34 @@ class ChatMessage(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _load_history(db, conversation_id: str, company_id: str) -> list[dict]:
-    """Load conversation history from Supabase, most recent turns first.
+def _load_history(db, conversation_id: str, company_id: str, user_id: str) -> list[dict]:
+    """Load a user's conversation from the JSONB schema, scoped to tenant AND user.
 
-    Scoped to the caller's tenant: conversation_id is client-supplied, so
-    without the company filter a guessed/leaked UUID pulled another tenant's
-    history into this user's LLM context (and _save_turn appended to it).
+    The deployed conversations table stores one row per conversation with a
+    messages JSONB array, not one row per message. Fail closed on missing rows.
     """
     result = (
         db.table("conversations")
-        .select("role, content")
-        .eq("conversation_id", conversation_id)
+        .select("messages")
+        .eq("id", conversation_id)
         .eq("company_id", company_id)
-        .order("created_at", desc=False)
-        .limit(MAX_HISTORY_TURNS * 2)  # each turn = 2 rows (user + assistant)
+        .eq("user_id", user_id)
+        .limit(1)
         .execute()
     )
-    return result.data or []
+    rows = result.data or []
+    if not rows:
+        return []
+    messages = rows[0].get("messages") or []
+    if not isinstance(messages, list):
+        return []
+    return [
+        {"role": msg["role"], "content": msg["content"]}
+        for msg in messages[-MAX_HISTORY_TURNS * 2:]
+        if isinstance(msg, dict)
+        and msg.get("role") in ("user", "assistant")
+        and isinstance(msg.get("content"), str)
+    ]
 
 
 def _trim_history(history: list[dict]) -> list[dict]:
@@ -90,29 +101,40 @@ def _trim_history(history: list[dict]) -> list[dict]:
 
 def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
                user_message: str, assistant_message: str) -> None:
-    """Persist a conversation turn (user + assistant) to Supabase."""
-    rows = [
-        {
-            "id": str(uuid.uuid4()),
-            "conversation_id": conversation_id,
-            "company_id": company_id,
-            "user_id": user_id,
-            "role": "user",
-            "content": user_message,
-        },
-        {
-            "id": str(uuid.uuid4()),
-            "conversation_id": conversation_id,
-            "company_id": company_id,
-            "user_id": user_id,
-            "role": "assistant",
-            "content": assistant_message,
-        },
-    ]
+    """Persist a turn to the existing conversations.messages JSONB schema.
+
+    Restrict updates to the owning user and tenant. Never overwrite a row
+    belonging to another user, even when a conversation UUID is supplied.
+    """
     try:
-        db.table("conversations").insert(rows).execute()
-    except Exception as exc:
-        log.error("Failed to save conversation turn: %s", exc)
+        query = (
+            db.table("conversations").select("messages")
+            .eq("id", conversation_id).eq("company_id", company_id)
+            .eq("user_id", user_id).limit(1).execute()
+        )
+        rows = query.data or []
+        new_turn = [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": assistant_message},
+        ]
+        if rows:
+            existing = rows[0].get("messages") or []
+            if not isinstance(existing, list):
+                raise ValueError("Conversation messages are malformed")
+            (
+                db.table("conversations").update({"messages": existing + new_turn})
+                .eq("id", conversation_id).eq("company_id", company_id)
+                .eq("user_id", user_id).execute()
+            )
+        else:
+            # The caller must have generated a new conversation ID; never
+            # create a new row for an unknown client-supplied ID.
+            db.table("conversations").insert({
+                "id": conversation_id, "company_id": company_id,
+                "user_id": user_id, "messages": new_turn,
+            }).execute()
+    except Exception:
+        log.exception("Failed to save conversation turn")
 
 
 async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
@@ -312,10 +334,10 @@ async def send_message(
     """
     company_id = user["company_id"]
     user_id = user.get("sub", user.get("user_id", ""))
-    conversation_id = request.conversation_id or str(uuid.uuid4())
+    conversation_id = request.conversation_id or str(uuid.uuid4())\n    if request.conversation_id:\n        owned = (db.table('conversations').select('id')\n                 .eq('id', conversation_id).eq('company_id', company_id)\n                 .eq('user_id', user_id).limit(1).execute())\n        if not owned.data:\n            raise HTTPException(status_code=404, detail='Conversation not found')
 
     # 1. Load + trim conversation history
-    history = _load_history(db, conversation_id, company_id)
+    history = _load_history(db, conversation_id, company_id, user_id)
     history = _trim_history(history)
 
     # 2. Classify intent
@@ -399,16 +421,16 @@ async def get_conversation_history(
 ):
     """Return the message history for a conversation."""
     result = (
-        db.table("conversations")
-        .select("id, role, content, created_at")
-        .eq("conversation_id", conversation_id)
+        db.table("conversations").select("messages")
+        .eq("id", conversation_id)
         .eq("company_id", user["company_id"])
-        .eq("user_id", user["sub"])        # prevent cross-user history access
-        .order("created_at", desc=False)
-        .limit(limit)
-        .execute()
+        .eq("user_id", user["sub"]).limit(1).execute()
     )
-    return {"conversation_id": conversation_id, "messages": result.data or []}
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = result.data[0].get("messages") or []
+    return {"conversation_id": conversation_id, "messages": messages[-limit:]}
+
 
 
 @router.get("/conversations")
@@ -420,27 +442,23 @@ async def list_conversations(
     """List recent conversations for the current user."""
     result = (
         db.table("conversations")
-        .select("conversation_id, content, created_at")
+        .select("id, title, messages, created_at, updated_at")
         .eq("company_id", user["company_id"])
-        .eq("user_id", user.get("sub", ""))
-        .eq("role", "user")  # only user turns = one row per conversation start
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
+        .eq("user_id", user["sub"])
+        .order("updated_at", desc=True).limit(limit).execute()
     )
-    # Deduplicate by conversation_id, keep most recent
-    seen: set[str] = set()
     convos = []
-    for row in (result.data or []):
-        cid = row["conversation_id"]
-        if cid not in seen:
-            seen.add(cid)
-            convos.append({
-                "conversation_id": cid,
-                "preview": row["content"][:80],
-                "created_at": row["created_at"],
-            })
+    for row in result.data or []:
+        messages = row.get("messages") or []
+        first_user = next((m.get("content", "") for m in messages
+                           if isinstance(m, dict) and m.get("role") == "user"), "")
+        convos.append({
+            "conversation_id": row["id"],
+            "preview": (row.get("title") or first_user)[:80],
+            "created_at": row.get("created_at"),
+        })
     return {"conversations": convos}
+
 
 
 # ─── Voice Transcription ───────────────────────────────────────────────────────

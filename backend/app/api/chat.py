@@ -372,15 +372,9 @@ async def send_message(
     if recent_summaries or account_mem:
         memory_context = ""
         if recent_summaries:
-            memory_context += f"
-
-[Recent conversation context]
-{recent_summaries}"
+            memory_context += f"\n\n[Recent conversation context]\n{recent_summaries}"
         if account_mem:
-            memory_context += f"
-
-[Account memory]
-{account_mem}"
+            memory_context += f"\n\n[Account memory]\n{account_mem}"
         data_summary = data_summary + memory_context
 
     # 5. Collect the full response text while streaming
@@ -391,9 +385,7 @@ async def send_message(
             request.message, history, data_summary, company_context
         ):
             full_response.append(chunk)
-            yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}
-
-"
+            yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}\n\n"
 
         # 6. Persist conversation turn
         assistant_text = "".join(full_response)
@@ -419,13 +411,9 @@ async def send_message(
         action = detect_action_in_response(assistant_text)
         if action:
             log.info("Action detected in chat response: %s", action.get("action_type"))
-            yield f"data: {json.dumps({'action': action, 'conversation_id': conversation_id})}
+            yield f"data: {json.dumps({'action': action, 'conversation_id': conversation_id})}\n\n"
 
-"
-
-        yield f"data: {json.dumps({'done': True, 'conversation_id': conversation_id})}
-
-"
+        yield f"data: {json.dumps({'done': True, 'conversation_id': conversation_id})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

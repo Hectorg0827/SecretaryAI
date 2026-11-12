@@ -6,6 +6,7 @@ import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
 import { LionBrand } from '../lola/LionBrand';
+import { BRAND_LABELS } from '../../lib/brand';
 
 const ROLE_LABELS: Record<Role, string> = {
   owner:       'Owner',
@@ -20,7 +21,7 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
-  { to: '/',          label: 'Lola · Home', icon: Sparkles, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/',          label: BRAND_LABELS.home, icon: Sparkles, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/dashboard', label: 'Detailed Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
@@ -29,7 +30,7 @@ const ALL_NAV_ITEMS = [
   // domain owner provides a scoped account read contract.
   { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Lola Conversations',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
+  { to: '/chat',      label: BRAND_LABELS.conversations,      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
   { to: '/insights',  label: 'Insights',  icon: Lightbulb,     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },

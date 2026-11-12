@@ -7,7 +7,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [claude/secretaryai-tech-spec-lqBZj, main]
+    branches: [claude/secretaryai-tech-spec-lqBZj, main, feat/staging-secure-manager-invites-20261108]
 
 concurrency:
   group: ci-${{ github.ref }}

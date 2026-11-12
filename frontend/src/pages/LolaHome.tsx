@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronRight, Mic, MicOff, Send, ShieldCheck, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
@@ -119,9 +119,18 @@ export function LolaHome() {
   }, [preferenceKey, snapshotLoading, voiceGreeting, summary, canReadSnapshot]);
 
   useEffect(() => () => {
-    recognitionRef.current?.stop();
+    try { recognitionRef.current?.stop(); } catch { /* recognition may already be stopped */ }
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }, []);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setChatOpen(false);
+    };
+    document.addEventListener('keydown', onEscape);
+    return () => document.removeEventListener('keydown', onEscape);
+  }, [chatOpen]);
 
   const toggleGreeting = () => {
     const next = !voiceGreeting;
@@ -315,7 +324,7 @@ export function LolaHome() {
           <button type="button" className="lola-home__scrim" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} />
           <section className="lola-home__chat" role="dialog" aria-modal="true" aria-label="Lola conversation">
             <header><span className="lola-home__chat-title"><Sparkles size={17} /> Lola <span>Business assistant</span></span>
-              <button type="button" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)}><X size={18} /></button>
+              <button type="button" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} autoFocus><X size={18} /></button>
             </header>
             <div className="lola-home__chat-body"><ChatInterface /></div>
           </section>

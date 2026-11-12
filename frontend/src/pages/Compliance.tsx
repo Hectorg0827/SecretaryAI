@@ -163,6 +163,7 @@ export function Compliance() {
       {/* Setup wizard */}
       {showSetupWizard && (
         <ComplianceSetupWizard
+          onDismiss={() => setShowSetupWizard(false)}
           onComplete={() => {
             setShowSetupWizard(false);
             fetchAll();

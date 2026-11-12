@@ -162,6 +162,20 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     assert "bg-slate-800" in page.get_by_role("button", name="Purchase Orders").get_attribute("class")
     _measure(page, "logistics " + str(width))
     page.screenshot(path=str(artifacts / (engine + "-logistics-" + str(width) + ".png")))
+
+    # Lola-first home: verify the actual built UI without a backend account.
+    page.goto(base + "/", wait_until="networkidle")
+    assert page.get_by_role("img", name="Lola, your AI business assistant").is_visible()
+    assert page.get_by_role("heading", name=re.compile("Good morning|Good afternoon|Good evening")).is_visible()
+    toggle = page.get_by_role("button", name="Automatic Lola voice greeting off")
+    assert toggle.is_visible(), "Voice greeting must default off"
+    toggle.click()
+    assert page.get_by_role("button", name="Automatic Lola voice greeting on").is_visible()
+    page.get_by_role("button", name="Automatic Lola voice greeting on").click()
+    assert page.get_by_role("button", name="Automatic Lola voice greeting off").is_visible()
+    assert page.get_by_label("Ask Lola").is_visible()
+    _measure(page, "lola home " + str(width))
+    page.screenshot(path=str(artifacts / (engine + "-lola-home-" + str(width) + ".png")), full_page=True)
     context.close()
 
 

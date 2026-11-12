@@ -1,4 +1,4 @@
-/* Lion BI / Lola — scoped styling for the authenticated AI-first home. */
+/* Lion BI platform home; Lola is the assistant, not a second platform brand. */
 .lola-home {
   display: flex;
   flex-direction: column;
@@ -22,17 +22,10 @@
   padding: 14px clamp(20px, 4vw, 56px);
   border-bottom: 1px solid rgba(211, 216, 255, .09);
 }
-.lola-home__breadcrumb {
-  color: #e0d3b6;
-  font-size: 11px;
-  letter-spacing: .2em;
-  font-weight: 750;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.lola-home__breadcrumb svg { color: #e7c994; }
-.lola-home__breadcrumb span { color: #68718d; }
+.lola-home__brand { display: flex; align-items: center; min-width: 0; }
+.lola-home__brand .lionbi-brand { display: inline-flex; align-items: center; gap: 10px; }
+.lola-home__brand .lionbi-brand__mark { width: 35px; height: 35px; }
+.lola-home__brand .lionbi-brand__name { font-size: 17px; letter-spacing: .12em; }
 .lola-home__header-actions { display: flex; align-items: center; gap: 18px; }
 .lola-home__private { display: flex; align-items: center; gap: 8px; color: #8e9ab5; font-size: 11px; text-transform: capitalize; }
 .lola-home__voice-toggle {
@@ -144,7 +137,8 @@
 @media (max-width: 1000px) { .lola-home__private { display: none; } }
 @media (max-width: 720px) {
   .lola-home__header { min-height: 59px; padding: 8px 15px; }
-  .lola-home__breadcrumb { letter-spacing: .11em; font-size: 10px; gap: 7px; }
+  .lola-home__brand .lionbi-brand__mark { width: 30px; height: 30px; }
+  .lola-home__brand .lionbi-brand__name { font-size: 14px; letter-spacing: .08em; }
   .lola-home__voice-toggle { padding: 7px 9px; gap: 7px; }
   .lola-home__voice-toggle > span:not(.lola-home__switch) { display: none; }
   .lola-home__inner { padding: 0 16px 20px; }

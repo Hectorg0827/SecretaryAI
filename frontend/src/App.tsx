@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
+import './lion-workspace.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
@@ -104,7 +105,7 @@ function AppShell() {
         <span className="font-semibold text-[#e9c787] tracking-wider">LION BI</span>
       </header>
       <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
-      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main className="lion-workspace min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<RoleHome />} />
           <Route path="/dashboard" element={<Dashboard />} />

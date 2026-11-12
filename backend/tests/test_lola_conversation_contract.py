@@ -183,3 +183,29 @@ async def test_sales_rep_financial_intent_fails_before_querying_connector():
             )
         assert exc.value.status_code == 403
         data_fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stream_reports_persistence_failure_instead_of_claiming_completion():
+    db = ConversationDB()
+
+    async def fake_stream(*_args):
+        yield "Unsaved answer"
+
+    with (
+        patch("app.api.chat.classify_intent", new=AsyncMock(return_value="general_question")),
+        patch("app.api.chat._fetch_data_for_intent", new=AsyncMock(return_value={})),
+        patch("app.api.chat.build_query_context", return_value=""),
+        patch("app.api.chat.load_recent_summaries", return_value=[]),
+        patch("app.api.chat.load_account_memory", return_value=[]),
+        patch("app.api.chat.stream_chat", side_effect=fake_stream),
+        patch("app.api.chat._save_turn", side_effect=RuntimeError("Synthetic database outage")),
+    ):
+        response = await send_message(
+            ChatRequest(message="Question"),
+            user={"sub": "alice", "company_id": "company-a", "role": "owner"},
+            adapter=None, db=db,
+        )
+        payload = "".join(str(chunk) for chunk in [part async for part in response.body_iterator])
+    assert "Conversation could not be saved" in payload
+    assert '"done": true' not in payload

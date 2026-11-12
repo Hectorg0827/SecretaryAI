@@ -334,7 +334,13 @@ async def send_message(
     """
     company_id = user["company_id"]
     user_id = user.get("sub", user.get("user_id", ""))
-    conversation_id = request.conversation_id or str(uuid.uuid4())\n    if request.conversation_id:\n        owned = (db.table('conversations').select('id')\n                 .eq('id', conversation_id).eq('company_id', company_id)\n                 .eq('user_id', user_id).limit(1).execute())\n        if not owned.data:\n            raise HTTPException(status_code=404, detail='Conversation not found')
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    if request.conversation_id:
+        owned = (db.table('conversations').select('id')
+                 .eq('id', conversation_id).eq('company_id', company_id)
+                 .eq('user_id', user_id).limit(1).execute())
+        if not owned.data:
+            raise HTTPException(status_code=404, detail='Conversation not found')
 
     # 1. Load + trim conversation history
     history = _load_history(db, conversation_id, company_id, user_id)
@@ -366,9 +372,15 @@ async def send_message(
     if recent_summaries or account_mem:
         memory_context = ""
         if recent_summaries:
-            memory_context += f"\n\n[Recent conversation context]\n{recent_summaries}"
+            memory_context += f"
+
+[Recent conversation context]
+{recent_summaries}"
         if account_mem:
-            memory_context += f"\n\n[Account memory]\n{account_mem}"
+            memory_context += f"
+
+[Account memory]
+{account_mem}"
         data_summary = data_summary + memory_context
 
     # 5. Collect the full response text while streaming
@@ -379,7 +391,9 @@ async def send_message(
             request.message, history, data_summary, company_context
         ):
             full_response.append(chunk)
-            yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}\n\n"
+            yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}
+
+"
 
         # 6. Persist conversation turn
         assistant_text = "".join(full_response)
@@ -405,9 +419,13 @@ async def send_message(
         action = detect_action_in_response(assistant_text)
         if action:
             log.info("Action detected in chat response: %s", action.get("action_type"))
-            yield f"data: {json.dumps({'action': action, 'conversation_id': conversation_id})}\n\n"
+            yield f"data: {json.dumps({'action': action, 'conversation_id': conversation_id})}
 
-        yield f"data: {json.dumps({'done': True, 'conversation_id': conversation_id})}\n\n"
+"
+
+        yield f"data: {json.dumps({'done': True, 'conversation_id': conversation_id})}
+
+"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
+import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
+import { LolaGlyph } from '../lola/LolaGlyph';
 import './lola-chat.css';
 
 const QUICK_PROMPTS = [
@@ -39,7 +40,7 @@ export function ChatInterface() {
   return (
     <section className="lola-chat" aria-label="Lola conversation">
       <div className="lola-chat__topline">
-        <div className="lola-chat__identity"><Sparkles size={16} /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
+        <div className="lola-chat__identity"><LolaGlyph size={19} /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
         <div className="lola-chat__controls">
           <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>

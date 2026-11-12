@@ -75,7 +75,7 @@ export function ChatInterface() {
         {messages.length === 0 && (
           <div className="lola-chat__welcome">
             <LolaOrb />
-            <div className="lola-chat__eyebrow">LION BI · LOLA</div>
+            <div className="lola-chat__eyebrow">LOLA · YOUR BUSINESS ASSISTANT</div>
             <h2>How can I help you move forward?</h2>
             <p>Ask a question, explore your business, or prepare your next decision.</p>
             <div className="lola-chat__prompts">

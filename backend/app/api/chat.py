@@ -138,6 +138,15 @@ def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
         raise
 
 
+def _record_value(record, key: str, fallback: str | None = None, default=None):
+    """Read a dict or domain object without interpreting valid zero/empty values as missing."""
+    if isinstance(record, dict):
+        value = record.get(key)
+        return value if value is not None else record.get(fallback, default) if fallback else default
+    value = getattr(record, key, None)
+    return value if value is not None else getattr(record, fallback, default) if fallback else default
+
+
 async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
     """
     Fetch real QB data matching the classified intent.
@@ -177,21 +186,21 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                 cid = getattr(specific, "qb_id", "")
                 acct_invoices = [
                     inv for inv in invoices
-                    if (getattr(inv, "customer_id", None) or inv.get("customer_id", "")) == cid
+                    if _record_value(inv, "customer_id", default="") == cid
                 ]
                 data["account"] = {
                     "name": getattr(specific, "name", ""),
                     "health_status": "unknown",
                     "last_order_date": max(
-                        (str(getattr(inv, "date", "") or inv.get("order_date", "")) for inv in acct_invoices),
+                        (str(_record_value(inv, "date", "order_date", "")) for inv in acct_invoices),
                         default="never",
                     ),
                     "current_balance": float(getattr(specific, "balance", 0)),
                 }
                 data["orders"] = [
                     {
-                        "order_date": str(getattr(inv, "date", "") or inv.get("order_date", "")),
-                        "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
+                        "order_date": str(_record_value(inv, "date", "order_date", "")),
+                        "total_amount": float(_record_value(inv, "total", "total_amount", 0)),
                     }
                     for inv in acct_invoices
                 ]
@@ -204,7 +213,7 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                     cust_invoices = [
                         {"date": str(getattr(inv, "date", "")), "total": float(getattr(inv, "total", 0))}
                         for inv in invoices
-                        if (getattr(inv, "customer_id", None) or inv.get("customer_id", "")) == cid
+                        if _record_value(inv, "customer_id", default="") == cid
                     ]
                     dates = [o["date"] for o in cust_invoices if o["date"]]
                     last_order = None
@@ -258,10 +267,10 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
 
             invoice_dicts = [
                 {
-                    "customer_name": getattr(inv, "customer_name", "") or inv.get("customer_name", ""),
-                    "order_date": str(getattr(inv, "date", "") or inv.get("order_date", "")),
-                    "total_amount": float(getattr(inv, "total", 0) or inv.get("total_amount", 0)),
-                    "items": getattr(inv, "line_items", []) or inv.get("line_items", []),
+                    "customer_name": _record_value(inv, "customer_name", default=""),
+                    "order_date": str(_record_value(inv, "date", "order_date", "")),
+                    "total_amount": float(_record_value(inv, "total", "total_amount", 0)),
+                    "items": _record_value(inv, "line_items", default=[]),
                 }
                 for inv in invoices
             ]

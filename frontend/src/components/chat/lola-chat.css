@@ -32,3 +32,17 @@
 .lola-chat__message--user .lola-chat__bubble{border-color:#65598a;border-radius:17px 17px 5px 17px;background:#302c50;color:#faf8ff}
 @media(max-width:600px){.lola-chat__topline{height:60px;padding:10px 16px}.lola-chat__messages{padding:18px 15px;gap:18px}.lola-chat__prompts{grid-template-columns:1fr}.lola-chat__welcome .lola-orb{width:110px}.lola-chat__welcome{padding:10px 0}.lola-chat__bubble{padding:12px 13px}.lola-chat__bottom{padding:11px 12px 14px}}
 @media(prefers-reduced-motion:reduce){.lola-chat *{scroll-behavior:auto}}
+
+.lola-chat__controls{display:flex;align-items:center;gap:8px}
+.lola-chat__history-toggle{display:flex;align-items:center;gap:7px;min-height:36px;padding:0 11px;border:1px solid #303c57;border-radius:11px;background:#171f34;color:#c5ccdd;font-size:12px;cursor:pointer}
+.lola-chat__history-toggle:hover,.lola-chat__history-toggle[aria-expanded=true]{border-color:#d8b980;color:#f7db9c}
+.lola-chat__history{flex-shrink:0;padding:13px 22px;border-bottom:1px solid #303c57;background:#121a2e}
+.lola-chat__history-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#f2edfa;font-size:12px;margin-bottom:9px}
+.lola-chat__history-heading button{border:0;background:none;color:#e4c18c;font-size:11px;cursor:pointer}
+.lola-chat__history-heading button:disabled{opacity:.5;cursor:not-allowed}
+.lola-chat__history-state{font-size:12px;color:#abb5ce;padding:7px 0}
+.lola-chat__history-list{display:flex;align-items:stretch;gap:9px;max-height:126px;overflow-x:auto;overflow-y:hidden;padding:4px 0 8px}
+.lola-chat__history-list button{flex:0 0 195px;min-height:62px;max-height:92px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;text-align:left;background:#202943;border:1px solid #3c4966;color:#e4e8f3;border-radius:12px;padding:12px;font-size:12px;line-height:1.5;cursor:pointer;overflow-wrap:anywhere}
+.lola-chat__history-list button:hover,.lola-chat__history-list button.is-active{border-color:#e4c18c;color:#fff}
+.lola-chat__history-list button:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:600px){.lola-chat__history{padding:11px 13px}.lola-chat__history-list button{flex-basis:165px}.lola-chat__history-toggle{padding:0 8px}.lola-chat__history-toggle span{display:none}}

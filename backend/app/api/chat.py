@@ -13,7 +13,7 @@ Full pipeline:
 import json
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
@@ -122,7 +122,7 @@ def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
             if not isinstance(existing, list):
                 raise ValueError("Conversation messages are malformed")
             (
-                db.table("conversations").update({"messages": existing + new_turn})
+                db.table("conversations").update({"messages": existing + new_turn, "updated_at": datetime.now(timezone.utc).isoformat()})
                 .eq("id", conversation_id).eq("company_id", company_id)
                 .eq("user_id", user_id).execute()
             )
@@ -135,6 +135,7 @@ def _save_turn(db, conversation_id: str, company_id: str, user_id: str,
             }).execute()
     except Exception:
         log.exception("Failed to save conversation turn")
+        raise
 
 
 async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
@@ -405,7 +406,13 @@ async def send_message(
 
         # 6. Persist conversation turn
         assistant_text = "".join(full_response)
-        _save_turn(db, conversation_id, company_id, user_id, request.message, assistant_text)
+        try:
+            _save_turn(db, conversation_id, company_id, user_id, request.message, assistant_text)
+        except Exception:
+            # A streamed response is not a completed conversation if the
+            # database commit failed. Emit an explicit SSE error, not "done".
+            yield f"data: {json.dumps({'error': 'Conversation could not be saved', 'conversation_id': conversation_id})}\n\n"
+            return
 
         # Async background: summarise conversation + extract account memory
         import asyncio

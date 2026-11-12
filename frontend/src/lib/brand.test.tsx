@@ -22,7 +22,7 @@ describe('Lion BI platform / Lola assistant brand hierarchy', () => {
   it('places the Lion BI logo alone on the home header', () => {
     const home = read('src/pages/LolaHome.tsx');
     expect(home).toContain('<LionBrand showSubtitle={false} />');
-    expect(home).not.toMatch(/LION BI\s*<span>\/</span>\s*LOLA/);
+    expect(home).not.toContain('LION BI <span>/</span> LOLA');
     expect(home).toContain('BRAND_LABELS.voiceGreeting');
     const sidebar = read('src/components/layout/Sidebar.tsx');
     expect(sidebar).toContain('label: BRAND_LABELS.home');

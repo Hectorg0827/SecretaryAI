@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, RotateCcw, Loader2 } from 'lucide-react';
+import { ArrowUp, Loader2, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
+import { LolaOrb } from '../lola/LolaOrb';
+import './lola-chat.css';
 
 const QUICK_PROMPTS = [
-  'How\'s our inventory looking?',
-  '¿Cómo están nuestras cuentas?',
+  'What needs my attention?',
+  'Review my business priorities',
   'Which accounts need attention?',
-  'What\'s running low this week?',
+  'Show inventory risks',
 ];
 
 export function ChatInterface() {
@@ -16,102 +18,60 @@ export function ChatInterface() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
-  const handleSend = () => {
-    const text = input.trim();
+  const handleSend = (value = input) => {
+    const text = value.trim();
     if (!text || isStreaming) return;
     setInput('');
-    sendMessage(text);
+    void sendMessage(text);
   };
 
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  const handleKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
       handleSend();
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-white border-l border-slate-100">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-green-400 rounded-full" />
-          <span className="font-semibold text-gray-800">Lola</span>
-        </div>
-        <button
-          onClick={clearConversation}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
-          title="Clear conversation"
-        >
-          <RotateCcw size={16} />
-        </button>
+    <section className="lola-chat" aria-label="Lola conversation">
+      <div className="lola-chat__topline">
+        <div className="lola-chat__identity"><Sparkles size={16} /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
+        <button type="button" className="lola-chat__clear" onClick={clearConversation} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={17} /></button>
       </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">
         {messages.length === 0 && (
-          <div className="space-y-4">
-            <p className="text-center text-gray-400 text-sm mt-8">
-              Ask me anything about your business
-            </p>
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              {QUICK_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => sendMessage(prompt)}
-                  className="text-left px-3 py-2 text-sm text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                >
-                  {prompt}
-                </button>
+          <div className="lola-chat__welcome">
+            <LolaOrb />
+            <div className="lola-chat__eyebrow">LION BI · LOLA</div>
+            <h2>How can I help you move forward?</h2>
+            <p>Ask a question, explore your business, or prepare your next decision.</p>
+            <div className="lola-chat__prompts">
+              {QUICK_PROMPTS.map((question) => (
+                <button type="button" key={question} onClick={() => handleSend(question)} disabled={isStreaming}>{question}<ArrowUp size={14} /></button>
               ))}
             </div>
           </div>
         )}
-
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-
+        {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
         {isStreaming && messages[messages.length - 1]?.role === 'user' && (
-          <div className="flex items-center gap-2 text-gray-400 text-sm">
-            <Loader2 size={14} className="animate-spin" />
-            <span>Thinking...</span>
-          </div>
+          <div className="lola-chat__thinking" role="status"><Loader2 size={15} className="animate-spin" /> Lola is thinking…</div>
         )}
-
         <div ref={bottomRef} />
       </div>
-
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-gray-100">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="Ask about accounts, inventory, orders..."
-            rows={1}
-            disabled={isStreaming}
-            className="flex-1 resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            style={{ maxHeight: '120px', overflowY: 'auto' }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
-            className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 text-white rounded-lg p-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isStreaming ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Send size={16} />
-            )}
+      <div className="lola-chat__bottom">
+        <div className="lola-chat__composer">
+          <label className="sr-only" htmlFor="lola-chat-input">Message Lola</label>
+          <textarea id="lola-chat-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
+            placeholder="Ask Lola about your business…" rows={2} maxLength={4000} disabled={isStreaming} />
+          <button type="button" onClick={() => handleSend()} disabled={!input.trim() || isStreaming} aria-label="Send message to Lola">
+            {isStreaming ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-1">Enter to send · Shift+Enter for new line</p>
+        <p className="lola-chat__privacy"><ShieldCheck size={12} /> Responses depend on your permissions and connected business data.</p>
       </div>
-    </div>
+    </section>
   );
 }

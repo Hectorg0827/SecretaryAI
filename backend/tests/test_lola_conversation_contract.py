@@ -143,3 +143,43 @@ async def test_send_rejects_foreign_conversation_id_before_ai_runs():
         assert exc.value.status_code == 404
         classifier.assert_not_awaited()
     assert db.rows[0]["messages"][0]["content"] == "Confidential"
+
+
+@pytest.mark.asyncio
+async def test_sales_rep_general_chat_cannot_retrieve_business_or_memory_data():
+    db = ConversationDB()
+
+    async def fake_stream(*_args):
+        yield "No verified business data is available."
+
+    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="general_question")), \\
+         patch("app.api.chat._fetch_data_for_intent", new=AsyncMock()) as data_fetch, \\
+         patch("app.api.chat.load_recent_summaries") as memory_fetch, \\
+         patch("app.api.chat.load_account_memory") as account_memory_fetch, \\
+         patch("app.api.chat.stream_chat", side_effect=fake_stream), \\
+         patch("app.api.chat.detect_action_in_response", return_value=None):
+        response = await send_message(
+            ChatRequest(message="Show company revenue"),
+            user={"sub": "rep", "company_id": "company-a", "role": "sales_rep"},
+            adapter=None, db=db,
+        )
+        body = [part async for part in response.body_iterator]
+        assert any("No verified business data" in str(part) for part in body)
+        data_fetch.assert_not_awaited()
+        memory_fetch.assert_not_called()
+        account_memory_fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sales_rep_financial_intent_fails_before_querying_connector():
+    db = ConversationDB()
+    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="sales_report")), \\
+         patch("app.api.chat._fetch_data_for_intent", new=AsyncMock()) as data_fetch:
+        with pytest.raises(HTTPException) as exc:
+            await send_message(
+                ChatRequest(message="What is our company-wide revenue?"),
+                user={"sub": "rep", "company_id": "company-a", "role": "sales_rep"},
+                adapter=None, db=db,
+            )
+        assert exc.value.status_code == 403
+        data_fetch.assert_not_awaited()

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bot, X, Send, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { X, Send, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { LolaGlyph } from '../lola/LolaGlyph';
+import { BRAND_LABELS } from '../../lib/brand';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -98,9 +100,9 @@ export function InlineAssistant({ context, initialSuggestion, onClose, className
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 text-white">
         <div className="flex items-center gap-2">
-          <Bot className="w-4 h-4 text-blue-400" />
+          <LolaGlyph size={18} />
           <span className="text-sm font-medium">
-            AI Assistant
+            {BRAND_LABELS.assistant}
             {context?.label && <span className="text-slate-400 ml-1">— {context.label}</span>}
           </span>
         </div>
@@ -108,11 +110,12 @@ export function InlineAssistant({ context, initialSuggestion, onClose, className
           <button
             onClick={() => setCollapsed((c) => !c)}
             className="p-1 rounded hover:bg-slate-700 transition-colors"
+            aria-label={collapsed ? "Expand Lola assistant" : "Collapse Lola assistant"}
           >
             {collapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
           </button>
           {onClose && (
-            <button onClick={onClose} className="p-1 rounded hover:bg-slate-700 transition-colors">
+            <button onClick={onClose} aria-label="Close Lola assistant" className="p-1 rounded hover:bg-slate-700 transition-colors">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -125,7 +128,7 @@ export function InlineAssistant({ context, initialSuggestion, onClose, className
           <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 max-h-72">
             {messages.length === 0 ? (
               <div className="text-center py-4">
-                <Bot className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <LolaGlyph size={32} className="mx-auto mb-2" />
                 <p className="text-xs text-slate-400">Ask me anything about this {contextType}</p>
               </div>
             ) : (
@@ -170,7 +173,7 @@ export function InlineAssistant({ context, initialSuggestion, onClose, className
             <div className="flex items-center gap-2 bg-slate-50 rounded-lg border border-slate-200 px-3 py-2">
               <input
                 className="flex-1 bg-transparent text-xs outline-none placeholder-slate-400"
-                placeholder="Ask anything..."
+                placeholder={BRAND_LABELS.askAssistant}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send(input)}

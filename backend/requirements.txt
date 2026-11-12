@@ -22,7 +22,7 @@ conductor-api==2.1.0
 
 # Background tasks
 celery==5.4.0
-redis==5.1.0
+redis==6.1.0
 
 # Auth & Security
 PyJWT==2.15.1                 # HS256 user/refresh/2FA sessions; removes python-jose/ecdsa/pyasn1 chain

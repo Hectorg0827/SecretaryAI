@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
 import { LionBrand } from '../components/lola/LionBrand';
+import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { BRAND_LABELS } from '../lib/brand';
 import { useAuth } from '../hooks/useAuth';
 import { api, type DashboardSummary } from '../lib/api';
@@ -239,7 +240,7 @@ export function LolaHome() {
             {canAccessChat ? (
               <>
                 <form className="lola-home__composer" onSubmit={(event) => { event.preventDefault(); submit(prompt); }}>
-                  <Sparkles size={18} className="lola-home__composer-spark" aria-hidden="true" />
+                  <LolaGlyph size={20} className="lola-home__composer-spark" />
                   <label className="sr-only" htmlFor="lola-question">Ask Lola</label>
                   <input id="lola-question" value={prompt} onChange={(event) => setPrompt(event.target.value)}
                     placeholder="Ask Lola anything about your business..."
@@ -325,7 +326,7 @@ export function LolaHome() {
         <div className="lola-home__dialog-layer">
           <button type="button" className="lola-home__scrim" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} />
           <section className="lola-home__chat" role="dialog" aria-modal="true" aria-label="Lola conversation">
-            <header><span className="lola-home__chat-title"><Sparkles size={17} /> Lola <span>Business assistant</span></span>
+            <header><span className="lola-home__chat-title"><LolaGlyph size={18} /> Lola <span>Business assistant</span></span>
               <button type="button" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} autoFocus><X size={18} /></button>
             </header>
             <div className="lola-home__chat-body"><ChatInterface /></div>

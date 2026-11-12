@@ -1,7 +1,7 @@
 {
-  "name": "Lion Business Intelligence",
+  "name": "Lion BI",
   "short_name": "Lion BI",
-  "description": "Lola, your AI business assistant",
+  "description": "Lion Business Intelligence, with Lola as your AI assistant",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b1020",

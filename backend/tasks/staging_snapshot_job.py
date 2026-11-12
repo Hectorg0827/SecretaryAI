@@ -7,6 +7,7 @@ It never dispatches Celery tasks, runs the AI agent, or sends notifications.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 import json
 import logging
 import os
@@ -18,6 +19,8 @@ from tasks.base import build_adapter, get_supabase, task_lock
 from tasks.dashboard_refresh import refresh_company_snapshot
 
 log = logging.getLogger(__name__)
+# Fixed stage labels only: never include provider errors or confidential values.
+_FAILURE_STAGE = ContextVar("staging_snapshot_stage", default="initialization")
 
 # This pilot is deliberately bound to the existing SecretaryAI staging stack.
 STAGING_PROJECT_ID = "77513c77-44df-485e-a927-d57d6a80b2c1"
@@ -60,15 +63,18 @@ def run_once(*, settings=None, environ=None, db_factory=None,
     """Refresh a single approved QBO sandbox tenant or fail without a write."""
     settings = settings if settings is not None else get_settings()
     environ = environ if environ is not None else os.environ
+    _FAILURE_STAGE.set("validate_staging_isolation")
     company_id = validated_company_id(settings, environ)
     db_factory = db_factory or get_supabase
     adapter_factory = adapter_factory or build_adapter
     lock = lock or task_lock
 
+    _FAILURE_STAGE.set("acquire_refresh_lock")
     with lock(f"staging_readonly_snapshot_{company_id}", ttl_seconds=3300) as acquired:
         if not acquired:
             return {"status": "skipped", "reason": "refresh_already_running"}
 
+        _FAILURE_STAGE.set("lookup_connected_company")
         db = db_factory()
         result = (
             db.table("companies").select("*")
@@ -81,6 +87,7 @@ def run_once(*, settings=None, environ=None, db_factory=None,
                 or companies[0].get("qb_type") != "online"):
             raise RuntimeError("Approved company does not have one connected sandbox source")
 
+        _FAILURE_STAGE.set("read_and_refresh_dashboard")
         refreshed = refresh_company_snapshot(
             company_id, db=db, companies=companies,
             adapter_factory=adapter_factory,
@@ -89,6 +96,7 @@ def run_once(*, settings=None, environ=None, db_factory=None,
             include_purchasing_coverage=True,
             include_finance_document_coverage=True,
         )
+        _FAILURE_STAGE.set("completed")
         # Never log fetched customer, financial, inventory, or credential values.
         return {
             "status": refreshed["status"],
@@ -104,7 +112,7 @@ def main() -> int:
         outcome = run_once()
     except Exception:
         # Keep exception chains (e.g. provider requests) out of persisted logs.
-        log.error("Staging read-only snapshot refresh failed")
+        log.error("Staging read-only snapshot refresh failed at stage=%s", _FAILURE_STAGE.get())
         return 1
     print(json.dumps(outcome, sort_keys=True))
     return 0

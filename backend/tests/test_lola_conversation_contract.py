@@ -152,11 +152,11 @@ async def test_sales_rep_general_chat_cannot_retrieve_business_or_memory_data():
     async def fake_stream(*_args):
         yield "No verified business data is available."
 
-    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="general_question")), \\
-         patch("app.api.chat._fetch_data_for_intent", new=AsyncMock()) as data_fetch, \\
-         patch("app.api.chat.load_recent_summaries") as memory_fetch, \\
-         patch("app.api.chat.load_account_memory") as account_memory_fetch, \\
-         patch("app.api.chat.stream_chat", side_effect=fake_stream), \\
+    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="general_question")), \
+         patch("app.api.chat._fetch_data_for_intent", new=AsyncMock()) as data_fetch, \
+         patch("app.api.chat.load_recent_summaries") as memory_fetch, \
+         patch("app.api.chat.load_account_memory") as account_memory_fetch, \
+         patch("app.api.chat.stream_chat", side_effect=fake_stream), \
          patch("app.api.chat.detect_action_in_response", return_value=None):
         response = await send_message(
             ChatRequest(message="Show company revenue"),
@@ -173,7 +173,7 @@ async def test_sales_rep_general_chat_cannot_retrieve_business_or_memory_data():
 @pytest.mark.asyncio
 async def test_sales_rep_financial_intent_fails_before_querying_connector():
     db = ConversationDB()
-    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="sales_report")), \\
+    with patch("app.api.chat.classify_intent", new=AsyncMock(return_value="sales_report")), \
          patch("app.api.chat._fetch_data_for_intent", new=AsyncMock()) as data_fetch:
         with pytest.raises(HTTPException) as exc:
             await send_message(

@@ -73,21 +73,15 @@ def _login_and_register(browser, engine: str, base: str, artifacts: Path, width:
     assert email.is_visible() and password.is_visible()
     assert page.get_by_role("button", name="Sign in").is_disabled()
     _measure(page, "login " + str(width))
-    background = page.locator(".min-h-screen").first.evaluate(
+    background = page.locator(".min-h-dvh").first.evaluate(
         "(element) => getComputedStyle(element).backgroundColor"
     )
-    # Chromium/Firefox/WebKit serialize the same Tailwind OKLCH hue with
-    # slightly different decimal precision. Check the numeric components
-    # with tight tolerance rather than requiring identical string rendering.
-    if background != "rgb(15, 23, 42)":
-        match = re.fullmatch(
-            r"oklch\((\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\)",
-            background,
-        )
-        assert match is not None and all(
-            abs(float(actual) - expected) < 0.001
-            for actual, expected in zip(match.groups(), (0.208, 0.042, 265.755))
-        ), "Tailwind slate login background missing: " + background
+    # Lion BI uses its approved deep navy login surface, not the former
+    # SecretaryAI slate theme. Validate the actual rendered background.
+    assert background == "rgb(8, 14, 28)", (
+        "Lion BI navy login background missing: " + background
+    )
+    assert page.get_by_text("LION BUSINESS INTELLIGENCE", exact=True).is_visible()
     page.screenshot(path=str(artifacts / (engine + "-login-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/register", wait_until="networkidle")
     assert page.get_by_role("heading", name="Create your account").is_visible()

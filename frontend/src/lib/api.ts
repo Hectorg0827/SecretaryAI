@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { LolaContext } from './lolaContext';
 /**
  * API client for the SecretaryAI backend.
  * All requests are authenticated via JWT Bearer token.
@@ -554,8 +555,9 @@ export const api = {
   async *streamChat(
     message: string,
     conversationId?: string,
+    context?: LolaContext,
   ): AsyncGenerator<{ text: string; conversationId?: string }> {
-    const body = JSON.stringify({ message, conversation_id: conversationId });
+    const body = JSON.stringify({ message, conversation_id: conversationId, ...(context ? { context } : {}) });
     const call = (token: string | null) => fetch(`${API_BASE}/api/chat/message`, {
       method: 'POST',
       headers: {

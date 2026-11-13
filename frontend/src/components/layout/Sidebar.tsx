@@ -1,17 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, Users, Package, Settings, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, WalletCards } from 'lucide-react';
+import { Wifi, WifiOff, LogOut, UserCircle } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
 import { LionBrand } from '../lola/LionBrand';
+import { LionUIIcon } from '../lola/LionUIIcon';
+import './lion-sidebar.css';
 import { BRAND_LABELS } from '../../lib/brand';
-
-function LionHomeIcon({ size = 16 }: { size?: number }) {
-  return <img src="/brand/lion-bi-emblem-approved.webp" alt="" aria-hidden="true" draggable={false}
-    width={size} height={size} className="shrink-0 object-contain" />;
-}
 
 const ROLE_LABELS: Record<Role, string> = {
   owner:       'Owner',
@@ -26,23 +23,23 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
-  { to: '/',          label: BRAND_LABELS.home, icon: LionHomeIcon, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
-  { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
-  { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/dashboard', label: 'Detailed Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
-  { to: '/finance',   label: 'Finance Workspace', icon: WalletCards, exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/',          label: BRAND_LABELS.home, icon: 'home', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/inbox',     label: 'Inbox',     icon: 'inbox',          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
+  { to: '/work',      label: 'Work',      icon: 'work',      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/dashboard', label: 'Detailed Dashboard', icon: 'dashboard', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
+  { to: '/finance',   label: 'Finance Workspace', icon: 'finance', exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   // Rep account assignment is not yet server-verified; fail closed until the
   // domain owner provides a scoped account read contract.
-  { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
-  { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/insights',  label: 'Insights',  icon: Lightbulb,     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
-  { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/connectors', label: 'Connectors', icon: Server,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/audit-log',  label: 'Audit Log',  icon: Shield,    exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/admin',      label: 'Diagnostics', icon: Activity,  exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/account-security', label: 'My Password', icon: Shield, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/accounts',  label: 'Accounts',  icon: 'accounts',         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
+  { to: '/inventory', label: 'Inventory', icon: 'inventory',       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/insights',  label: 'Insights',  icon: 'insights',     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/logistics',   label: 'Logistics',   icon: 'logistics',     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
+  { to: '/compliance',  label: 'Compliance',  icon: 'compliance',     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/connectors', label: 'Connectors', icon: 'connectors',     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/audit-log',  label: 'Audit Log',  icon: 'audit',    exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/admin',      label: 'Diagnostics', icon: 'diagnostics',  exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/settings',  label: 'Settings',  icon: 'settings',      exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/account-security', label: 'My Password', icon: 'security', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
 ] as const;
 
 export function Sidebar({
@@ -117,7 +114,7 @@ export function Sidebar({
       role={isMobile && mobileOpen ? 'dialog' : undefined}
       aria-modal={isMobile && mobileOpen ? true : undefined}
       className={[
-        'fixed inset-y-0 left-0 z-50 flex h-dvh w-60 flex-shrink-0 flex-col bg-[#0b1122] text-white border-r border-[#2d344b]',
+        'lionbi-sidebar fixed inset-y-0 left-0 z-50 flex h-dvh w-60 flex-shrink-0 flex-col bg-[#0b1122] text-white border-r border-[#2d344b]',
         'transition-transform duration-200 md:static md:h-full md:translate-x-0 md:transition-none',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
       ].join(' ')}
@@ -151,14 +148,14 @@ export function Sidebar({
               onClick={onMobileClose}
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
+                  'lionbi-navlink flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
                   isActive
-                    ? 'bg-[#252a47] text-[#f3dca8]'
+                    ? 'lionbi-navlink--active bg-[#252a47] text-[#f3dca8]'
                     : 'text-[#a9b5cd] hover:text-white hover:bg-[#1c2743]',
                 )
               }
             >
-              <Icon size={16} />
+              <LionUIIcon kind={Icon} size={19} />
               {label}
               {badgeCount !== null && badgeCount > 0 && (
                 <span

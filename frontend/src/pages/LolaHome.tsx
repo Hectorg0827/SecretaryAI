@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { ArrowRight, Bell, ChevronRight, History, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
@@ -64,6 +64,7 @@ export function LolaHome() {
   const [snapshotLoading, setSnapshotLoading] = useState(canReadSnapshot);
   const [prompt, setPrompt] = useState('');
   const [conversationActive, setConversationActive] = useState(false);
+  const [historyRequested, setHistoryRequested] = useState(false);
   const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState('');
   const greetingAttempted = useRef(false);
@@ -142,6 +143,7 @@ export function LolaHome() {
     const cleaned = text.trim();
     if (!canAccessChat || !cleaned || chatBusy) return;
     setPrompt('');
+    setHistoryRequested(false);
     setConversationActive(true);
     void sendMessage(cleaned);
   };
@@ -225,19 +227,20 @@ export function LolaHome() {
       {conversationActive && canAccessChat ? (
         <main className="lola-home__conversation" aria-label="Lola conversation workspace">
           <div className="lola-home__conversation-content">
-            <ChatInterface onBack={() => setConversationActive(false)} />
+            <ChatInterface context={{ workspace: 'home' }} initialHistoryOpen={historyRequested}
+              onBack={() => { setHistoryRequested(false); setConversationActive(false); }} />
           </div>
         </main>
       ) : (
       <div className="lola-home__scroll">
         <div className="lola-home__inner">
           <section className="lola-home__hero" aria-labelledby="lola-hero-title">
-            <div className="lola-home__eyebrow"><span /> YOUR BUSINESS INTELLIGENCE, PERSONIFIED</div>
+            <div className="lola-home__eyebrow"><span /> BUSINESS INTELLIGENCE, WITH LOLA</div>
             <LolaOrb
               state={listening ? 'listening' : voiceStatus === 'speaking' ? 'speaking' : chatBusy ? 'thinking' : undefined}
               audioLevel={listening ? 0 : voiceLevel}
               micEnabled={listening}
-              onActivate={canAccessChat ? () => setConversationActive(true) : undefined}
+              onActivate={canAccessChat ? () => { setHistoryRequested(false); setConversationActive(true); } : undefined}
             />
             <h1 id="lola-hero-title">{greeting()}{firstName ? `, ${firstName}` : ''}<span className="lola-home__period">.</span></h1>
             <p className="lola-home__hero-lead">I'm Lola. What can I help you accomplish today?</p>
@@ -255,6 +258,12 @@ export function LolaHome() {
                     onClick={toggleMicrophone}>{listening ? <MicOff size={19} /> : <Mic size={19} />}</button>
                   <button type="submit" className="lola-home__send" aria-label="Send to Lola" disabled={!prompt.trim() || chatBusy}><ArrowRight size={19} /></button>
                 </form>
+                <div className="lola-home__history-link">
+                  <button type="button" onClick={() => { setHistoryRequested(true); setConversationActive(true); }}>
+                    <History size={16} /> Past conversations
+                  </button>
+                  <span>Conversations save automatically after each completed response.</span>
+                </div>
                 {micError && <p className="lola-home__hint" role="status">{micError}</p>}
                 <div className="lola-home__suggestions" aria-label="Suggested questions">
                   {['What needs my attention?', 'Review my business priorities', 'Show inventory risks'].map((question) => (

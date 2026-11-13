@@ -189,3 +189,23 @@
   .lola-home__history-link span{display:none}
   .lola-home__composer{margin-top:16px}
 }
+
+/* One corporate wordmark in the sidebar; Lola's own identity in Home's top bar. */
+.lola-home__brand { gap: 12px; }
+.lola-home__nameplate-glyph { flex-shrink: 0;filter:drop-shadow(0 0 7px rgba(141,166,244,.35)); }
+.lola-home__nameplate { display:flex;flex-direction:column;gap:3px;min-width:0; }
+.lola-home__nameplate strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .2em;
+  line-height: 1.12;
+  color: #f6ddb0;
+}
+.lola-home__nameplate small {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: .12em;
+  color: #95a9ce;
+}
+@media(max-width:720px){.lola-home__brand{display:none;}}

@@ -54,11 +54,6 @@
 .lola-home__hero { display: flex; align-items: center; text-align: center; flex-direction: column; padding: 36px 0 46px; }
 .lola-home__eyebrow { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 10px; letter-spacing: .23em; color: #cdb88f; }
 .lola-home__eyebrow span { width: 6px; height: 6px; border-radius: 50%; background: #f0c984; box-shadow: 0 0 15px #ffdc9a; }
-.lola-orb { position: relative; width: clamp(210px, 24vw, 292px); aspect-ratio: 1; display: grid; place-items: center; margin: 12px auto 1px; filter: drop-shadow(0 0 34px rgba(103, 83, 255, .31)); animation: lola-drift 7s ease-in-out infinite; }
-.lola-orb::before { content: ''; position: absolute; width: 74%; height: 74%; border-radius: 50%; background: #6e51ff; filter: blur(65px); opacity: .22; }
-.lola-orb__art { position: relative; width: 128%; height: 128%; object-fit: cover; max-width: none; mix-blend-mode: screen; -webkit-mask-image: radial-gradient(circle, #000 48%, rgba(0,0,0,.95) 63%, transparent 75%); mask-image: radial-gradient(circle, #000 48%, rgba(0,0,0,.95) 63%, transparent 75%); filter: drop-shadow(0 0 14px rgba(137, 103, 255, .38)); }
-.lola-orb--active { animation-duration: 3s; filter: drop-shadow(0 0 48px rgba(137, 103, 255, .67)); }
-@keyframes lola-drift { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.018); } }
 .lola-home__hero h1 { font-size: clamp(29px, 3.4vw, 42px); font-weight: 650; line-height: 1.16; letter-spacing: -.04em; color: #fcfbff; margin: 2px 0 0; }
 .lola-home__period { color: #e7c98f; }
 .lola-home__hero-lead { color: #b7bdd2; font-size: clamp(14px, 1.55vw, 17px); margin-top: 12px; }
@@ -144,7 +139,6 @@
   .lola-home__inner { padding: 0 16px 20px; }
   .lola-home__hero { padding-top: 24px; padding-bottom: 35px; }
   .lola-home__eyebrow { font-size: 8px; letter-spacing: .13em; }
-  .lola-orb { width: 215px; margin: 8px auto 0; }
   .lola-home__hero-lead { padding: 0 12px; }
   .lola-home__composer { margin-top: 24px; border-radius: 15px; padding: 7px; gap: 7px; }
   .lola-home__composer-spark { display: none; }
@@ -159,6 +153,5 @@
   .lola-home__footer { line-height: 1.6; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lola-orb { animation: none !important; }
   .lola-home__stat, .lola-home__switch i { transition: none; }
 }

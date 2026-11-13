@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowRight, Bell, ChevronLeft, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
@@ -63,12 +63,13 @@ export function LolaHome() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(canReadSnapshot);
   const [prompt, setPrompt] = useState('');
-  const [chatOpen, setChatOpen] = useState(false);
+  const [conversationActive, setConversationActive] = useState(false);
   const [listening, setListening] = useState(false);
   const [micError, setMicError] = useState('');
   const greetingAttempted = useRef(false);
   const recognitionRef = useRef<BrowserSpeechRecognizer | null>(null);
   const chatBusy = useChatStore((state) => state.isStreaming);
+  const messageCount = useChatStore((state) => state.messages.length);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const speak = useLolaVoiceStore((state) => state.speak);
   const stopSpeaking = useLolaVoiceStore((state) => state.stop);
@@ -121,14 +122,10 @@ export function LolaHome() {
     stopSpeaking();
   }, [stopSpeaking]);
 
+  // Preserve an existing conversation on return to the platform home.
   useEffect(() => {
-    if (!chatOpen) return;
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setChatOpen(false);
-    };
-    document.addEventListener('keydown', onEscape);
-    return () => document.removeEventListener('keydown', onEscape);
-  }, [chatOpen]);
+    if (messageCount > 0) setConversationActive(true);
+  }, [messageCount]);
 
   const toggleGreeting = () => {
     const next = !voiceGreeting;
@@ -145,7 +142,7 @@ export function LolaHome() {
     const cleaned = text.trim();
     if (!canAccessChat || !cleaned || chatBusy) return;
     setPrompt('');
-    setChatOpen(true);
+    setConversationActive(true);
     void sendMessage(cleaned);
   };
 
@@ -225,6 +222,19 @@ export function LolaHome() {
         </div>
       </header>
 
+      {conversationActive && canAccessChat ? (
+        <main className="lola-home__conversation" aria-label="Lola conversation workspace">
+          <div className="lola-home__conversation-nav">
+            <button type="button" className="lola-home__back" onClick={() => setConversationActive(false)}>
+              <ChevronLeft size={17} /> Overview
+            </button>
+            <span>Private conversation with Lola</span>
+          </div>
+          <div className="lola-home__conversation-content">
+            <ChatInterface />
+          </div>
+        </main>
+      ) : (
       <div className="lola-home__scroll">
         <div className="lola-home__inner">
           <section className="lola-home__hero" aria-labelledby="lola-hero-title">
@@ -233,7 +243,7 @@ export function LolaHome() {
               state={listening ? 'listening' : voiceStatus === 'speaking' ? 'speaking' : chatBusy ? 'thinking' : undefined}
               audioLevel={listening ? 0 : voiceLevel}
               micEnabled={listening}
-              onActivate={canAccessChat ? () => setChatOpen(true) : undefined}
+              onActivate={canAccessChat ? () => setConversationActive(true) : undefined}
             />
             <h1 id="lola-hero-title">{greeting()}{firstName ? `, ${firstName}` : ''}<span className="lola-home__period">.</span></h1>
             <p className="lola-home__hero-lead">I'm Lola. What can I help you accomplish today?</p>
@@ -322,18 +332,8 @@ export function LolaHome() {
           <footer className="lola-home__footer">LION BI <span>·</span> Intelligence with oversight. All business actions remain subject to your permissions and approval policies.</footer>
         </div>
       </div>
-
-      {chatOpen && canAccessChat && (
-        <div className="lola-home__dialog-layer">
-          <button type="button" className="lola-home__scrim" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} />
-          <section className="lola-home__chat" role="dialog" aria-modal="true" aria-label="Lola conversation">
-            <header><span className="lola-home__chat-title"><LolaGlyph size={18} /> Lola <span>Business assistant</span></span>
-              <button type="button" aria-label="Close Lola conversation" onClick={() => setChatOpen(false)} autoFocus><X size={18} /></button>
-            </header>
-            <div className="lola-home__chat-body"><ChatInterface /></div>
-          </section>
-        </div>
       )}
+
     </div>
   );
 }

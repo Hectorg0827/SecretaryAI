@@ -46,3 +46,23 @@
 .lola-chat__history-list button:hover,.lola-chat__history-list button.is-active{border-color:#e4c18c;color:#fff}
 .lola-chat__history-list button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:600px){.lola-chat__history{padding:11px 13px}.lola-chat__history-list button{flex-basis:165px}.lola-chat__history-toggle{padding:0 8px}.lola-chat__history-toggle span{display:none}}
+
+/* Miniature of the same living orb: never a generic robot or stock sparkle. */
+.lola-chat__identity .lola-orb { width: 35px; height: 35px; margin: 0; }
+.lola-chat__identity .lola-orb__aura { filter: blur(8px); }
+.lola-chat__identity .lola-orb__focus { display: none; }
+.lola-chat__read {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 11px 0 0;
+  padding: 7px 11px;
+  border: 1px solid #384565;
+  border-radius: 10px;
+  background: #1a263e;
+  color: #d9c5ed;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lola-chat__read:hover { border-color: #dcbf8e; color: #f7e1ae; }
+.lola-chat__read:focus-visible { outline: 2px solid #e8ca99; outline-offset: 2px; }

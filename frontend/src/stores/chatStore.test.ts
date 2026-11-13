@@ -9,7 +9,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   useChatStore.setState({
     messages: [], isStreaming: false, conversationId: null,
-    conversations: [], historyLoading: false, historyError: null, deletingId: null, context: null,
+    conversations: [], historyLoading: false, loadingMore: false, hasMore: false,
+    historyError: null, deletingId: null, context: null,
   });
 });
 
@@ -25,7 +26,21 @@ describe('Lola conversation history', () => {
     expect(useChatStore.getState().conversations).toEqual([
       { conversation_id: 'alice-1', preview: 'Inventory risks' },
     ]);
-    expect(mocks.get).toHaveBeenCalledWith('/api/chat/conversations?limit=100');
+    expect(mocks.get).toHaveBeenCalledWith('/api/chat/conversations?limit=50&offset=0');
+  });
+
+  it('loads older conversations without duplicating saved entries', async () => {
+    mocks.get.mockResolvedValueOnce({
+      conversations: [{conversation_id:'one',preview:'First'}], has_more:true,
+    }).mockResolvedValueOnce({
+      conversations: [{conversation_id:'two',preview:'Second'}], has_more:false,
+    });
+    await useChatStore.getState().loadConversations();
+    expect(useChatStore.getState().hasMore).toBe(true);
+    await useChatStore.getState().loadMoreConversations();
+    expect(mocks.get).toHaveBeenLastCalledWith('/api/chat/conversations?limit=50&offset=1');
+    expect(useChatStore.getState().conversations.map((c) => c.conversation_id)).toEqual(['one','two']);
+    expect(useChatStore.getState().hasMore).toBe(false);
   });
 
   it('restores a saved conversation without trusting malformed messages', async () => {

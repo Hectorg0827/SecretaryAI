@@ -20,7 +20,7 @@
 .lola-chat__bottom{flex-shrink:0;padding:14px clamp(14px,4vw,28px) 17px;border-top:1px solid rgba(209,193,237,.13);background:#0e1426}
 .lola-chat__composer{display:flex;align-items:flex-end;gap:10px;border:1px solid #49516e;background:#1a2239;border-radius:17px;padding:10px}
 .lola-chat__composer:focus-within{border-color:#c7aee9;box-shadow:0 0 0 2px rgba(153,112,229,.16)}
-.lola-chat__composer textarea{flex:1;min-width:0;max-height:130px;resize:vertical;border:0;outline:0;background:transparent;color:#f5f3ff;font:inherit;font-size:14px;line-height:1.5;padding:6px}
+.lola-chat__composer textarea{flex:1;min-width:0;max-height:130px;resize:none;border:0;outline:0;background:transparent;color:#f5f3ff;font:inherit;font-size:14px;line-height:1.5;padding:6px}
 .lola-chat__composer textarea::placeholder{color:#9ba5c1}
 .lola-chat__composer button{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:#dfc18e;color:#12192c;cursor:pointer;flex-shrink:0}
 .lola-chat__composer button:disabled{opacity:.45;cursor:not-allowed}
@@ -29,7 +29,6 @@
 .lola-chat__messages {
   gap: 28px;
   padding: 30px clamp(20px, 5vw, 55px) 40px;
-  scroll-behavior: smooth;
 }
 .lola-chat__message {
   display: flex;

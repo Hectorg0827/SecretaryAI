@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { workspaceFromPath, type LolaContext } from '../../lib/lolaContext';
 import { useLolaPanelStore } from '../../stores/lolaPanelStore';
 import { LolaGlyph } from '../lola/LolaGlyph';
+import { BRAND_LABELS } from '../../lib/brand';
 
 interface AssistantContext {
   type: 'account' | 'inventory' | 'inbox' | 'work' | 'general';
@@ -37,11 +38,11 @@ export function InlineAssistant({ context, onClose, className = '' }: Props) {
       <button type="button"
         className="flex w-full items-center justify-between gap-3 rounded-xl border border-[#53607b] bg-[#202c45] px-3 py-3 text-left text-[#f1daab] transition hover:border-[#e2c18d] hover:bg-[#293852] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ebca91]"
         onClick={() => { openPanel(target); onClose?.(); }}
-        aria-label={`Ask Lola about ${label}`}>
+        aria-label={`Ask ${BRAND_LABELS.assistant} about ${label}`}>
         <span className="flex min-w-0 items-center gap-3">
           <LolaGlyph size={27} />
           <span className="min-w-0">
-            <strong className="block text-sm">Ask Lola</strong>
+            <strong className="block text-sm">Ask {BRAND_LABELS.assistant}</strong>
             <small className="block truncate text-xs text-[#b6c5dd]">Context: {label}</small>
           </span>
         </span>

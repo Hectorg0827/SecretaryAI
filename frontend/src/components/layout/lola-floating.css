@@ -1,0 +1,37 @@
+.lola-float__launcher {
+  position: fixed; z-index: 35; right: 24px; bottom: 24px;
+  display: flex; align-items: center; gap: 10px; min-height: 54px;
+  padding: 8px 18px 8px 12px; border-radius: 999px;
+  border: 1px solid rgba(225,196,146,.65);
+  background: linear-gradient(125deg,#293052,#121d38);
+  color: #f7e2ba; box-shadow: 0 13px 50px rgba(0,0,0,.4),inset 0 1px rgba(255,255,255,.1);
+  cursor: pointer; font-size: 13px; font-weight: 650;
+}
+.lola-float__launcher:hover, .lola-float__launcher[aria-expanded=true]{
+  border-color:#f2d6a4; background:linear-gradient(140deg,#34385d,#1b2544);
+}
+.lola-float__launcher:focus-visible,.lola-float__panel button:focus-visible{
+  outline:2px solid #ebce9e;outline-offset:3px;
+}
+.lola-float__panel{
+  position: fixed; z-index: 40; right:24px; bottom:90px;
+  width:min(480px,calc(100vw - 24px)); height:min(700px,calc(100dvh - 122px));
+  display:flex;flex-direction:column;min-height:350px;
+  border:1px solid #3c4864;border-radius:22px;overflow:hidden;
+  background:#0c1428;box-shadow:0 30px 95px rgba(0,0,0,.56);
+}
+.lola-float__panel .lola-chat{height:100%;background:#0c1428}
+.lola-float__panel .lola-chat__messages{padding:16px 19px}
+.lola-float__panel .lola-chat__message{gap:9px}
+.lola-float__panel .lola-chat__bubble,.lola-float__panel .lola-rich{font-size:13px}
+.lola-float__panel .lola-chat__identity small{display:none}
+.lola-float__panel .lola-chat__topline{padding:11px 14px}
+.lola-float__mobile-close{display:none}
+@media(max-width:600px){
+ .lola-float__launcher{right:15px;bottom:15px;min-height:51px}
+ .lola-float__panel{right:0;bottom:0;width:100vw;height:min(86dvh,780px);min-height:340px;border-radius:22px 22px 0 0;border-bottom:0}
+ .lola-float__panel .lola-chat__bottom{padding-bottom:22px}
+ .lola-float__mobile-close{display:flex;align-items:center;justify-content:center;gap:7px;
+  color:#c6d0e2;background:#14213b;border-top:1px solid #354362;font-size:12px;padding:9px;cursor:pointer}
+}
+@media(prefers-reduced-motion:reduce){.lola-float__launcher,.lola-float__panel{transition:none}}

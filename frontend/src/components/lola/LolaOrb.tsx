@@ -1,5 +1,6 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { useLolaVoiceStore } from '../../stores/lolaVoiceStore';
+import { useMicLevel } from '../../hooks/useMicLevel';
 import './lola-orb.css';
 
 export type LolaOrbState =
@@ -13,6 +14,7 @@ type LolaOrbProps = {
   active?: boolean;
   /** Actual microphone or output signal, normalized 0..1. */
   audioLevel?: number;
+  micEnabled?: boolean;
   onActivate?: () => void;
   className?: string;
 };
@@ -26,17 +28,19 @@ const clamp = (value: number) =>
  * No opaque tile, mix-blend-mode, radial clipping or picture substitution.
  */
 export function LolaOrb({
-  state, active = false, audioLevel = 0, onActivate, className = '',
+  state, active = false, audioLevel = 0, micEnabled = false, onActivate, className = '',
 }: LolaOrbProps) {
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
   const elementRef = useRef<HTMLElement | null>(null);
+  // Analyze live audio inside this leaf component, never re-render the entire home at 30 fps.
+  const micLevel = useMicLevel(micEnabled);
   const voiceStatus = useLolaVoiceStore((s) => s.status);
   const voiceLevel = useLolaVoiceStore((s) => s.outputLevel);
   const mode: LolaOrbState = state ??
     (voiceStatus === 'speaking' ? 'speaking'
       : active ? 'thinking' : pressed ? 'pressed' : hovered ? 'hover' : 'idle');
-  const level = clamp(Math.max(audioLevel, mode === 'speaking' ? voiceLevel : 0));
+  const level = clamp(Math.max(audioLevel, micEnabled ? micLevel : 0, mode === 'speaking' ? voiceLevel : 0));
 
   const resetTilt = () => {
     const element = elementRef.current;

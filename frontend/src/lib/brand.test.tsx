@@ -26,7 +26,8 @@ describe('Lion BI platform / Lola assistant brand hierarchy', () => {
     expect(home).toContain('BRAND_LABELS.voiceGreeting');
     const sidebar = read('src/components/layout/Sidebar.tsx');
     expect(sidebar).toContain('label: BRAND_LABELS.home');
-    expect(sidebar).toContain('label: BRAND_LABELS.conversations');
+    // Conversation history lives inside Lola; no duplicate sidebar tab.
+    expect(sidebar).not.toContain('label: BRAND_LABELS.conversations');
   });
 
   it('uses a bespoke orbital assistant mark rather than a stock sparkle for identity', () => {

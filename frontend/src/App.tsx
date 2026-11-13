@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
+import './lion-workspace.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
+import { LolaFloatingAssistant } from './components/layout/LolaFloatingAssistant';
 import { Dashboard } from './pages/Dashboard';
-import { Chat } from './pages/Chat';
+import { LolaHome } from './pages/LolaHome';
 import { Accounts } from './pages/Accounts';
 import { Inventory } from './pages/Inventory';
 import { Settings } from './pages/Settings';
@@ -22,12 +24,11 @@ import { AdminDiag } from './pages/AdminDiag';
 import { Insights } from './pages/Insights';
 import { FinanceWorkspace } from './pages/FinanceWorkspace';
 import { PrivateRoute, RoleGuard } from './components/auth/RouteGuards';
-import { useAuth } from './hooks/useAuth';
 
 function RoleHome() {
-  const { hasPermission } = useAuth();
-  return hasPermission('view_finance_workspace') && !hasPermission('view_dashboard')
-    ? <Navigate to="/finance" replace /> : <Dashboard />;
+  // The new Lion BI entry point is Lola. Sensitive data remains guarded by
+  // the existing backend scopes; legacy operational screens are untouched.
+  return <LolaHome />;
 }
 
 /** Shell with sidebar + main area — only shown for authenticated routes. */
@@ -87,9 +88,9 @@ function AppShell() {
   }, []);
 
   return (
-    <div className="flex h-dvh flex-col bg-slate-50 overflow-hidden md:flex-row">
+    <div className="flex h-dvh flex-col bg-[#090e1c] overflow-hidden md:flex-row">
       {/* Navigation stays a real landmark on mobile; drawer is closed by default. */}
-      <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 md:hidden">
+      <header className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-[#343a54] bg-[#0b1122] px-4 md:hidden">
         <button
           type="button"
           aria-label="Open navigation"
@@ -97,16 +98,17 @@ function AppShell() {
           aria-controls="secretaryai-sidebar"
           ref={menuButtonRef}
           onClick={() => setMobileMenuOpen(true)}
-          className="rounded-lg p-2 text-slate-800 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-600"
+          className="rounded-lg p-2 text-[#e9d29b] hover:bg-[#202b45] focus-visible:outline-2 focus-visible:outline-[#e9d29b]"
         >
           <Menu size={20} aria-hidden="true" />
         </button>
-        <span className="font-semibold text-slate-900">SecretaryAI</span>
+        <span className="font-semibold text-[#e9c787] tracking-wider">LION BI</span>
       </header>
       <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
-      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main className="lion-workspace min-h-0 min-w-0 flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<RoleHome />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/finance" element={
             <RoleGuard roles={['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks']}>
               <FinanceWorkspace />
@@ -128,14 +130,8 @@ function AppShell() {
               </RoleGuard>
             }
           />
-          <Route
-            path="/chat"
-            element={
-              <RoleGuard roles={['owner', 'manager', 'sales_rep']}>
-                <Chat />
-              </RoleGuard>
-            }
-          />
+          {/* Legacy bookmarks converge on the single Lola Home entry point. */}
+          <Route path="/chat" element={<Navigate to="/" replace />} />
           <Route
             path="/accounts"
             element={
@@ -218,6 +214,7 @@ function AppShell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <LolaFloatingAssistant />
     </div>
   );
 }

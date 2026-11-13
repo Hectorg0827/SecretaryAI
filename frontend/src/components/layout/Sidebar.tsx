@@ -1,10 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, WalletCards } from 'lucide-react';
+import { LayoutDashboard, Users, Package, Settings, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, WalletCards } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
+import { LionBrand } from '../lola/LionBrand';
+import { BRAND_LABELS } from '../../lib/brand';
+
+function LionHomeIcon({ size = 16 }: { size?: number }) {
+  return <img src="/brand/lion-bi-emblem-approved.webp" alt="" aria-hidden="true" draggable={false}
+    width={size} height={size} className="shrink-0 object-contain" />;
+}
 
 const ROLE_LABELS: Record<Role, string> = {
   owner:       'Owner',
@@ -19,15 +26,15 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
+  { to: '/',          label: BRAND_LABELS.home, icon: LionHomeIcon, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
   { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
+  { to: '/dashboard', label: 'Detailed Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
   { to: '/finance',   label: 'Finance Workspace', icon: WalletCards, exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   // Rep account assignment is not yet server-verified; fail closed until the
   // domain owner provides a scoped account read contract.
   { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
   { to: '/insights',  label: 'Insights',  icon: Lightbulb,     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
   { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
@@ -110,26 +117,23 @@ export function Sidebar({
       role={isMobile && mobileOpen ? 'dialog' : undefined}
       aria-modal={isMobile && mobileOpen ? true : undefined}
       className={[
-        'fixed inset-y-0 left-0 z-50 flex h-dvh w-56 flex-shrink-0 flex-col bg-slate-900 text-white',
+        'fixed inset-y-0 left-0 z-50 flex h-dvh w-60 flex-shrink-0 flex-col bg-[#0b1122] text-white border-r border-[#2d344b]',
         'transition-transform duration-200 md:static md:h-full md:translate-x-0 md:transition-none',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
       ].join(' ')}
     >
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-slate-800">
-        <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center shadow-sm">
-          <Zap size={14} className="text-white" />
-        </div>
-        <span className="font-bold text-white tracking-tight">SecretaryAI</span>
+      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-[#30354a]">
         <button
           type="button"
           data-mobile-close="true"
           aria-label="Close navigation"
-          className="ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
+          className="order-2 ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
           onClick={onMobileClose}
         >
           <span aria-hidden="true">×</span>
         </button>
+        <div className="order-1"><LionBrand /></div>
       </div>
 
       {/* Navigation */}
@@ -149,8 +153,8 @@ export function Sidebar({
                 clsx(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
                   isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                    ? 'bg-[#252a47] text-[#f3dca8]'
+                    : 'text-[#a9b5cd] hover:text-white hover:bg-[#1c2743]',
                 )
               }
             >

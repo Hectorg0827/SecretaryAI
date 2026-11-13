@@ -163,7 +163,7 @@ function TwoFASection() {
 
           {/* Do not send a TOTP enrollment URI or secret to an external QR service. */}
           <div className="flex items-center gap-4">
-            <p className="text-xs text-slate-600 max-w-40">For your security, enter the setup key manually in your authenticator app. SecretaryAI never sends it to a QR-image provider.</p>
+            <p className="text-xs text-slate-600 max-w-40">For your security, enter the setup key manually in your authenticator app. Lion BI never sends it to a QR-image provider.</p>
             <div className="min-w-0">
               <p className="text-xs text-slate-500 mb-1">Authenticator setup key:</p>
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
@@ -772,7 +772,7 @@ export function Settings() {
                 )}
 
                 <p className="text-xs text-slate-400 py-3">
-                  AI model, database, and email delivery credentials are managed by SecretaryAI — you never need to enter them.
+                  AI model, database, and email delivery credentials are managed by Lion BI — you never need to enter them.
                 </p>
                 <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded p-3 mb-3">
                   Notification preferences, inventory thresholds and desktop-agent settings are not available yet.

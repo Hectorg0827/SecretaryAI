@@ -108,11 +108,11 @@ export function Accounts() {
     <div className="flex h-full bg-slate-50 overflow-hidden">
     <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
       {/* Header */}
-      <div className="bg-white border-b border-slate-100 px-6 py-4">
-        <div className="flex items-center justify-between">
+      <div className="border-b border-[#34405d] bg-[#121a2f] px-4 py-5 sm:px-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Accounts</h1>
-            <p className="text-sm text-slate-400 mt-0.5">{loading ? "Loading accounts…" : loadError ? "Account count unavailable" : `${total ?? accounts.length} total accounts${total !== null && total > accounts.length ? ` (showing first ${accounts.length})` : ""}`}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#f6f0ff]">Accounts</h1>
+            <p className="mt-1 text-sm text-[#aab8d0]">{loading ? "Loading accounts…" : loadError ? "Account count unavailable" : `${total ?? accounts.length} total accounts${total !== null && total > accounts.length ? ` (showing first ${accounts.length})` : ""}`}</p>
           </div>
           {/* Search */}
           <div className="relative">
@@ -121,13 +121,13 @@ export function Accounts() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search accounts…"
-              className="pl-8 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white w-56"
+              className="w-full rounded-xl border border-[#475574] bg-[#1c2941] py-2.5 pl-9 pr-4 text-sm text-white outline-none placeholder:text-[#98a6be] focus:border-[#dfc18e] sm:w-64"
             />
           </div>
         </div>
 
         {/* Filter tabs */}
-        <div className="flex gap-1 mt-4">
+        <div className="mt-5 flex gap-2 overflow-x-auto whitespace-nowrap pb-2">
           {FILTERS.map((f) => (
             <button
               key={f}
@@ -135,8 +135,8 @@ export function Accounts() {
               className={clsx(
                 'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors capitalize',
                 filter === f
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-500 hover:bg-slate-100',
+                  ? 'border border-[#e0bf88] bg-[#342f45] text-[#f0d4a1]'
+                  : 'border border-[#35405b] bg-[#1a253c] text-[#bac7dc] hover:bg-[#2c3851]',
               )}
             >
               {f === 'all' ? 'All' : f.replace('_', ' ')} ({counts[f] ?? 0})
@@ -180,7 +180,7 @@ export function Accounts() {
 
       {/* Account detail drawer */}
       {selectedAccount && (
-        <div className="w-96 flex-shrink-0 border-l border-slate-200 overflow-hidden">
+        <div className="fixed inset-y-0 right-0 z-30 w-full max-w-sm overflow-hidden border-l border-[#37435e] bg-[#182238] shadow-2xl sm:w-96 lg:static lg:z-auto lg:flex-shrink-0">
           <AccountDetail
             account={selectedAccount}
             onClose={() => setSelected(null)}

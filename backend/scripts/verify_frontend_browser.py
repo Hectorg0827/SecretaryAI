@@ -73,21 +73,15 @@ def _login_and_register(browser, engine: str, base: str, artifacts: Path, width:
     assert email.is_visible() and password.is_visible()
     assert page.get_by_role("button", name="Sign in").is_disabled()
     _measure(page, "login " + str(width))
-    background = page.locator(".min-h-screen").first.evaluate(
+    background = page.locator(".min-h-dvh").first.evaluate(
         "(element) => getComputedStyle(element).backgroundColor"
     )
-    # Chromium/Firefox/WebKit serialize the same Tailwind OKLCH hue with
-    # slightly different decimal precision. Check the numeric components
-    # with tight tolerance rather than requiring identical string rendering.
-    if background != "rgb(15, 23, 42)":
-        match = re.fullmatch(
-            r"oklch\((\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\)",
-            background,
-        )
-        assert match is not None and all(
-            abs(float(actual) - expected) < 0.001
-            for actual, expected in zip(match.groups(), (0.208, 0.042, 265.755))
-        ), "Tailwind slate login background missing: " + background
+    # Lion BI uses its approved deep navy login surface, not the former
+    # SecretaryAI slate theme. Validate the actual rendered background.
+    assert background == "rgb(8, 14, 28)", (
+        "Lion BI navy login background missing: " + background
+    )
+    assert page.get_by_text("LION BUSINESS INTELLIGENCE", exact=True).is_visible()
     page.screenshot(path=str(artifacts / (engine + "-login-" + str(width) + ".png")), full_page=True)
     page.goto(base + "/register", wait_until="networkidle")
     assert page.get_by_role("heading", name="Create your account").is_visible()
@@ -157,11 +151,50 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
         assert aside_box is not None and 0 <= aside_box["x"] <= 1
         assert aside_box["width"] >= 200
 
+    assert aside.get_by_role("link", name="Lola Conversations").count() == 0, (
+        "Redundant Lola Conversations navigation must be removed"
+    )
+    lola = page.get_by_role("button", name="Ask Lola about this page")
+    assert lola.is_visible(), "Operational workspaces need a contextual floating Lola launcher"
+    lola.click()
+    panel = page.get_by_role("dialog", name="Lola contextual assistant")
+    assert panel.is_visible()
+    assert "logistics" in panel.inner_text().lower()
+    panel.get_by_role("button", name="Close Lola assistant").first.click()
+    assert page.get_by_role("dialog", name="Lola contextual assistant").count() == 0
+
     page.get_by_role("button", name="Purchase Orders").click()
     # Correct tab switch is verified through the changed active button styling.
     assert "bg-slate-800" in page.get_by_role("button", name="Purchase Orders").get_attribute("class")
     _measure(page, "logistics " + str(width))
     page.screenshot(path=str(artifacts / (engine + "-logistics-" + str(width) + ".png")))
+
+    # Lola-first home: verify the actual built UI without a backend account.
+    page.goto(base + "/", wait_until="networkidle")
+    orb = page.get_by_role("button", name="Open Lola conversation")
+    assert orb.is_visible(), "The official Lola orb must be operable on desktop and mobile"
+    img = orb.locator("img[src='/brand/lola-orb-approved.png']")
+    assert img.is_visible(), "Missing the official transparent Lola HD artwork"
+    img.evaluate("(element) => element.decode()")
+    assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
+    assert orb.get_attribute("data-state") in ("idle", "hover"), "Orb should be calm before interaction"
+    orb.click()
+    assert page.get_by_role("main", name="Lola conversation workspace").is_visible()
+    assert page.get_by_role("dialog", name="Lola conversation").count() == 0, (
+        "Lola should never open a duplicate chat modal on the main screen"
+    )
+    assert page.get_by_role("button", name="Overview").is_visible()
+    page.get_by_role("button", name="Overview").click()
+    assert page.get_by_role("heading", name=re.compile("Good morning|Good afternoon|Good evening")).is_visible()
+    toggle = page.get_by_role("button", name="Automatic Lola voice greeting off")
+    assert toggle.is_visible(), "Voice greeting must default off"
+    toggle.click()
+    assert page.get_by_role("button", name="Automatic Lola voice greeting on").is_visible()
+    page.get_by_role("button", name="Automatic Lola voice greeting on").click()
+    assert page.get_by_role("button", name="Automatic Lola voice greeting off").is_visible()
+    assert page.get_by_label("Ask Lola").is_visible()
+    _measure(page, "lola home " + str(width))
+    page.screenshot(path=str(artifacts / (engine + "-lola-home-" + str(width) + ".png")), full_page=True)
     context.close()
 
 

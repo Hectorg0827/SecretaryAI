@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CheckCircle2, ChevronRight, ChevronLeft, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 interface Props {
   onComplete: () => void;
+  onDismiss: () => void;
 }
 
 // ─── Step data shapes ─────────────────────────────────────────────────────────
@@ -484,10 +485,22 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
 
 const TOTAL_STEPS = 5;
 
-export function ComplianceSetupWizard({ onComplete }: Props) {
+export function ComplianceSetupWizard({ onComplete, onDismiss }: Props) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+
+  // A dismissible setup wizard must never trap the user in Compliance.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault();
+        onDismiss();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onDismiss, saving]);
 
   const [permit, setPermit] = useState<FederalPermitForm>({
     permit_type: '',
@@ -597,8 +610,17 @@ export function ComplianceSetupWizard({ onComplete }: Props) {
   const isLastStep = step === TOTAL_STEPS - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-xl bg-white rounded-2xl p-8 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#070c19]/80 p-3 sm:p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="compliance-setup-title"
+        className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#465575] bg-[#141f34] p-5 text-[#f4f1fb] shadow-2xl sm:p-8">
+        <div className="sticky -top-5 z-10 mb-4 flex items-center justify-between gap-3 border-b border-[#35425d] bg-[#141f34] py-3 sm:-top-8">
+          <h2 id="compliance-setup-title" className="text-base font-semibold text-[#f0d3a1]">Compliance setup</h2>
+          <button type="button" aria-label="Close compliance setup" title="Close compliance setup"
+            onClick={onDismiss} disabled={saving}
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-[#58637d] bg-[#25314a] text-white transition hover:border-[#ebce9e] focus-visible:outline-2 focus-visible:outline-[#ebce9e] disabled:opacity-50">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
         <ProgressBar step={step} total={TOTAL_STEPS} />
 
         <div className="min-h-[320px]">

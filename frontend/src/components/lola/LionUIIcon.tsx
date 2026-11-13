@@ -9,7 +9,7 @@ export type LionUIIconKind =
   | 'home' | 'inbox' | 'work' | 'dashboard' | 'finance'
   | 'accounts' | 'inventory' | 'insights' | 'logistics'
   | 'compliance' | 'connectors' | 'audit' | 'diagnostics'
-  | 'settings' | 'security';
+  | 'settings' | 'security' | 'user' | 'online' | 'offline' | 'logout';
 
 type Props = { kind: LionUIIconKind; size?: number; className?: string };
 
@@ -81,6 +81,23 @@ const glyphs: Record<LionUIIconKind, ReactNode> = {
     <path d="M8.1 10.6V7.8a3.9 3.9 0 0 1 7.8 0v2.8" />
     <circle cx="12" cy="14.7" r="1.3" className="lion-ui-icon__accent" />
     <path d="M12 16v1.4" className="lion-ui-icon__accent" />
+  </>,
+  user: <>
+    <circle cx="12" cy="8.2" r="3.7" />
+    <path d="M4.7 19.3c.2-3.8 2.8-5.7 7.3-5.7s7.1 1.9 7.3 5.7" />
+    <path d="M10.5 8.2h3" className="lion-ui-icon__accent" />
+  </>,
+  online: <>
+    <path d="M4.5 9a11 11 0 0 1 15 0M7.5 12.3a6.5 6.5 0 0 1 9 0" />
+    <circle cx="12" cy="16.3" r="1.7" className="lion-ui-icon__accent" />
+  </>,
+  offline: <>
+    <path d="M4.5 9a11 11 0 0 1 15 0M7.5 12.3a6.5 6.5 0 0 1 9 0M4.3 19.7 19.7 4.3" />
+    <circle cx="12" cy="16.3" r="1.7" className="lion-ui-icon__accent" />
+  </>,
+  logout: <>
+    <path d="M11.6 4.4H5.8a2 2 0 0 0-2 2v11.2a2 2 0 0 0 2 2h5.8M11.2 12h9M16.8 8.3l3.7 3.7-3.7 3.7" />
+    <path d="M7.2 12h2.5" className="lion-ui-icon__accent" />
   </>,
 };
 

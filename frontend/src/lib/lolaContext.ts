@@ -1,6 +1,7 @@
 /** Non-sensitive navigation context only. The backend enforces access independently. */
 export type LolaWorkspace = 'home' | 'dashboard' | 'finance' | 'accounts' | 'inventory'
-  | 'inbox' | 'work' | 'logistics' | 'compliance' | 'insights' | 'connectors';
+  | 'inbox' | 'work' | 'logistics' | 'compliance' | 'insights' | 'connectors'
+  | 'settings' | 'account-security' | 'audit-log' | 'admin';
 export type LolaEntityType = 'account' | 'item' | 'shipment' | 'order' | 'product' | 'alert';
 export interface LolaContext {
   workspace: LolaWorkspace;
@@ -11,7 +12,8 @@ export interface LolaContext {
 export function workspaceFromPath(pathname: string): LolaWorkspace | null {
   const name = pathname.split('/').filter(Boolean)[0] ?? 'home';
   const allowed: LolaWorkspace[] = ['home', 'dashboard', 'finance', 'accounts', 'inventory', 'inbox',
-    'work', 'logistics', 'compliance', 'insights', 'connectors'];
+    'work', 'logistics', 'compliance', 'insights', 'connectors',
+    'settings', 'account-security', 'audit-log', 'admin'];
   if (pathname === '/') return 'home';
   return allowed.includes(name as LolaWorkspace) ? name as LolaWorkspace : null;
 }

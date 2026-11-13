@@ -58,8 +58,30 @@ def _measure(page, label: str):
 
 def _mock_internal_api(context):
     # No actual backend/API/credentials; static UI and CSS only.
+    # Supply the minimal correct contracts for modules exercised by this smoke.
     def respond(route):
-        route.fulfill(status=200, content_type="application/json", body="{}")
+        path = route.request.url.split("?", 1)[0]
+        if path.endswith("/api/compliance/setup-status"):
+            payload = {
+                "is_setup": False, "missing": ["federal_permit", "state_license"],
+                "products_count": 0, "licenses_count": 0, "federal_permits_count": 0,
+                "distributors_count": 0, "brand_registrations_count": 0,
+            }
+        elif path.endswith("/api/compliance/status"):
+            payload = {
+                "overall": "ok", "critical_alerts": 0, "warning_alerts": 0,
+                "active_states": 0, "total_products": 0,
+                "deadlines_due_7_days": 0, "state_status": {},
+            }
+        elif any(path.endswith(suffix) for suffix in (
+            "/api/compliance/alerts", "/api/compliance/deadlines",
+            "/api/compliance/licenses", "/api/compliance/federal-permits",
+            "/api/compliance/brand-registrations",
+        )):
+            payload = []
+        else:
+            payload = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
     context.route(re.compile(r"/api/|/auth/me(?:[/?]|$)"), respond)
 
 

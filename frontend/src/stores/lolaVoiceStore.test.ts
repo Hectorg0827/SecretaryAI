@@ -47,8 +47,8 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
     expect(useLolaVoiceStore.getState().speak('Business briefing')).toBe(true);
     expect(speech.speak).toHaveBeenCalledOnce();
     expect(useLolaVoiceStore.getState().status).toBe('idle');
-    expect(utterances.at(-1)).not.toBeNull();
-    const utterance = utterances.at(-1) as MockUtterance | null;
+    expect(utterances[utterances.length - 1]).not.toBeNull();
+    const utterance = utterances[utterances.length - 1] as MockUtterance | null;
     utterance?.onstart?.();
     expect(useLolaVoiceStore.getState().status).toBe('speaking');
     expect(useLolaVoiceStore.getState().outputLevel).toBe(0.22);
@@ -57,7 +57,7 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
   it('reacts to actual word boundaries and returns idle after speech ends', () => {
     vi.useFakeTimers();
     useLolaVoiceStore.getState().speak('Next priority');
-    const utterance = utterances.at(-1) as MockUtterance | null;
+    const utterance = utterances[utterances.length - 1] as MockUtterance | null;
     utterance?.onstart?.();
     utterance?.onboundary?.();
     expect(useLolaVoiceStore.getState().outputLevel).toBe(0.85);
@@ -70,7 +70,7 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
 
   it('stops speaking and cancels browser audio on explicit stop', () => {
     useLolaVoiceStore.getState().speak('Hello');
-    const utterance = utterances.at(-1) as MockUtterance | null;
+    const utterance = utterances[utterances.length - 1] as MockUtterance | null;
     utterance?.onstart?.();
     useLolaVoiceStore.getState().stop();
     expect(speech.cancel).toHaveBeenCalled();

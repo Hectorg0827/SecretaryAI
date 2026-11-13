@@ -144,9 +144,10 @@
 .lionbi-brand__subtitle { margin-top: 4px; color: #ad9b7d; font-size: 7px; letter-spacing: .17em; font-weight: 650; white-space: nowrap; }
 @media (max-width: 1000px) { .lola-home__private { display: none; } }
 @media (max-width: 720px) {
-  .lola-home__header { min-height: 59px; padding: 8px 15px; }
-  .lola-home__brand .lionbi-brand__mark { width: 30px; height: 30px; }
-  .lola-home__brand .lionbi-brand__name { font-size: 14px; letter-spacing: .08em; }
+  /* The global mobile app bar already carries the Lion BI logo.
+     Avoid a second identical brand row on the executive home. */
+  .lola-home__header { min-height: 44px; padding: 5px 15px; justify-content: flex-end; border-bottom: 0; }
+  .lola-home__brand { display: none; }
   .lola-home__voice-toggle { padding: 7px 9px; gap: 7px; }
   .lola-home__voice-toggle > span:not(.lola-home__switch) { display: none; }
   .lola-home__inner { padding: 0 16px 20px; }

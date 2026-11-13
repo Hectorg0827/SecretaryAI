@@ -219,3 +219,7 @@
 .lola-chat__read:focus-visible { outline: 2px solid #e8ca99; outline-offset: 2px; }
 
 @media(max-width:600px){.lola-chat__heading{gap:7px}.lola-chat__back{font-size:11px;padding:7px 1px}.lola-chat__back span{display:inline}.lola-chat__identity small{display:none}.lola-chat__topline{gap:8px}}
+
+.lola-chat__more{display:block;width:100%;margin-top:5px;padding:9px 11px;border:1px solid #3c4b68;border-radius:9px;background:#1a2840;color:#eccd94;text-align:center;font-size:12px;cursor:pointer}
+.lola-chat__more:hover{border-color:#e5c78d;background:#263651}
+.lola-chat__more:disabled{opacity:.55;cursor:not-allowed}

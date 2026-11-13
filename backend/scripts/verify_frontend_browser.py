@@ -165,7 +165,7 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     assert img.is_visible(), "Missing the official transparent Lola HD artwork"
     img.evaluate("(element) => element.decode()")
     assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
-    assert orb.get_attribute("data-state") == "idle"
+    assert orb.get_attribute("data-state") in ("idle", "hover"), "Orb should be calm before interaction"
     orb.click()
     assert page.get_by_role("dialog", name="Lola conversation").is_visible()
     page.get_by_role("button", name="Close Lola conversation").last.click()

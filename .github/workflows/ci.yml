@@ -109,9 +109,9 @@ jobs:
           npm ci
           npm run build
           npm run test:css
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # Match the verified 3-engine browser job from Lola UI PR #113.
+      # Official Playwright image Python has SSL/pip; setup-python lacks SSL,
+      # and system python has no ensurepip to create an isolated venv.
       - name: Verify preinstalled Chromium Firefox and WebKit
         run: |
           python -m pip install playwright==1.48.0

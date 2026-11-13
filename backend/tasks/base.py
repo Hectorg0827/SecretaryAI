@@ -153,9 +153,11 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
         cfg["qbo_refresh_token"] = new_tokens["refresh_token"]
         cfg["_qbo_expected_refresh_ciphertext"] = new_ciphertext
 
-        log.info("QBO access token refreshed for company %s", company["id"])
+        log.info("QBO access token refresh completed")
     except Exception as exc:
-        log.warning("QBO token refresh failed for company %s: %s", company["id"], exc)
+        # OAuth/provider errors may contain tokens, URLs and customer identifiers.
+        # Keep the chained exception for code-level handling, never in logs.
+        log.warning("QBO token refresh failed")
         raise RuntimeError("QBO proactive token refresh failed") from exc
 
 
@@ -211,7 +213,8 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
                 }).eq("id", company["id"]).execute()
                 google_creds["token"] = updated_creds["token"]
         except Exception as exc:
-            log.warning("Google token refresh failed in task: %s", exc)
+            # Provider exception messages may contain credential-bearing URLs.
+            log.warning("Google token refresh failed in task")
         cfg["gmail_credentials"] = google_creds
 
     # Map column names to adapter config keys

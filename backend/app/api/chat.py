@@ -48,7 +48,8 @@ class LolaPageContext(BaseModel):
     @classmethod
     def allow_workspace(cls, value: str) -> str:
         if value not in {"home","dashboard","finance","accounts","inventory","inbox",
-                         "work","logistics","compliance","insights","connectors"}:
+                         "work","logistics","compliance","insights","connectors",
+                         "settings","account-security","audit-log","admin"}:
             raise ValueError("Unknown workspace")
         return value
 
@@ -398,6 +399,10 @@ async def send_message(
             "compliance": {"owner", "manager"},
             "insights": {"owner", "manager", "sales_rep"},
             "connectors": {"owner", "manager"},
+            "settings": {"owner", "manager"},
+            "account-security": {"owner", "manager", "sales_rep"},
+            "audit-log": {"owner", "manager"},
+            "admin": {"owner", "manager"},
         }
         if role not in allowed[ui_context.workspace]:
             raise HTTPException(status_code=403, detail="Unauthorized workspace context")

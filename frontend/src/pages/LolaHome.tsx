@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronLeft, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { ArrowRight, Bell, ChevronRight, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
@@ -224,14 +224,8 @@ export function LolaHome() {
 
       {conversationActive && canAccessChat ? (
         <main className="lola-home__conversation" aria-label="Lola conversation workspace">
-          <div className="lola-home__conversation-nav">
-            <button type="button" className="lola-home__back" onClick={() => setConversationActive(false)}>
-              <ChevronLeft size={17} /> Overview
-            </button>
-            <span>Private conversation with Lola</span>
-          </div>
           <div className="lola-home__conversation-content">
-            <ChatInterface />
+            <ChatInterface onBack={() => setConversationActive(false)} />
           </div>
         </main>
       ) : (

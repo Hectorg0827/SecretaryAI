@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUp, ChevronLeft, History, Loader2, RotateCcw, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
@@ -14,7 +14,7 @@ const QUICK_PROMPTS = [
   'Show inventory risks',
 ];
 
-export function ChatInterface() {
+export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
   const { messages, isStreaming, conversationId, sendMessage, clearConversation, conversations, historyLoading, historyError, loadConversations, openConversation } = useChatStore();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -59,7 +59,10 @@ export function ChatInterface() {
   return (
     <section className="lola-chat" aria-label="Lola conversation">
       <div className="lola-chat__topline">
-        <div className="lola-chat__identity"><LolaOrb state={isStreaming ? "thinking" : undefined} className="lola-orb--mini" /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
+        <div className="lola-chat__heading">
+          {onBack && <button type="button" className="lola-chat__back" onClick={onBack} aria-label="Overview"><ChevronLeft size={16} /><span>Overview</span></button>}
+          <div className="lola-chat__identity"><LolaOrb state={isStreaming ? "thinking" : undefined} className="lola-orb--mini" /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
+        </div>
         <div className="lola-chat__controls">
           <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>

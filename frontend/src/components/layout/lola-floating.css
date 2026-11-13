@@ -35,3 +35,40 @@
   color:#c6d0e2;background:#14213b;border-top:1px solid #354362;font-size:12px;padding:9px;cursor:pointer}
 }
 @media(prefers-reduced-motion:reduce){.lola-float__launcher,.lola-float__panel{transition:none}}
+
+/* Lola's contextual presence follows the same premium optical language. */
+.lola-float__launcher {
+  background:linear-gradient(123deg,rgba(48,47,93,.98),rgba(18,30,58,.98));
+  border-color:rgba(221,191,147,.52);
+  box-shadow:0 16px 44px rgba(3,8,23,.42),inset 0 1px rgba(255,255,255,.14);
+  transition:transform 210ms ease,border-color 210ms ease,box-shadow 210ms ease,background 210ms ease;
+}
+.lola-float__launcher .lion-ui-icon,
+.lola-float__launcher svg {
+  flex-shrink:0;
+  filter:drop-shadow(0 0 7px rgba(176,172,255,.38));
+  animation:lola-launcher-presence 5.5s ease-in-out infinite;
+}
+.lola-float__launcher:hover {
+  transform:translateY(-3px);
+  border-color:#f4d5a4;
+  box-shadow:0 22px 58px rgba(3,8,23,.49),inset 0 1px rgba(255,255,255,.16);
+}
+.lola-float__panel {
+  border-color:rgba(194,175,231,.33);
+  box-shadow:0 36px 100px rgba(1,6,19,.64),0 0 0 1px rgba(177,165,223,.075);
+  animation:lola-context-enter 280ms cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes lola-context-enter {
+  from { opacity:.6;transform:translateY(12px) scale(.987); }
+  to { opacity:1;transform:translateY(0) scale(1); }
+}
+@keyframes lola-launcher-presence {
+  0%,100% { opacity:.86; transform:scale(1); }
+  50% { opacity:1; transform:scale(1.08); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .lola-float__launcher svg,.lola-float__panel { animation:none!important; }
+  .lola-float__launcher { transition:none!important; }
+  .lola-float__launcher:hover { transform:none!important; }
+}

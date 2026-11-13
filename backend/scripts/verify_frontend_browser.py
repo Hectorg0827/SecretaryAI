@@ -201,6 +201,15 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     assert glass.is_visible(), "Missing Lola optical-glass sphere"
     assert orb.locator(".lola-orb__plasma").count() == 3, "Missing animated Lola currents"
     assert orb.locator(".lola-orb__orbit").count() == 3, "Missing orbital depth layers"
+    assert orb.locator("svg.lola-orb__ribbons").is_visible(), (
+        "Lola must render her intertwined vector energy signature"
+    )
+    assert orb.locator(".lola-orb__ribbon--blue").count() == 1, (
+        "Missing blue orbital ribbon"
+    )
+    assert orb.locator(".lola-orb__ribbon--gold").count() == 1, (
+        "Missing gold orbital ribbon"
+    )
     assert glass.evaluate(
         "(element) => getComputedStyle(element).backgroundImage !== 'none'"
     ), "Lola sphere must have a real rendered gradient"

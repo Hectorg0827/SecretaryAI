@@ -23,8 +23,8 @@ vi.mock('../hooks/useAuth', () => ({
   }),
 }));
 vi.mock('../stores/chatStore', () => ({
-  useChatStore: (selector: (state: { isStreaming: boolean; sendMessage: (text: string) => Promise<void> }) => unknown) =>
-    selector({ isStreaming: false, sendMessage: mocks.sendMessage }),
+  useChatStore: (selector: (state: { isStreaming: boolean; messages: unknown[]; sendMessage: (text: string) => Promise<void> }) => unknown) =>
+    selector({ isStreaming: false, messages: [], sendMessage: mocks.sendMessage }),
 }));
 vi.mock('../components/chat/ChatInterface', () => ({
   ChatInterface: () => <div>Conversation connected</div>,
@@ -91,7 +91,22 @@ describe('Lola-first homepage (synthetic data only)', () => {
     const prompt = [...node.querySelectorAll('button')].find((item) => item.textContent?.includes('What needs my attention?'));
     await act(async () => { prompt?.click(); });
     expect(mocks.sendMessage).toHaveBeenCalledWith('What needs my attention?');
+    expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
+    expect(node.querySelector('[role="dialog"][aria-label="Lola conversation"]')).toBeNull();
     expect(node.textContent).toContain('Conversation connected');
+    const back = [...node.querySelectorAll('button')].find((button) => button.textContent?.includes('Overview'));
+    await act(async () => { back?.click(); });
+    expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).toBeNull();
+    expect(node.textContent).toContain("I'm Lola");
+  });
+
+  it('uses the main screen itself for orb activation rather than opening a second window', async () => {
+    const node = await renderHome();
+    const orb = node.querySelector<HTMLButtonElement>('button[aria-label="Open Lola conversation"]');
+    await act(async () => { orb?.click(); });
+    expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
+    expect(node.querySelector('.lola-home__dialog-layer')).toBeNull();
+    expect(node.querySelector('button[aria-label="Close Lola conversation"]')).toBeNull();
   });
 
   it('distinguishes unavailable business evidence from zero results', async () => {

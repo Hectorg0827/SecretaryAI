@@ -159,7 +159,16 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
 
     # Lola-first home: verify the actual built UI without a backend account.
     page.goto(base + "/", wait_until="networkidle")
-    assert page.get_by_role("img", name="Lola, your AI business assistant").is_visible()
+    orb = page.get_by_role("button", name="Open Lola conversation")
+    assert orb.is_visible(), "The official Lola orb must be operable on desktop and mobile"
+    img = orb.locator("img[src='/brand/lola-orb-approved.png']")
+    assert img.is_visible(), "Missing the official transparent Lola HD artwork"
+    img.evaluate("(element) => element.decode()")
+    assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
+    assert orb.get_attribute("data-state") == "idle"
+    orb.click()
+    assert page.get_by_role("dialog", name="Lola conversation").is_visible()
+    page.get_by_role("button", name="Close Lola conversation").last.click()
     assert page.get_by_role("heading", name=re.compile("Good morning|Good afternoon|Good evening")).is_visible()
     toggle = page.get_by_role("button", name="Automatic Lola voice greeting off")
     assert toggle.is_visible(), "Voice greeting must default off"

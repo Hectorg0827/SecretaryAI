@@ -206,4 +206,4 @@
 .lola-chat__read:hover { border-color: #dcbf8e; color: #f7e1ae; }
 .lola-chat__read:focus-visible { outline: 2px solid #e8ca99; outline-offset: 2px; }
 
-@media(max-width:600px){.lola-chat__heading{gap:7px}.lola-chat__back{font-size:11px;padding:7px 1px}.lola-chat__back span{display:none}.lola-chat__topline{gap:8px}}
+@media(max-width:600px){.lola-chat__heading{gap:7px}.lola-chat__back{font-size:11px;padding:7px 1px}.lola-chat__back span{display:inline}.lola-chat__identity small{display:none}.lola-chat__topline{gap:8px}}

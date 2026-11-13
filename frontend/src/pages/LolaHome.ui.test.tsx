@@ -67,7 +67,9 @@ afterEach(async () => {
 describe('Lola-first homepage (synthetic data only)', () => {
   it('opens with an off-by-default voice greeting and a central Lola assistant', async () => {
     const node = await renderHome();
-    expect(node.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('Lola');
+    const orb = node.querySelector<HTMLButtonElement>('button[aria-label="Open Lola conversation"]');
+    expect(orb).not.toBeNull();
+    expect(orb?.querySelector('img')?.getAttribute('src')).toBe('/brand/lola-orb-approved.webp');
     expect(node.querySelector('[aria-label="Automatic Lola voice greeting off"]')?.getAttribute('aria-pressed')).toBe('false');
     expect(localStorage.getItem('lionbi:lola:voice-greeting:user-alpha')).toBeNull();
     expect(node.textContent).toContain("I'm Lola");

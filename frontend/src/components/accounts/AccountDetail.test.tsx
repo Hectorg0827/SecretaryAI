@@ -1,4 +1,5 @@
 import { act, type ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type Account } from '../../lib/api';
@@ -17,7 +18,7 @@ async function mount(node: ReactNode) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => { root?.render(node); });
+  await act(async () => { root?.render(<MemoryRouter initialEntries={['/accounts']}>{node}</MemoryRouter>); });
   await flush();
   return container;
 }

@@ -7,6 +7,8 @@ import { LionBrand } from '../components/lola/LionBrand';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { BRAND_LABELS } from '../lib/brand';
 import { useAuth } from '../hooks/useAuth';
+import { useMicLevel } from '../hooks/useMicLevel';
+import { useLolaVoiceStore } from '../stores/lolaVoiceStore';
 import { api, type DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
 import { useChatStore } from '../stores/chatStore';
@@ -33,23 +35,13 @@ function greeting(): string {
   return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 }
 
-function speakWelcome(quality: 'ready' | 'missing' | 'unknown') {
-  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') return false;
-  try {
-    window.speechSynthesis.cancel();
-    const intro = quality === 'ready'
-      ? "I'm Lola. Your business snapshot is ready to review."
-      : quality === 'missing'
-        ? "I'm Lola. I couldn't verify your business snapshot just now."
-        : "I'm Lola. Your workspace is ready.";
-    const utterance = new SpeechSynthesisUtterance(`${greeting()}. ${intro}`);
-    utterance.rate = 0.97;
-    utterance.lang = 'en-US';
-    window.speechSynthesis.speak(utterance);
-    return true;
-  } catch {
-    return false;
-  }
+function welcomeText(quality: 'ready' | 'missing' | 'unknown'): string {
+  const intro = quality === 'ready'
+    ? "I'm Lola. Your business snapshot is ready to review."
+    : quality === 'missing'
+      ? "I'm Lola. I couldn't verify your business snapshot just now."
+      : "I'm Lola. Your workspace is ready.";
+  return `${greeting()}. ${intro}`;
 }
 
 const workspaces = [
@@ -79,6 +71,11 @@ export function LolaHome() {
   const recognitionRef = useRef<BrowserSpeechRecognizer | null>(null);
   const chatBusy = useChatStore((state) => state.isStreaming);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const speak = useLolaVoiceStore((state) => state.speak);
+  const stopSpeaking = useLolaVoiceStore((state) => state.stop);
+  const voiceStatus = useLolaVoiceStore((state) => state.status);
+  const voiceLevel = useLolaVoiceStore((state) => state.outputLevel);
+  const micLevel = useMicLevel(listening);
 
   // Privacy: preference keys are derived from the authenticated account, never
   // shared across users on the same browser. No key = session-only/off by default.
@@ -118,13 +115,13 @@ export function LolaHome() {
   useEffect(() => {
     if (!preferenceKey || snapshotLoading || !voiceGreeting || greetingAttempted.current) return;
     greetingAttempted.current = true;
-    speakWelcome(summary ? 'ready' : canReadSnapshot ? 'missing' : 'unknown');
-  }, [preferenceKey, snapshotLoading, voiceGreeting, summary, canReadSnapshot]);
+    speak(welcomeText(summary ? 'ready' : canReadSnapshot ? 'missing' : 'unknown'));
+  }, [preferenceKey, snapshotLoading, voiceGreeting, summary, canReadSnapshot, speak]);
 
   useEffect(() => () => {
     try { recognitionRef.current?.stop(); } catch { /* recognition may already be stopped */ }
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-  }, []);
+    stopSpeaking();
+  }, [stopSpeaking]);
 
   useEffect(() => {
     if (!chatOpen) return;
@@ -139,10 +136,10 @@ export function LolaHome() {
     const next = !voiceGreeting;
     setVoiceGreeting(next);
     if (preferenceKey) localStorage.setItem(preferenceKey, next ? 'on' : 'off');
-    if (!next && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (!next) stopSpeaking();
     if (next) {
       greetingAttempted.current = true;
-      speakWelcome(summary ? 'ready' : canReadSnapshot ? 'missing' : 'unknown');
+      speak(welcomeText(summary ? 'ready' : canReadSnapshot ? 'missing' : 'unknown'));
     }
   };
 
@@ -167,6 +164,7 @@ export function LolaHome() {
       setMicError('Voice dictation is unavailable in this browser. You can type to Lola instead.');
       return;
     }
+    stopSpeaking();
     const recognition = new Recognition();
     recognitionRef.current = recognition;
     recognition.lang = 'en-US';
@@ -233,7 +231,11 @@ export function LolaHome() {
         <div className="lola-home__inner">
           <section className="lola-home__hero" aria-labelledby="lola-hero-title">
             <div className="lola-home__eyebrow"><span /> YOUR BUSINESS INTELLIGENCE, PERSONIFIED</div>
-            <LolaOrb active={chatBusy || listening} />
+            <LolaOrb
+              state={listening ? 'listening' : voiceStatus === 'speaking' ? 'speaking' : chatBusy ? 'thinking' : undefined}
+              audioLevel={listening ? micLevel : voiceLevel}
+              onActivate={canAccessChat ? () => setChatOpen(true) : undefined}
+            />
             <h1 id="lola-hero-title">{greeting()}{firstName ? `, ${firstName}` : ''}<span className="lola-home__period">.</span></h1>
             <p className="lola-home__hero-lead">I'm Lola. What can I help you accomplish today?</p>
 

@@ -90,3 +90,60 @@ def test_worker_refresh_attaches_db_so_inventory_sell_rates_are_read():
             adapter_factory=lambda row: reader,
         )
     reader.set_db.assert_called_once_with(db)
+
+
+def test_staging_refresh_reports_each_fixed_stage_before_snapshot_write():
+    db = MagicMock()
+    adapter = MagicMock()
+    observed_stages = []
+    payload = {
+        "source_quality": "partial", "source_read_status": "completed",
+        "accounts": {"total": 0}, "inventory_alerts": [], "sales_30d": 0,
+    }
+    with patch(
+        "tasks.dashboard_refresh.compute_dashboard_payload",
+        new=AsyncMock(return_value=payload),
+    ), patch(
+        "tasks.dashboard_refresh.compare_invoice_headers_to_qbo_income",
+        new=AsyncMock(return_value={"status": "unavailable"}),
+    ), patch(
+        "tasks.dashboard_refresh.read_finance_document_coverage",
+        new=AsyncMock(return_value={"ar": {"status": "unavailable"}}),
+    ), patch(
+        "tasks.dashboard_refresh.read_purchasing_coverage",
+        return_value={"status": "unavailable"},
+    ), patch(
+        "tasks.dashboard_refresh.store_snapshot",
+    ) as write:
+        refresh_company_snapshot(
+            "tenant-a", db=db, companies=[{"id": "tenant-a"}],
+            adapter_factory=lambda row: adapter,
+            include_finance_comparison=True,
+            include_purchasing_coverage=True,
+            include_finance_document_coverage=True,
+            stage_hook=observed_stages.append,
+        )
+    assert observed_stages == [
+        "setup_provider_adapter", "attach_inventory_database",
+        "read_required_dashboard_sources", "read_optional_income_comparison",
+        "read_optional_finance_documents", "read_optional_purchasing",
+        "persist_snapshot",
+    ]
+    write.assert_called_once()
+
+
+def test_required_provider_failure_never_advances_to_persistence_stage():
+    observed_stages = []
+    with patch(
+        "tasks.dashboard_refresh.compute_dashboard_payload",
+        new=AsyncMock(side_effect=SnapshotSourceUnavailable("sales_30d")),
+    ), patch("tasks.dashboard_refresh.store_snapshot") as write:
+        with pytest.raises(SnapshotSourceUnavailable):
+            refresh_company_snapshot(
+                "tenant-a", db=MagicMock(), companies=[{"id": "tenant-a"}],
+                adapter_factory=lambda row: MagicMock(),
+                stage_hook=observed_stages.append,
+            )
+    assert observed_stages[-1] == "read_required_dashboard_sources"
+    assert "persist_snapshot" not in observed_stages
+    write.assert_not_called()

@@ -24,6 +24,10 @@ describe('official Lola orb interaction', () => {
     expect(node.querySelector('.lola-orb__glass')).not.toBeNull();
     expect(node.querySelectorAll('.lola-orb__plasma')).toHaveLength(3);
     expect(node.querySelectorAll('.lola-orb__orbit')).toHaveLength(3);
+    expect(node.querySelector('svg.lola-orb__ribbons')).not.toBeNull();
+    expect(node.querySelectorAll('.lola-orb__ribbon')).toHaveLength(3);
+    expect(node.querySelector('.lola-orb__ribbon--blue')).not.toBeNull();
+    expect(node.querySelector('.lola-orb__ribbon--gold')).not.toBeNull();
     expect(node.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('idle');
   });
 

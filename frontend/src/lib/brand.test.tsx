@@ -26,7 +26,8 @@ describe('Lion BI platform / Lola assistant brand hierarchy', () => {
     expect(home).toContain('BRAND_LABELS.voiceGreeting');
     const sidebar = read('src/components/layout/Sidebar.tsx');
     expect(sidebar).toContain('label: BRAND_LABELS.home');
-    expect(sidebar).toContain('label: BRAND_LABELS.conversations');
+    expect(sidebar).not.toContain("to: '/chat'");
+    expect(read('src/App.tsx')).toContain('<LolaFloatingAssistant />');
   });
 
   it('uses a bespoke orbital assistant mark rather than a stock sparkle for identity', () => {
@@ -35,7 +36,7 @@ describe('Lion BI platform / Lola assistant brand hierarchy', () => {
     expect(svg).toContain('<linearGradient');
     expect(svg).toContain('aria-hidden="true"');
     const assistant = read('src/components/layout/InlineAssistant.tsx');
-    expect(assistant).toContain('{BRAND_LABELS.assistant}');
+    expect(assistant).toContain('Ask Lola');
     expect(assistant).not.toContain('AI Assistant');
   });
 });

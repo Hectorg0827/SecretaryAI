@@ -25,12 +25,147 @@
 .lola-chat__composer button{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:#dfc18e;color:#12192c;cursor:pointer;flex-shrink:0}
 .lola-chat__composer button:disabled{opacity:.45;cursor:not-allowed}
 .lola-chat__privacy{display:flex;align-items:center;justify-content:center;gap:6px;color:#8b98b3;font-size:10px;margin-top:10px;text-align:center}
-.lola-chat__message{display:flex;align-items:flex-start;gap:9px;max-width:94%}
-.lola-chat__message--user{align-self:flex-end;flex-direction:row-reverse}
-.lola-chat__avatar{display:grid;place-items:center;width:28px;height:28px;flex-shrink:0;border-radius:10px;color:#e4c18c;background:#272844;border:1px solid #4a446a}
-.lola-chat__bubble{border:1px solid #303b56;border-radius:17px 17px 17px 5px;padding:14px 16px;color:#e4e8f3;background:#1a243a;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
-.lola-chat__message--user .lola-chat__bubble{border-color:#65598a;border-radius:17px 17px 5px 17px;background:#302c50;color:#faf8ff}
-@media(max-width:600px){.lola-chat__topline{height:60px;padding:10px 16px}.lola-chat__messages{padding:18px 15px;gap:18px}.lola-chat__prompts{grid-template-columns:1fr}.lola-chat__welcome .lola-orb{width:110px}.lola-chat__welcome{padding:10px 0}.lola-chat__bubble{padding:12px 13px}.lola-chat__bottom{padding:11px 12px 14px}}
+/* Premium conversational reading surface: assistant prose, not a giant text bubble. */
+.lola-chat__messages {
+  gap: 28px;
+  padding: 30px clamp(20px, 5vw, 55px) 40px;
+  scroll-behavior: smooth;
+}
+.lola-chat__message {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(100%, 850px);
+  max-width: 100%;
+  align-self: center;
+}
+.lola-chat__message--user {
+  justify-content: flex-end;
+  align-self: center;
+}
+.lola-chat__message-body { flex: 1; min-width: 0; }
+.lola-chat__message--user .lola-chat__message-body {
+  flex: 0 1 auto;
+  max-width: min(78%, 650px);
+}
+.lola-chat__author {
+  display: block;
+  color: #e3c890;
+  font-size: 12px;
+  letter-spacing: .045em;
+  font-weight: 650;
+  margin: 0 0 7px 2px;
+}
+.lola-chat__avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 13px;
+  color: #ddc594;
+  background: linear-gradient(145deg,#272b4d,#192641);
+  border: 1px solid #47425c;
+}
+.lola-chat__bubble {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.75;
+  color: #e9edfa;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.lola-chat__message--assistant .lola-chat__bubble {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 0 0 14px;
+}
+.lola-chat__message--user .lola-chat__bubble {
+  border: 1px solid rgba(168,149,218,.3);
+  border-radius: 19px 19px 5px 19px;
+  background: #2a2b4b;
+  color: #fcfaff;
+  padding: 13px 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.lola-chat__user-text { margin: 0; white-space: pre-wrap; }
+.lola-chat__pending { color: #a7b7d4; font-style: italic; }
+.lola-chat__cursor {
+  display: inline-block;
+  width: 3px;
+  height: 15px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: #e4c58f;
+  border-radius: 2px;
+  animation: lola-cursor-blink 1s steps(2) infinite;
+}
+@keyframes lola-cursor-blink { 50% { opacity: .2; } }
+
+/* Render generated Markdown as accessible, legible typography. */
+.lola-rich { display: flow-root; color: #e9edfa; font-size: 15px; line-height: 1.77; letter-spacing: .003em; }
+.lola-rich > :first-child { margin-top: 0; }
+.lola-rich > :last-child { margin-bottom: 0; }
+.lola-rich p { margin: 0 0 15px; }
+.lola-rich h2, .lola-rich h3, .lola-rich h4 {
+  color: #f8f5ff;
+  line-height: 1.35;
+  letter-spacing: -.025em;
+  font-weight: 650;
+  scroll-margin-top: 18px;
+}
+.lola-rich h2 { font-size: 21px; margin: 26px 0 12px; }
+.lola-rich h3 { font-size: 18px; margin: 23px 0 10px; }
+.lola-rich h4 { font-size: 16px; margin: 20px 0 8px; }
+.lola-rich strong { font-weight: 670; color: #faf6ff; }
+.lola-rich em { color: #d9d5eb; }
+.lola-rich a { color: #e9c88c; text-decoration: underline; text-underline-offset: 3px; }
+.lola-rich a:hover { color: #ffe7b9; }
+.lola-rich a:focus-visible { outline: 2px solid #e9c88c; outline-offset: 2px; }
+.lola-rich ul, .lola-rich ol { margin: 10px 0 19px; padding-left: 25px; }
+.lola-rich ul { list-style: disc outside; }
+.lola-rich ol { list-style: decimal outside; }
+.lola-rich li { margin-bottom: 6px; padding-left: 4px; }
+.lola-rich li::marker { color: #d8b984; }
+.lola-rich hr { border: 0; border-top: 1px solid #37425e; margin: 22px 0; }
+.lola-rich blockquote {
+  margin: 18px 0; border-left: 3px solid #b5996e;
+  background: rgba(39,47,77,.5); border-radius: 0 11px 11px 0;
+  padding: 12px 17px; color: #c5d1e9;
+}
+.lola-rich code {
+  border: 1px solid #3a4564; border-radius: 5px;
+  color: #f1d7a7; background: #19233a;
+  font: 13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+  padding: 2px 5px;
+}
+.lola-rich__code {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid #35415c; border-radius: 13px;
+  padding: 16px 18px; margin: 16px 0 22px;
+  background: #10192c; tab-size: 2;
+}
+.lola-rich__code code { padding: 0; border: 0; background: none; color: #dbe4f7; white-space: pre; }
+.lola-rich__table-wrap {
+  overflow-x: auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 18px 0 22px;
+  border: 1px solid #384563;
+  border-radius: 13px;
+}
+.lola-rich__table-wrap:focus-visible { outline: 2px solid #e9c88c; outline-offset: 3px; }
+.lola-rich table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
+.lola-rich th, .lola-rich td { padding: 11px 14px; text-align: left; border-bottom: 1px solid #2f3b58; }
+.lola-rich th { color: #d5c5a8; background: #1b2840; font-weight: 650; white-space: nowrap; }
+.lola-rich td { color: #d8e0f0; }
+.lola-rich tbody tr:last-child td { border-bottom: 0; }
+.lola-rich tbody tr:nth-child(even) { background: rgba(31,42,66,.36); }
+@media(max-width:600px){.lola-chat__topline{height:60px;padding:10px 16px}.lola-chat__messages{padding:18px 15px;gap:18px}.lola-chat__prompts{grid-template-columns:1fr}.lola-chat__welcome .lola-orb{width:110px}.lola-chat__welcome{padding:10px 0}.lola-chat__message--user .lola-chat__bubble{padding:11px 14px}.lola-chat__message--user .lola-chat__message-body{max-width:85%}.lola-chat__message{gap:9px}.lola-chat__avatar{width:30px;height:30px;flex-basis:30px}.lola-rich{font-size:14px}.lola-rich h2{font-size:19px}.lola-chat__bottom{padding:11px 12px 14px}}
 @media(prefers-reduced-motion:reduce){.lola-chat *{scroll-behavior:auto}}
 
 .lola-chat__controls{display:flex;align-items:center;gap:8px}

@@ -217,7 +217,14 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
 
     # Compliance must never trap users behind an undismissable onboarding wizard.
     page.goto(base + "/compliance", wait_until="networkidle")
+    assert page.get_by_role("heading", name="Compliance Manager").is_visible(), (
+        "Owner must be able to enter Compliance"
+    )
     setup = page.get_by_role("dialog", name="Compliance setup")
+    # The mocked API does not represent a real company onboarding state.
+    # Launch manually when the wizard did not auto-open; validate both paths.
+    if not setup.is_visible():
+        page.get_by_role("button", name="Open compliance setup").click()
     setup.wait_for(state="visible", timeout=5000)
     assert setup.get_attribute("aria-modal") == "true"
     assert setup.get_by_role("button", name="Close compliance setup").is_visible()

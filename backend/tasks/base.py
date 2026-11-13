@@ -161,6 +161,23 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
         raise RuntimeError("QBO proactive token refresh failed") from exc
 
 
+class SafeAdapterSetupError(ValueError):
+    """Fixed diagnostic category; never carry a credential or provider message."""
+
+    _ALLOWED = frozenset({
+        "qbo_credential_decryption_failed",
+        "microsoft_credential_decryption_failed",
+        "google_credential_decryption_failed",
+        "connector_configuration_invalid",
+    })
+
+    def __init__(self, code: str):
+        if code not in self._ALLOWED:
+            raise ValueError("Invalid safe adapter error code")
+        self.code = code
+        super().__init__(code)
+
+
 def build_adapter(company: dict) -> UnifiedDataAdapter:
     """Build a UnifiedDataAdapter from a company row."""
     from app.utils.encryption import decrypt
@@ -168,23 +185,44 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
 
     # Decrypt sensitive fields
     if cfg.get("qbo_access_token"):
-        cfg["qbo_access_token"] = decrypt(cfg["qbo_access_token"], settings.secret_key)
+        try:
+            cfg["qbo_access_token"] = decrypt(cfg["qbo_access_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("qbo_credential_decryption_failed") from None
     if cfg.get("qbo_refresh_token"):
         cfg["_qbo_expected_refresh_ciphertext"] = cfg["qbo_refresh_token"]
-        cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
+        try:
+            cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("qbo_credential_decryption_failed") from None
     if cfg.get("google_access_token"):
-        cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
+        try:
+            cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("google_credential_decryption_failed") from None
     if cfg.get("google_refresh_token"):
-        cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+        try:
+            cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("google_credential_decryption_failed") from None
     # Match the request adapter: Outlook's persisted rotated tokens and client
     # secret are ciphertext.
     if cfg.get("ms_access_token"):
-        cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
+        try:
+            cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("microsoft_credential_decryption_failed") from None
     if cfg.get("ms_refresh_token"):
         cfg["_ms_expected_refresh_ciphertext"] = cfg["ms_refresh_token"]
-        cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
+        try:
+            cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("microsoft_credential_decryption_failed") from None
     if cfg.get("ms_client_secret"):
-        cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
+        try:
+            cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
+        except ValueError:
+            raise SafeAdapterSetupError("microsoft_credential_decryption_failed") from None
     cfg["ms_client_id"] = cfg.get("ms_client_id") or getattr(settings, "ms_client_id", "")
     cfg["ms_client_secret"] = cfg.get("ms_client_secret") or getattr(settings, "ms_client_secret", "")
 
@@ -222,4 +260,7 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
     cfg.setdefault("qbo_client_secret", settings.intuit_client_secret)
     cfg.setdefault("conductor_api_key", settings.conductor_api_key)
 
-    return UnifiedDataAdapter(cfg)
+    try:
+        return UnifiedDataAdapter(cfg)
+    except ValueError:
+        raise SafeAdapterSetupError("connector_configuration_invalid") from None

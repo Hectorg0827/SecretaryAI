@@ -215,6 +215,7 @@ export function Compliance() {
             return (
               <button
                 key={id}
+                data-active={activeTab === id}
                 onClick={() => setActiveTab(id)}
                 className={clsx(
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
@@ -245,7 +246,7 @@ export function Compliance() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
-        <div className="bg-white min-h-full shadow-sm">
+        <div key={activeTab} className="lionbi-compliance__content bg-white min-h-full shadow-sm">
 
           {/* Status tab */}
           {activeTab === 'status' && (

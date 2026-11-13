@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { MessageCircle, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { workspaceFromPath, type LolaContext } from '../../lib/lolaContext';
 import { useLolaPanelStore } from '../../stores/lolaPanelStore';

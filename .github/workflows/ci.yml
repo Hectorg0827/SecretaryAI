@@ -109,18 +109,13 @@ jobs:
           npm ci
           npm run build
           npm run test:css
-      # Use the Python interpreter bundled with the official Playwright
-      # image. actions/setup-python installs a hosted-toolcache interpreter
-      # inside this container without a functioning _ssl module, so pip fails
-      # before any browser tests execute.
+      # Match the verified 3-engine browser job from Lola UI PR #113.
+      # Official Playwright image Python has SSL/pip; setup-python lacks SSL,
+      # and system python has no ensurepip to create an isolated venv.
       - name: Verify preinstalled Chromium Firefox and WebKit
-        shell: bash
         run: |
-          set -euo pipefail
-          python3 -m venv /tmp/secretaryai-playwright-venv
-          /tmp/secretaryai-playwright-venv/bin/python -m pip install playwright==1.48.0
-          echo "/tmp/secretaryai-playwright-venv/bin" >> "$GITHUB_PATH"
-          /tmp/secretaryai-playwright-venv/bin/python - <<'PY'
+          python -m pip install playwright==1.48.0
+          python - <<'PY'
           from pathlib import Path
           from playwright.sync_api import sync_playwright
           with sync_playwright() as p:

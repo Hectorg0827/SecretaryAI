@@ -167,8 +167,12 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
     assert orb.get_attribute("data-state") in ("idle", "hover"), "Orb should be calm before interaction"
     orb.click()
-    assert page.get_by_role("dialog", name="Lola conversation").is_visible()
-    page.get_by_role("button", name="Close Lola conversation").last.click()
+    assert page.get_by_role("main", name="Lola conversation workspace").is_visible()
+    assert page.get_by_role("dialog", name="Lola conversation").count() == 0, (
+        "Lola should never open a duplicate chat modal on the main screen"
+    )
+    assert page.get_by_role("button", name="Overview").is_visible()
+    page.get_by_role("button", name="Overview").click()
     assert page.get_by_role("heading", name=re.compile("Good morning|Good afternoon|Good evening")).is_visible()
     toggle = page.get_by_role("button", name="Automatic Lola voice greeting off")
     assert toggle.is_visible(), "Voice greeting must default off"

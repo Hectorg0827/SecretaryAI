@@ -25,7 +25,7 @@ describe('Lola conversation history', () => {
     expect(useChatStore.getState().conversations).toEqual([
       { conversation_id: 'alice-1', preview: 'Inventory risks' },
     ]);
-    expect(mocks.get).toHaveBeenCalledWith('/api/chat/conversations?limit=20');
+    expect(mocks.get).toHaveBeenCalledWith('/api/chat/conversations?limit=100');
   });
 
   it('restores a saved conversation without trusting malformed messages', async () => {

@@ -180,12 +180,24 @@
 .lola-chat__history-heading button{border:0;background:none;color:#e4c18c;font-size:11px;cursor:pointer}
 .lola-chat__history-heading button:disabled{opacity:.5;cursor:not-allowed}
 .lola-chat__history-state{font-size:12px;color:#abb5ce;padding:7px 0}
-.lola-chat__history-list{display:flex;align-items:stretch;gap:9px;max-height:126px;overflow-x:auto;overflow-y:hidden;padding:4px 0 8px}
-.lola-chat__history-list button{flex:0 0 195px;min-height:62px;max-height:92px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;text-align:left;background:#202943;border:1px solid #3c4966;color:#e4e8f3;border-radius:12px;padding:12px;font-size:12px;line-height:1.5;cursor:pointer;overflow-wrap:anywhere}
-.lola-chat__history-list button:hover,.lola-chat__history-list button.is-active{border-color:#e4c18c;color:#fff}
-.lola-chat__history-list button:disabled{opacity:.55;cursor:not-allowed}
-@media(max-width:600px){.lola-chat__history{padding:11px 13px}.lola-chat__history-list button{flex-basis:165px}.lola-chat__history-toggle{padding:0 8px}.lola-chat__history-toggle span{display:none}}
-
+.lola-chat__history-list{display:flex;flex-direction:column;gap:4px;max-height:min(41vh,350px);overflow-y:auto;overflow-x:hidden;padding:4px 0 10px}
+.lola-chat__history-item{position:relative;display:flex;align-items:center;gap:6px;border:1px solid transparent;border-radius:10px;background:#1b2740}
+.lola-chat__history-item:hover,.lola-chat__history-item.is-active{border-color:#917d66;background:#26334b}
+.lola-chat__history-open{display:flex;min-width:0;flex:1;flex-direction:column;align-items:flex-start;text-align:left;gap:3px;padding:10px 12px;background:transparent;border:0;color:#e8eaf7;cursor:pointer}
+.lola-chat__history-open span{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px;font-weight:550}
+.lola-chat__history-open small{color:#9caec8;font-size:11px}
+.lola-chat__history-delete{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;margin-right:7px;border:1px solid #404d68;border-radius:9px;color:#cbd5e7;background:#1a2439;cursor:pointer}
+.lola-chat__history-delete:hover{border-color:#d7a3a3;color:#ffd0d0}
+.lola-chat__history-open:disabled,.lola-chat__history-delete:disabled{opacity:.5;cursor:not-allowed}
+.lola-chat__confirm{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:7px 9px;background:#232037;border:1px solid #a56a6a;border-radius:10px;color:#ffe4dd;font-size:12px}
+.lola-chat__confirm span{margin-right:auto}
+.lola-chat__confirm button{padding:5px 8px;border:1px solid #54617f;border-radius:7px;color:#ebedf7;background:#303950;cursor:pointer}
+.lola-chat__confirm button.is-danger{background:#743739;border-color:#b36666;color:#ffe6e4}
+.lola-chat__confirm button:disabled{opacity:.5;cursor:not-allowed}
+.lola-chat__context{padding:9px 20px;border-bottom:1px solid rgba(216,196,231,.13);background:#19253d;color:#d8dce9;font-size:11px}
+.lola-chat__context strong{text-transform:capitalize;color:#e9cb98}
+.lola-chat__context small{display:block;margin-top:3px;color:#9cb0cc;font-size:10px}
+@media(max-width:600px){.lola-chat__history{padding:11px 13px}.lola-chat__history-list{max-height:38vh}.lola-chat__history-open span{font-size:12px}.lola-chat__confirm{gap:5px;font-size:11px}}
 /* Miniature of the same living orb: never a generic robot or stock sparkle. */
 .lola-chat__identity .lola-orb { width: 35px; height: 35px; margin: 0; }
 .lola-chat__identity .lola-orb__aura { filter: blur(8px); }

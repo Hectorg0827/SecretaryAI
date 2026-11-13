@@ -18,7 +18,8 @@ export function ChatInterface() {
   const { messages, isStreaming, conversationId, sendMessage, clearConversation, conversations, historyLoading, historyError, loadConversations, openConversation } = useChatStore();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
   const speak = useLolaVoiceStore((state) => state.speak);
   const stopSpeaking = useLolaVoiceStore((state) => state.stop);
   const voiceStatus = useLolaVoiceStore((state) => state.status);
@@ -27,14 +28,24 @@ export function ChatInterface() {
   const canReadAloud = typeof window !== 'undefined' &&
     'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
+  // Only follow the newest reply if the reader is near the bottom.
+  // Never yank the page away while someone is reviewing older evidence.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
+    const area = messagesRef.current;
+    if (area && followLatestRef.current) area.scrollTop = area.scrollHeight;
+  }, [messages, isStreaming]);
+
+  const trackScroll = () => {
+    const area = messagesRef.current;
+    if (!area) return;
+    followLatestRef.current = area.scrollHeight - area.scrollTop - area.clientHeight < 110;
+  };
 
   const handleSend = (value = input) => {
     const text = value.trim();
     if (!text || isStreaming) return;
     setInput('');
+    followLatestRef.current = true;
     void sendMessage(text);
   };
 
@@ -80,7 +91,7 @@ export function ChatInterface() {
               </div>}
         </div>
       )}
-      <div className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">
+      <div ref={messagesRef} onScroll={trackScroll} className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">
         {messages.length === 0 && (
           <div className="lola-chat__welcome">
             <LolaGlyph size={42} className="lola-chat__welcome-mark" />
@@ -98,7 +109,6 @@ export function ChatInterface() {
         {isStreaming && messages[messages.length - 1]?.role === 'user' && (
           <div className="lola-chat__thinking" role="status"><Loader2 size={15} className="animate-spin" /> Lola is thinking…</div>
         )}
-        <div ref={bottomRef} />
       </div>
       <div className="lola-chat__bottom">
         <div className="lola-chat__composer">

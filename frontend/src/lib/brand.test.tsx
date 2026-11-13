@@ -19,13 +19,16 @@ describe('Lion BI platform / Lola assistant brand hierarchy', () => {
     expect(manifest.short_name).toBe('Lion BI');
   });
 
-  it('places the Lion BI logo alone on the home header', () => {
+  it('preserves one corporate brand in navigation and gives Lola a separate home identity', () => {
     const home = read('src/pages/LolaHome.tsx');
-    expect(home).toContain('<LionBrand showSubtitle={false} />');
+    expect(home).toContain('lola-home__nameplate');
+    expect(home).toContain('YOUR INTELLIGENCE PARTNER');
+    expect(home).not.toContain('<LionBrand showSubtitle={false} />');
     expect(home).not.toContain('LION BI <span>/</span> LOLA');
     expect(home).toContain('BRAND_LABELS.voiceGreeting');
     const sidebar = read('src/components/layout/Sidebar.tsx');
     expect(sidebar).toContain('label: BRAND_LABELS.home');
+    expect(sidebar).toContain('<LionBrand />');
     expect(sidebar).not.toContain("to: '/chat'");
     expect(read('src/App.tsx')).toContain('<LolaFloatingAssistant />');
   });

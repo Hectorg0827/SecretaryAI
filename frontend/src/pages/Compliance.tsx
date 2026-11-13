@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import clsx from 'clsx';
-import {
-  Scale, Bell, CalendarClock, FileText, Search, CheckCircle2, AlertCircle, AlertTriangle,
-} from 'lucide-react';
+import { CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { LionUIIcon, type LionUIIconKind } from '../components/lola/LionUIIcon';
+import './compliance-premium.css';
 import {
   api,
   ComplianceStatus,
@@ -23,12 +23,12 @@ import { ComplianceSetupWizard }   from '../components/compliance/ComplianceSetu
 
 type TabId = 'status' | 'alerts' | 'deadlines' | 'licenses' | 'check';
 
-const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: 'status',    label: 'Status',          icon: Scale        },
-  { id: 'alerts',    label: 'Alerts',          icon: Bell         },
-  { id: 'deadlines', label: 'Deadlines',       icon: CalendarClock },
-  { id: 'licenses',  label: 'Licenses',        icon: FileText     },
-  { id: 'check',     label: 'Check Shipment',  icon: Search       },
+const TABS: { id: TabId; label: string; icon: LionUIIconKind }[] = [
+  { id: 'status',    label: 'Status',          icon: 'compliance' },
+  { id: 'alerts',    label: 'Alerts',          icon: 'notification' },
+  { id: 'deadlines', label: 'Deadlines',       icon: 'calendar' },
+  { id: 'licenses',  label: 'Licenses',        icon: 'document' },
+  { id: 'check',     label: 'Check Shipment',  icon: 'search' },
 ];
 
 // ─── State status grid ────────────────────────────────────────────────────────
@@ -159,7 +159,7 @@ export function Compliance() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50">
+    <div className="lionbi-compliance flex flex-col h-full bg-slate-50">
       {/* Setup wizard */}
       {showSetupWizard && (
         <ComplianceSetupWizard
@@ -171,10 +171,10 @@ export function Compliance() {
         />
       )}
       {/* Page header */}
-      <div className="bg-white border-b border-slate-100 px-6 py-4 flex-shrink-0">
+      <div className="lionbi-compliance__header bg-white border-b border-slate-100 px-6 py-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
-            <Scale size={18} className="text-indigo-600" />
+            <LionUIIcon kind="compliance" size={20} className="text-indigo-600" />
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900">Compliance Manager</h1>
@@ -185,6 +185,11 @@ export function Compliance() {
 
           {/* Quick stats */}
           <div className="ml-auto flex items-center gap-3">
+            <button type="button" onClick={() => setShowSetupWizard(true)}
+              className="lionbi-compliance__setup rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
+              aria-label="Open compliance setup">
+              <LionUIIcon kind="settings" size={15} /> Setup
+            </button>
             {status && (
               <ComplianceStatusBadge status={status.overall} />
             )}
@@ -204,12 +209,13 @@ export function Compliance() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mt-4">
-          {TABS.map(({ id, label, icon: Icon }) => {
+        <div className="lionbi-compliance__tabs flex gap-1 mt-4 overflow-x-auto pb-1">
+          {TABS.map(({ id, label, icon }) => {
             const badge = tabBadge(id);
             return (
               <button
                 key={id}
+                data-active={activeTab === id}
                 onClick={() => setActiveTab(id)}
                 className={clsx(
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
@@ -218,7 +224,7 @@ export function Compliance() {
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700',
                 )}
               >
-                <Icon size={14} />
+                <LionUIIcon kind={icon} size={15} />
                 {label}
                 {badge > 0 && (
                   <span className={clsx(
@@ -240,7 +246,7 @@ export function Compliance() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
-        <div className="bg-white min-h-full shadow-sm">
+        <div key={activeTab} className="lionbi-compliance__content bg-white min-h-full shadow-sm">
 
           {/* Status tab */}
           {activeTab === 'status' && (

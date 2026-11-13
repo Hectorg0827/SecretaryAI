@@ -58,8 +58,30 @@ def _measure(page, label: str):
 
 def _mock_internal_api(context):
     # No actual backend/API/credentials; static UI and CSS only.
+    # Supply the minimal correct contracts for modules exercised by this smoke.
     def respond(route):
-        route.fulfill(status=200, content_type="application/json", body="{}")
+        path = route.request.url.split("?", 1)[0]
+        if path.endswith("/api/compliance/setup-status"):
+            payload = {
+                "is_setup": False, "missing": ["federal_permit", "state_license"],
+                "products_count": 0, "licenses_count": 0, "federal_permits_count": 0,
+                "distributors_count": 0, "brand_registrations_count": 0,
+            }
+        elif path.endswith("/api/compliance/status"):
+            payload = {
+                "overall": "ok", "critical_alerts": 0, "warning_alerts": 0,
+                "active_states": 0, "total_products": 0,
+                "deadlines_due_7_days": 0, "state_status": {},
+            }
+        elif any(path.endswith(suffix) for suffix in (
+            "/api/compliance/alerts", "/api/compliance/deadlines",
+            "/api/compliance/licenses", "/api/compliance/federal-permits",
+            "/api/compliance/brand-registrations",
+        )):
+            payload = []
+        else:
+            payload = {}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
     context.route(re.compile(r"/api/|/auth/me(?:[/?]|$)"), respond)
 
 
@@ -173,10 +195,28 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     page.goto(base + "/", wait_until="networkidle")
     orb = page.get_by_role("button", name="Open Lola conversation")
     assert orb.is_visible(), "The official Lola orb must be operable on desktop and mobile"
-    img = orb.locator("img[src='/brand/lola-orb-approved.png']")
-    assert img.is_visible(), "Missing the official transparent Lola HD artwork"
-    img.evaluate("(element) => element.decode()")
-    assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
+    # Lola is now volumetric CSS, not a transparent PNG pasted into a circle.
+    assert orb.locator("img").count() == 0, "Legacy flat Lola orb must not return"
+    glass = orb.locator(".lola-orb__glass")
+    assert glass.is_visible(), "Missing Lola optical-glass sphere"
+    assert orb.locator(".lola-orb__plasma").count() == 3, "Missing animated Lola currents"
+    assert orb.locator(".lola-orb__orbit").count() == 3, "Missing orbital depth layers"
+    assert orb.locator("svg.lola-orb__ribbons").is_visible(), (
+        "Lola must render her intertwined vector energy signature"
+    )
+    assert orb.locator(".lola-orb__ribbon--blue").count() == 1, (
+        "Missing blue orbital ribbon"
+    )
+    assert orb.locator(".lola-orb__ribbon--gold").count() == 1, (
+        "Missing gold orbital ribbon"
+    )
+    assert glass.evaluate(
+        "(element) => getComputedStyle(element).backgroundImage !== 'none'"
+    ), "Lola sphere must have a real rendered gradient"
+    assert orb.locator(".lola-orb__body").evaluate(
+        "(element) => window.matchMedia('(prefers-reduced-motion: reduce)').matches"
+        " || getComputedStyle(element).animationName.includes('lola-breath')"
+    ), "Lola must animate in normal motion mode and honor reduced-motion preference"
     assert orb.get_attribute("data-state") in ("idle", "hover"), "Orb should be calm before interaction"
     orb.click()
     assert page.get_by_role("main", name="Lola conversation workspace").is_visible()
@@ -205,6 +245,32 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
         )
     _measure(page, "lola home " + str(width))
     page.screenshot(path=str(artifacts / (engine + "-lola-home-" + str(width) + ".png")), full_page=True)
+
+    # Compliance must never trap users behind an undismissable onboarding wizard.
+    page.goto(base + "/compliance", wait_until="networkidle")
+    assert page.get_by_role("heading", name="Compliance Manager").is_visible(), (
+        "Owner must be able to enter Compliance"
+    )
+    setup = page.get_by_role("dialog", name="Compliance setup")
+    # The mocked API does not represent a real company onboarding state.
+    # Launch manually when the wizard did not auto-open; validate both paths.
+    if not setup.is_visible():
+        page.get_by_role("button", name="Open compliance setup").click()
+    setup.wait_for(state="visible", timeout=5000)
+    assert setup.get_attribute("aria-modal") == "true"
+    assert setup.get_by_role("button", name="Close compliance setup").is_visible()
+    page.screenshot(path=str(artifacts / (engine + "-compliance-setup-" + str(width) + ".png")))
+    setup.get_by_role("button", name="Close compliance setup").click()
+    setup.wait_for(state="hidden", timeout=5000)
+    page.get_by_role("button", name="Open compliance setup").click()
+    setup.wait_for(state="visible", timeout=5000)
+    setup.get_by_role("button", name="Exit compliance setup and return to dashboard").click()
+    setup.wait_for(state="hidden", timeout=5000)
+    page.get_by_role("button", name="Open compliance setup").click()
+    setup.wait_for(state="visible", timeout=5000)
+    page.keyboard.press("Escape")
+    setup.wait_for(state="hidden", timeout=5000)
+    _measure(page, "compliance " + str(width))
     context.close()
 
 

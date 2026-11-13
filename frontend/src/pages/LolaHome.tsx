@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Bell, ChevronRight, History, Mic, MicOff, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
-import { LionBrand } from '../components/lola/LionBrand';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
+import { LionUIIcon } from '../components/lola/LionUIIcon';
 import { BRAND_LABELS } from '../lib/brand';
 import { useAuth } from '../hooks/useAuth';
 import { useLolaVoiceStore } from '../stores/lolaVoiceStore';
@@ -210,11 +210,17 @@ export function LolaHome() {
   return (
     <div className="lola-home">
       <header className="lola-home__header">
-        <div className="lola-home__brand"><LionBrand showSubtitle={false} /></div>
+        <div className="lola-home__brand" aria-label="Lola executive workspace">
+          <LolaGlyph size={28} className="lola-home__nameplate-glyph" />
+          <span className="lola-home__nameplate">
+            <strong>LOLA</strong>
+            <small>YOUR INTELLIGENCE PARTNER</small>
+          </span>
+        </div>
         <div className="lola-home__header-actions">
-          <span className="lola-home__private"><ShieldCheck size={14} /> Your access level: {role.replace(/_/g, ' ')}</span>
+          <span className="lola-home__private"><LionUIIcon kind="compliance" size={14} /> Your access level: {role.replace(/_/g, ' ')}</span>
           <button className="lola-home__voice-toggle" type="button" aria-label={`Automatic Lola voice greeting ${voiceGreeting ? 'on' : 'off'}`} aria-pressed={voiceGreeting} onClick={toggleGreeting}>
-            {voiceGreeting ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            {voiceGreeting ? <LionUIIcon kind="voice" size={16} /> : <LionUIIcon kind="voice-off" size={16} />}
             <span>{BRAND_LABELS.voiceGreeting}</span>
             <span className={`lola-home__switch ${voiceGreeting ? 'lola-home__switch--on' : ''}`} aria-hidden="true"><i /></span>
           </button>
@@ -252,12 +258,12 @@ export function LolaHome() {
                     autoComplete="off" disabled={chatBusy} maxLength={4000} />
                   <button type="button" aria-label={listening ? 'Stop voice dictation' : 'Start voice dictation'} aria-pressed={listening}
                     className={`lola-home__mic ${listening ? 'lola-home__mic--active' : ''}`}
-                    onClick={toggleMicrophone}>{listening ? <MicOff size={19} /> : <Mic size={19} />}</button>
-                  <button type="submit" className="lola-home__send" aria-label="Send to Lola" disabled={!prompt.trim() || chatBusy}><ArrowRight size={19} /></button>
+                    onClick={toggleMicrophone}>{listening ? <LionUIIcon kind="microphone-off" size={19} /> : <LionUIIcon kind="microphone" size={19} />}</button>
+                  <button type="submit" className="lola-home__send" aria-label="Send to Lola" disabled={!prompt.trim() || chatBusy}><LionUIIcon kind="arrow" size={19} /></button>
                 </form>
                 <div className="lola-home__history-link">
                   <button type="button" onClick={() => { setHistoryRequested(true); setConversationActive(true); }}>
-                    <History size={16} /> Past conversations
+                    <LionUIIcon kind="history" size={16} /> Past conversations
                   </button>
                   <span>Conversations save automatically after each completed response.</span>
                 </div>
@@ -265,7 +271,7 @@ export function LolaHome() {
                 <div className="lola-home__suggestions" aria-label="Suggested questions">
                   {['What needs my attention?', 'Review my business priorities', 'Show inventory risks'].map((question) => (
                     <button key={question} type="button" onClick={() => submit(question)} disabled={chatBusy}>
-                      {question} <ChevronRight size={13} />
+                      {question} <LionUIIcon kind="chevron" size={13} />
                     </button>
                   ))}
                 </div>
@@ -283,7 +289,7 @@ export function LolaHome() {
                 <p className="lola-home__section-kicker">AT A GLANCE</p>
                 <h2 id="lola-overview-title">Your business, in focus.</h2>
               </div>
-              {canReadSnapshot && <Link to="/dashboard" className="lola-home__subtle-link">Open detailed dashboard <ArrowRight size={15} /></Link>}
+              {canReadSnapshot && <Link to="/dashboard" className="lola-home__subtle-link">Open detailed dashboard <LionUIIcon kind="arrow" size={15} /></Link>}
             </div>
 
             {canReadSnapshot && (
@@ -296,7 +302,7 @@ export function LolaHome() {
             {tiles.length > 0 && <div className="lola-home__stat-grid">
               {tiles.map((tile) => (
                 <Link to={tile.link} key={tile.label} className="lola-home__stat">
-                  <span className="lola-home__stat-label">{tile.label} <ArrowRight size={14} /></span>
+                  <span className="lola-home__stat-label">{tile.label} <LionUIIcon kind="arrow" size={14} /></span>
                   <strong>{tile.value}</strong>
                   <span className="lola-home__stat-detail">{tile.detail}</span>
                 </Link>
@@ -304,7 +310,7 @@ export function LolaHome() {
             </div>}
 
             <div className="lola-home__action-panel">
-              <div className="lola-home__action-icon"><Bell size={20} /></div>
+              <div className="lola-home__action-icon"><LionUIIcon kind="notification" size={20} /></div>
               <div className="lola-home__action-copy">
                 <h3>Executive briefing</h3>
                 <p>{canReadSnapshot
@@ -312,7 +318,7 @@ export function LolaHome() {
                     : 'The briefing is available when its underlying source can be verified.'
                   : 'Open an authorized workspace to review business activity.'}</p>
               </div>
-              {canReadSnapshot && <Link to="/dashboard" className="lola-home__action-link">View briefing <ArrowRight size={16} /></Link>}
+              {canReadSnapshot && <Link to="/dashboard" className="lola-home__action-link">View briefing <LionUIIcon kind="arrow" size={16} /></Link>}
             </div>
           </section>
 
@@ -325,7 +331,7 @@ export function LolaHome() {
             </div>
             <div className="lola-home__workspaces-grid">
               {availableWorkspaces.map((item) => (
-                <Link key={item.to} to={item.to}>{item.label}<ArrowRight size={15} /></Link>
+                <Link key={item.to} to={item.to}>{item.label}<LionUIIcon kind="arrow" size={15} /></Link>
               ))}
             </div>
           </section>

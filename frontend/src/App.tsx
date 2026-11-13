@@ -4,9 +4,9 @@ import './lion-workspace.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './components/layout/Sidebar';
+import { LolaFloatingAssistant } from './components/layout/LolaFloatingAssistant';
 import { Dashboard } from './pages/Dashboard';
 import { LolaHome } from './pages/LolaHome';
-import { Chat } from './pages/Chat';
 import { Accounts } from './pages/Accounts';
 import { Inventory } from './pages/Inventory';
 import { Settings } from './pages/Settings';
@@ -130,14 +130,8 @@ function AppShell() {
               </RoleGuard>
             }
           />
-          <Route
-            path="/chat"
-            element={
-              <RoleGuard roles={['owner', 'manager', 'sales_rep']}>
-                <Chat />
-              </RoleGuard>
-            }
-          />
+          {/* Legacy bookmarks converge on the single Lola Home entry point. */}
+          <Route path="/chat" element={<Navigate to="/" replace />} />
           <Route
             path="/accounts"
             element={
@@ -220,6 +214,7 @@ function AppShell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <LolaFloatingAssistant />
     </div>
   );
 }

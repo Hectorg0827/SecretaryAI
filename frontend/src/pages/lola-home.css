@@ -169,3 +169,22 @@
 @media (prefers-reduced-motion: reduce) {
   .lola-home__stat, .lola-home__switch i { transition: none; }
 }
+
+/* Balanced Home: Lola leads, but real business intelligence is visible without a second page. */
+.lola-home__hero{padding:15px 0 25px}
+.lola-home__hero>.lola-orb{width:clamp(160px,19vw,218px);margin:3px auto}
+.lola-home__hero h1{font-size:clamp(26px,3.2vw,37px)}
+.lola-home__hero-lead{margin-top:7px}
+.lola-home__composer{margin-top:18px;min-height:58px}
+.lola-home__suggestions{margin-top:11px}
+.lola-home__overview{padding-top:14px}
+.lola-home__history-link{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.lola-home__history-link button{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #394660;border-radius:9px;color:#e4c996;background:#18223a;cursor:pointer;font-size:12px}
+.lola-home__history-link button:hover{border-color:#e4c996;background:#222f49}
+.lola-home__history-link span{font-size:11px;color:#8795b1}
+@media(max-width:600px){
+  .lola-home__hero{padding:13px 0 20px}
+  .lola-home__hero>.lola-orb{width:172px}
+  .lola-home__history-link span{display:none}
+  .lola-home__composer{margin-top:16px}
+}

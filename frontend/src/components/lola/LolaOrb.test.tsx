@@ -18,12 +18,12 @@ async function mount(orb: React.ReactElement) {
 }
 
 describe('official Lola orb interaction', () => {
-  it('uses the exact approved transparent HD artwork without image masks', async () => {
+  it('renders layered living glass rather than a pasted static image', async () => {
     const node = await mount(<LolaOrb />);
-    const img = node.querySelector('img');
-    expect(img?.getAttribute('src')).toBe('/brand/lola-orb-approved.png');
-    expect(img?.getAttribute('alt')).toBe('');
-    expect(img?.getAttribute('draggable')).toBe('false');
+    expect(node.querySelector('img')).toBeNull();
+    expect(node.querySelector('.lola-orb__glass')).not.toBeNull();
+    expect(node.querySelectorAll('.lola-orb__plasma')).toHaveLength(3);
+    expect(node.querySelectorAll('.lola-orb__orbit')).toHaveLength(3);
     expect(node.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('idle');
   });
 

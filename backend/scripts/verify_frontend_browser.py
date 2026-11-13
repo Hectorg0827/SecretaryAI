@@ -151,6 +151,18 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
         assert aside_box is not None and 0 <= aside_box["x"] <= 1
         assert aside_box["width"] >= 200
 
+    assert aside.get_by_role("link", name="Lola Conversations").count() == 0, (
+        "Redundant Lola Conversations navigation must be removed"
+    )
+    lola = page.get_by_role("button", name="Ask Lola about this page")
+    assert lola.is_visible(), "Operational workspaces need a contextual floating Lola launcher"
+    lola.click()
+    panel = page.get_by_role("dialog", name="Lola contextual assistant")
+    assert panel.is_visible()
+    assert "logistics" in panel.inner_text().lower()
+    panel.get_by_role("button", name="Close Lola assistant").first.click()
+    assert page.get_by_role("dialog", name="Lola contextual assistant").count() == 0
+
     page.get_by_role("button", name="Purchase Orders").click()
     # Correct tab switch is verified through the changed active button styling.
     assert "bg-slate-800" in page.get_by_role("button", name="Purchase Orders").get_attribute("class")

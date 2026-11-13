@@ -617,7 +617,7 @@ export function ComplianceSetupWizard({ onComplete, onDismiss }: Props) {
         if (event.target === event.currentTarget && !saving) onDismiss();
       }}>
       <div role="dialog" aria-modal="true" aria-labelledby="compliance-setup-title"
-        className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-[24px] border border-[#adb5d0] bg-[#f8fafc] p-5 text-[#14223c] shadow-[0_30px_90px_rgba(0,0,0,.55)] sm:p-8">
+        className="lionbi-compliance-wizard max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-[24px] border border-[#adb5d0] bg-[#f8fafc] p-5 text-[#14223c] shadow-[0_30px_90px_rgba(0,0,0,.55)] sm:p-8">
         <div className="sticky -top-5 z-10 mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#35425d] bg-[#141f34] px-3 py-2.5 shadow-sm sm:-top-8">
           <h2 id="compliance-setup-title" className="text-base font-semibold tracking-wide text-[#f0d3a1]">Compliance setup</h2>
           <button type="button" aria-label="Close compliance setup" title="Close compliance setup"

@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
-import { LionBrand } from '../components/lola/LionBrand';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { LionUIIcon } from '../components/lola/LionUIIcon';
 import { BRAND_LABELS } from '../lib/brand';
@@ -211,7 +210,13 @@ export function LolaHome() {
   return (
     <div className="lola-home">
       <header className="lola-home__header">
-        <div className="lola-home__brand"><LionBrand showSubtitle={false} /></div>
+        <div className="lola-home__brand" aria-label="Lola executive workspace">
+          <LolaGlyph size={28} className="lola-home__nameplate-glyph" />
+          <span className="lola-home__nameplate">
+            <strong>LOLA</strong>
+            <small>YOUR INTELLIGENCE PARTNER</small>
+          </span>
+        </div>
         <div className="lola-home__header-actions">
           <span className="lola-home__private"><LionUIIcon kind="compliance" size={14} /> Your access level: {role.replace(/_/g, ' ')}</span>
           <button className="lola-home__voice-toggle" type="button" aria-label={`Automatic Lola voice greeting ${voiceGreeting ? 'on' : 'off'}`} aria-pressed={voiceGreeting} onClick={toggleGreeting}>

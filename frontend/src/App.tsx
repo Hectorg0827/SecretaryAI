@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { LionUIIcon } from './components/lola/LionUIIcon';
 import './lion-workspace.css';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -100,7 +100,7 @@ function AppShell() {
           onClick={() => setMobileMenuOpen(true)}
           className="rounded-lg p-2 text-[#e9d29b] hover:bg-[#202b45] focus-visible:outline-2 focus-visible:outline-[#e9d29b]"
         >
-          <Menu size={20} aria-hidden="true" />
+          <LionUIIcon kind="menu" size={20} />
         </button>
         <span className="font-semibold text-[#e9c787] tracking-wider">LION BI</span>
       </header>

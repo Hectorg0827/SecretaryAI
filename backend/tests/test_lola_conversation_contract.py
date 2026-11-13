@@ -19,6 +19,7 @@ class ConversationQuery:
         self.operation = "read"
         self.payload = None
         self.max_rows = None
+        self.page_range = None
 
     def select(self, *_):
         return self
@@ -32,6 +33,10 @@ class ConversationQuery:
         return self
 
     def order(self, *_args, **_kwargs):
+        return self
+
+    def range(self, start, end):
+        self.page_range = (start, end)
         return self
 
     def update(self, payload):
@@ -51,6 +56,9 @@ class ConversationQuery:
                     if all(row.get(field) == value for field, value in self.filters)]
         if self.max_rows is not None:
             selected = selected[:self.max_rows]
+        if self.page_range is not None:
+            first, last = self.page_range
+            selected = selected[first:last + 1]
         if self.operation == "delete":
             deleted = [dict(row) for row in selected]
             self.db.rows = [row for row in self.db.rows if row not in selected]
@@ -100,7 +108,7 @@ async def test_history_and_listing_never_return_another_users_data():
     tenant = {"sub": "alice", "company_id": "company-b"}
     history = await get_conversation_history("private", limit=40, user=me, db=db)
     assert [m["content"] for m in history["messages"]] == ["Private", "Secret"]
-    listing = await list_conversations(limit=20, user=me, db=db)
+    listing = await list_conversations(limit=20, offset=0, user=me, db=db)
     assert listing["conversations"][0]["conversation_id"] == "private"
     assert (await list_conversations(limit=20, user=other, db=db))["conversations"] == []
     for denied in (other, tenant):
@@ -259,6 +267,25 @@ async def test_delete_history_requires_both_user_and_company():
     with pytest.raises(HTTPException) as err:
         await get_conversation_history("mine", limit=40, user=alice, db=db)
     assert err.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_conversations_list_paginates_without_leaking_other_owners():
+    db = ConversationDB()
+    for index in range(5):
+        _save_turn(db, f"mine-{index}", "company-a", "alice", f"Question {index}", "Answer")
+    _save_turn(db, "private", "company-b", "alice", "Another tenant", "Secret")
+    user = {"sub": "alice", "company_id": "company-a"}
+    first = await list_conversations(limit=2, offset=0, user=user, db=db)
+    assert len(first["conversations"]) == 2 and first["has_more"] is True
+    second = await list_conversations(limit=2, offset=2, user=user, db=db)
+    assert len(second["conversations"]) == 2 and second["has_more"] is True
+    third = await list_conversations(limit=2, offset=4, user=user, db=db)
+    assert len(third["conversations"]) == 1 and third["has_more"] is False
+    all_ids = [row["conversation_id"] for page in (first, second, third)
+               for row in page["conversations"]]
+    assert len(set(all_ids)) == 5
+    assert "private" not in all_ids
 
 
 @pytest.mark.asyncio

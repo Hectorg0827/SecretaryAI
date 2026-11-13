@@ -118,7 +118,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (!result.deleted || result.conversation_id !== id) throw new Error('Unexpected deletion response');
       set((state) => ({
         conversations: state.conversations.filter((item) => item.conversation_id !== id),
-        ...(state.conversationId === id ? { conversationId: null, messages: [], context: null } : {}),
+        ...(state.conversationId === id ? { conversationId: null, messages: [] } : {}),
       }));
       return true;
     } catch {
@@ -176,6 +176,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   clearConversation: () => {
     if (get().isStreaming) return;
-    set({ messages: [], conversationId: null, context: null, historyError: null });
+    set({ messages: [], conversationId: null, historyError: null });
   },
 }));

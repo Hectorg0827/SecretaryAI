@@ -64,7 +64,7 @@ export function LolaOrb({
     <>
       <span className="lola-orb__aura" aria-hidden="true" />
       <span className="lola-orb__body" aria-hidden="true">
-        <img src="/brand/lola-orb-approved.webp" className="lola-orb__art"
+        <img src="/brand/lola-orb-approved.png" className="lola-orb__art"
           alt="" draggable={false} decoding="async" />
         <span className="lola-orb__refraction" />
         <span className="lola-orb__glint" />

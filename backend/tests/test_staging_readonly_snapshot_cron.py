@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import httpx
 
 from tasks import staging_snapshot_job as job
 from app.scheduler.dashboard_snapshot import SnapshotSourceUnavailable
@@ -164,3 +165,24 @@ def test_failure_classification_only_emits_predefined_safe_codes(caplog):
     assert job._safe_failure_code(SnapshotSourceUnavailable("UNTRUSTED_INPUT")) == "required_source_unavailable"
     assert job._safe_failure_code(RuntimeError("QBO proactive token refresh failed")) == "qbo_token_refresh_failed"
     assert job._safe_failure_code(RuntimeError("RAW_PROVIDER_PASSWORD")) == "dependency_or_configuration_failed"
+
+
+def test_qbo_refresh_failure_is_classified_without_provider_text(caplog):
+    request = httpx.Request("POST", "https://example.invalid/secret")
+    response = httpx.Response(status_code=400, request=request)
+    cause = httpx.HTTPStatusError("SENSITIVE_QBO_CANARY", request=request, response=response)
+    failure = RuntimeError("QBO proactive token refresh failed")
+    failure.__cause__ = cause
+    assert job._safe_failure_code(failure) == "qbo_refresh_rejected"
+
+    with patch.object(job, "run_once", side_effect=failure):
+        assert job.main() == 1
+    assert "code=qbo_refresh_rejected" in caplog.text
+    assert "SENSITIVE_QBO_CANARY" not in caplog.text
+    assert "example.invalid" not in caplog.text
+
+
+def test_qbo_refresh_cas_conflict_is_distinct_from_network_failure():
+    failure = RuntimeError("QBO proactive token refresh failed")
+    failure.__cause__ = RuntimeError("QBO token persistence matched no current connected company")
+    assert job._safe_failure_code(failure) == "qbo_refresh_version_conflict"

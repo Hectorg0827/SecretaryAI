@@ -25,8 +25,8 @@ export function ChatInterface({
   initialHistoryOpen?: boolean;
 } = {}) {
   const { messages, isStreaming, conversationId, context: activeContext, sendMessage, clearConversation,
-    beginContext, conversations, historyLoading, historyError, deletingId, deleteConversation,
-    loadConversations, openConversation } = useChatStore();
+    beginContext, conversations, historyLoading, loadingMore, hasMore, historyError, deletingId, deleteConversation,
+    loadConversations, loadMoreConversations, openConversation } = useChatStore();
   const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [input, setInput] = useState('');
@@ -134,6 +134,12 @@ export function ChatInterface({
                   </div>
                 ))}
               </div>}
+          {hasMore && !historyLoading && (
+            <button type="button" className="lola-chat__more" disabled={loadingMore}
+              onClick={() => void loadMoreConversations()}>
+              {loadingMore ? 'Loading older conversations…' : 'Load older conversations'}
+            </button>
+          )}
         </div>
       )}
       {activeContext && activeContext.workspace !== 'home' && (

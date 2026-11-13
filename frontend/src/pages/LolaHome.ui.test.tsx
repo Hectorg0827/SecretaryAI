@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   summary: vi.fn(),
   sendMessage: vi.fn(),
+  beginContext: vi.fn(),
   role: 'owner',
 }));
 
@@ -23,8 +24,8 @@ vi.mock('../hooks/useAuth', () => ({
   }),
 }));
 vi.mock('../stores/chatStore', () => ({
-  useChatStore: (selector: (state: { isStreaming: boolean; messages: unknown[]; sendMessage: (text: string) => Promise<void> }) => unknown) =>
-    selector({ isStreaming: false, messages: [], sendMessage: mocks.sendMessage }),
+  useChatStore: (selector: (state: { isStreaming: boolean; sendMessage: (text: string) => Promise<void>; beginContext: (context: unknown) => void }) => unknown) =>
+    selector({ isStreaming: false, sendMessage: mocks.sendMessage, beginContext: mocks.beginContext }),
 }));
 vi.mock('../components/chat/ChatInterface', () => ({
   ChatInterface: ({ onBack }: { onBack?: () => void }) => (
@@ -109,6 +110,16 @@ describe('Lola-first homepage (synthetic data only)', () => {
     expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
     expect(node.querySelector('.lola-home__dialog-layer')).toBeNull();
     expect(node.querySelector('button[aria-label="Close Lola conversation"]')).toBeNull();
+  });
+
+  it('Home links directly to saved conversations without a duplicate sidebar chat page', async () => {
+    const node = await renderHome();
+    const history = [...node.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Past conversations'));
+    expect(history).toBeDefined();
+    await act(async () => { history?.click(); });
+    expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
   it('distinguishes unavailable business evidence from zero results', async () => {

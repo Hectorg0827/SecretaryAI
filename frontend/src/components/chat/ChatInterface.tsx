@@ -86,7 +86,7 @@ export function ChatInterface({
           <div className="lola-chat__identity"><LolaOrb state={isStreaming ? "thinking" : undefined} className="lola-orb--mini" /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
         </div>
         <div className="lola-chat__controls">
-          <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
+          <button type="button" className="lola-chat__history-toggle" aria-label="Conversation history" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>
             <History size={16} /> <span>History</span>
           </button>

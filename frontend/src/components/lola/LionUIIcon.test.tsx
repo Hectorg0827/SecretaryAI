@@ -9,12 +9,12 @@ const kinds: LionUIIconKind[] = [
   'audit', 'diagnostics', 'settings', 'security', 'user', 'online',
   'offline', 'logout', 'arrow', 'chevron', 'history', 'microphone',
   'microphone-off', 'voice', 'voice-off', 'notification', 'calendar',
-  'document', 'search',
+  'document', 'search', 'up', 'back', 'loading', 'refresh', 'delete', 'close', 'menu',
 ];
 
 describe('Lion BI proprietary vector pictograms', () => {
   it('renders every navigation and control icon without external imagery', () => {
-    expect(kinds).toHaveLength(30);
+    expect(kinds).toHaveLength(37);
     for (const kind of kinds) {
       const markup = renderToStaticMarkup(<LionUIIcon kind={kind} size={20} />);
       expect(markup).toContain('<svg');

@@ -4,8 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import httpx
 
 from tasks import staging_snapshot_job as job
+from app.scheduler.dashboard_snapshot import SnapshotSourceUnavailable
 
 
 def safe_settings(**kwargs):
@@ -98,6 +100,7 @@ def test_single_tenant_refresh_cannot_enqueue_outbound_tasks():
         include_finance_comparison=True,
         include_purchasing_coverage=True,
         include_finance_document_coverage=True,
+        stage_hook=refresh.call_args.kwargs["stage_hook"],
     )
 
 
@@ -130,3 +133,56 @@ def test_main_never_logs_provider_exception_details(caplog):
         assert job.main() == 1
     assert "SENSITIVE_CANARY" not in caplog.text
     assert "Staging read-only snapshot refresh failed" in caplog.text
+
+
+def test_refresh_source_failure_records_precise_redacted_stage():
+    db = MagicMock()
+    db.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+        {"id": job.STAGING_COMPANY_ID, "qb_type": "online", "qb_connection_status": "connected"}
+    ]
+
+    def failing_refresh(*args, stage_hook, **kwargs):
+        stage_hook("read_required_dashboard_sources")
+        raise SnapshotSourceUnavailable("inventory") from RuntimeError(
+            "SENSITIVE_PROVIDER_URL_AND_ACCOUNT"
+        )
+
+    with patch.object(job, "refresh_company_snapshot", side_effect=failing_refresh):
+        with pytest.raises(SnapshotSourceUnavailable):
+            job.run_once(
+                settings=safe_settings(), environ=safe_env(),
+                db_factory=lambda: db, lock=lambda *a, **k: lock(True),
+            )
+    assert job._FAILURE_STAGE.get() == "read_required_dashboard_sources"
+    assert job._safe_failure_code(SnapshotSourceUnavailable("inventory")) == "required_source_inventory"
+
+
+def test_failure_classification_only_emits_predefined_safe_codes(caplog):
+    with patch.object(job, "run_once", side_effect=RuntimeError("SENSITIVE_API_TOKEN_AND_URL")):
+        assert job.main() == 1
+    assert "code=dependency_or_configuration_failed" in caplog.text
+    assert "SENSITIVE_API_TOKEN_AND_URL" not in caplog.text
+    assert job._safe_failure_code(SnapshotSourceUnavailable("UNTRUSTED_INPUT")) == "required_source_unavailable"
+    assert job._safe_failure_code(RuntimeError("QBO proactive token refresh failed")) == "qbo_token_refresh_failed"
+    assert job._safe_failure_code(RuntimeError("RAW_PROVIDER_PASSWORD")) == "dependency_or_configuration_failed"
+
+
+def test_qbo_refresh_failure_is_classified_without_provider_text(caplog):
+    request = httpx.Request("POST", "https://example.invalid/secret")
+    response = httpx.Response(status_code=400, request=request)
+    cause = httpx.HTTPStatusError("SENSITIVE_QBO_CANARY", request=request, response=response)
+    failure = RuntimeError("QBO proactive token refresh failed")
+    failure.__cause__ = cause
+    assert job._safe_failure_code(failure) == "qbo_refresh_rejected"
+
+    with patch.object(job, "run_once", side_effect=failure):
+        assert job.main() == 1
+    assert "code=qbo_refresh_rejected" in caplog.text
+    assert "SENSITIVE_QBO_CANARY" not in caplog.text
+    assert "example.invalid" not in caplog.text
+
+
+def test_qbo_refresh_cas_conflict_is_distinct_from_network_failure():
+    failure = RuntimeError("QBO proactive token refresh failed")
+    failure.__cause__ = RuntimeError("QBO token persistence matched no current connected company")
+    assert job._safe_failure_code(failure) == "qbo_refresh_version_conflict"

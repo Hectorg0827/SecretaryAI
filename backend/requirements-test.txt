@@ -14,3 +14,5 @@
 pytest==8.3.3
 pytest-asyncio==0.24.0
 anyio[trio]==4.6.0
+# Required by staging single-use token/session concurrency regression tests.
+fakeredis==2.26.2

@@ -23,9 +23,9 @@ const clamp = (value: number) =>
   Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 
 /**
- * The approved orb art remains an unmodified transparent image, at its natural
- * aspect ratio. CSS only animates light, depth and interactions around it.
- * No opaque tile, mix-blend-mode, radial clipping or picture substitution.
+ * Lola is drawn as a living, layered optical object rather than a flat image.
+ * The CSS animation runs independently of React; only live audio changes its
+ * visual energy. The focusable button and all voice state wiring are preserved.
  */
 export function LolaOrb({
   state, active = false, audioLevel = 0, micEnabled = false, onActivate, className = '',
@@ -68,10 +68,18 @@ export function LolaOrb({
     <>
       <span className="lola-orb__aura" aria-hidden="true" />
       <span className="lola-orb__body" aria-hidden="true">
-        <img src="/brand/lola-orb-approved.png" className="lola-orb__art"
-          alt="" draggable={false} decoding="async" />
-        <span className="lola-orb__refraction" />
-        <span className="lola-orb__glint" />
+        <span className="lola-orb__glass">
+          <span className="lola-orb__plasma lola-orb__plasma--a" />
+          <span className="lola-orb__plasma lola-orb__plasma--b" />
+          <span className="lola-orb__plasma lola-orb__plasma--c" />
+          <span className="lola-orb__caustic" />
+          <span className="lola-orb__core" />
+          <span className="lola-orb__refraction" />
+          <span className="lola-orb__glint" />
+        </span>
+        <span className="lola-orb__orbit lola-orb__orbit--first" />
+        <span className="lola-orb__orbit lola-orb__orbit--second" />
+        <span className="lola-orb__orbit lola-orb__orbit--third" />
       </span>
       <span className="lola-orb__focus" aria-hidden="true" />
       <span className="lola-orb__status sr-only">Lola is {mode}</span>

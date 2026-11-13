@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck } from 'lucide-react';
+import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
-import { LolaGlyph } from '../lola/LolaGlyph';
+import { useLolaVoiceStore } from '../../stores/lolaVoiceStore';
 import './lola-chat.css';
 
 const QUICK_PROMPTS = [
@@ -18,6 +18,13 @@ export function ChatInterface() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const speak = useLolaVoiceStore((state) => state.speak);
+  const stopSpeaking = useLolaVoiceStore((state) => state.stop);
+  const voiceStatus = useLolaVoiceStore((state) => state.status);
+  const lastAnswer = [...messages].reverse().find((message) =>
+    message.role === 'assistant' && !message.streaming && message.content.trim().length > 0);
+  const canReadAloud = typeof window !== 'undefined' &&
+    'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -40,7 +47,7 @@ export function ChatInterface() {
   return (
     <section className="lola-chat" aria-label="Lola conversation">
       <div className="lola-chat__topline">
-        <div className="lola-chat__identity"><LolaGlyph size={19} /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
+        <div className="lola-chat__identity"><LolaOrb state={isStreaming ? "thinking" : undefined} className="lola-orb--mini" /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
         <div className="lola-chat__controls">
           <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>
@@ -101,6 +108,15 @@ export function ChatInterface() {
             {isStreaming ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
           </button>
         </div>
+        {canReadAloud && lastAnswer && !isStreaming && (
+          <button type="button" className="lola-chat__read" onClick={() => {
+            if (voiceStatus === 'speaking') stopSpeaking();
+            else speak(lastAnswer.content);
+          }} aria-label={voiceStatus === 'speaking' ? 'Stop Lola voice' : 'Read Lola response aloud'}>
+            {voiceStatus === 'speaking' ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            {voiceStatus === 'speaking' ? 'Stop voice' : 'Read response aloud'}
+          </button>
+        )}
         <p className="lola-chat__privacy"><ShieldCheck size={12} /> Responses depend on your permissions and connected business data.</p>
       </div>
     </section>

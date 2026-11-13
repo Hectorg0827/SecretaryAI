@@ -6,7 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.chat import (
-    ChatRequest, _load_history, _save_turn,
+    ChatRequest, LolaPageContext, _load_history, _save_turn,
+    delete_conversation,
     get_conversation_history, list_conversations, send_message,
 )
 
@@ -41,11 +42,19 @@ class ConversationQuery:
         self.operation, self.payload = "insert", payload
         return self
 
+    def delete(self):
+        self.operation = "delete"
+        return self
+
     def execute(self):
         selected = [row for row in self.db.rows
                     if all(row.get(field) == value for field, value in self.filters)]
         if self.max_rows is not None:
             selected = selected[:self.max_rows]
+        if self.operation == "delete":
+            deleted = [dict(row) for row in selected]
+            self.db.rows = [row for row in self.db.rows if row not in selected]
+            return SimpleNamespace(data=deleted)
         if self.operation == "update":
             for row in selected:
                 row.update(self.payload)
@@ -228,3 +237,76 @@ async def test_general_business_context_accepts_object_invoices_with_zero_and_em
     data = await _fetch_data_for_intent("general_question", "Today's status", adapter)
     assert data["sales_summary"]["order_count"] == 1
     assert data["sales_summary"]["total_revenue"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_history_requires_both_user_and_company():
+    db = ConversationDB()
+    _save_turn(db, "mine", "company-a", "alice", "Synthetic note", "Answer")
+    _save_turn(db, "other", "company-a", "bob", "Private", "Never reveal")
+    alice = {"sub": "alice", "company_id": "company-a"}
+    for foreign in (
+        {"sub": "bob", "company_id": "company-a"},
+        {"sub": "alice", "company_id": "company-b"},
+    ):
+        with pytest.raises(HTTPException) as err:
+            await delete_conversation("mine", user=foreign, db=db)
+        assert err.value.status_code == 404
+    success = await delete_conversation("mine", user=alice, db=db)
+    assert success["deleted"] is True
+    assert success["conversation_id"] == "mine"
+    assert db.rows[0]["id"] == "other"
+    with pytest.raises(HTTPException) as err:
+        await get_conversation_history("mine", limit=40, user=alice, db=db)
+    assert err.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_is_a_validated_navigation_hint_not_client_business_data():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ChatRequest(message="Please summarize", context={"workspace":"secret_admin"})
+    with pytest.raises(ValidationError):
+        ChatRequest(message="Please summarize", context={"workspace":"accounts", "entity_type":"bad"})
+    with pytest.raises(ValidationError):
+        ChatRequest(message="Please summarize", context={"workspace":"accounts", "entity_label":"A"*101})
+    db = ConversationDB()
+    with patch("app.api.chat.classify_intent", new=AsyncMock()) as classifier:
+        with pytest.raises(HTTPException) as err:
+            await send_message(
+                ChatRequest(message="Summarize this account", context=LolaPageContext(
+                    workspace="accounts", entity_type="account", entity_label="Synthetic Customer"
+                )),
+                user={"sub":"sales-rep", "company_id":"company-a", "role":"sales_rep"},
+                adapter=None, db=db,
+            )
+        assert err.value.status_code == 403
+        classifier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_context_is_supplied_to_classification_and_autosaved_for_history():
+    db = ConversationDB()
+    ctx = LolaPageContext(workspace="accounts", entity_type="account", entity_label="Synthetic Customer")
+    async def fake_stream(*_args):
+        yield "Synthetic answer"
+    with (
+        patch("app.api.chat.classify_intent", new=AsyncMock(return_value="account_status")) as classifier,
+        patch("app.api.chat._fetch_data_for_intent", new=AsyncMock(return_value={})) as fetch,
+        patch("app.api.chat.build_query_context", return_value=""),
+        patch("app.api.chat.load_recent_summaries", return_value=[]),
+        patch("app.api.chat.load_account_memory", return_value=[]),
+        patch("app.api.chat.stream_chat", side_effect=fake_stream),
+        patch("app.api.chat.detect_action_in_response", return_value=None),
+    ):
+        response = await send_message(
+            ChatRequest(message="What about this account?", context=ctx),
+            user={"sub":"alice","company_id":"company-a","role":"owner"},
+            adapter=None, db=db
+        )
+        payload = [item async for item in response.body_iterator]
+        assert any('"done": true' in str(item) for item in payload)
+        assert "Synthetic Customer" in classifier.await_args.args[0]
+        assert "Synthetic Customer" in fetch.await_args.args[1]
+    assert db.rows[0]["messages"][0]["context"]["entity_label"] == "Synthetic Customer"
+    assert db.rows[0]["messages"][0]["content"] == "What about this account?"

@@ -29,6 +29,21 @@ describe('Compliance setup exit path', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       });
       expect(onDismiss).toHaveBeenCalledTimes(2);
+
+      const exitButton = rootNode.querySelector<HTMLButtonElement>(
+        'button[aria-label="Exit compliance setup and return to dashboard"]',
+      );
+      expect(exitButton).not.toBeNull();
+      await act(async () => exitButton?.click());
+      expect(onDismiss).toHaveBeenCalledTimes(3);
+
+      const modalContent = rootNode.querySelector<HTMLElement>('[role="dialog"]');
+      await act(async () => modalContent?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+      expect(onDismiss).toHaveBeenCalledTimes(3);
+
+      const backdrop = rootNode.querySelector<HTMLElement>('[data-testid="compliance-backdrop"]');
+      await act(async () => backdrop?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+      expect(onDismiss).toHaveBeenCalledTimes(4);
     } finally {
       await act(async () => root.unmount());
       rootNode.remove();

@@ -193,6 +193,16 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     page.get_by_role("button", name="Automatic Lola voice greeting on").click()
     assert page.get_by_role("button", name="Automatic Lola voice greeting off").is_visible()
     assert page.get_by_label("Ask Lola").is_visible()
+    home_brand = page.locator(".lola-home__brand")
+    if mobile:
+        assert home_brand.is_hidden(), (
+            "Mobile Lola Home must not duplicate the global Lion BI brand bar"
+        )
+        assert page.get_by_role("button", name="Open navigation").is_visible()
+    else:
+        assert home_brand.is_visible(), (
+            "Desktop Lola Home must retain its own page-level brand"
+        )
     _measure(page, "lola home " + str(width))
     page.screenshot(path=str(artifacts / (engine + "-lola-home-" + str(width) + ".png")), full_page=True)
     context.close()

@@ -14,3 +14,5 @@
 pytest==8.3.3
 pytest-asyncio==0.24.0
 anyio[trio]==4.6.0
+# Used only by concurrency/session-revocation tests; never installed in production.
+fakeredis==2.26.2

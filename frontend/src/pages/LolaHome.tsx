@@ -7,7 +7,6 @@ import { LionBrand } from '../components/lola/LionBrand';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { BRAND_LABELS } from '../lib/brand';
 import { useAuth } from '../hooks/useAuth';
-import { useMicLevel } from '../hooks/useMicLevel';
 import { useLolaVoiceStore } from '../stores/lolaVoiceStore';
 import { api, type DashboardSummary } from '../lib/api';
 import { verifiedDashboardSummary } from '../lib/sourceEvidence';
@@ -75,7 +74,6 @@ export function LolaHome() {
   const stopSpeaking = useLolaVoiceStore((state) => state.stop);
   const voiceStatus = useLolaVoiceStore((state) => state.status);
   const voiceLevel = useLolaVoiceStore((state) => state.outputLevel);
-  const micLevel = useMicLevel(listening);
 
   // Privacy: preference keys are derived from the authenticated account, never
   // shared across users on the same browser. No key = session-only/off by default.
@@ -233,7 +231,8 @@ export function LolaHome() {
             <div className="lola-home__eyebrow"><span /> YOUR BUSINESS INTELLIGENCE, PERSONIFIED</div>
             <LolaOrb
               state={listening ? 'listening' : voiceStatus === 'speaking' ? 'speaking' : chatBusy ? 'thinking' : undefined}
-              audioLevel={listening ? micLevel : voiceLevel}
+              audioLevel={listening ? 0 : voiceLevel}
+              micEnabled={listening}
               onActivate={canAccessChat ? () => setChatOpen(true) : undefined}
             />
             <h1 id="lola-hero-title">{greeting()}{firstName ? `, ${firstName}` : ''}<span className="lola-home__period">.</span></h1>

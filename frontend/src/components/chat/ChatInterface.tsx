@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronLeft, History, Loader2, RotateCcw, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUp, ChevronLeft, History, Loader2, RotateCcw, ShieldCheck, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
+import { contextKey, type LolaContext } from '../../lib/lolaContext';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
 import { LolaGlyph } from '../lola/LolaGlyph';
@@ -14,9 +15,19 @@ const QUICK_PROMPTS = [
   'Show inventory risks',
 ];
 
-export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
-  const { messages, isStreaming, conversationId, sendMessage, clearConversation, conversations, historyLoading, historyError, loadConversations, openConversation } = useChatStore();
+export function ChatInterface({
+  onBack, onClose, compact = false, context,
+}: {
+  onBack?: () => void;
+  onClose?: () => void;
+  compact?: boolean;
+  context?: LolaContext;
+} = {}) {
+  const { messages, isStreaming, conversationId, context: activeContext, sendMessage, clearConversation,
+    beginContext, conversations, historyLoading, historyError, deletingId, deleteConversation,
+    loadConversations, openConversation } = useChatStore();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
@@ -25,6 +36,16 @@ export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
   const voiceStatus = useLolaVoiceStore((state) => state.status);
   const lastAnswer = [...messages].reverse().find((message) =>
     message.role === 'assistant' && !message.streaming && message.content.trim().length > 0);
+  const initialContextKey = contextKey(context ?? null);
+  useEffect(() => {
+    if (context) beginContext(context);
+    // The context object may be regenerated; only switch when its identity changes.
+  }, [initialContextKey, beginContext]);
+
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
+
   const canReadAloud = typeof window !== 'undefined' &&
     'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
@@ -57,7 +78,7 @@ export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
   };
 
   return (
-    <section className="lola-chat" aria-label="Lola conversation">
+    <section className={compact ? "lola-chat lola-chat--compact" : "lola-chat"} aria-label="Lola conversation">
       <div className="lola-chat__topline">
         <div className="lola-chat__heading">
           {onBack && <button type="button" className="lola-chat__back" onClick={onBack} aria-label="Overview"><ChevronLeft size={16} /><span>Overview</span></button>}
@@ -66,8 +87,10 @@ export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
         <div className="lola-chat__controls">
           <button type="button" className="lola-chat__history-toggle" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>
-            <History size={16} /> <span>Recent</span>
+            <History size={16} /> <span>History</span>
           </button>
+          {onClose && <button type="button" className="lola-chat__clear" aria-label="Close Lola assistant"
+            onClick={onClose}><X size={17} /></button>}
           <button type="button" className="lola-chat__clear" onClick={() => { clearConversation(); setHistoryOpen(false); }}
             disabled={isStreaming} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={17} /></button>
         </div>
@@ -75,23 +98,48 @@ export function ChatInterface({ onBack }: { onBack?: () => void } = {}) {
       {historyOpen && (
         <div id="lola-chat-history" className="lola-chat__history" aria-label="Your saved conversations">
           <div className="lola-chat__history-heading">
-            <strong>Recent conversations</strong>
+            <strong>Conversation history</strong>
             <button type="button" onClick={() => void loadConversations()} disabled={historyLoading}>Refresh</button>
           </div>
-          {historyLoading ? <p className="lola-chat__history-state" role="status">Loading saved conversations…</p>
-            : historyError ? <p className="lola-chat__history-state" role="alert">{historyError}</p>
+          {historyError && <p className="lola-chat__history-state" role="alert">{historyError}</p>}
+          {historyLoading ? <p className="lola-chat__history-state" role="status">Loading conversations…</p>
             : conversations.length === 0 ? <p className="lola-chat__history-state">No saved conversations yet.</p>
             : <div className="lola-chat__history-list">
                 {conversations.map((conversation) => (
-                  <button type="button" key={conversation.conversation_id}
-                    className={conversation.conversation_id === conversationId ? 'is-active' : ''}
-                    onClick={async () => { if (await openConversation(conversation.conversation_id)) setHistoryOpen(false); }}
-                    disabled={isStreaming || historyLoading}
-                    title={conversation.preview || 'Untitled conversation'}>
-                    {conversation.preview || 'Untitled conversation'}
-                  </button>
+                  <div className={`lola-chat__history-item ${conversation.conversation_id === conversationId ? 'is-active' : ''}`}
+                    key={conversation.conversation_id}>
+                    <button type="button" className="lola-chat__history-open"
+                      aria-label={`Open conversation: ${conversation.preview || 'Untitled'}`}
+                      onClick={async () => { if (await openConversation(conversation.conversation_id)) { setHistoryOpen(false); setConfirmDelete(null); } }}
+                      disabled={isStreaming || !!deletingId || historyLoading}>
+                      <span>{conversation.preview || 'Untitled conversation'}</span>
+                      <small>{conversation.created_at ? new Date(conversation.created_at).toLocaleDateString() : 'Saved conversation'}</small>
+                    </button>
+                    <button type="button" className="lola-chat__history-delete"
+                      title="Delete conversation"
+                      aria-label={`Delete conversation: ${conversation.preview || 'Untitled'}`}
+                      disabled={isStreaming || !!deletingId}
+                      onClick={() => setConfirmDelete(conversation.conversation_id)}><Trash2 size={15} /></button>
+                    {confirmDelete === conversation.conversation_id && (
+                      <div className="lola-chat__confirm" role="group" aria-label="Confirm conversation deletion">
+                        <span>Delete permanently?</span>
+                        <button type="button" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                        <button type="button" className="is-danger" disabled={!!deletingId}
+                          onClick={async () => { if (await deleteConversation(conversation.conversation_id)) setConfirmDelete(null); }}>
+                          {deletingId === conversation.conversation_id ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>}
+        </div>
+      )}
+      {activeContext && activeContext.workspace !== 'home' && (
+        <div className="lola-chat__context" role="status">
+          <span>Lola is viewing <strong>{activeContext.workspace}</strong>
+            {activeContext.entity_label ? ` · ${activeContext.entity_label}` : ''}</span>
+          <small>Page context is a navigation hint. Business details still require authorized sources.</small>
         </div>
       )}
       <div ref={messagesRef} onScroll={trackScroll} className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">

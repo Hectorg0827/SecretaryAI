@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronLeft, History, Loader2, RotateCcw, ShieldCheck, Trash2, Volume2, VolumeX, X } from 'lucide-react';
+import { LionUIIcon } from '../lola/LionUIIcon';
 import { useChatStore } from '../../stores/chatStore';
 import { contextKey, type LolaContext } from '../../lib/lolaContext';
 import { MessageBubble } from './MessageBubble';
@@ -82,18 +82,18 @@ export function ChatInterface({
     <section className={compact ? "lola-chat lola-chat--compact" : "lola-chat"} aria-label="Lola conversation">
       <div className="lola-chat__topline">
         <div className="lola-chat__heading">
-          {onBack && <button type="button" className="lola-chat__back" onClick={onBack} aria-label="Overview"><ChevronLeft size={16} /><span>Overview</span></button>}
+          {onBack && <button type="button" className="lola-chat__back" onClick={onBack} aria-label="Overview"><LionUIIcon kind="back" size={16} /><span>Overview</span></button>}
           <div className="lola-chat__identity"><LolaOrb state={isStreaming ? "thinking" : undefined} className="lola-orb--mini" /><div><strong>Lola</strong><small>Your business intelligence assistant</small></div></div>
         </div>
         <div className="lola-chat__controls">
           <button type="button" className="lola-chat__history-toggle" aria-label="Conversation history" aria-controls="lola-chat-history"
             aria-expanded={historyOpen} onClick={() => { setHistoryOpen(!historyOpen); if (!historyOpen) void loadConversations(); }}>
-            <History size={16} /> <span>History</span>
+            <LionUIIcon kind="history" size={16} /> <span>History</span>
           </button>
           {onClose && <button type="button" className="lola-chat__clear" aria-label="Close Lola assistant"
-            onClick={onClose}><X size={17} /></button>}
+            onClick={onClose}><LionUIIcon kind="close" size={17} /></button>}
           <button type="button" className="lola-chat__clear" onClick={() => { clearConversation(); setHistoryOpen(false); }}
-            disabled={isStreaming} aria-label="Start a new conversation" title="New conversation"><RotateCcw size={17} /></button>
+            disabled={isStreaming} aria-label="Start a new conversation" title="New conversation"><LionUIIcon kind="refresh" size={17} /></button>
         </div>
       </div>
       {historyOpen && (
@@ -120,7 +120,7 @@ export function ChatInterface({
                       title="Delete conversation"
                       aria-label={`Delete conversation: ${conversation.preview || 'Untitled'}`}
                       disabled={isStreaming || !!deletingId}
-                      onClick={() => setConfirmDelete(conversation.conversation_id)}><Trash2 size={15} /></button>
+                      onClick={() => setConfirmDelete(conversation.conversation_id)}><LionUIIcon kind="delete" size={15} /></button>
                     {confirmDelete === conversation.conversation_id && (
                       <div className="lola-chat__confirm" role="group" aria-label="Confirm conversation deletion">
                         <span>Delete permanently?</span>
@@ -158,14 +158,14 @@ export function ChatInterface({
             <p>Ask a question, explore your business, or prepare your next decision.</p>
             <div className="lola-chat__prompts">
               {QUICK_PROMPTS.map((question) => (
-                <button type="button" key={question} onClick={() => handleSend(question)} disabled={isStreaming}>{question}<ArrowUp size={14} /></button>
+                <button type="button" key={question} onClick={() => handleSend(question)} disabled={isStreaming}>{question}<LionUIIcon kind="up" size={14} /></button>
               ))}
             </div>
           </div>
         )}
         {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
         {isStreaming && messages[messages.length - 1]?.role === 'user' && (
-          <div className="lola-chat__thinking" role="status"><Loader2 size={15} className="animate-spin" /> Lola is thinking…</div>
+          <div className="lola-chat__thinking" role="status"><LionUIIcon kind="loading" size={15} className="animate-spin" /> Lola is thinking…</div>
         )}
       </div>
       <div className="lola-chat__bottom">
@@ -174,7 +174,7 @@ export function ChatInterface({
           <textarea id="lola-chat-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
             placeholder="Ask Lola about your business…" rows={2} maxLength={4000} disabled={isStreaming} />
           <button type="button" onClick={() => handleSend()} disabled={!input.trim() || isStreaming} aria-label="Send message to Lola">
-            {isStreaming ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
+            {isStreaming ? <LionUIIcon kind="loading" size={18} className="animate-spin" /> : <LionUIIcon kind="up" size={19} />}
           </button>
         </div>
         {canReadAloud && lastAnswer && !isStreaming && (
@@ -182,11 +182,11 @@ export function ChatInterface({
             if (voiceStatus === 'speaking') stopSpeaking();
             else speak(lastAnswer.content);
           }} aria-label={voiceStatus === 'speaking' ? 'Stop Lola voice' : 'Read Lola response aloud'}>
-            {voiceStatus === 'speaking' ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            {voiceStatus === 'speaking' ? <LionUIIcon kind="voice-off" size={15} /> : <LionUIIcon kind="voice" size={15} />}
             {voiceStatus === 'speaking' ? 'Stop voice' : 'Read response aloud'}
           </button>
         )}
-        <p className="lola-chat__privacy"><ShieldCheck size={12} /> Responses depend on your permissions and connected business data.</p>
+        <p className="lola-chat__privacy"><LionUIIcon kind="compliance" size={12} /> Responses depend on your permissions and connected business data.</p>
       </div>
     </section>
   );

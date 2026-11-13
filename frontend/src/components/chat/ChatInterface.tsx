@@ -16,17 +16,18 @@ const QUICK_PROMPTS = [
 ];
 
 export function ChatInterface({
-  onBack, onClose, compact = false, context,
+  onBack, onClose, compact = false, context, initialHistoryOpen = false,
 }: {
   onBack?: () => void;
   onClose?: () => void;
   compact?: boolean;
   context?: LolaContext;
+  initialHistoryOpen?: boolean;
 } = {}) {
   const { messages, isStreaming, conversationId, context: activeContext, sendMessage, clearConversation,
     beginContext, conversations, historyLoading, historyError, deletingId, deleteConversation,
     loadConversations, openConversation } = useChatStore();
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);

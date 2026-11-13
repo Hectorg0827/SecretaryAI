@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   summary: vi.fn(),
   sendMessage: vi.fn(),
+  beginContext: vi.fn(),
   role: 'owner',
 }));
 
@@ -23,12 +24,12 @@ vi.mock('../hooks/useAuth', () => ({
   }),
 }));
 vi.mock('../stores/chatStore', () => ({
-  useChatStore: (selector: (state: { isStreaming: boolean; messages: unknown[]; sendMessage: (text: string) => Promise<void> }) => unknown) =>
-    selector({ isStreaming: false, messages: [], sendMessage: mocks.sendMessage }),
+  useChatStore: (selector: (state: { isStreaming: boolean; messages: unknown[]; sendMessage: (text: string) => Promise<void>; beginContext: (value: unknown) => void }) => unknown) =>
+    selector({ isStreaming: false, messages: [], sendMessage: mocks.sendMessage, beginContext: mocks.beginContext }),
 }));
 vi.mock('../components/chat/ChatInterface', () => ({
-  ChatInterface: ({ onBack }: { onBack?: () => void }) => (
-    <div>Conversation connected{onBack && <button type="button" onClick={onBack}>Overview</button>}</div>
+  ChatInterface: ({ onBack, initialHistoryOpen }: { onBack?: () => void; initialHistoryOpen?: boolean }) => (
+    <div data-history-open={initialHistoryOpen ? 'true' : 'false'}>Conversation connected{onBack && <button type="button" onClick={onBack}>Overview</button>}</div>
   ),
 }));
 
@@ -93,6 +94,7 @@ describe('Lola-first homepage (synthetic data only)', () => {
     const prompt = [...node.querySelectorAll('button')].find((item) => item.textContent?.includes('What needs my attention?'));
     await act(async () => { prompt?.click(); });
     expect(mocks.sendMessage).toHaveBeenCalledWith('What needs my attention?');
+    expect(mocks.beginContext).toHaveBeenCalledWith({ workspace: 'home' });
     expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
     expect(node.querySelector('[role="dialog"][aria-label="Lola conversation"]')).toBeNull();
     expect(node.textContent).toContain('Conversation connected');
@@ -109,6 +111,19 @@ describe('Lola-first homepage (synthetic data only)', () => {
     expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
     expect(node.querySelector('.lola-home__dialog-layer')).toBeNull();
     expect(node.querySelector('button[aria-label="Close Lola conversation"]')).toBeNull();
+  });
+
+
+  it('opens saved conversations in the main conversation view without a second panel', async () => {
+    const node = await renderHome();
+    const history = [...node.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('Past conversations'));
+    expect(history).toBeDefined();
+    await act(async () => { history?.click(); });
+    expect(node.querySelector('main[aria-label="Lola conversation workspace"]')).not.toBeNull();
+    expect(node.querySelector('[data-history-open="true"]')).not.toBeNull();
+    expect(node.querySelector('[role="dialog"]')).toBeNull();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
   it('distinguishes unavailable business evidence from zero results', async () => {

@@ -9,7 +9,9 @@ export type LionUIIconKind =
   | 'home' | 'inbox' | 'work' | 'dashboard' | 'finance'
   | 'accounts' | 'inventory' | 'insights' | 'logistics'
   | 'compliance' | 'connectors' | 'audit' | 'diagnostics'
-  | 'settings' | 'security' | 'user' | 'online' | 'offline' | 'logout';
+  | 'settings' | 'security' | 'user' | 'online' | 'offline' | 'logout'
+  | 'arrow' | 'chevron' | 'history' | 'microphone' | 'microphone-off'
+  | 'voice' | 'voice-off' | 'notification';
 
 type Props = { kind: LionUIIconKind; size?: number; className?: string };
 
@@ -98,6 +100,36 @@ const glyphs: Record<LionUIIconKind, ReactNode> = {
   logout: <>
     <path d="M11.6 4.4H5.8a2 2 0 0 0-2 2v11.2a2 2 0 0 0 2 2h5.8M11.2 12h9M16.8 8.3l3.7 3.7-3.7 3.7" />
     <path d="M7.2 12h2.5" className="lion-ui-icon__accent" />
+  </>,
+  arrow: <>
+    <path d="M4 12h15M13.5 6.5 19 12l-5.5 5.5" />
+    <path d="M4 16v1.5" className="lion-ui-icon__accent" />
+  </>,
+  chevron: <path d="m8.5 5.2 6.8 6.8-6.8 6.8" />,
+  history: <>
+    <path d="M4.5 10a8 8 0 1 1 1.4 6M4 5v5h5" />
+    <path d="M12 7.8V12l3 2" className="lion-ui-icon__accent" />
+  </>,
+  microphone: <>
+    <rect x="9.1" y="3.4" width="5.8" height="11" rx="2.9" />
+    <path d="M6.4 11.6a5.6 5.6 0 0 0 11.2 0M12 17.2v3.2M9.2 20.4h5.6" />
+    <path d="M11.1 6h1.8" className="lion-ui-icon__accent" />
+  </>,
+  'microphone-off': <>
+    <rect x="9.1" y="3.4" width="5.8" height="11" rx="2.9" />
+    <path d="M6.4 11.6a5.6 5.6 0 0 0 11.2 0M12 17.2v3.2M9.2 20.4h5.6" />
+    <path d="m4.5 4.5 15 15" className="lion-ui-icon__accent" />
+  </>,
+  voice: <>
+    <path d="M4.5 9.5h3.2l4.2-3.7v12.4l-4.2-3.7H4.5zM15.3 8.2c2.3 1.6 2.3 6 0 7.6M17.6 5.8c4.2 3.4 4.2 9 0 12.4" />
+  </>,
+  'voice-off': <>
+    <path d="M4.5 9.5h3.2l4.2-3.7v12.4l-4.2-3.7H4.5zM15.5 9l5 6M20.5 9l-5 6" />
+    <path d="M8 13.1v.7" className="lion-ui-icon__accent" />
+  </>,
+  notification: <>
+    <path d="M6.5 9a5.5 5.5 0 0 1 11 0v4.7l2 2.3H4.5l2-2.3zM10 19h4" />
+    <circle cx="17.6" cy="5.6" r="1.1" className="lion-ui-icon__accent" />
   </>,
 };
 

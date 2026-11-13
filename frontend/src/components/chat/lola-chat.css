@@ -1,5 +1,10 @@
 .lola-chat{height:100%;min-height:0;display:flex;flex-direction:column;color:#f4f1fa;background:radial-gradient(ellipse at 50% 24%,rgba(79,61,148,.17),transparent 65%),#0b1020;font-family:inherit}
 .lola-chat__topline{height:68px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:12px 22px;border-bottom:1px solid rgba(209,193,237,.13);background:rgba(14,19,36,.95)}
+.lola-chat__heading{display:flex;align-items:center;gap:20px;min-width:0}
+.lola-chat__back{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;border:0;background:transparent;color:#e2c58e;font-size:12px;font-weight:600;cursor:pointer;padding:8px 6px;border-radius:8px}
+.lola-chat__back:hover{color:#fff0be;background:rgba(221,193,137,.09)}
+.lola-chat__back:focus-visible{outline:2px solid #e2c58e;outline-offset:2px}
+.lola-chat__heading .lola-chat__identity{padding-left:0}
 .lola-chat__identity{display:flex;align-items:center;gap:12px;color:#e8c78d}
 .lola-chat__identity>div{display:flex;flex-direction:column;gap:2px}
 .lola-chat__identity strong{font-size:15px;letter-spacing:.025em;color:#f7f4ff}
@@ -200,3 +205,5 @@
 }
 .lola-chat__read:hover { border-color: #dcbf8e; color: #f7e1ae; }
 .lola-chat__read:focus-visible { outline: 2px solid #e8ca99; outline-offset: 2px; }
+
+@media(max-width:600px){.lola-chat__heading{gap:7px}.lola-chat__back{font-size:11px;padding:7px 1px}.lola-chat__back span{display:none}.lola-chat__topline{gap:8px}}

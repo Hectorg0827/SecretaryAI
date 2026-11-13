@@ -17,7 +17,7 @@ from uuid import UUID
 from app.config import get_settings
 from app.scheduler.dashboard_snapshot import SnapshotPersistenceUnavailable, SnapshotSourceUnavailable
 from app.utils.log_safety import configure_safe_transport_logging
-from tasks.base import build_adapter, get_supabase, task_lock
+from tasks.base import SafeAdapterSetupError, build_adapter, get_supabase, task_lock
 from tasks.dashboard_refresh import refresh_company_snapshot
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,8 @@ _SAFE_SOURCES = frozenset({"account_health", "inventory", "sales_30d"})
 
 def _safe_failure_code(exc: Exception) -> str:
     """Only stable, credential-free failure categories are logged."""
+    if isinstance(exc, SafeAdapterSetupError):
+        return exc.code
     if isinstance(exc, SnapshotSourceUnavailable):
         return ("required_source_" + exc.source if exc.source in _SAFE_SOURCES
                 else "required_source_unavailable")

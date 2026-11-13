@@ -1,165 +1,266 @@
-/* Lola's orbital interface. The artwork is transparent and untouched. */
+/*
+ * Lola kinetic identity — pure CSS optics, no pasted bitmap.
+ * Layers live inside the same focusable button and respond to real voice energy.
+ */
 .lola-orb {
   --lola-x: 0deg;
   --lola-y: 0deg;
   --lola-spot-x: 50%;
   --lola-spot-y: 50%;
   --lola-audio: 0;
-  --lola-energy: 0.22;
   position: relative;
   display: block;
   width: clamp(210px, 24vw, 292px);
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 1;
   flex: none;
-  margin: 12px auto 1px;
+  margin: 16px auto 4px;
   padding: 0;
+  appearance: none;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  appearance: none;
   isolation: isolate;
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
-  transform: perspective(750px) rotateX(var(--lola-x)) rotateY(var(--lola-y));
-  transition: transform 230ms cubic-bezier(.21,.8,.24,1), filter 240ms ease;
-  will-change: transform;
-  filter: drop-shadow(0 8px 24px rgba(91,75,225,.15));
+  transform: perspective(850px) rotateX(var(--lola-x)) rotateY(var(--lola-y));
+  transition: transform 260ms cubic-bezier(.2,.8,.2,1), filter 300ms ease;
+  filter: drop-shadow(0 18px 32px rgba(66, 57, 165, .19));
 }
 .lola-orb--interactive { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.lola-orb--interactive:focus-visible {
-  outline: 2px solid #edce9a;
-  outline-offset: 10px;
-}
+.lola-orb--interactive:focus-visible { outline: 2px solid #e9c990; outline-offset: 12px; }
 .lola-orb__aura {
   position: absolute;
+  inset: -23%;
   z-index: -1;
-  inset: -14%;
   border-radius: 50%;
-  background: radial-gradient(circle at center,
-    rgba(96,94,226,.2) 0%,rgba(88,61,171,.1) 40%,transparent 72%);
-  filter: blur(22px);
-  opacity: .7;
-  animation: lola-aura 8.5s ease-in-out infinite;
+  background:
+    radial-gradient(circle at 42% 51%, rgba(97, 184, 244, .18), transparent 44%),
+    radial-gradient(circle at 60% 45%, rgba(165, 107, 241, .22), transparent 51%),
+    radial-gradient(circle at 52% 58%, rgba(245, 188, 149, .1), transparent 64%);
+  filter: blur(20px);
+  animation: lola-aura 7.8s ease-in-out infinite;
   pointer-events: none;
 }
 .lola-orb__body {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
   display: block;
-  animation: lola-breath 6.2s ease-in-out infinite;
+  border-radius: 50%;
   transform-origin: center;
-  overflow: visible;
+  animation: lola-breath 7.2s ease-in-out infinite;
   pointer-events: none;
 }
-.lola-orb__art {
+.lola-orb__glass {
+  position: absolute;
+  inset: 6%;
   display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 45% 36% at 30% 19%, rgba(232, 250, 255, .76), transparent 52%),
+    radial-gradient(circle at 76% 69%, rgba(229, 161, 209, .55), transparent 42%),
+    radial-gradient(circle at 26% 78%, rgba(67, 171, 229, .64), transparent 45%),
+    radial-gradient(circle at 61% 30%, #8f70e9 0%, #4734a4 40%, #10194e 80%, #0b0e2d 100%);
+  border: 1px solid rgba(212, 213, 255, .44);
+  box-shadow:
+    inset -19px -25px 42px rgba(8, 13, 57, .74),
+    inset 15px 15px 36px rgba(225, 232, 255, .23),
+    inset 0 0 3px rgba(255, 255, 255, .92),
+    0 0 0 2px rgba(135, 151, 255, .09),
+    0 14px 45px rgba(57, 65, 175, .45),
+    0 0 44px rgba(134, 113, 228, .25);
+}
+.lola-orb__glass::before {
+  content: '';
+  position: absolute;
+  inset: 2%;
+  z-index: 4;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 30% 18% at 34% 17%, rgba(255,255,255,.68), transparent 96%),
+    linear-gradient(138deg, rgba(255,255,255,.2), transparent 24%, transparent 60%, rgba(244,210,255,.07));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.52);
+  pointer-events: none;
+}
+.lola-orb__glass::after {
+  content: '';
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  object-fit: contain;
+  z-index: 5;
   border-radius: 50%;
-  background: transparent;
-  mix-blend-mode: normal;
-  transform-origin: center;
-  image-rendering: auto;
-  filter: drop-shadow(0 0 12px rgba(104,101,244,.19));
+  box-shadow: inset -9px -10px 25px rgba(9,10,49,.49), inset 6px 8px 13px rgba(255,255,255,.1);
   pointer-events: none;
+}
+.lola-orb__plasma {
+  position: absolute;
+  inset: -25%;
+  border-radius: 45%;
+  filter: blur(20px);
+  mix-blend-mode: screen;
+  transform-origin: 51% 47%;
+  will-change: transform;
+}
+.lola-orb__plasma--a {
+  background: conic-gradient(from 34deg, transparent, #6544d9 50deg, #a7e2ff 112deg,
+    transparent 180deg, #e5a8ef 242deg, #b9a3ff 300deg, transparent 350deg);
+  opacity: .76;
+  animation: lola-current-a 12s ease-in-out infinite alternate;
+}
+.lola-orb__plasma--b {
+  background: conic-gradient(from 225deg, #93d8ff, transparent 66deg, #d7a9ff 144deg,
+    transparent 211deg, #e4bbeb 289deg, transparent 350deg);
+  opacity: .55;
+  animation: lola-current-b 16s ease-in-out infinite alternate;
+}
+.lola-orb__plasma--c {
+  inset: -10%;
+  background: radial-gradient(ellipse 41% 59% at 29% 65%, rgba(101,235,255,.96), transparent 85%),
+    radial-gradient(ellipse 35% 39% at 76% 33%, rgba(255,205,221,.86), transparent 83%);
+  opacity: .6;
+  animation: lola-current-c 9.5s ease-in-out infinite alternate;
+}
+.lola-orb__caustic {
+  position: absolute;
+  inset: 9%;
+  border-radius: 50%;
+  background: conic-gradient(from 90deg, transparent 0deg, rgba(194,228,255,.37) 65deg,
+    transparent 128deg, rgba(255,217,242,.28) 204deg, transparent 260deg, rgba(160,192,255,.34) 329deg, transparent);
+  mask-image: radial-gradient(circle, transparent 0 44%, #000 70%, transparent 91%);
+  animation: lola-caustic 18s linear infinite;
+}
+.lola-orb__core {
+  position: absolute;
+  z-index: 2;
+  inset: 29%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 31%, rgba(255,255,255,.92), rgba(195,245,255,.65) 13%,
+    rgba(174,167,255,.52) 33%, rgba(138,106,220,.2) 63%, transparent 75%);
+  filter: blur(5px);
+  opacity: calc(.64 + var(--lola-audio) * .3);
+  transform: scale(calc(1 + var(--lola-audio) * .2));
+  animation: lola-heart 4.2s ease-in-out infinite;
 }
 .lola-orb__refraction {
   position: absolute;
-  inset: 3%;
+  z-index: 3;
+  inset: 2%;
   border-radius: 50%;
-  pointer-events: none;
-  background: conic-gradient(from 120deg at 50% 50%,
-    transparent 0deg,rgba(110,194,255,.035) 85deg,transparent 140deg,
-    rgba(204,166,255,.048) 216deg,transparent 280deg,rgba(255,219,165,.035) 360deg);
-  mask-image: radial-gradient(circle,transparent 0 42%,rgba(0,0,0,.4) 66%,black 86%,transparent 99%);
-  animation: lola-refraction 17s linear infinite;
-  opacity: .58;
+  background: conic-gradient(from 110deg, transparent 0deg, rgba(227,230,255,.18) 90deg,
+    transparent 145deg, rgba(224,191,255,.22) 228deg, transparent 300deg);
+  mask-image: radial-gradient(circle, transparent 0 64%, #000 86%, transparent 96%);
+  animation: lola-caustic 23s linear infinite reverse;
 }
 .lola-orb__glint {
   position: absolute;
-  inset: 2%;
+  z-index: 6;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at var(--lola-spot-x) var(--lola-spot-y), rgba(255,251,235,.37), transparent 33%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.lola-orb__orbit {
+  position: absolute;
+  inset: 1%;
+  z-index: 6;
+  display: block;
   border-radius: 50%;
   pointer-events: none;
-  background: radial-gradient(circle at var(--lola-spot-x) var(--lola-spot-y),
-    rgba(255,239,205,.22),transparent 39%);
-  opacity: 0;
-  transition: opacity 250ms ease;
-  mask-image: radial-gradient(circle,transparent 0%,rgba(0,0,0,.6) 60%,transparent 84%);
+}
+.lola-orb__orbit--first {
+  border: 1px solid rgba(158,207,255,.26);
+  transform: rotate(-32deg) scaleX(1.06) scaleY(.81);
+  animation: lola-orbit-first 14s linear infinite;
+}
+.lola-orb__orbit--second {
+  inset: -2%;
+  border: 1px solid rgba(243,202,177,.22);
+  transform: rotate(35deg) scaleX(.79) scaleY(1.11);
+  animation: lola-orbit-second 19s linear infinite;
+}
+.lola-orb__orbit--third {
+  inset: 2%;
+  border: 1px dashed rgba(188,171,245,.15);
+  transform: scale(1.04);
+  animation: lola-caustic 28s linear infinite;
 }
 .lola-orb__focus {
   position: absolute;
-  inset: -2%;
+  inset: -4%;
+  z-index: 7;
   border-radius: 50%;
+  border: 1px solid rgba(145,194,255,.12);
+  box-shadow: 0 0 18px rgba(117,145,255,.11);
+  transform: scale(calc(1.012 + var(--lola-audio) * .06));
+  transition: opacity 230ms ease, border-color 230ms ease, box-shadow 230ms ease;
   pointer-events: none;
-  border: 1px solid rgba(129,191,255,.04);
-  opacity: .35;
-  transform: scale(1);
-  transition: opacity 200ms ease, transform 180ms ease, box-shadow 200ms ease;
 }
 .lola-orb--hover .lola-orb__glint,
-.lola-orb--pressed .lola-orb__glint { opacity: .8; }
-.lola-orb--hover .lola-orb__focus,
-.lola-orb--pressed .lola-orb__focus {
-  opacity: .48;
-  transform: scale(1.025);
-  box-shadow: 0 0 16px rgba(106,188,255,.17);
-}
-.lola-orb--pressed .lola-orb__body { animation: none; transform: scale(.975); }
-.lola-orb--listening { --lola-energy: .5; }
+.lola-orb--pressed .lola-orb__glint { opacity: .93; }
+.lola-orb--hover .lola-orb__focus { border-color: rgba(208,220,255,.43); box-shadow: 0 0 35px rgba(134,144,250,.22); }
+.lola-orb--pressed .lola-orb__body { animation: none; transform: scale(.977); }
 .lola-orb--listening .lola-orb__focus {
-  opacity: calc(.30 + var(--lola-audio) * .65);
-  transform: scale(calc(1.007 + var(--lola-audio) * .055));
-  box-shadow: 0 0 calc(15px + var(--lola-audio) * 30px) rgba(107,206,255,.3);
-  border-color: rgba(108,212,255,.43);
+  border-color: rgba(109,219,252,.7);
+  box-shadow: 0 0 calc(20px + var(--lola-audio) * 46px) rgba(98,203,250,.43);
 }
-.lola-orb--listening .lola-orb__body {
-  animation-duration: 4.3s;
-  transform: scale(calc(1 + var(--lola-audio) * .024));
-}
-.lola-orb--thinking .lola-orb__refraction { animation-duration: 9s; opacity: .76; }
-.lola-orb--thinking .lola-orb__aura { opacity: .94; }
+.lola-orb--listening .lola-orb__aura { filter: blur(23px) saturate(1.22); }
+.lola-orb--thinking .lola-orb__caustic { animation-duration: 5.8s; }
+.lola-orb--thinking .lola-orb__aura { filter: blur(22px) saturate(1.18); }
 .lola-orb--speaking .lola-orb__focus {
-  opacity: calc(.28 + var(--lola-audio) * .68);
-  transform: scale(calc(1.012 + var(--lola-audio) * .065));
-  border-color: rgba(248,204,148,.42);
-  box-shadow: 0 0 calc(16px + var(--lola-audio) * 38px) rgba(251,191,127,.24);
+  border-color: rgba(245,205,154,.7);
+  box-shadow: 0 0 calc(20px + var(--lola-audio) * 52px) rgba(255,187,148,.33);
 }
-.lola-orb--speaking .lola-orb__body {
-  animation-duration: 4.6s;
-  transform: scale(calc(1 + var(--lola-audio) * .032));
-}
-.lola-orb--muted .lola-orb__aura { opacity: .38; }
-.lola-orb--error .lola-orb__aura { background: radial-gradient(circle,rgba(220,166,98,.14),transparent 70%); }
+.lola-orb--speaking .lola-orb__glass { filter: saturate(1.1) brightness(calc(1 + var(--lola-audio) * .14)); }
+.lola-orb--muted .lola-orb__aura { opacity: .25; }
+.lola-orb--muted .lola-orb__glass { filter: saturate(.64); }
+.lola-orb--error .lola-orb__focus { border-color: rgba(252,135,112,.8); }
+.lola-orb--error .lola-orb__aura { background: radial-gradient(circle, rgba(230,99,124,.24), transparent 65%); }
 @keyframes lola-breath {
-  0%,100% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.013) translateY(-3px); }
+  0%, 100% { transform: translateY(0) scale(.993); }
+  50% { transform: translateY(-5px) scale(1.014); }
 }
 @keyframes lola-aura {
-  0%,100% { transform: scale(.98); opacity: .58; }
-  50% { transform: scale(1.045); opacity: .85; }
+  0%, 100% { transform: scale(.96); opacity: .64; }
+  50% { transform: scale(1.08); opacity: .97; }
 }
-@keyframes lola-refraction { to { transform: rotate(360deg); } }
+@keyframes lola-current-a {
+  from { transform: rotate(-20deg) scale(1.1) translateX(-2%); }
+  to { transform: rotate(150deg) scale(1.32) translateX(6%); }
+}
+@keyframes lola-current-b {
+  from { transform: rotate(200deg) scale(1.22) translateY(5%); }
+  to { transform: rotate(-70deg) scale(1.05) translateY(-5%); }
+}
+@keyframes lola-current-c {
+  from { transform: rotate(-12deg) scale(.98); }
+  to { transform: rotate(23deg) scale(1.22); }
+}
+@keyframes lola-caustic { to { transform: rotate(360deg); } }
+@keyframes lola-heart {
+  0%, 100% { opacity: .6; }
+  50% { opacity: .9; }
+}
+@keyframes lola-orbit-first {
+  from { transform: rotate(-32deg) scaleX(1.06) scaleY(.81); }
+  to { transform: rotate(328deg) scaleX(1.06) scaleY(.81); }
+}
+@keyframes lola-orbit-second {
+  from { transform: rotate(35deg) scaleX(.79) scaleY(1.11); }
+  to { transform: rotate(-325deg) scaleX(.79) scaleY(1.11); }
+}
 @media (max-width: 720px) {
-  .lola-orb { width: 215px; margin: 8px auto 0; }
-  .lola-orb__aura { filter: blur(17px); }
+  .lola-orb { width: clamp(192px, 58vw, 220px); margin: 7px auto 0; }
+  .lola-orb__plasma { filter: blur(14px); }
+  .lola-orb__aura { filter: blur(16px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lola-orb,
-  .lola-orb__aura,
-  .lola-orb__body,
-  .lola-orb__refraction,
-  .lola-orb__focus,
-  .lola-orb__glint {
+  .lola-orb, .lola-orb *,
+  .lola-orb *::before, .lola-orb *::after {
     animation: none !important;
     transition: none !important;
-    transform: none !important;
     will-change: auto !important;
   }
-  .lola-orb__focus { opacity: .3; }
+  .lola-orb { transform: none !important; }
+  .lola-orb__core { opacity: .8; }
 }

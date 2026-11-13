@@ -3,6 +3,7 @@ import { ArrowUp, History, Loader2, RotateCcw, ShieldCheck, Volume2, VolumeX } f
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { LolaOrb } from '../lola/LolaOrb';
+import { LolaGlyph } from '../lola/LolaGlyph';
 import { useLolaVoiceStore } from '../../stores/lolaVoiceStore';
 import './lola-chat.css';
 
@@ -82,7 +83,7 @@ export function ChatInterface() {
       <div className="lola-chat__messages" role="log" aria-label="Conversation messages" aria-live="polite">
         {messages.length === 0 && (
           <div className="lola-chat__welcome">
-            <LolaOrb />
+            <LolaGlyph size={42} className="lola-chat__welcome-mark" />
             <div className="lola-chat__eyebrow">LOLA · YOUR BUSINESS ASSISTANT</div>
             <h2>How can I help you move forward?</h2>
             <p>Ask a question, explore your business, or prepare your next decision.</p>

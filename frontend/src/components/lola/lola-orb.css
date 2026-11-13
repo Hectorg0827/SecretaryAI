@@ -1,0 +1,165 @@
+/* Lola's orbital interface. The artwork is transparent and untouched. */
+.lola-orb {
+  --lola-x: 0deg;
+  --lola-y: 0deg;
+  --lola-spot-x: 50%;
+  --lola-spot-y: 50%;
+  --lola-audio: 0;
+  --lola-energy: 0.22;
+  position: relative;
+  display: block;
+  width: clamp(210px, 24vw, 292px);
+  aspect-ratio: 1 / 1;
+  flex: none;
+  margin: 12px auto 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  appearance: none;
+  isolation: isolate;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transform: perspective(750px) rotateX(var(--lola-x)) rotateY(var(--lola-y));
+  transition: transform 230ms cubic-bezier(.21,.8,.24,1), filter 240ms ease;
+  will-change: transform;
+  filter: drop-shadow(0 8px 24px rgba(91,75,225,.15));
+}
+.lola-orb--interactive { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.lola-orb--interactive:focus-visible {
+  outline: 2px solid #edce9a;
+  outline-offset: 10px;
+}
+.lola-orb__aura {
+  position: absolute;
+  z-index: -1;
+  inset: -14%;
+  border-radius: 50%;
+  background: radial-gradient(circle at center,
+    rgba(96,94,226,.2) 0%,rgba(88,61,171,.1) 40%,transparent 72%);
+  filter: blur(22px);
+  opacity: .7;
+  animation: lola-aura 8.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.lola-orb__body {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: block;
+  animation: lola-breath 6.2s ease-in-out infinite;
+  transform-origin: center;
+  overflow: visible;
+  pointer-events: none;
+}
+.lola-orb__art {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+  background: transparent;
+  mix-blend-mode: normal;
+  transform-origin: center;
+  image-rendering: auto;
+  filter: drop-shadow(0 0 12px rgba(104,101,244,.19));
+  pointer-events: none;
+}
+.lola-orb__refraction {
+  position: absolute;
+  inset: 3%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(from 120deg at 50% 50%,
+    transparent 0deg,rgba(110,194,255,.035) 85deg,transparent 140deg,
+    rgba(204,166,255,.048) 216deg,transparent 280deg,rgba(255,219,165,.035) 360deg);
+  mask-image: radial-gradient(circle,transparent 0 42%,rgba(0,0,0,.4) 66%,black 86%,transparent 99%);
+  animation: lola-refraction 17s linear infinite;
+  opacity: .58;
+}
+.lola-orb__glint {
+  position: absolute;
+  inset: 2%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--lola-spot-x) var(--lola-spot-y),
+    rgba(255,239,205,.22),transparent 39%);
+  opacity: 0;
+  transition: opacity 250ms ease;
+  mask-image: radial-gradient(circle,transparent 0%,rgba(0,0,0,.6) 60%,transparent 84%);
+}
+.lola-orb__focus {
+  position: absolute;
+  inset: -2%;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1px solid rgba(129,191,255,.04);
+  opacity: .35;
+  transform: scale(1);
+  transition: opacity 200ms ease, transform 180ms ease, box-shadow 200ms ease;
+}
+.lola-orb--hover .lola-orb__glint,
+.lola-orb--pressed .lola-orb__glint { opacity: .8; }
+.lola-orb--hover .lola-orb__focus,
+.lola-orb--pressed .lola-orb__focus {
+  opacity: .48;
+  transform: scale(1.025);
+  box-shadow: 0 0 16px rgba(106,188,255,.17);
+}
+.lola-orb--pressed .lola-orb__body { animation: none; transform: scale(.975); }
+.lola-orb--listening { --lola-energy: .5; }
+.lola-orb--listening .lola-orb__focus {
+  opacity: calc(.30 + var(--lola-audio) * .65);
+  transform: scale(calc(1.007 + var(--lola-audio) * .055));
+  box-shadow: 0 0 calc(15px + var(--lola-audio) * 30px) rgba(107,206,255,.3);
+  border-color: rgba(108,212,255,.43);
+}
+.lola-orb--listening .lola-orb__body {
+  animation-duration: 4.3s;
+  transform: scale(calc(1 + var(--lola-audio) * .024));
+}
+.lola-orb--thinking .lola-orb__refraction { animation-duration: 9s; opacity: .76; }
+.lola-orb--thinking .lola-orb__aura { opacity: .94; }
+.lola-orb--speaking .lola-orb__focus {
+  opacity: calc(.28 + var(--lola-audio) * .68);
+  transform: scale(calc(1.012 + var(--lola-audio) * .065));
+  border-color: rgba(248,204,148,.42);
+  box-shadow: 0 0 calc(16px + var(--lola-audio) * 38px) rgba(251,191,127,.24);
+}
+.lola-orb--speaking .lola-orb__body {
+  animation-duration: 4.6s;
+  transform: scale(calc(1 + var(--lola-audio) * .032));
+}
+.lola-orb--muted .lola-orb__aura { opacity: .38; }
+.lola-orb--error .lola-orb__aura { background: radial-gradient(circle,rgba(220,166,98,.14),transparent 70%); }
+@keyframes lola-breath {
+  0%,100% { transform: scale(1) translateY(0); }
+  50% { transform: scale(1.013) translateY(-3px); }
+}
+@keyframes lola-aura {
+  0%,100% { transform: scale(.98); opacity: .58; }
+  50% { transform: scale(1.045); opacity: .85; }
+}
+@keyframes lola-refraction { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+  .lola-orb { width: 215px; margin: 8px auto 0; }
+  .lola-orb__aura { filter: blur(17px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lola-orb,
+  .lola-orb__aura,
+  .lola-orb__body,
+  .lola-orb__refraction,
+  .lola-orb__focus,
+  .lola-orb__glint {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    will-change: auto !important;
+  }
+  .lola-orb__focus { opacity: .3; }
+}

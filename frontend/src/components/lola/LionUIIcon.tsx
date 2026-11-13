@@ -11,7 +11,8 @@ export type LionUIIconKind =
   | 'compliance' | 'connectors' | 'audit' | 'diagnostics'
   | 'settings' | 'security' | 'user' | 'online' | 'offline' | 'logout'
   | 'arrow' | 'chevron' | 'history' | 'microphone' | 'microphone-off'
-  | 'voice' | 'voice-off' | 'notification' | 'calendar' | 'document' | 'search';
+  | 'voice' | 'voice-off' | 'notification' | 'calendar' | 'document' | 'search'
+  | 'up' | 'back' | 'loading' | 'refresh' | 'delete' | 'close' | 'menu';
 
 type Props = { kind: LionUIIconKind; size?: number; className?: string };
 
@@ -144,6 +145,27 @@ const glyphs: Record<LionUIIconKind, ReactNode> = {
     <circle cx="10.7" cy="10.7" r="6.8" />
     <path d="m15.8 15.8 4.3 4.3" />
     <path d="M8 10.7h5.4" className="lion-ui-icon__accent" />
+  </>,
+  up: <>
+    <path d="M12 19V5m-5.6 5.6L12 5l5.6 5.6" />
+    <path d="M7 18h3" className="lion-ui-icon__accent" />
+  </>,
+  back: <path d="m14.7 4.8-7.1 7.2 7.1 7.2" />,
+  loading: <>
+    <path d="M12 3.5a8.5 8.5 0 1 1-8.5 8.5" />
+    <path d="m3.5 7.8.1 4.2 4.2-.1" className="lion-ui-icon__accent" />
+  </>,
+  refresh: <>
+    <path d="M4.7 10.2a7.8 7.8 0 0 1 13-4.1L20 8.6M20 4.6v4h-4M19.3 13.8a7.8 7.8 0 0 1-13 4.1L4 15.4M4 19.4v-4h4" />
+  </>,
+  delete: <>
+    <path d="M4.5 6.4h15M8 6.4V4.5h8v1.9M6.5 7.4 7.4 20h9.2l.9-12.6M10 10v6M14 10v6" />
+    <path d="M10 4.5h4" className="lion-ui-icon__accent" />
+  </>,
+  close: <path d="M5.3 5.3 18.7 18.7M18.7 5.3 5.3 18.7" />,
+  menu: <>
+    <path d="M4 6h16M4 12h13M4 18h16" />
+    <path d="M18.5 12h1.5" className="lion-ui-icon__accent" />
   </>,
 };
 

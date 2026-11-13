@@ -110,7 +110,7 @@ async def test_history_and_listing_never_return_another_users_data():
     assert [m["content"] for m in history["messages"]] == ["Private", "Secret"]
     listing = await list_conversations(limit=20, offset=0, user=me, db=db)
     assert listing["conversations"][0]["conversation_id"] == "private"
-    assert (await list_conversations(limit=20, user=other, db=db))["conversations"] == []
+    assert (await list_conversations(limit=20, offset=0, user=other, db=db))["conversations"] == []
     for denied in (other, tenant):
         with pytest.raises(HTTPException) as exc:
             await get_conversation_history("private", limit=40, user=denied, db=db)

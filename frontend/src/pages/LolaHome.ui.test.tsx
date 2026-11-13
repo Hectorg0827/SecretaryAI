@@ -27,7 +27,9 @@ vi.mock('../stores/chatStore', () => ({
     selector({ isStreaming: false, messages: [], sendMessage: mocks.sendMessage }),
 }));
 vi.mock('../components/chat/ChatInterface', () => ({
-  ChatInterface: () => <div>Conversation connected</div>,
+  ChatInterface: ({ onBack }: { onBack?: () => void }) => (
+    <div>Conversation connected{onBack && <button type="button" onClick={onBack}>Overview</button>}</div>
+  ),
 }));
 
 import { LolaHome } from './LolaHome';

@@ -99,10 +99,16 @@ class OutlookConnector:
             params: dict = {
                 "$top": min(max_results, 50),
                 "$select": "id,conversationId,internetMessageId,subject,from,bodyPreview,receivedDateTime,isRead",
-                "$orderby": "receivedDateTime desc",
             }
             if "is:unread" in query:
+                # Microsoft Graph refuses $filter=isRead eq false combined with
+                # $orderby=receivedDateTime desc: an orderby field must first
+                # appear in the filter, or Graph returns InefficientFilter.
+                # Keep the predicate server-side; do not reorder a partial
+                # page client-side and pretend that it is globally ordered.
                 params["$filter"] = "isRead eq false"
+            else:
+                params["$orderby"] = "receivedDateTime desc"
 
             messages: list[dict] = []
             seen_ids: set[str] = set()
@@ -157,7 +163,11 @@ class OutlookConnector:
                 }
                 for m in messages
             ]
-        except Exception as exc:
+        except httpx.HTTPStatusError as exc:
+            # Status only: no Graph response bodies, mail details, URL, or tokens.
+            log.error("Outlook get_emails failed graph_http_status=%d", exc.response.status_code)
+            raise
+        except Exception:
             log.error("Outlook get_emails failed (details withheld to protect message data)")
             raise
 
@@ -170,8 +180,8 @@ class OutlookConnector:
                 response = await client.get(f"{GRAPH_BASE}/me", headers=headers)
                 response.raise_for_status()
             return True
-        except Exception as exc:
-            log.warning("Outlook connectivity check failed: %s", exc)
+        except Exception:
+            log.warning("Outlook connectivity check failed (details withheld)")
             return False
 
     async def send_email_reply(self, to: str, subject: str, body: str, reply_to_id: Optional[str] = None) -> dict:

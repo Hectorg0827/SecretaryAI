@@ -12,12 +12,12 @@ type MockUtterance = {
   onerror?: () => void;
 };
 
-let lastUtterance: MockUtterance | null = null;
+const utterances: MockUtterance[] = [];
 const speech = { cancel: vi.fn(), speak: vi.fn() };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  lastUtterance = null;
+  utterances.length = 0;
   class SyntheticUtterance implements MockUtterance {
     lang = '';
     rate = 1;
@@ -26,7 +26,7 @@ beforeEach(() => {
     onend?: () => void;
     onerror?: () => void;
     constructor(public text: string) {
-      lastUtterance = this;
+      utterances.push(this);
     }
   }
   vi.stubGlobal('SpeechSynthesisUtterance', SyntheticUtterance);
@@ -47,8 +47,8 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
     expect(useLolaVoiceStore.getState().speak('Business briefing')).toBe(true);
     expect(speech.speak).toHaveBeenCalledOnce();
     expect(useLolaVoiceStore.getState().status).toBe('idle');
-    expect(lastUtterance).not.toBeNull();
-    const utterance = lastUtterance as MockUtterance | null;
+    expect(utterances.at(-1)).not.toBeNull();
+    const utterance = utterances.at(-1) as MockUtterance | null;
     utterance?.onstart?.();
     expect(useLolaVoiceStore.getState().status).toBe('speaking');
     expect(useLolaVoiceStore.getState().outputLevel).toBe(0.22);
@@ -57,7 +57,7 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
   it('reacts to actual word boundaries and returns idle after speech ends', () => {
     vi.useFakeTimers();
     useLolaVoiceStore.getState().speak('Next priority');
-    const utterance = lastUtterance as MockUtterance | null;
+    const utterance = utterances.at(-1) as MockUtterance | null;
     utterance?.onstart?.();
     utterance?.onboundary?.();
     expect(useLolaVoiceStore.getState().outputLevel).toBe(0.85);
@@ -70,7 +70,7 @@ describe('Lola voice state reflects actual browser speech callbacks', () => {
 
   it('stops speaking and cancels browser audio on explicit stop', () => {
     useLolaVoiceStore.getState().speak('Hello');
-    const utterance = lastUtterance as MockUtterance | null;
+    const utterance = utterances.at(-1) as MockUtterance | null;
     utterance?.onstart?.();
     useLolaVoiceStore.getState().stop();
     expect(speech.cancel).toHaveBeenCalled();

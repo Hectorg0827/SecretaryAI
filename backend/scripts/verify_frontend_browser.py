@@ -173,10 +173,19 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
     page.goto(base + "/", wait_until="networkidle")
     orb = page.get_by_role("button", name="Open Lola conversation")
     assert orb.is_visible(), "The official Lola orb must be operable on desktop and mobile"
-    img = orb.locator("img[src='/brand/lola-orb-approved.png']")
-    assert img.is_visible(), "Missing the official transparent Lola HD artwork"
-    img.evaluate("(element) => element.decode()")
-    assert img.evaluate("(element) => element.naturalWidth >= 1200"), "Low-resolution orb artwork"
+    # Lola is now volumetric CSS, not a transparent PNG pasted into a circle.
+    assert orb.locator("img").count() == 0, "Legacy flat Lola orb must not return"
+    glass = orb.locator(".lola-orb__glass")
+    assert glass.is_visible(), "Missing Lola optical-glass sphere"
+    assert orb.locator(".lola-orb__plasma").count() == 3, "Missing animated Lola currents"
+    assert orb.locator(".lola-orb__orbit").count() == 3, "Missing orbital depth layers"
+    assert glass.evaluate(
+        "(element) => getComputedStyle(element).backgroundImage !== 'none'"
+    ), "Lola sphere must have a real rendered gradient"
+    assert orb.locator(".lola-orb__body").evaluate(
+        "(element) => window.matchMedia('(prefers-reduced-motion: reduce)').matches"
+        " || getComputedStyle(element).animationName.includes('lola-breath')"
+    ), "Lola must animate in normal motion mode and honor reduced-motion preference"
     assert orb.get_attribute("data-state") in ("idle", "hover"), "Orb should be calm before interaction"
     orb.click()
     assert page.get_by_role("main", name="Lola conversation workspace").is_visible()

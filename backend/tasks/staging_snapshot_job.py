@@ -57,6 +57,21 @@ def _safe_failure_code(exc: Exception) -> str:
         # This is the fixed, sanitized error text from tasks.base; never log
         # or classify raw provider messages or their chained exceptions.
         if str(exc) == "QBO proactive token refresh failed":
+            # Only inspect the exception type / numeric HTTP status, never the
+            # provider body, URL or message, which may contain credentials.
+            cause = exc.__cause__
+            if isinstance(cause, httpx.HTTPStatusError):
+                status = cause.response.status_code
+                if status in (400, 401, 403):
+                    return "qbo_refresh_rejected"
+                if status == 429:
+                    return "qbo_refresh_rate_limited"
+                return "qbo_refresh_upstream_error" if status >= 500 else "qbo_refresh_http_error"
+            if isinstance(cause, httpx.RequestError):
+                return "qbo_refresh_transport_error"
+            if (isinstance(cause, RuntimeError)
+                    and str(cause) == "QBO token persistence matched no current connected company"):
+                return "qbo_refresh_version_conflict"
             return "qbo_token_refresh_failed"
         return "dependency_or_configuration_failed"
     return "unexpected_failure"

@@ -123,29 +123,6 @@
   flex-direction: column;
   background: radial-gradient(ellipse at 50% 14%, rgba(77,64,137,.12), transparent 65%), #0b1121;
 }
-.lola-home__conversation-nav {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 9px clamp(18px, 5vw, 64px);
-  border-bottom: 1px solid rgba(217,200,240,.1);
-  font-size: 12px;
-  color: #8899ba;
-}
-.lola-home__back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-  color: #e2c58e;
-  font-size: 13px;
-  padding: 8px 4px;
-  cursor: pointer;
-}
-.lola-home__back:hover { color: #fff3ce; }
 .lola-home__conversation-content {
   flex: 1;
   min-height: 0;
@@ -187,8 +164,6 @@
   .lola-home__action-panel { flex-wrap: wrap; padding: 16px; gap: 12px; }
   .lola-home__action-link { margin-left: 54px; }
   .lola-home__footer { line-height: 1.6; }
-  .lola-home__conversation-nav { padding: 6px 15px; }
-  .lola-home__conversation-nav > span { display: none; }
   .lola-home__conversation-content .lola-chat { border: 0; }
 }
 @media (prefers-reduced-motion: reduce) {

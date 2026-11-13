@@ -264,3 +264,112 @@
   .lola-orb { transform: none !important; }
   .lola-orb__core { opacity: .8; }
 }
+
+/*
+ * Reference-fidelity correction (PR #125 visual review):
+ * The earlier screen captures washed Lola out into a featureless lavender
+ * sphere. Restore the distinctive dark, interwoven sapphire/amber signature.
+ */
+.lola-orb__glass {
+  background:
+    radial-gradient(ellipse 29% 24% at 35% 23%, rgba(89, 110, 245, .19), transparent 94%),
+    radial-gradient(ellipse 28% 40% at 76% 71%, rgba(77, 45, 182, .22), transparent 91%),
+    radial-gradient(ellipse 44% 44% at 45% 47%, #17215f 0%, #0f1648 59%, #090d29 100%);
+  border-color: rgba(146, 147, 249, .38);
+  box-shadow:
+    inset -15px -21px 35px rgba(5, 8, 33, .86),
+    inset 11px 11px 25px rgba(118, 152, 255, .12),
+    inset 0 0 2px rgba(224, 213, 255, .55),
+    0 0 0 2px rgba(105, 125, 228, .07),
+    0 13px 34px rgba(39, 48, 137, .37),
+    0 0 36px rgba(96, 84, 203, .21);
+}
+.lola-orb__glass::before {
+  background:
+    radial-gradient(ellipse 21% 10% at 32% 16%, rgba(213, 226, 255, .20), transparent 94%),
+    linear-gradient(145deg, rgba(110, 132, 241, .13), transparent 23%, transparent 77%, rgba(167, 105, 228, .08));
+  box-shadow: inset 0 1px 1px rgba(223, 230, 255, .2);
+}
+.lola-orb__glass::after {
+  box-shadow: inset -11px -9px 29px rgba(6, 9, 36, .63), inset 5px 8px 11px rgba(111, 152, 245, .10);
+}
+.lola-orb__plasma--a { opacity: .16; filter: blur(22px); }
+.lola-orb__plasma--b { opacity: .13; filter: blur(22px); }
+.lola-orb__plasma--c { opacity: .13; filter: blur(20px); }
+.lola-orb__core {
+  inset: 35%;
+  z-index: 2;
+  background: radial-gradient(circle,
+    rgba(255,249,217,.9),
+    rgba(255,206,141,.48) 18%,
+    rgba(244,162,107,.18) 45%,
+    transparent 72%);
+  filter: blur(9px);
+}
+.lola-orb__ribbons {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  opacity: .98;
+  isolation: isolate;
+}
+.lola-orb__ribbons-motion {
+  transform-origin: 50% 50%;
+  animation: lola-ribbon-drift 9s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.lola-orb__ribbon { stroke-linejoin: round; }
+.lola-orb__ribbon--blue {
+  filter: drop-shadow(0 0 5px rgba(83, 183, 255, .95)) drop-shadow(0 0 12px rgba(67, 104, 255, .72));
+}
+.lola-orb__ribbon--gold {
+  filter: drop-shadow(0 0 5px rgba(255, 196, 140, .96)) drop-shadow(0 0 12px rgba(244, 128, 154, .48));
+}
+.lola-orb__ribbon--violet { filter: drop-shadow(0 0 6px rgba(166, 112, 244, .62)); }
+.lola-orb__ribbon-haze--blue { opacity: .40; filter: blur(8px); }
+.lola-orb__ribbon-haze--gold { opacity: .48; filter: blur(7px); }
+.lola-orb__ribbon-shimmer {
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,.84));
+}
+.lola-orb__ribbon-shimmer--blue { animation: lola-ribbon-sweep 6.4s linear infinite; }
+.lola-orb__ribbon-shimmer--gold { animation: lola-ribbon-sweep 7.4s linear infinite reverse; }
+.lola-orb__heart-light {
+  opacity: calc(.74 + var(--lola-audio) * .25);
+  transform-origin: 164px 163px;
+  animation: lola-ribbon-heart 4.5s ease-in-out infinite;
+}
+.lola-orb--listening .lola-orb__ribbons { filter: hue-rotate(-9deg) brightness(calc(1 + var(--lola-audio) * .12)); }
+.lola-orb--thinking .lola-orb__ribbons-motion { animation-duration: 4.6s; }
+.lola-orb--speaking .lola-orb__ribbon--gold { filter: drop-shadow(0 0 10px rgba(255,204,133,.97)) drop-shadow(0 0 16px rgba(245,138,101,.77)); }
+.lola-orb--muted .lola-orb__ribbons { opacity: .36; }
+.lola-orb--error .lola-orb__ribbons { filter: saturate(.63) sepia(.22); }
+@keyframes lola-ribbon-drift {
+  0% { transform: rotate(-3deg) scale(.99) translateY(2px); }
+  50% { transform: rotate(1deg) scale(1.015) translateY(-1px); }
+  100% { transform: rotate(4deg) scale(.996) translateY(2px); }
+}
+@keyframes lola-ribbon-sweep {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -470; }
+}
+@keyframes lola-ribbon-heart {
+  0%,100% { opacity: .66; transform: scale(.97); }
+  50% { opacity: .94; transform: scale(1.07); }
+}
+@media (max-width: 720px) {
+  .lola-orb__plasma--a,.lola-orb__plasma--b,.lola-orb__plasma--c { filter: blur(12px); }
+  .lola-orb__ribbon-haze { filter: blur(5px); }
+  .lola-orb__ribbon--blue { filter: drop-shadow(0 0 4px rgba(83, 183, 255, .9)); }
+  .lola-orb__ribbon--gold { filter: drop-shadow(0 0 4px rgba(255, 196, 140, .95)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lola-orb__ribbons-motion,.lola-orb__ribbon-shimmer,.lola-orb__heart-light {
+    animation: none !important;
+    transform: none !important;
+  }
+}

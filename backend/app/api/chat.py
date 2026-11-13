@@ -518,7 +518,7 @@ async def send_message(
 async def get_conversation_history(
     conversation_id: str,
     limit: int = Query(40, ge=1, le=200),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
     """Return the message history for a conversation."""
@@ -538,7 +538,7 @@ async def get_conversation_history(
 @router.get("/conversations")
 async def list_conversations(
     limit: int = Query(20, ge=1, le=100),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
     """List recent conversations for the current user."""

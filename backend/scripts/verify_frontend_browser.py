@@ -214,6 +214,25 @@ def _authenticated_navigation(browser, engine: str, base: str, artifacts: Path, 
         )
     _measure(page, "lola home " + str(width))
     page.screenshot(path=str(artifacts / (engine + "-lola-home-" + str(width) + ".png")), full_page=True)
+
+    # Compliance must never trap users behind an undismissable onboarding wizard.
+    page.goto(base + "/compliance", wait_until="networkidle")
+    setup = page.get_by_role("dialog", name="Compliance setup")
+    setup.wait_for(state="visible", timeout=5000)
+    assert setup.get_attribute("aria-modal") == "true"
+    assert setup.get_by_role("button", name="Close compliance setup").is_visible()
+    page.screenshot(path=str(artifacts / (engine + "-compliance-setup-" + str(width) + ".png")))
+    setup.get_by_role("button", name="Close compliance setup").click()
+    setup.wait_for(state="hidden", timeout=5000)
+    page.get_by_role("button", name="Open compliance setup").click()
+    setup.wait_for(state="visible", timeout=5000)
+    setup.get_by_role("button", name="Exit compliance setup and return to dashboard").click()
+    setup.wait_for(state="hidden", timeout=5000)
+    page.get_by_role("button", name="Open compliance setup").click()
+    setup.wait_for(state="visible", timeout=5000)
+    page.keyboard.press("Escape")
+    setup.wait_for(state="hidden", timeout=5000)
+    _measure(page, "compliance " + str(width))
     context.close()
 
 

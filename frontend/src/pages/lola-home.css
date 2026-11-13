@@ -114,15 +114,51 @@
 .lola-home__workspaces-grid svg { color: #d4b67e; }
 .lola-home__footer { border-top: 1px solid #28324b; padding: 24px 0 8px; margin-top: 10px; color: #76829d; font-size: 11px; }
 .lola-home__footer span { color: #d2ad74; padding: 0 7px; }
-.lola-home__dialog-layer { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; }
-.lola-home__scrim { position: absolute; inset: 0; background: rgba(3, 7, 20, .68); cursor: pointer; }
-.lola-home__chat { z-index: 1; width: min(100%, 480px); height: 100%; background: #fff; box-shadow: -25px 0 80px rgba(0,0,0,.4); display: flex; flex-direction: column; }
-.lola-home__chat > header { min-height: 64px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; background: #0c1426; color: #fff; }
-.lola-home__chat-title { display: flex; gap: 10px; align-items: center; font-weight: 700; }
-.lola-home__chat-title svg { color: #e4c98c; }
-.lola-home__chat-title span { color: #aab5d0; font-size: 11px; font-weight: 400; margin-left: 6px; }
-.lola-home__chat > header button { color: #fff; cursor: pointer; border: 0; background: transparent; padding: 8px; }
-.lola-home__chat-body { min-height: 0; flex: 1; }
+/* Main Lola conversation is a full workspace, never an overlay or secondary mini-chat. */
+.lola-home__conversation {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(ellipse at 50% 14%, rgba(77,64,137,.12), transparent 65%), #0b1121;
+}
+.lola-home__conversation-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px clamp(18px, 5vw, 64px);
+  border-bottom: 1px solid rgba(217,200,240,.1);
+  font-size: 12px;
+  color: #8899ba;
+}
+.lola-home__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: #e2c58e;
+  font-size: 13px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.lola-home__back:hover { color: #fff3ce; }
+.lola-home__conversation-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.lola-home__conversation-content .lola-chat {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+  height: 100%;
+  border-left: 1px solid rgba(221,219,251,.065);
+  border-right: 1px solid rgba(221,219,251,.065);
+  background: transparent;
+}
 .lionbi-brand { display: flex; align-items: center; gap: 9px; text-decoration: none; }
 .lionbi-brand__mark { width: 43px; height: 43px; flex-shrink: 0; }
 .lionbi-brand__copy { display: flex; flex-direction: column; line-height: 1.1; }
@@ -151,6 +187,9 @@
   .lola-home__action-panel { flex-wrap: wrap; padding: 16px; gap: 12px; }
   .lola-home__action-link { margin-left: 54px; }
   .lola-home__footer { line-height: 1.6; }
+  .lola-home__conversation-nav { padding: 6px 15px; }
+  .lola-home__conversation-nav > span { display: none; }
+  .lola-home__conversation-content .lola-chat { border: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lola-home__stat, .lola-home__switch i { transition: none; }

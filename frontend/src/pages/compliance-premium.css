@@ -81,3 +81,28 @@
   .lionbi-compliance__content .rounded-xl,
   .lionbi-compliance__content .rounded-lg { transition: none !important; }
 }
+
+/* The global Lion BI dark theme should not wash out onboarding form fields. */
+.lion-workspace .lionbi-compliance-wizard {
+  background: #f8fafc !important;
+  color: #15243d !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.text-slate-900,.text-slate-800,.text-slate-700) {
+  color: #1c2c45 !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.text-slate-600,.text-slate-500,.text-slate-400) {
+  color: #52627a !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.bg-white,.bg-slate-50) {
+  background-color: #fff !important;
+}
+.lion-workspace .lionbi-compliance-wizard .bg-slate-100 { background-color: #e5e9f0 !important; }
+.lion-workspace .lionbi-compliance-wizard :is(.border-slate-100,.border-slate-200) { border-color: #d6deea !important; }
+.lion-workspace .lionbi-compliance-wizard :is(input:not([type=checkbox]):not([type=radio]),textarea,select) {
+  background: #fff !important;
+  color: #1a2d48 !important;
+  border-color: #cbd5e1 !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(input,textarea)::placeholder { color: #7b8ba3 !important; }
+.lion-workspace .lionbi-compliance-wizard .bg-blue-600 { background-color: #4854a8 !important; }
+.lion-workspace .lionbi-compliance-wizard .bg-emerald-600 { background-color: #087f67 !important; }

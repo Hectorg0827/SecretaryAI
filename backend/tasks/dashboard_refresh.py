@@ -27,6 +27,7 @@ def refresh_company_snapshot(
     include_finance_comparison: bool = False,
     include_purchasing_coverage: bool = False,
     include_finance_document_coverage: bool = False,
+    stage_hook=None,
 ) -> dict:
     """Purely read from the provider; persist one tenant-scoped dashboard snapshot."""
     if not isinstance(company_id, str) or not company_id.strip():
@@ -35,14 +36,24 @@ def refresh_company_snapshot(
     if company is None:
         raise ValueError("Company is not eligible for dashboard refresh")
 
+    # The cron supplies a fixed-label stage tracker; standard callers may omit it.
+    # Never pass provider content or identifiers through this hook.
+    def stage(name: str) -> None:
+        if stage_hook is not None:
+            stage_hook(name)
+
+    stage("setup_provider_adapter")
     adapter = adapter_factory(company)
     # Without a DB the adapter cannot read inventory sell rates, so no item
     # would ever be assessed; request-time adapters attach it the same way.
+    stage("attach_inventory_database")
     adapter.set_db(db)
 
     async def collect() -> dict:
+        stage("read_required_dashboard_sources")
         payload = await compute_dashboard_payload(adapter)
         if include_finance_comparison:
+            stage("read_optional_income_comparison")
             # This optional cross-check is only enabled by the hard-gated
             # single-company staging cron. A failed P&L read is exposed as
             # unavailable evidence, not as a verified $0 ledger report.
@@ -50,14 +61,17 @@ def refresh_company_snapshot(
                 adapter, payload["sales_30d"]
             )
         if include_finance_document_coverage:
+            stage("read_optional_finance_documents")
             payload["finance_document_coverage"] = await read_finance_document_coverage(adapter)
         return payload
 
     payload = asyncio.run(collect())
     if include_purchasing_coverage:
+        stage("read_optional_purchasing")
         # Only the staging allowlisted cron opts into this source. Aggregate
         # tenant-scoped DB reads never call external systems or take actions.
         payload["purchasing_coverage"] = read_purchasing_coverage(db, company_id)
+    stage("persist_snapshot")
     store_snapshot(
         db, company_id, "dashboard_summary", payload,
         generated_by=generated_by,

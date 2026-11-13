@@ -70,8 +70,8 @@ export function LolaHome() {
   const greetingAttempted = useRef(false);
   const recognitionRef = useRef<BrowserSpeechRecognizer | null>(null);
   const chatBusy = useChatStore((state) => state.isStreaming);
-  const messageCount = useChatStore((state) => state.messages.length);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const beginContext = useChatStore((state) => state.beginContext);
   const speak = useLolaVoiceStore((state) => state.speak);
   const stopSpeaking = useLolaVoiceStore((state) => state.stop);
   const voiceStatus = useLolaVoiceStore((state) => state.status);
@@ -123,10 +123,6 @@ export function LolaHome() {
     stopSpeaking();
   }, [stopSpeaking]);
 
-  // Preserve an existing conversation on return to the platform home.
-  useEffect(() => {
-    if (messageCount > 0) setConversationActive(true);
-  }, [messageCount]);
 
   const toggleGreeting = () => {
     const next = !voiceGreeting;
@@ -143,6 +139,7 @@ export function LolaHome() {
     const cleaned = text.trim();
     if (!canAccessChat || !cleaned || chatBusy) return;
     setPrompt('');
+    beginContext({ workspace: 'home' });
     setHistoryRequested(false);
     setConversationActive(true);
     void sendMessage(cleaned);

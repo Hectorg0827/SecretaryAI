@@ -537,7 +537,8 @@ async def get_conversation_history(
 
 @router.get("/conversations")
 async def list_conversations(
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100000),
     user: dict = Depends(require_permission("view_own_accounts")),
     db=Depends(get_db),
 ):
@@ -547,10 +548,11 @@ async def list_conversations(
         .select("id, title, messages, created_at, updated_at")
         .eq("company_id", user["company_id"])
         .eq("user_id", user["sub"])
-        .order("updated_at", desc=True).limit(limit).execute()
+        .order("updated_at", desc=True).range(offset, offset + limit).execute()
     )
     convos = []
-    for row in result.data or []:
+    rows = result.data or []
+    for row in rows[:limit]:
         messages = row.get("messages") or []
         first_user = next((m.get("content", "") for m in messages
                            if isinstance(m, dict) and m.get("role") == "user"), "")
@@ -559,7 +561,7 @@ async def list_conversations(
             "preview": (row.get("title") or first_user)[:80],
             "created_at": row.get("created_at"),
         })
-    return {"conversations": convos}
+    return {"conversations": convos, "has_more": len(rows) > limit, "next_offset": offset + len(convos)}
 
 
 

@@ -22,12 +22,15 @@ interface ChatStore {
   context: LolaContext | null;
   conversations: ConversationSummary[];
   historyLoading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   historyError: string | null;
   deletingId: string | null;
   sendMessage: (text: string) => Promise<void>;
   clearConversation: () => void;
   beginContext: (context: LolaContext | null) => void;
   loadConversations: () => Promise<void>;
+  loadMoreConversations: () => Promise<void>;
   openConversation: (id: string) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<boolean>;
 }
@@ -43,6 +46,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   context: null,
   conversations: [],
   historyLoading: false,
+  loadingMore: false,
+  hasMore: false,
   historyError: null,
   deletingId: null,
 
@@ -58,19 +63,46 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   loadConversations: async () => {
     set({ historyLoading: true, historyError: null });
     try {
-      const data = await api.get<unknown>('/api/chat/conversations?limit=100');
-      const value = data as { conversations?: unknown } | null;
+      const data = await api.get<unknown>('/api/chat/conversations?limit=50&offset=0');
+      const value = data as { conversations?: unknown; has_more?: unknown } | null;
       if (!value || !Array.isArray(value.conversations)) throw new Error('Invalid history response');
       const conversations = value.conversations.filter((item): item is ConversationSummary => (
         item !== null && typeof item === 'object'
         && typeof item.conversation_id === 'string'
         && typeof item.preview === 'string'
       ));
-      set({ conversations });
+      set({ conversations, hasMore: value.has_more === true });
     } catch {
       set({ historyError: 'Conversation history is unavailable. Please try again.' });
     } finally {
       set({ historyLoading: false });
+    }
+  },
+
+  loadMoreConversations: async () => {
+    if (get().historyLoading || get().loadingMore || !get().hasMore) return;
+    set({ loadingMore: true, historyError: null });
+    try {
+      const offset = get().conversations.length;
+      const data = await api.get<unknown>('/api/chat/conversations?limit=50&offset=' + offset);
+      const value = data as { conversations?: unknown; has_more?: unknown } | null;
+      if (!value || !Array.isArray(value.conversations)) throw new Error('Invalid history response');
+      const page = value.conversations.filter((item): item is ConversationSummary => (
+        item !== null && typeof item === 'object'
+        && typeof item.conversation_id === 'string'
+        && typeof item.preview === 'string'
+      ));
+      set((state) => {
+        const existing = new Set(state.conversations.map((item) => item.conversation_id));
+        return {
+          conversations: [...state.conversations, ...page.filter((item) => !existing.has(item.conversation_id))],
+          hasMore: value.has_more === true,
+        };
+      });
+    } catch {
+      set({ historyError: 'Older conversations could not be loaded.' });
+    } finally {
+      set({ loadingMore: false });
     }
   },
 

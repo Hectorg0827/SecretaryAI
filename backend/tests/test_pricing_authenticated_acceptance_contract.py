@@ -5,7 +5,7 @@ import pytest
 
 from scripts.pricing_authenticated_acceptance import (
     ASSESSMENTS, BOOK_PATH, SUGGESTIONS, AcceptanceBlocked,
-    check_role_matrix, verify_assessment, verify_book,
+    check_role_matrix, verify_assessment, verify_book, verify_foreign_tenant,
 )
 
 
@@ -24,12 +24,13 @@ class Response:
 
 class Client:
     def __init__(self, role, company="tenant-a", book=None, assessment=None,
-                 suggestions=None):
+                 suggestions=None, foreign_assessment_status=None):
         self.role = role
         self.company = company
         self.book = book
         self.assessment = assessment
         self.suggestions = suggestions
+        self.foreign_assessment_status = foreign_assessment_status
         self.paths = []
 
     def get(self, path):
@@ -41,7 +42,10 @@ class Client:
                 return Response(403)
             return Response(200, self.book or book_payload(self.company))
         if path == ASSESSMENTS + ASSESSMENT:
-            return Response(200, self.assessment or assessment_payload())
+            return Response(
+                self.foreign_assessment_status, {}
+            ) if self.foreign_assessment_status is not None else Response(
+                200, self.assessment or assessment_payload())
         if path == SUGGESTIONS:
             return Response(200, self.suggestions or suggestions_payload(self.company))
         return Response(404)
@@ -121,3 +125,40 @@ def test_source_absence_is_not_approved_or_recorded_as_zero():
     obj.book = {"items": [], "count_returned": 0}
     with pytest.raises(AcceptanceBlocked):
         verify_book(obj)
+
+def test_cross_tenant_assessment_is_not_readable():
+    owner = Client("owner")
+    pricing = Client("pricing_billbacks")
+    denied = Client("back_office")
+    foreign = Client("manager", company="tenant-b",
+                     foreign_assessment_status=404)
+    result = check_role_matrix(owner, pricing, denied, ASSESSMENT, foreign)
+    assert result["cross_tenant"] == {
+        "assessment_access": "DENIED_404", "distinct_tenant": True,
+    }
+    assert ASSESSMENTS + ASSESSMENT in foreign.paths
+
+
+@pytest.mark.parametrize("code", [200, 401, 403, 500, 503])
+def test_cross_tenant_fails_closed_for_non_404_responses(code):
+    foreign = Client("manager", company="tenant-b",
+                     foreign_assessment_status=code)
+    with pytest.raises(AcceptanceBlocked, match="did not return 404"):
+        verify_foreign_tenant(foreign, "tenant-a", ASSESSMENT)
+
+
+def test_foreign_tenant_rejected_if_session_same_company():
+    foreign = Client("manager", company="tenant-a",
+                     foreign_assessment_status=404)
+    with pytest.raises(AcceptanceBlocked, match="belongs to the owner tenant"):
+        verify_foreign_tenant(foreign, "tenant-a", ASSESSMENT)
+
+
+def test_optional_cross_tenant_must_be_explicitly_unverified_when_absent():
+    result = check_role_matrix(
+        Client("owner"), Client("pricing_billbacks"),
+        Client("back_office"), ASSESSMENT,
+    )
+    assert result["cross_tenant"]["assessment_access"] == (
+        "NOT_RUN_SECOND_TENANT_SESSION_REQUIRED"
+    )

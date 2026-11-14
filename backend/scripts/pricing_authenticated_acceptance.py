@@ -3,7 +3,9 @@
 Only the operator's local shell may hold the bearer tokens below. Never paste
 them in ChatGPT, CI, GitHub comments, command arguments, or evidence artifacts.
 No real price or accounting writes. This script requires three separate
-authorized staging users and a real same-tenant purchase assessment.
+authorized staging users and a real same-tenant purchase assessment. A fourth
+private owner/manager token from another tenant optionally verifies 404 cross-
+tenant denial without manufacturing another user's account or data.
 """
 from __future__ import annotations
 
@@ -115,8 +117,28 @@ def verify_denied(client: httpx.Client) -> dict:
     return {"book_access": "DENIED_403"}
 
 
+def verify_foreign_tenant(foreign: httpx.Client, owner_company: str,
+                          assessment_id: str) -> dict:
+    """Use a separate current owner/manager session, with no tenant spoofing.
+
+    The authorized owner's request above must have already established the
+    assessment exists. A valid independent tenant must see a 404, not the
+    original tenant's financial details, and not a provider-error 503.
+    """
+    confirm_role(foreign, {"owner", "manager"})
+    other_book = verify_book(foreign)
+    check(other_book["company"] != owner_company,
+          "Foreign-tenant test session belongs to the owner tenant")
+    safe_id = str(UUID(assessment_id))
+    response = foreign.get(ASSESSMENTS + safe_id)
+    check(response.status_code == 404,
+          "Foreign-tenant assessment request did not return 404")
+    return {"assessment_access": "DENIED_404", "distinct_tenant": True}
+
+
 def check_role_matrix(owner: httpx.Client, pricing: httpx.Client,
-                      denied: httpx.Client, assessment_id: str) -> dict:
+                      denied: httpx.Client, assessment_id: str,
+                      foreign: httpx.Client | None = None) -> dict:
     confirm_role(owner, {"owner", "manager"})
     confirm_role(pricing, {"pricing_billbacks"})
     a = verify_book(owner)
@@ -131,12 +153,16 @@ def check_role_matrix(owner: httpx.Client, pricing: httpx.Client,
           "Owner and pricing staff see inconsistent purchase assessment evidence")
     rejection = verify_denied(denied)
     suggestions = verify_suggestions(owner, a["company"])
+    isolation = (verify_foreign_tenant(foreign, a["company"], assessment_id)
+                 if foreign is not None else
+                 {"assessment_access": "NOT_RUN_SECOND_TENANT_SESSION_REQUIRED"})
     return {
         "pricing_book": {"result": "SOURCE_PARITY_PASS",
                          "records": a["count"], "state": a["book_state"]},
         "assessment": owner_assessment,
         "pricing_role": "ALLOWED",
         "denied_role": rejection,
+        "cross_tenant": isolation,
         "suggestions": suggestions,
         "accounting_certification": "NOT_ESTABLISHED",
         "price_approval_or_publication": "NOT_PERFORMED",
@@ -150,10 +176,19 @@ def main() -> int:
     try:
         assessment_id = os.environ.get("LIONBI_STAGING_ASSESSMENT_ID", "").strip()
         check(bool(assessment_id), "A real approved-scope assessment ID is required")
-        with session("LIONBI_STAGING_BEARER_TOKEN") as owner, \
-             session("LIONBI_STAGING_PRICING_BEARER_TOKEN") as pricing, \
-             session("LIONBI_STAGING_DENIED_BEARER_TOKEN") as denied:
-            result.update(check_role_matrix(owner, pricing, denied, assessment_id))
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            owner = stack.enter_context(session("LIONBI_STAGING_BEARER_TOKEN"))
+            pricing = stack.enter_context(
+                session("LIONBI_STAGING_PRICING_BEARER_TOKEN"))
+            denied = stack.enter_context(
+                session("LIONBI_STAGING_DENIED_BEARER_TOKEN"))
+            foreign = None
+            if os.environ.get("LIONBI_STAGING_FOREIGN_BEARER_TOKEN", "").strip():
+                foreign = stack.enter_context(
+                    session("LIONBI_STAGING_FOREIGN_BEARER_TOKEN"))
+            result.update(check_role_matrix(owner, pricing, denied, assessment_id,
+                                            foreign=foreign))
             result["result"] = "READ_ONLY_ROLE_AND_SOURCE_PARITY_PASS"
             # No automated independent accounting or actual external provider proof.
             print(json.dumps(result, sort_keys=True))

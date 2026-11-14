@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS pricing_cost_snapshots (
 CREATE TABLE IF NOT EXISTS pricing_cost_lines (
     company_id UUID NOT NULL,
     cost_snapshot_id UUID NOT NULL,
+    expense_line_ref TEXT NOT NULL CHECK (length(btrim(expense_line_ref)) BETWEEN 1 AND 160),
     component TEXT NOT NULL CHECK (component IN (
         'product','international_freight','insurance','duty','customs_brokerage',
         'port_fees','domestic_freight','excise','other_taxes',
@@ -36,12 +37,12 @@ CREATE TABLE IF NOT EXISTS pricing_cost_lines (
     source_document_ref TEXT NOT NULL CHECK (length(btrim(source_document_ref)) BETWEEN 1 AND 160),
     source_revision TEXT NOT NULL CHECK (length(btrim(source_revision)) BETWEEN 1 AND 120),
     allocation_basis TEXT NOT NULL CHECK (allocation_basis IN (
-        'direct_per_case','cases','weight','volume','pallet_days','manual_estimate'
+        'direct_per_case','cases','weight_kg','volume_cbm','pallet_days','picks','manual_estimate'
     )),
     observation_status TEXT NOT NULL DEFAULT 'provisional'
         CHECK (observation_status IN ('provisional','verified')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (company_id,cost_snapshot_id,component),
+    PRIMARY KEY (company_id,cost_snapshot_id,expense_line_ref),
     FOREIGN KEY(company_id,cost_snapshot_id)
         REFERENCES pricing_cost_snapshots(company_id,id) ON DELETE RESTRICT
 );
@@ -74,7 +75,9 @@ CREATE TABLE IF NOT EXISTS pricing_price_book (
     CHECK (effective_to IS NULL OR effective_to >= effective_from),
     CHECK (
         status <> 'approved' OR
-        (cost_snapshot_id IS NOT NULL AND approved_by IS NOT NULL AND approved_at IS NOT NULL)
+        (cost_snapshot_id IS NOT NULL AND approved_by IS NOT NULL
+         AND approved_at IS NOT NULL AND created_by IS NOT NULL
+         AND created_by <> approved_by AND length(btrim(evidence_ref)) > 0)
     )
 );
 

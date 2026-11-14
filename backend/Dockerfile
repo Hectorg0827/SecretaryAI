@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+# Pin the Debian release: unqualified python:3.12-slim now resolves to Debian 13,
+# whose fonts break the Playwright 1.48 browser dependency installer.
+FROM python:3.12-bookworm
 
 WORKDIR /app
 
@@ -26,18 +28,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium into a shared, non-root-readable location.
-# Without PLAYWRIGHT_BROWSERS_PATH the browser lands in /root/.cache, which the
-# `appuser` below cannot read — headless workflows then fail at runtime while
-# the `|| true` hid the install error at build time.
+# Install the browser and its native libraries for the pinned Playwright version.
+# Build MUST fail on a missing Chromium executable or missing apt dependency:
+# a healthy /health endpoint alone does not certify browser automation.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install chromium --with-deps \
-    || echo "WARNING: Playwright Chromium install failed; browser automation will be unavailable"
+RUN playwright install --with-deps chromium
 
 # Application code
 COPY app/       ./app/
 COPY tasks/     ./tasks/
 COPY celery_app.py .
+COPY scripts/verify_playwright_runtime.py ./scripts/verify_playwright_runtime.py
 
 # Run as non-root user — prevents container-escape privilege escalation
 RUN addgroup --system appgroup \
@@ -46,6 +47,10 @@ RUN addgroup --system appgroup \
     && { [ -d /ms-playwright ] && chown -R appuser:appgroup /ms-playwright || true; }
 
 USER appuser
+
+# Verify that the *runtime, non-root user* can launch headless Chromium,
+# render a local-only page, and produce a PNG; never access the network.
+RUN python scripts/verify_playwright_runtime.py
 
 EXPOSE 8000
 

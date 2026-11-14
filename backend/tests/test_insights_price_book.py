@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_db
 from app.auth.rbac import get_current_user
 from app.main import app
+from pricing_auth_testkit import RoleQuery
 
 
 class Query:
@@ -42,17 +43,24 @@ class Query:
 
 
 class Db:
-    def __init__(self, rows, *, fail=False):
+    def __init__(self, rows, *, identity="operator-1", company="tenant-a",
+                 role="owner", active=True, fail=False, role_fail=False):
         self.query = Query(rows, fail=fail)
+        self.role_query = RoleQuery(identity, company, role, active=active, fail=role_fail)
+
     def table(self, name):
+        if name == "users":
+            return self.role_query
         assert name == "pricing_price_book"
         return self.query
 
 
 @pytest.fixture
 def client():
-    def build(*, role="owner", company_id="tenant-a", rows=None, fail=False):
-        db = Db(rows or [], fail=fail)
+    def build(*, role="owner", company_id="tenant-a", rows=None, fail=False,
+              current_role=None, active=True, role_fail=False):
+        db = Db(rows or [], company=company_id, role=current_role or role,
+                active=active, fail=fail, role_fail=role_fail)
         app.dependency_overrides[get_current_user] = lambda: {
             "sub": "operator-1", "company_id": company_id, "role": role,
         }
@@ -101,7 +109,7 @@ def test_source_outage_fails_closed_and_sanitizes_error(client):
     assert "provider failure" not in response.text
 
 
-@pytest.mark.parametrize("role", ["sales_rep", "viewer", "back_office", "pricing_billbacks"])
+@pytest.mark.parametrize("role", ["sales_rep", "viewer", "back_office", "ap_specialist"])
 def test_unauthorized_roles_cannot_read_confidential_prices(client, role):
     web, _ = client(role=role)
     assert web.get("/api/insights/price-book").status_code == 403
@@ -111,3 +119,27 @@ def test_page_bounds_are_enforced(client):
     web, _ = client()
     assert web.get("/api/insights/price-book?limit=1000").status_code == 422
     assert web.get("/api/insights/price-book?offset=-1").status_code == 422
+
+
+def test_pricing_billbacks_has_scoped_read_only_access(client):
+    web, _ = client(role="pricing_billbacks")
+    resp = web.get("/api/insights/price-book")
+    assert resp.status_code == 200
+    assert resp.json()["price_changes_allowed"] is False
+
+
+@pytest.mark.parametrize("change", [
+    {"current_role": "sales_rep"},
+    {"current_role": "manager"},
+    {"active": False},
+])
+def test_stale_or_revoked_role_fails_closed(client, change):
+    web, _ = client(role="pricing_billbacks", **change)
+    assert web.get("/api/insights/price-book").status_code == 403
+
+
+def test_role_db_outage_does_not_show_pricing_data(client):
+    web, _ = client(role="pricing_billbacks", role_fail=True)
+    response = web.get("/api/insights/price-book")
+    assert response.status_code == 503
+    assert "Synthetic role database outage" not in response.text

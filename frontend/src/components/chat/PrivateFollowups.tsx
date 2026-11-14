@@ -13,19 +13,24 @@ interface PrivateFollowup {
 
 type PrivateResponse = { count: number; private: true; followups: PrivateFollowup[] };
 
-export function PrivateFollowups({ onDraft }: {
+export function PrivateFollowups({ onDraft, refreshKey }: {
   onDraft: (request: string) => void;
+  refreshKey: number;
 }) {
   const [items, setItems] = useState<PrivateFollowup[]>([]);
 
   useEffect(() => {
     let mounted = true;
-    api.get<PrivateResponse>('/api/lola/continuity/followups')
-      .then((result) => { if (mounted) setItems(result.followups.slice(0, 3)); })
+    Promise.all([
+      api.get<PrivateResponse>('/api/lola/continuity/followups'),
+      api.get<{ preferences: { proactive_enabled: boolean } }>('/api/lola/continuity/preferences'),
+    ]).then(([result, settings]) => {
+      if (mounted) setItems(settings.preferences.proactive_enabled ? result.followups.slice(0, 3) : []);
+    })
       // If staging vault migration is absent, keep personal content hidden.
       .catch(() => { if (mounted) setItems([]); });
     return () => { mounted = false; };
-  }, []);
+  }, [refreshKey]);
 
   const resolve = async (eventId: string) => {
     try {

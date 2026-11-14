@@ -15,13 +15,13 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "view_all", "manage_users", "approve_actions", "manage_billing",
         "view_financials", "trigger_actions", "run_reports", "draft_purchase_orders",
         "view_inventory", "view_orders", "view_customers", "view_own_accounts",
-        "view_dashboard", "manage_inventory", "view_finance_workspace",
+        "view_dashboard", "manage_inventory", "view_finance_workspace", "view_pricing",
     },
     "manager": {
         "view_all", "approve_actions", "trigger_actions", "view_financials",
         "run_reports", "draft_purchase_orders", "view_inventory", "view_orders",
         "view_customers", "view_own_accounts", "view_dashboard", "manage_inventory",
-        "view_finance_workspace",
+        "view_finance_workspace", "view_pricing",
     },
     "sales_rep": {
         "view_own_accounts", "view_inventory",
@@ -38,7 +38,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "finance_controller": {"view_finance_workspace"},
     "ar_specialist": {"view_finance_workspace"},
     "ap_specialist": {"view_finance_workspace"},
-    "pricing_billbacks": {"view_finance_workspace"},
+    "pricing_billbacks": {"view_finance_workspace", "view_pricing"},
 }
 
 

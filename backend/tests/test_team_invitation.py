@@ -272,7 +272,10 @@ async def test_finance_role_invitation_activates_only_server_bound_tenant_and_sc
     assert db.users[-1]["role"] == role
     assert db.users[-1]["is_active"] is True
     assert finance_scopes_for_role(role) == authorized_scopes
-    assert ROLE_PERMISSIONS[role] == {"view_finance_workspace"}
+    expected_permissions = {"view_finance_workspace"}
+    if role == "pricing_billbacks":
+        expected_permissions.add("view_pricing")  # narrowly scoped read; no view_financials
+    assert ROLE_PERMISSIONS[role] == expected_permissions
     with pytest.raises(HTTPException) as replay:
         await team.accept_invitation(team.AcceptInviteRequest(token=token, password="SyntheticPassword987"))
     assert replay.value.status_code == 400

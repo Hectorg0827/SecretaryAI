@@ -76,7 +76,7 @@ afterEach(async () => {
 
 describe('pricing suggestions insight', () => {
   it('is a Pricing insight for roles the backend view_financials check admits', () => {
-    expect([...meta.roles].sort()).toEqual(['manager', 'owner']);
+    expect([...meta.roles].sort()).toEqual(['manager', 'owner', 'pricing_billbacks']);
     expect(meta.group).toBe('Pricing');
   });
 

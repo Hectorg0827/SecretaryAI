@@ -66,7 +66,7 @@ afterEach(async () => {
 
 describe('price waterfall page', () => {
   it('is a pricing insight for roles with financial access', () => {
-    expect([...meta.roles].sort()).toEqual(['manager', 'owner']);
+    expect([...meta.roles].sort()).toEqual(['manager', 'owner', 'pricing_billbacks']);
     expect(meta.group).toBe('Pricing');
   });
 

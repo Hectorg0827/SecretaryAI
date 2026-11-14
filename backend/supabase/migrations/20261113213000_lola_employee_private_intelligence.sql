@@ -105,3 +105,34 @@ REVOKE ALL ON lola_private_contacts FROM anon, authenticated;
 REVOKE ALL ON lola_private_events FROM anon, authenticated;
 REVOKE ALL ON lola_private_followup_state FROM anon, authenticated;
 REVOKE ALL ON lola_personal_account_memory FROM anon, authenticated;
+
+
+-- Proactive reminders are opt-in and always addressed to ONE employee.
+CREATE TABLE IF NOT EXISTS lola_private_preferences (
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    proactive_enabled boolean NOT NULL DEFAULT false,
+    push_enabled boolean NOT NULL DEFAULT false,
+    timezone text NOT NULL DEFAULT 'America/New_York',
+    reminder_hour smallint NOT NULL DEFAULT 9
+        CHECK (reminder_hour BETWEEN 0 AND 23),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS lola_private_reminder_receipts (
+    company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_id uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    push_accepted boolean NOT NULL DEFAULT false,
+    PRIMARY KEY (company_id, user_id, event_id),
+    FOREIGN KEY (company_id, user_id, event_id)
+        REFERENCES lola_private_events(company_id, user_id, id)
+        ON DELETE CASCADE
+);
+
+ALTER TABLE lola_private_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lola_private_reminder_receipts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON lola_private_preferences FROM anon, authenticated;
+REVOKE ALL ON lola_private_reminder_receipts FROM anon, authenticated;

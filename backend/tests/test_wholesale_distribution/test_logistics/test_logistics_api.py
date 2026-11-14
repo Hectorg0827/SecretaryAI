@@ -47,6 +47,7 @@ class _Query:
     def order(self, *a, **k): return self
     def lt(self, *a, **k): return self
     def limit(self, count): self.cap = count; return self
+    def range(self, start, end): self.slice_range = (start, end); return self
     def maybe_single(self): return self
 
     def eq(self, col, val):
@@ -79,6 +80,9 @@ class _Query:
             rows.append(copy.deepcopy(self.row))
             return type("R", (), {"data": [self.row]})()
         data = [r for r in rows if all(str(r.get(c)) == str(v) for c, v in self.filters)]
+        if hasattr(self, "slice_range"):
+            start, end = self.slice_range
+            data = data[start:end + 1]
         if hasattr(self, "cap"):
             data = data[:self.cap]
         return type("R", (), {"data": data})()

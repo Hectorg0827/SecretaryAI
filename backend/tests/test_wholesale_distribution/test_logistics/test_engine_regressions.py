@@ -106,6 +106,7 @@ class _FakeTable:
 
     def select(self, *a): return self
     def order(self, *a, **k): return self
+    def range(self, start, end): self.slice_range = (start, end); return self
 
     def eq(self, c, v):
         self.filters.append((c, v))
@@ -117,7 +118,11 @@ class _FakeTable:
                        and r["idempotency_key"] == self.pending["idempotency_key"] for r in self.rows):
                 self.rows.append(dict(self.pending))
             return type("R", (), {"data": []})()
-        return type("R", (), {"data": [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]})()
+        filtered = [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]
+        if hasattr(self, "slice_range"):
+            start, end = self.slice_range
+            filtered = filtered[start:end + 1]
+        return type("R", (), {"data": filtered})()
 
 
 class _FakeDB:

@@ -19,11 +19,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .journey import LogisticsEvent, SourceType
+from .journey import LogisticsEvent, SourceType, StoreUnavailableError
 
 log = logging.getLogger(__name__)
 
 TABLE = "logistics_events"
+PAGE_SIZE = 500
+MAX_EVENTS_PER_COMPANY = 50000
 
 
 class SupabaseEventStore:
@@ -41,22 +43,48 @@ class SupabaseEventStore:
             self._db.table(TABLE).upsert(row, on_conflict="company_id,idempotency_key").execute()
 
     def load(self, company_id: str) -> list[LogisticsEvent]:
-        res = (
-            self._db.table(TABLE).select("*")
-            .eq("company_id", company_id)
-            .order("recorded_at", desc=False)
-            .order("inserted_at", desc=False)
-            .execute()
-        )
-        events = []
-        for row in res.data or []:
-            if row.get("company_id") != company_id:
-                continue  # defence in depth
+        """Load *every* event or fail; Supabase's default 1,000-row cap is unsafe.
+
+        Each page repeats the company predicate and uses a deterministic tie
+        breaker. Never return a partial ledger if a later page fails: Lola
+        must not silently omit shipments, exceptions or confirmed milestones.
+        """
+        if not company_id:
+            raise StoreUnavailableError("Logistics tenant missing")
+        events: list[LogisticsEvent] = []
+        offset = 0
+        while True:
             try:
-                events.append(LogisticsEvent.from_dict(row))
-            except (TypeError, ValueError) as exc:
-                log.warning("skipping malformed logistics event %s: %s", row.get("event_id"), exc)
-        return events
+                response = (
+                    self._db.table(TABLE).select("*")
+                    .eq("company_id", company_id)
+                    .order("recorded_at", desc=False)
+                    .order("inserted_at", desc=False)
+                    .order("event_id", desc=False)
+                    .range(offset, offset + PAGE_SIZE - 1)
+                    .execute()
+                )
+                rows = getattr(response, "data", None)
+                if not isinstance(rows, list) or len(rows) > PAGE_SIZE:
+                    raise StoreUnavailableError("Invalid logistics event page")
+                for row in rows:
+                    if not isinstance(row, dict) or str(row.get("company_id")) != str(company_id):
+                        raise StoreUnavailableError("Inconsistent logistics event tenant")
+                    try:
+                        events.append(LogisticsEvent.from_dict(row))
+                    except (TypeError, ValueError, KeyError) as exc:
+                        raise StoreUnavailableError("Malformed stored logistics event") from exc
+            except StoreUnavailableError:
+                raise
+            except Exception as exc:
+                log.warning("Logistics event page unavailable (%s)", type(exc).__name__)
+                raise StoreUnavailableError("Logistics event history unavailable") from exc
+
+            if len(rows) < PAGE_SIZE:
+                return events
+            offset += PAGE_SIZE
+            if offset >= MAX_EVENTS_PER_COMPANY:
+                raise StoreUnavailableError("Logistics event history exceeds safe replay limit")
 
 
 # ─── Parcel carriers (existing ShipTrackConnector) ───────────────────────────

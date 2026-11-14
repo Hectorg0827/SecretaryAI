@@ -17,12 +17,10 @@ QBO_SCOPES = "com.intuit.quickbooks.accounting"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-# Gmail modify + Sheets read/write; offline for refresh token
-GOOGLE_SCOPES = (
-    "https://www.googleapis.com/auth/gmail.modify "
-    "https://www.googleapis.com/auth/spreadsheets "
-    "https://www.googleapis.com/auth/drive.file"
-)
+# Personal Lola Gmail connector only. Never request Google Drive/Sheets
+# permissions alongside a private employee mailbox consent.
+# Gmail modify supports reading, marking as read, drafts and approved sends.
+GOOGLE_SCOPES = "https://www.googleapis.com/auth/gmail.modify"
 
 
 def build_authorization_url(state: str) -> str:

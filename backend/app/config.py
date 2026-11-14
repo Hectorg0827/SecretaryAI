@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     lola_meta_app_id: str = ""
     lola_meta_configuration_id: str = ""
     lola_meta_app_secret: str = ""
+    lola_meta_webhook_verify_token: str = ""
+    lola_meta_webhooks_enabled: bool = False
     lola_meta_app_review_approved: bool = False
     lola_meta_ai_policy_approved: bool = False
     lola_meta_waba_privacy_approved: bool = False

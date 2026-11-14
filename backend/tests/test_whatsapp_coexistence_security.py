@@ -16,9 +16,10 @@ def _payload(phone_id="phone-A", field="smb_message_echoes"):
             "field": field,
             "value": {
                 "metadata": {"phone_number_id": phone_id},
-                "messages": [{"id": "message-1", "text": {
-                    "body": "Confidential label draft for Joan"}},
-                    {"id": "message-2", "text": {"body": "Another private note"}}],
+                ("message_echoes" if field == "smb_message_echoes" else "messages"):
+                    [{"id": "message-1", "text": {
+                        "body": "Confidential label draft for Joan"}},
+                     {"id": "message-2", "text": {"body": "Another private note"}}],
             },
         }]}],
     }
@@ -151,3 +152,21 @@ def test_invalid_json_and_excessive_webhook_size_are_rejected():
         phone_owners={}, staging_pilot_enabled=True,
         written_meta_policy_clearance=True,
     ) == []
+
+
+
+def test_business_app_echo_is_not_mistaken_for_customer_inbound():
+    outbound = resolve_signed_event_routes(
+        _payload(field="smb_message_echoes"),
+        phone_owners={"phone-A": [_owner()]},
+        signature_verified=True,
+    )
+    inbound = resolve_signed_event_routes(
+        _payload(field="messages"),
+        phone_owners={"phone-A": [_owner()]},
+        signature_verified=True,
+    )
+    assert len(outbound) == len(inbound) == 1
+    assert outbound[0].field == "smb_message_echoes"
+    assert inbound[0].field == "messages"
+    assert outbound[0].event_count == inbound[0].event_count == 2

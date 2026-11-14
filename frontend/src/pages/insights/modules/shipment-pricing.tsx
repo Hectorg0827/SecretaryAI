@@ -8,7 +8,7 @@ export const meta: InsightMeta = {
   title: 'Shipment cost allocation',
   description: 'Allocate shared import and warehouse expenses across saleable cases, with invoice-cent reconciliation.',
   group: 'Pricing',
-  roles: ['owner', 'manager'],
+  roles: ['owner', 'manager', 'pricing_billbacks'],
 };
 
 type Product = {

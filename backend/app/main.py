@@ -310,6 +310,8 @@ app.include_router(actions.router,          prefix="/api/actions",       tags=["
 app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"],         dependencies=_PAID)
 app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"], dependencies=_PAID)
 app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"],         dependencies=_PAID)
+from app.api import private_continuity as private_continuity_router
+app.include_router(private_continuity_router.router, prefix="/api/lola/continuity", tags=["lola-private-continuity"], dependencies=_PAID)
 app.include_router(workflows.router,        prefix="/api/workflows",     tags=["workflows"],     dependencies=_PAID)
 app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"],          dependencies=_PAID)
 app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"], dependencies=_PAID)

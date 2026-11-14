@@ -8,12 +8,11 @@ from __future__ import annotations
 import re
 from email.utils import parseaddr, parsedate_to_datetime
 from datetime import timezone
+from app.intelligence.private_continuity import canonical_project_key
 
 
 def _project_key(subject: str) -> str:
-    text = re.sub(r"^(?:(?:re|fw|fwd)\s*:\s*)+", "", subject or "", flags=re.I)
-    text = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return text[:140]
+    return canonical_project_key(subject)
 
 
 def map_gmail_to_private_events(messages: list[dict], contacts: list[dict]) -> list[dict]:

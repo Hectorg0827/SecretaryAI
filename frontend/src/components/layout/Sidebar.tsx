@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
-import { LayoutDashboard, MessageSquare, Users, Package, Settings, Zap, Wifi, WifiOff, LogOut, UserCircle, Inbox, Briefcase, Truck, Scale, Server, Shield, Activity, Lightbulb, WalletCards } from 'lucide-react';
 import { api, AgentStatus } from '../../lib/api';
 import { useAuth, Role } from '../../hooks/useAuth';
 import { useInboxStore } from '../../stores/inboxStore';
+import { LionBrand } from '../lola/LionBrand';
+import { LionUIIcon } from '../lola/LionUIIcon';
+import './lion-sidebar.css';
+import { BRAND_LABELS } from '../../lib/brand';
 
 const ROLE_LABELS: Record<Role, string> = {
   owner:       'Owner',
@@ -19,23 +22,23 @@ const ROLE_LABELS: Record<Role, string> = {
 };
 
 const ALL_NAV_ITEMS = [
-  { to: '/inbox',     label: 'Inbox',     icon: Inbox,          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
-  { to: '/work',      label: 'Work',      icon: Briefcase,      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/',          label: 'Dashboard', icon: LayoutDashboard, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
-  { to: '/finance',   label: 'Finance Workspace', icon: WalletCards, exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/',          label: BRAND_LABELS.home, icon: 'home', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/inbox',     label: 'Inbox',     icon: 'inbox',          exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: 'inbox'     },
+  { to: '/work',      label: 'Work',      icon: 'work',      exact: true,  roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/dashboard', label: 'Detailed Dashboard', icon: 'dashboard', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer'], badge: null },
+  { to: '/finance',   label: 'Finance Workspace', icon: 'finance', exact: true, roles: ['owner', 'manager', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
   // Rep account assignment is not yet server-verified; fail closed until the
   // domain owner provides a scoped account read contract.
-  { to: '/accounts',  label: 'Accounts',  icon: Users,         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
-  { to: '/inventory', label: 'Inventory', icon: Package,       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/chat',      label: 'Chat',      icon: MessageSquare, exact: false, roles: ['owner', 'manager', 'sales_rep'],                badge: null        },
-  { to: '/insights',  label: 'Insights',  icon: Lightbulb,     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/logistics',   label: 'Logistics',   icon: Truck,     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
-  { to: '/compliance',  label: 'Compliance',  icon: Scale,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/connectors', label: 'Connectors', icon: Server,     exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/audit-log',  label: 'Audit Log',  icon: Shield,    exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/admin',      label: 'Diagnostics', icon: Activity,  exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/settings',  label: 'Settings',  icon: Settings,      exact: false, roles: ['owner', 'manager'],                            badge: null        },
-  { to: '/account-security', label: 'My Password', icon: Shield, exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
+  { to: '/accounts',  label: 'Accounts',  icon: 'accounts',         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
+  { to: '/inventory', label: 'Inventory', icon: 'inventory',       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/insights',  label: 'Insights',  icon: 'insights',     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/logistics',   label: 'Logistics',   icon: 'logistics',     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
+  { to: '/compliance',  label: 'Compliance',  icon: 'compliance',     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/connectors', label: 'Connectors', icon: 'connectors',     exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/audit-log',  label: 'Audit Log',  icon: 'audit',    exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/admin',      label: 'Diagnostics', icon: 'diagnostics',  exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/settings',  label: 'Settings',  icon: 'settings',      exact: false, roles: ['owner', 'manager'],                            badge: null        },
+  { to: '/account-security', label: 'My Password', icon: 'security', exact: true, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'viewer', 'finance_controller', 'ar_specialist', 'ap_specialist', 'pricing_billbacks'], badge: null },
 ] as const;
 
 export function Sidebar({
@@ -110,26 +113,23 @@ export function Sidebar({
       role={isMobile && mobileOpen ? 'dialog' : undefined}
       aria-modal={isMobile && mobileOpen ? true : undefined}
       className={[
-        'fixed inset-y-0 left-0 z-50 flex h-dvh w-56 flex-shrink-0 flex-col bg-slate-900 text-white',
+        'lionbi-sidebar fixed inset-y-0 left-0 z-50 flex h-dvh w-60 flex-shrink-0 flex-col bg-[#0b1122] text-white border-r border-[#2d344b]',
         'transition-transform duration-200 md:static md:h-full md:translate-x-0 md:transition-none',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
       ].join(' ')}
     >
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-5 border-b border-slate-800">
-        <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center shadow-sm">
-          <Zap size={14} className="text-white" />
-        </div>
-        <span className="font-bold text-white tracking-tight">SecretaryAI</span>
+      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-[#30354a]">
         <button
           type="button"
           data-mobile-close="true"
           aria-label="Close navigation"
-          className="ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
+          className="order-2 ml-auto rounded-md p-1 text-slate-200 focus-visible:outline-2 focus-visible:outline-white md:hidden"
           onClick={onMobileClose}
         >
           <span aria-hidden="true">×</span>
         </button>
+        <div className="order-1"><LionBrand /></div>
       </div>
 
       {/* Navigation */}
@@ -147,14 +147,14 @@ export function Sidebar({
               onClick={onMobileClose}
               className={({ isActive }) =>
                 clsx(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
+                  'lionbi-navlink flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative',
                   isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                    ? 'lionbi-navlink--active bg-[#252a47] text-[#f3dca8]'
+                    : 'text-[#a9b5cd] hover:text-white hover:bg-[#1c2743]',
                 )
               }
             >
-              <Icon size={16} />
+              <LionUIIcon kind={Icon} size={19} />
               {label}
               {badgeCount !== null && badgeCount > 0 && (
                 <span
@@ -174,7 +174,7 @@ export function Sidebar({
       <div className="px-4 py-4 border-t border-slate-800 space-y-2">
         {/* User badge */}
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/60">
-          <UserCircle size={14} className="text-slate-400 flex-shrink-0" />
+          <LionUIIcon kind="user" size={14} className="text-slate-400 flex-shrink-0" />
           <div className="min-w-0">
             {userName && (
               <div className="text-xs font-medium text-slate-200 truncate">{userName}</div>
@@ -188,7 +188,7 @@ export function Sidebar({
           'flex items-center gap-2 text-xs px-3 py-2 rounded-lg',
           connected ? 'bg-emerald-900/40 text-emerald-400' : 'bg-slate-800 text-slate-300',
         )}>
-          {connected ? <Wifi size={12} /> : <WifiOff size={12} />}
+          {connected ? <LionUIIcon kind="online" size={12} /> : <LionUIIcon kind="offline" size={12} />}
           <span>{connected ? 'Agent online' : agentConfigured ? 'Agent offline' : 'Agent not configured'}</span>
           {connected && (
             <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -199,7 +199,7 @@ export function Sidebar({
           onClick={logout}
           className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-slate-300 hover:text-red-400 hover:bg-slate-800/60 transition-colors"
         >
-          <LogOut size={12} />
+          <LionUIIcon kind="logout" size={12} />
           Sign out
         </button>
         <div className="text-[10px] text-slate-300 px-1">v1.0.0</div>

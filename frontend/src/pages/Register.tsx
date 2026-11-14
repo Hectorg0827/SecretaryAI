@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Zap, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { LionBrand } from '../components/lola/LionBrand';
 import { api } from '../lib/api';
 
 export function Register() {
@@ -54,13 +55,8 @@ export function Register() {
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 justify-center mb-8">
-          <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center shadow-lg">
-            <Zap size={20} className="text-white" />
-          </div>
-          <span className="text-2xl font-bold text-white tracking-tight">SecretaryAI</span>
-        </div>
+        {/* Lion BI is the platform; Lola is introduced inside the signed-in experience. */}
+        <div className="mb-8 flex justify-center"><LionBrand /></div>
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
@@ -186,7 +182,7 @@ export function Register() {
         </div>
 
         <p className="text-xs text-slate-300 text-center mt-6">
-          SecretaryAI · AI Operations Manager
+          Lion BI · Business intelligence with oversight
         </p>
       </div>
     </div>

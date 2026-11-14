@@ -76,3 +76,15 @@ def test_timezone_required():
     bad = event("3", "joan", "label-design", "whatsapp", "outbound", "draft_sent", 30)
     bad["occurred_at"] = "2026-11-13T12:00:00"
     assert pending_followups([bad], now=NOW) == []
+
+
+
+def test_project_identity_normalization_works_for_email_and_whatsapp():
+    from app.intelligence.private_continuity import canonical_project_key
+    assert canonical_project_key("Re: Label Artwork") == "label-artwork"
+    assert canonical_project_key("Label Artwork") == "label-artwork"
+    events = [
+        event("3", "joan", "Label Artwork", "whatsapp", "outbound", "draft_sent", 30),
+        event("4", "joan", "Re: Label Artwork", "email", "inbound", "feedback", 1),
+    ]
+    assert pending_followups(events, now=NOW) == []

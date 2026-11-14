@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Literal
 
-from .waterfall import REQUIRED_COMPONENTS, WAREHOUSE_COMPONENTS
+from .waterfall import INBOUND_COMPONENTS, REQUIRED_COMPONENTS, WAREHOUSE_COMPONENTS
 
 
 CENT = Decimal("0.01")
@@ -123,7 +123,7 @@ def allocate_shipment(scenario: AllocationScenario) -> dict:
             or len(charge.expense_line_ref) > 160):
             raise ValueError("Expense-line identifiers must be unique")
         seen_charges.add(charge.expense_line_ref)
-        if charge.component not in (REQUIRED_COMPONENTS | WAREHOUSE_COMPONENTS) - {"product"}:
+        if charge.component not in (INBOUND_COMPONENTS | WAREHOUSE_COMPONENTS) - {"product"}:
             raise ValueError("Unknown shared cost component")
         if charge.currency != scenario.currency:
             raise ValueError("Mixed-currency expenses require a sourced FX conversion first")
@@ -159,7 +159,7 @@ def allocate_shipment(scenario: AllocationScenario) -> dict:
     for sku, item in sorted(items.items()):
         allocated = assigned[sku]
         inbound_total = item.product_cost_per_case * item.accepted_cases + sum(
-            (amount for comp, amount in allocated.items() if comp in REQUIRED_COMPONENTS), ZERO
+            (amount for comp, amount in allocated.items() if comp in INBOUND_COMPONENTS), ZERO
         )
         warehouse_total = sum(
             (amount for comp, amount in allocated.items() if comp in WAREHOUSE_COMPONENTS), ZERO

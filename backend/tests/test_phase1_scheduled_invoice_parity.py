@@ -16,16 +16,21 @@ class Adapter:
         self.get_all_customers = AsyncMock(return_value=[
             SimpleNamespace(qb_id="C-1", name="Synthetic", balance=Decimal("0"))
         ])
-        self.get_invoice_summaries_last_n_days = AsyncMock(return_value=[
+        self.summary_days: list[int] = []
+        self.invoice_summaries = [
             SimpleNamespace(qb_id="I-1", customer_id="C-1",
                             customer_name="Synthetic", date=date.today() - timedelta(days=2),
                             due_date=date.today() + timedelta(days=30),
                             total=Decimal("100"), balance=Decimal("0"),
                             status="paid", line_items=[], line_items_observed=False)
-        ])
+        ]
         self.get_orders_last_n_days = AsyncMock(
             side_effect=AssertionError("The strict item-line invoice reader must not be used"))
         self.get_inventory_merged = AsyncMock(return_value=[])
+
+    async def get_invoice_summaries_last_n_days(self, days):
+        self.summary_days.append(days)
+        return self.invoice_summaries
 
 
 class MissingScoreQuery:
@@ -53,7 +58,7 @@ async def test_account_health_refresh_does_not_claim_missing_supabase_rows_are_u
     assert result["updated"] == 0
     assert result["failed"] == 1
     adapter.get_orders_last_n_days.assert_not_awaited()
-    adapter.get_invoice_summaries_last_n_days.assert_awaited_once_with(365)
+    assert adapter.summary_days == [365]
 
 
 @pytest.mark.asyncio
@@ -62,7 +67,7 @@ async def test_proactive_signals_use_header_only_invoice_evidence():
     result = await _generate_for_company("company-1", adapter)
     assert isinstance(result, list)
     adapter.get_orders_last_n_days.assert_not_awaited()
-    adapter.get_invoice_summaries_last_n_days.assert_awaited_once_with(90)
+    assert adapter.summary_days == [90]
 
 
 @pytest.mark.asyncio
@@ -82,5 +87,5 @@ async def test_weekly_report_uses_header_only_and_verified_billable_invoices():
             period_end=today - timedelta(days=1))
     assert result["figures"]["sales_this_week"] == 100
     assert result["figures"]["invoices_this_week"] == 1
-    adapter.get_invoice_summaries_last_n_days.assert_awaited_once_with(14)
+    assert adapter.summary_days == [14]
     adapter.get_orders_last_n_days.assert_not_awaited()

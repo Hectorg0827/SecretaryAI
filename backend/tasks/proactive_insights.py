@@ -5,6 +5,7 @@ Runs daily. Avoids creating duplicate events for the same entity.
 import asyncio
 import logging
 from celery_app import app
+from app.connectors.unified_adapter import read_invoice_summaries
 from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,9 @@ def generate_all(self):
 async def _generate_for_company(company_id: str, adapter) -> list[dict]:
     from app.intelligence.opportunity_detector import detect_opportunities
     customers = await adapter.get_all_customers()
-    invoices = await adapter.get_orders_last_n_days(90)
+    invoices = await read_invoice_summaries(adapter, 90)
+    invoices = [invoice for invoice in invoices if str(getattr(invoice, 'status', '')).casefold()
+                not in {'void', 'voided', 'cancelled', 'canceled', 'deleted', 'draft'}]
     inventory = await adapter.get_inventory_merged()
     return detect_opportunities(customers, invoices, inventory)
 

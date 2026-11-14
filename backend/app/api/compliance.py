@@ -49,10 +49,13 @@ def _get_compliance_module(user: dict, db) -> ComplianceModule:
     Config and entity registry are hydrated from the database.
     """
     company_id = user["company_id"]
-    result = db.table("companies").select("*").eq("id", company_id).execute()
-    companies = observed_rows(result)
-    if len(companies) != 1:
-        raise HTTPException(status_code=503, detail="Compliance company configuration unavailable")
+    try:
+        result = db.table("companies").select("*").eq("id", company_id).execute()
+        companies = observed_rows(result)
+        if len(companies) != 1:
+            raise ValueError("Compliance company configuration incomplete")
+    except Exception as exc:
+        raise source_error("companies", exc) from exc
     company = companies[0]
 
     active_states_raw = company.get("compliance_active_states", "")

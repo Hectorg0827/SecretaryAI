@@ -40,7 +40,7 @@ afterEach(async () => {
 describe('shipment and warehouse costing', () => {
   it('registers as an owner/manager pricing module', () => {
     expect(meta.group).toBe('Pricing');
-    expect([...meta.roles].sort()).toEqual(['manager', 'owner']);
+    expect([...meta.roles].sort()).toEqual(['manager', 'owner', 'pricing_billbacks']);
   });
 
   it('refuses empty shipment and missing invoice evidence before API call', async () => {

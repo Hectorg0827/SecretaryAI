@@ -1,0 +1,211 @@
+/* Lion BI platform home; Lola is the assistant, not a second platform brand. */
+.lola-home {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: #f5f5fb;
+  background:
+    radial-gradient(ellipse 52% 34% at 52% 26%, rgba(52, 55, 143, .22), transparent 80%),
+    radial-gradient(ellipse 38% 36% at 92% 88%, rgba(43, 55, 99, .18), transparent 85%),
+    #090e1c;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.lola-home__header {
+  flex-shrink: 0;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px clamp(20px, 4vw, 56px);
+  border-bottom: 1px solid rgba(211, 216, 255, .09);
+}
+.lola-home__brand { display: flex; align-items: center; min-width: 0; }
+.lola-home__brand .lionbi-brand { display: inline-flex; align-items: center; gap: 10px; }
+.lola-home__brand .lionbi-brand__mark { width: 35px; height: 35px; }
+.lola-home__brand .lionbi-brand__name { font-size: 17px; letter-spacing: .12em; }
+.lola-home__header-actions { display: flex; align-items: center; gap: 18px; }
+.lola-home__private { display: flex; align-items: center; gap: 8px; color: #8e9ab5; font-size: 11px; text-transform: capitalize; }
+.lola-home__voice-toggle {
+  border: 1px solid #3a4260;
+  background: rgba(23, 30, 55, .76);
+  color: #d7ddef;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px 8px 13px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lola-home__voice-toggle:hover { border-color: #bdaa89; }
+.lola-home__voice-toggle:focus-visible, .lola-home button:focus-visible, .lola-home a:focus-visible {
+  outline: 2px solid #ebca8f;
+  outline-offset: 3px;
+}
+.lola-home__switch { display: inline-flex; align-items: center; width: 30px; height: 17px; border-radius: 99px; padding: 2px; background: #566078; transition: background .2s; }
+.lola-home__switch i { display: block; width: 13px; height: 13px; border-radius: 99px; background: white; transition: transform .2s; }
+.lola-home__switch--on { background: #8665e6; }
+.lola-home__switch--on i { transform: translateX(13px); }
+.lola-home__scroll { flex: 1; min-height: 0; overflow: auto; }
+.lola-home__inner { max-width: 1180px; padding: 0 clamp(20px, 5vw, 58px) 28px; margin: 0 auto; }
+.lola-home__hero { display: flex; align-items: center; text-align: center; flex-direction: column; padding: 36px 0 46px; }
+.lola-home__eyebrow { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 10px; letter-spacing: .23em; color: #cdb88f; }
+.lola-home__eyebrow span { width: 6px; height: 6px; border-radius: 50%; background: #f0c984; box-shadow: 0 0 15px #ffdc9a; }
+.lola-home__hero h1 { font-size: clamp(29px, 3.4vw, 42px); font-weight: 650; line-height: 1.16; letter-spacing: -.04em; color: #fcfbff; margin: 2px 0 0; }
+.lola-home__period { color: #e7c98f; }
+.lola-home__hero-lead { color: #b7bdd2; font-size: clamp(14px, 1.55vw, 17px); margin-top: 12px; }
+.lola-home__composer {
+  margin-top: 32px;
+  width: min(100%, 720px);
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 11px 9px 19px;
+  border: 1px solid rgba(196, 195, 236, .28);
+  border-radius: 19px;
+  background: rgba(22, 29, 53, .92);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .18), inset 0 1px rgba(255,255,255,.04);
+  transition: border-color .2s, box-shadow .2s;
+}
+.lola-home__composer:focus-within { border-color: #b39ae9; box-shadow: 0 0 0 3px rgba(123, 96, 207, .12); }
+.lola-home__composer-spark { color: #d6b47e; flex-shrink: 0; }
+.lola-home__composer input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: #fff; font-size: 14px; }
+.lola-home__composer input::placeholder { color: #828aa5; }
+.lola-home__composer input:disabled { opacity: .55; }
+.lola-home__mic, .lola-home__send { width: 38px; height: 38px; flex-shrink: 0; display: grid; place-items: center; border-radius: 12px; cursor: pointer; }
+.lola-home__mic { color: #b8bfd6; background: transparent; }
+.lola-home__mic:hover, .lola-home__mic--active { color: #fff; background: #393254; }
+.lola-home__send { background: #d7b984; color: #121828; }
+.lola-home__send:hover { background: #f3d49f; }
+.lola-home__send:disabled { opacity: .46; cursor: not-allowed; }
+.lola-home__hint { margin-top: 12px; color: #efbd91; font-size: 12px; }
+.lola-home__suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 16px; }
+.lola-home__suggestions button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 13px; font-size: 12px; border-radius: 99px; border: 1px solid #303954; color: #b9c3d9; background: #151d32; cursor: pointer; }
+.lola-home__suggestions button:hover { color: #f3deaf; border-color: #8a7a78; }
+.lola-home__suggestions button:disabled { opacity: .5; cursor: not-allowed; }
+.lola-home__restricted { max-width: 550px; background: #151d32; border: 1px solid #35405e; padding: 15px 18px; margin-top: 24px; border-radius: 12px; font-size: 13px; color: #c1cbe0; }
+.lola-home__overview, .lola-home__workspaces { padding-top: 18px; margin: 0 auto 42px; }
+.lola-home__section-heading { display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 18px; }
+.lola-home__section-heading h2 { font-size: clamp(19px, 2vw, 25px); font-weight: 600; letter-spacing: -.035em; color: #f0f0f8; }
+.lola-home__section-kicker { color: #bba479; font-size: 10px; letter-spacing: .2em; font-weight: 750; margin-bottom: 7px; }
+.lola-home__subtle-link { display: inline-flex; align-items: center; gap: 7px; color: #d9c193; font-size: 12px; white-space: nowrap; }
+.lola-home__subtle-link:hover { color: #fff0c4; }
+.lola-home__source-line { color: #95a0bd; font-size: 11px; margin: -8px 0 16px; }
+.lola-home__stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.lola-home__stat { display: flex; flex-direction: column; min-height: 140px; border: 1px solid #2a3552; border-radius: 16px; background: linear-gradient(137deg, #172139, #11192c); padding: 20px 22px; transition: border-color .2s, transform .2s; }
+.lola-home__stat:hover { border-color: #a58b66; transform: translateY(-2px); }
+.lola-home__stat-label { display: flex; justify-content: space-between; gap: 12px; color: #b5bed3; font-size: 12px; }
+.lola-home__stat-label svg { color: #cead78; }
+.lola-home__stat strong { color: #f8f5ff; font-size: 30px; font-weight: 550; line-height: 1.5; }
+.lola-home__stat-detail { color: #929eb8; font-size: 11px; margin-top: auto; }
+.lola-home__action-panel { display: flex; align-items: center; gap: 18px; border: 1px solid #36415b; background: linear-gradient(105deg, #19203b, #10192d); border-radius: 16px; padding: 19px 22px; margin-top: 14px; }
+.lola-home__action-icon { width: 42px; height: 42px; flex-shrink: 0; border-radius: 13px; display: grid; place-items: center; color: #edca8b; background: #2b314a; }
+.lola-home__action-copy { flex: 1; }
+.lola-home__action-copy h3 { font-size: 14px; font-weight: 700; }
+.lola-home__action-copy p { color: #aeb7cd; font-size: 12px; margin-top: 4px; line-height: 1.5; }
+.lola-home__action-link { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: #edcd96; font-size: 12px; font-weight: 600; }
+.lola-home__workspaces-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.lola-home__workspaces-grid a { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 190px; flex: 1; padding: 15px 17px; border: 1px solid #303b54; background: #121b30; border-radius: 12px; color: #d3d9e9; font-size: 12px; }
+.lola-home__workspaces-grid a:hover { border-color: #9b855f; color: #f5dca8; }
+.lola-home__workspaces-grid svg { color: #d4b67e; }
+.lola-home__footer { border-top: 1px solid #28324b; padding: 24px 0 8px; margin-top: 10px; color: #76829d; font-size: 11px; }
+.lola-home__footer span { color: #d2ad74; padding: 0 7px; }
+/* Main Lola conversation is a full workspace, never an overlay or secondary mini-chat. */
+.lola-home__conversation {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(ellipse at 50% 14%, rgba(77,64,137,.12), transparent 65%), #0b1121;
+}
+.lola-home__conversation-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.lola-home__conversation-content .lola-chat {
+  width: min(100%, 1100px);
+  margin: 0 auto;
+  height: 100%;
+  border-left: 1px solid rgba(221,219,251,.065);
+  border-right: 1px solid rgba(221,219,251,.065);
+  background: transparent;
+}
+.lionbi-brand { display: flex; align-items: center; gap: 9px; text-decoration: none; }
+.lionbi-brand__mark { width: 43px; height: 43px; flex-shrink: 0; }
+.lionbi-brand__copy { display: flex; flex-direction: column; line-height: 1.1; }
+.lionbi-brand__name { color: #e3bc74; font-size: 19px; letter-spacing: .12em; font-weight: 700; white-space: nowrap; }
+.lionbi-brand__name b { color: #d5dce9; font-weight: 500; }
+.lionbi-brand__subtitle { margin-top: 4px; color: #ad9b7d; font-size: 7px; letter-spacing: .17em; font-weight: 650; white-space: nowrap; }
+@media (max-width: 1000px) { .lola-home__private { display: none; } }
+@media (max-width: 720px) {
+  /* The global mobile app bar already carries the Lion BI logo.
+     Avoid a second identical brand row on the executive home. */
+  .lola-home__header { min-height: 44px; padding: 5px 15px; justify-content: flex-end; border-bottom: 0; }
+  .lola-home__brand { display: none; }
+  .lola-home__voice-toggle { padding: 7px 9px; gap: 7px; }
+  .lola-home__voice-toggle > span:not(.lola-home__switch) { display: none; }
+  .lola-home__inner { padding: 0 16px 20px; }
+  .lola-home__hero { padding-top: 24px; padding-bottom: 35px; }
+  .lola-home__eyebrow { font-size: 8px; letter-spacing: .13em; }
+  .lola-home__hero-lead { padding: 0 12px; }
+  .lola-home__composer { margin-top: 24px; border-radius: 15px; padding: 7px; gap: 7px; }
+  .lola-home__composer-spark { display: none; }
+  .lola-home__composer input { padding-left: 8px; font-size: 13px; }
+  .lola-home__suggestions { gap: 6px; }
+  .lola-home__suggestions button { font-size: 11px; padding: 8px 9px; }
+  .lola-home__section-heading { align-items: start; flex-direction: column; }
+  .lola-home__stat-grid { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px; }
+  .lola-home__stat { padding: 16px; min-height: 122px; }
+  .lola-home__action-panel { flex-wrap: wrap; padding: 16px; gap: 12px; }
+  .lola-home__action-link { margin-left: 54px; }
+  .lola-home__footer { line-height: 1.6; }
+  .lola-home__conversation-content .lola-chat { border: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lola-home__stat, .lola-home__switch i { transition: none; }
+}
+
+/* Balanced Home: Lola leads, but real business intelligence is visible without a second page. */
+.lola-home__hero{padding:15px 0 25px}
+.lola-home__hero>.lola-orb{width:clamp(160px,19vw,218px);margin:3px auto}
+.lola-home__hero h1{font-size:clamp(26px,3.2vw,37px)}
+.lola-home__hero-lead{margin-top:7px}
+.lola-home__composer{margin-top:18px;min-height:58px}
+.lola-home__suggestions{margin-top:11px}
+.lola-home__overview{padding-top:14px}
+.lola-home__history-link{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.lola-home__history-link button{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #394660;border-radius:9px;color:#e4c996;background:#18223a;cursor:pointer;font-size:12px}
+.lola-home__history-link button:hover{border-color:#e4c996;background:#222f49}
+.lola-home__history-link span{font-size:11px;color:#8795b1}
+@media(max-width:600px){
+  .lola-home__hero{padding:13px 0 20px}
+  .lola-home__hero>.lola-orb{width:172px}
+  .lola-home__history-link span{display:none}
+  .lola-home__composer{margin-top:16px}
+}
+
+/* One corporate wordmark in the sidebar; Lola's own identity in Home's top bar. */
+.lola-home__brand { gap: 12px; }
+.lola-home__nameplate-glyph { flex-shrink: 0;filter:drop-shadow(0 0 7px rgba(141,166,244,.35)); }
+.lola-home__nameplate { display:flex;flex-direction:column;gap:3px;min-width:0; }
+.lola-home__nameplate strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .2em;
+  line-height: 1.12;
+  color: #f6ddb0;
+}
+.lola-home__nameplate small {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: .12em;
+  color: #95a9ce;
+}
+@media(max-width:720px){.lola-home__brand{display:none;}}

@@ -74,7 +74,7 @@ export function ApprovalQueue() {
   if (drafts.length === 0) {
     return (
       <div className="text-sm text-gray-400 p-4">
-        No pending actions — SecretaryAI has nothing waiting for your approval.
+        No pending actions — Lion BI has nothing waiting for your approval.
       </div>
     );
   }

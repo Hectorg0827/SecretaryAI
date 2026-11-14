@@ -1,0 +1,30 @@
+/* Lion BI operational surfaces.
+ * Scoped to authenticated workspaces; preserves status/alert colors and data logic.
+ * Explicitly higher specificity than legacy Tailwind light-surface utilities. */
+.lion-workspace{color:#f2f0fa;background:#0b1020}
+.lion-workspace :is(.bg-slate-50,.bg-gray-50,.bg-zinc-50){background-color:#0f1729}
+.lion-workspace .bg-white{background-color:#182238}
+.lion-workspace :is(.bg-slate-100,.bg-gray-100){background-color:#242d45}
+.lion-workspace :is(.text-slate-900,.text-gray-900,.text-slate-800,.text-gray-800){color:#f2effa}
+.lion-workspace :is(.text-slate-700,.text-gray-700,.text-slate-600,.text-gray-600){color:#c5cde0}
+.lion-workspace :is(.text-slate-500,.text-gray-500,.text-slate-400,.text-gray-400){color:#a1b0cb}
+.lion-workspace :is(.border-slate-50,.border-slate-100,.border-slate-200,.border-gray-100,.border-gray-200){border-color:#35405b}
+.lion-workspace :is(.divide-slate-50,.divide-slate-100,.divide-slate-200)>:not(:last-child){border-color:#35405b}
+.lion-workspace :is(input:not([type=checkbox]):not([type=radio]),textarea,select){background-color:#202b43;color:#f4f1fb;border-color:#475474;accent-color:#e7c891}
+.lion-workspace :is(input,textarea)::placeholder{color:#9faec8}
+.lion-workspace :is(input,textarea,select):focus-visible{outline:2px solid #e7c891;outline-offset:2px}
+.lion-workspace table{color:#e5e9f5}
+.lion-workspace tbody tr{border-color:#34405b}
+.lion-workspace tbody tr:hover{background-color:#242e47}
+.lion-workspace thead{background:#18243a}
+.lion-workspace :is(.hover\:bg-slate-50:hover,.hover\:bg-slate-100:hover,.hover\:bg-white:hover){background-color:#2b3753}
+.lion-workspace :is(.focus\:ring-blue-400:focus,.focus\:ring-blue-500:focus){--tw-ring-color:#d9b67c}
+.lion-workspace button:focus-visible,.lion-workspace a:focus-visible{outline:2px solid #e7c891;outline-offset:3px}
+.lion-workspace button:disabled{cursor:not-allowed}
+@media(max-width:640px){
+ .lion-workspace table{min-width:620px}
+ .lion-workspace table th,.lion-workspace table td{white-space:nowrap}
+}
+@media(prefers-reduced-motion:reduce){
+ .lion-workspace *{transition-duration:0.01ms!important;animation-duration:0.01ms!important}
+}

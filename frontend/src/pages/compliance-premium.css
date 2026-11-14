@@ -1,0 +1,108 @@
+/* Lion BI compliance: hierarchy and motion coordinated with the Lola experience. */
+.lionbi-compliance {
+  background: #f4f6fb;
+  color: #17243c;
+}
+.lionbi-compliance__header {
+  background: linear-gradient(115deg, #131c34, #161e38 48%, #222044) !important;
+  border-bottom-color: rgba(220,210,249,.2) !important;
+  box-shadow: 0 5px 22px rgba(9,16,35,.15);
+}
+.lionbi-compliance__header h1 {
+  color: #f9f7ff !important;
+  letter-spacing: -.035em;
+}
+.lionbi-compliance__header p { color: #b4c2db !important; }
+.lionbi-compliance__header > div:first-child { min-width: 0; }
+.lionbi-compliance__header .lion-ui-icon { color: #dbc799; }
+.lionbi-compliance__setup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #eeddbb;
+  background: rgba(222,204,255,.065);
+  border-color: rgba(229,208,174,.35);
+}
+.lionbi-compliance__setup:hover {
+  background: rgba(229,208,174,.15);
+  border-color: rgba(245,212,158,.72);
+}
+.lionbi-compliance__setup:focus-visible,
+.lionbi-compliance__tabs button:focus-visible {
+  outline: 2px solid #efcd96;
+  outline-offset: 3px;
+}
+.lionbi-compliance__tabs { scrollbar-width: thin; scrollbar-color: #7f7396 transparent; }
+.lionbi-compliance__tabs button {
+  flex: none;
+  color: #b9c3dd !important;
+  background: transparent !important;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease, transform 180ms ease !important;
+}
+.lionbi-compliance__tabs button:hover {
+  color: #f0e2c7 !important;
+  background: rgba(227,207,245,.09) !important;
+}
+.lionbi-compliance__tabs button[data-active="true"] {
+  color: #f7e8c9 !important;
+  border-color: rgba(225,193,149,.34);
+  background: linear-gradient(105deg, rgba(158,125,208,.23), rgba(88,111,179,.13)) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.075);
+}
+.lionbi-compliance__tabs button[data-active="true"] .lion-ui-icon { color: #f9d59c; }
+.lionbi-compliance__content {
+  border: 1px solid #dfe3ed;
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  animation: lionbi-panel-in 260ms cubic-bezier(.2,.75,.2,1) both;
+}
+.lionbi-compliance__content .rounded-xl,
+.lionbi-compliance__content .rounded-lg {
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+}
+@keyframes lionbi-panel-in {
+  from { opacity: .55; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 700px) {
+  .lionbi-compliance__header { padding: 14px 13px !important; }
+  .lionbi-compliance__header > div:first-child { flex-wrap: wrap; }
+  .lionbi-compliance__header h1 { font-size: 18px; }
+  .lionbi-compliance__header p { font-size: 11px; line-height: 1.4; }
+  .lionbi-compliance__header .ml-auto { margin-left: 0; flex-wrap: wrap; }
+  .lionbi-compliance__tabs { margin-top: 12px; }
+  .lionbi-compliance__tabs button { padding: 8px 10px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lionbi-compliance__content { animation: none !important; }
+  .lionbi-compliance__tabs button,
+  .lionbi-compliance__content .rounded-xl,
+  .lionbi-compliance__content .rounded-lg { transition: none !important; }
+}
+
+/* The global Lion BI dark theme should not wash out onboarding form fields. */
+.lion-workspace .lionbi-compliance-wizard {
+  background: #f8fafc !important;
+  color: #15243d !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.text-slate-900,.text-slate-800,.text-slate-700) {
+  color: #1c2c45 !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.text-slate-600,.text-slate-500,.text-slate-400) {
+  color: #52627a !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(.bg-white,.bg-slate-50) {
+  background-color: #fff !important;
+}
+.lion-workspace .lionbi-compliance-wizard .bg-slate-100 { background-color: #e5e9f0 !important; }
+.lion-workspace .lionbi-compliance-wizard :is(.border-slate-100,.border-slate-200) { border-color: #d6deea !important; }
+.lion-workspace .lionbi-compliance-wizard :is(input:not([type=checkbox]):not([type=radio]),textarea,select) {
+  background: #fff !important;
+  color: #1a2d48 !important;
+  border-color: #cbd5e1 !important;
+}
+.lion-workspace .lionbi-compliance-wizard :is(input,textarea)::placeholder { color: #7b8ba3 !important; }
+.lion-workspace .lionbi-compliance-wizard .bg-blue-600 { background-color: #4854a8 !important; }
+.lion-workspace .lionbi-compliance-wizard .bg-emerald-600 { background-color: #087f67 !important; }

@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Zap, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
+import { LolaOrb } from '../components/lola/LolaOrb';
+import { LolaGlyph } from '../components/lola/LolaGlyph';
+import { LionBrand } from '../components/lola/LionBrand';
 import { api } from '../lib/api';
 
 export function Login() {
@@ -56,127 +59,86 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 justify-center mb-8">
-          <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center shadow-lg">
-            <Zap size={20} className="text-white" />
-          </div>
-          <span className="text-2xl font-bold text-white tracking-tight">SecretaryAI</span>
-        </div>
-
-        {/* Card */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h1 className="text-xl font-bold text-slate-900 mb-1">
-            {needs2fa ? 'Two-factor authentication' : 'Welcome back'}
+    <div className="relative min-h-dvh overflow-y-auto bg-[#080e1c] text-[#f3f0f9]">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(ellipse at 20% 30%,rgba(102,79,166,.23),transparent 52%),radial-gradient(ellipse at 80% 80%,rgba(220,178,103,.10),transparent 44%)' }} />
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-5 py-7 md:px-10">
+        <LionBrand />
+        <span className="inline-flex items-center gap-2 rounded-full border border-[#3a4862] bg-[#131c30] px-3 py-1.5 text-[11px] text-[#d3c6a9]">
+          <ShieldCheck size={13} /> Private business intelligence
+        </span>
+      </header>
+      <div className="relative z-10 mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-4 md:min-h-[75vh] md:grid-cols-[1fr_460px] md:items-center md:px-10 md:pt-0">
+        <section className="hidden max-w-lg flex-col items-start gap-6 md:flex" aria-label="Lola business assistant">
+          <div className="w-36"><LolaOrb /></div>
+          <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-[#e5c38b]"><LolaGlyph size={16} /> Meet Lola</div>
+          <h1 className="text-5xl font-semibold leading-[1.08] tracking-[-0.045em] text-white">
+            Your business.<br /><span className="text-[#dfc08c]">One conversation.</span>
           </h1>
-          <p className="text-sm text-slate-600 mb-6">
-            {needs2fa
-              ? 'Enter the 6-digit code from your authenticator app.'
-              : 'Sign in to your account'}
+          <p className="max-w-md text-base leading-7 text-[#aebbd2]">
+            Finance, sales, operations and decisions — brought together in your authorized Lion BI workspace.
           </p>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+        </section>
+        <section className="rounded-[28px] border border-[#3c445e] bg-[#121b2f]/95 p-6 shadow-[0_26px_90px_rgba(0,0,0,.4)] sm:p-9" aria-label="Sign in to Lion BI">
+          <div className="mb-8">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#e4c18c]">LION BUSINESS INTELLIGENCE</p>
+            <h1 className="text-2xl font-semibold tracking-[-0.03em] text-white md:text-3xl">
+              {needs2fa ? 'Verify your identity' : 'Welcome back'}
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-[#aab8d0]">
+              {needs2fa ? 'Enter the code from your authenticator app to continue securely.' : 'Sign in to continue with Lola and your business workspace.'}
+            </p>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
-              <div role="alert" className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2.5 text-sm">
-                <AlertCircle size={14} className="flex-shrink-0" />
-                {error}
+              <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-[#8d5254] bg-[#3b252f] px-3 py-3 text-sm text-[#ffd6d3]">
+                <AlertCircle size={17} className="mt-0.5 flex-shrink-0" /> {error}
               </div>
             )}
-
             {!needs2fa ? (
               <>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="email">
-                    Email address
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
-                  />
+                  <label className="mb-2 block text-xs font-semibold text-[#c4cee1]" htmlFor="email">Email address</label>
+                  <input id="email" type="email" autoComplete="email" required value={email}
+                    onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com"
+                    className="w-full rounded-xl border border-[#46536f] bg-[#1b2640] px-4 py-3 text-sm text-[#f8f7ff] outline-none placeholder:text-[#92a1bb] focus:border-[#e3c18d] focus:ring-2 focus:ring-[#e3c18d]/25" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="password">
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white"
-                  />
+                  <label className="mb-2 block text-xs font-semibold text-[#c4cee1]" htmlFor="password">Password</label>
+                  <input id="password" type="password" autoComplete="current-password" required value={password}
+                    onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password"
+                    className="w-full rounded-xl border border-[#46536f] bg-[#1b2640] px-4 py-3 text-sm text-[#f8f7ff] outline-none placeholder:text-[#92a1bb] focus:border-[#e3c18d] focus:ring-2 focus:ring-[#e3c18d]/25" />
                 </div>
               </>
             ) : (
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="totp">
-                  Authenticator code
-                </label>
-                <input
-                  id="totp"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  required
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="000000"
-                  className="w-full px-3.5 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder-slate-500 bg-white tracking-widest text-center text-lg font-mono"
-                  autoFocus
-                />
+                <label className="mb-2 block text-xs font-semibold text-[#c4cee1]" htmlFor="totp">Authenticator code</label>
+                <input id="totp" type="text" inputMode="numeric" autoComplete="one-time-code" required maxLength={6}
+                  value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, ''))}
+                  placeholder="000000" autoFocus
+                  className="w-full rounded-xl border border-[#46536f] bg-[#1b2640] px-4 py-3 text-center font-mono text-lg tracking-[0.3em] text-[#f8f7ff] outline-none placeholder:text-[#92a1bb] focus:border-[#e3c18d] focus:ring-2 focus:ring-[#e3c18d]/25" />
               </div>
             )}
-
-            <button
-              type="submit"
-              disabled={loading || (!needs2fa && (!email || !password)) || (needs2fa && totpCode.length !== 6)}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm mt-2"
-            >
-              {loading && <Loader2 size={15} className="animate-spin" />}
-              {loading ? 'Verifying…' : needs2fa ? 'Verify code' : 'Sign in'}
+            <button type="submit" disabled={loading || (!needs2fa && (!email || !password)) || (needs2fa && totpCode.length !== 6)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#e3c18d] px-4 py-3 text-sm font-semibold text-[#151b2a] transition hover:bg-[#f2d6a7] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#e3c18d] disabled:cursor-not-allowed disabled:opacity-50">
+              {loading ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}
+              {loading ? 'Verifying…' : needs2fa ? 'Verify and continue' : 'Sign in to Lion BI'}
             </button>
-
             {needs2fa && (
-              <button
-                type="button"
-                onClick={() => { setNeeds2fa(false); setPreAuthToken(null); setPassword(''); setTotpCode(''); setError(null); }}
-                className="w-full text-xs text-slate-600 hover:text-slate-600 py-1"
-              >
-                ← Back to sign in
-              </button>
+              <button type="button" onClick={() => { setNeeds2fa(false); setPreAuthToken(null); setPassword(''); setTotpCode(''); setError(null); }}
+                className="w-full py-1 text-xs text-[#b8c4da] hover:text-[#e3c18d]">Back to sign in</button>
             )}
           </form>
-
           {!needs2fa && (
-            <p className="text-xs text-slate-600 text-center mt-6">
-              <Link to="/forgot-password" className="text-blue-600 hover:underline font-medium">Forgot your password?</Link>
-            </p>
+            <div className="mt-6 space-y-3 border-t border-[#35415a] pt-6 text-center text-xs text-[#adb9cf]">
+              <p><Link to="/forgot-password" className="font-medium text-[#e4c38f] hover:underline">Forgot your password?</Link></p>
+              <p>New to Lion BI? <Link to="/register" className="font-medium text-[#e4c38f] hover:underline">Create an account</Link></p>
+            </div>
           )}
-          {!needs2fa && (
-            <p className="text-xs text-slate-600 text-center mt-3">
-              New to SecretaryAI?{' '}
-              <Link to="/register" className="text-blue-600 hover:underline font-medium">
-                Create an account
-              </Link>
-            </p>
-          )}
-        </div>
-
-        <p className="text-xs text-slate-300 text-center mt-6">
-          SecretaryAI · AI Operations Manager
-        </p>
+          <p className="mt-7 flex items-center justify-center gap-1.5 text-center text-[11px] text-[#8e9bb4]">
+            <ShieldCheck size={13} /> Authorized access only · Your permissions control what Lola can see
+          </p>
+        </section>
       </div>
     </div>
   );

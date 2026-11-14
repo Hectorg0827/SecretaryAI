@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CheckCircle2, ChevronRight, ChevronLeft, Plus, Trash2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 interface Props {
   onComplete: () => void;
+  onDismiss: () => void;
 }
 
 // ─── Step data shapes ─────────────────────────────────────────────────────────
@@ -484,10 +485,22 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
 
 const TOTAL_STEPS = 5;
 
-export function ComplianceSetupWizard({ onComplete }: Props) {
+export function ComplianceSetupWizard({ onComplete, onDismiss }: Props) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+
+  // A dismissible setup wizard must never trap the user in Compliance.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault();
+        onDismiss();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onDismiss, saving]);
 
   const [permit, setPermit] = useState<FederalPermitForm>({
     permit_type: '',
@@ -597,8 +610,22 @@ export function ComplianceSetupWizard({ onComplete }: Props) {
   const isLastStep = step === TOTAL_STEPS - 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-xl bg-white rounded-2xl p-8 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#070c19]/85 p-3 backdrop-blur-sm sm:p-4"
+      data-testid="compliance-backdrop"
+      onMouseDown={(event) => {
+        // Only an actual backdrop click dismisses; clicks inside the form never do.
+        if (event.target === event.currentTarget && !saving) onDismiss();
+      }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="compliance-setup-title"
+        className="lionbi-compliance-wizard max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-[24px] border border-[#adb5d0] bg-[#f8fafc] p-5 text-[#14223c] shadow-[0_30px_90px_rgba(0,0,0,.55)] sm:p-8">
+        <div className="sticky -top-5 z-10 mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#35425d] bg-[#141f34] px-3 py-2.5 shadow-sm sm:-top-8">
+          <h2 id="compliance-setup-title" className="text-base font-semibold tracking-wide text-[#f0d3a1]">Compliance setup</h2>
+          <button type="button" aria-label="Close compliance setup" title="Close compliance setup"
+            onClick={onDismiss} disabled={saving}
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-[#58637d] bg-[#25314a] text-white transition hover:border-[#ebce9e] focus-visible:outline-2 focus-visible:outline-[#ebce9e] disabled:opacity-50">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
         <ProgressBar step={step} total={TOTAL_STEPS} />
 
         <div className="min-h-[320px]">
@@ -609,16 +636,23 @@ export function ComplianceSetupWizard({ onComplete }: Props) {
           {step === 4 && <StepDone permit={permit} products={products} licenses={licenses} />}
         </div>
 
-        <div className="flex items-center justify-between mt-8 pt-4 border-t border-slate-100">
-          <button
-            type="button"
-            onClick={handleBack}
-            disabled={step === 0}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-0 transition-colors"
-          >
-            <ChevronLeft size={16} />
-            Back
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-8 pt-4 border-t border-slate-200">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBack}
+              disabled={step === 0 || saving}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40 transition-colors"
+            >
+              <ChevronLeft size={16} />
+              Back
+            </button>
+            <button type="button" onClick={onDismiss} disabled={saving}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-[#8665e6] disabled:opacity-40"
+              aria-label="Exit compliance setup and return to dashboard">
+              Exit setup
+            </button>
+          </div>
 
           {isLastStep ? (
             <button

@@ -37,3 +37,12 @@ def test_unverified_duplicate_or_multirecipient_cannot_be_linked():
         [message("1", "Joan <joan@example.com>, Other <x@example.com>", "me@example.com", "Label")],
         [{"id": "c1", "email": "joan@example.com", "identity_verified": True}],
     ) == []
+
+
+def test_unsent_draft_cannot_cancel_whatsapp_followup():
+    contacts = [{"id": "joan", "email": "joan@example.com",
+                 "identity_verified": True}]
+    assert map_gmail_to_private_events([
+        message("draft1", "Joan <joan@example.com>", "me@example.com",
+                "Label Artwork", labels=["DRAFT"]),
+    ], contacts) == []

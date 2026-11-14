@@ -8,7 +8,7 @@ export const meta: InsightMeta = {
   title: 'Price book',
   description: 'Versioned case prices by SKU, package, market, channel and customer. Read-only in Phase 1.',
   group: 'Pricing',
-  roles: ['owner', 'manager'],
+  roles: ['owner', 'manager', 'pricing_billbacks'],
 };
 
 type PriceEntry = {

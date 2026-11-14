@@ -370,23 +370,16 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
 
 
 def _qty_to_status(item: dict) -> str:
-    """Map weeks_of_stock to a status string."""
-    wks = _weeks_remaining(item)
-    if wks is None:
-        return "healthy"
-    if wks <= 2:
-        return "critical"
-    if wks <= 4:
-        return "low"
-    return "healthy"
+    """Match the Inventory API's validated source and velocity classification."""
+    from app.api.inventory import _inventory_status
+    return _inventory_status(item).status
 
 
 def _weeks_remaining(item: dict):
-    sell_rate = item.get("weekly_sell_rate", 0)
-    if not sell_rate:
-        return None
-    qty = item.get("total_qty", 0)
-    return round(qty / sell_rate, 1) if sell_rate else None
+    """Unobserved sell rate is *unknown*, not healthy or zero velocity."""
+    from app.api.inventory import _inventory_status
+    remaining = _inventory_status(item).weeks_remaining
+    return float(remaining) if remaining is not None else None
 
 
 def _detect_account_names(message: str, history: list[dict]) -> list[str]:

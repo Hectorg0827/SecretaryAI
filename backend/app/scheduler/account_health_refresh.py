@@ -39,11 +39,13 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
     # Group invoices by customer
     by_customer: dict[str, list[dict]] = {}
     for inv in invoices:
-        cid = inv.customer_id if hasattr(inv, "customer_id") else inv.get("customer_id", "")
-        by_customer.setdefault(cid, []).append(
-            {"date": inv.date if hasattr(inv, "date") else inv.get("order_date"),
-             "total": float(inv.total if hasattr(inv, "total") else inv.get("total_amount", 0))}
-        )
+        # _billable_invoice_rows produces verified dictionaries with "date"
+        # and "total" keys. Do not read obsolete order_date/total_amount keys.
+        cid = inv["customer_id"]
+        by_customer.setdefault(cid, []).append({
+            "date": inv["date"],
+            "total": inv["total"],
+        })
 
     for customer in customers:
         cid = customer.qb_id if hasattr(customer, "qb_id") else customer.get("qb_id", "")

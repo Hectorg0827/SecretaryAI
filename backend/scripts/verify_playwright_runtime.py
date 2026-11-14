@@ -35,7 +35,7 @@ def verify() -> None:
             if page.locator("#ready").inner_text() != "Browser ready":
                 raise RuntimeError("Chromium did not render the local probe")
             screenshot = page.screenshot(timeout=10_000)
-            if not screenshot.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            if not screenshot.startswith(bytes((137, 80, 78, 71, 13, 10, 26, 10))):
                 raise RuntimeError("Chromium screenshot output is invalid")
             print("PASS: non-root Chromium launch, local page render and PNG capture")
         finally:

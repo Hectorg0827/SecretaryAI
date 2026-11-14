@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.api.deps import get_db
 from app.api.insights._common import advisory_response
@@ -75,4 +77,72 @@ async def list_price_book(
         "price_changes_allowed": False,
         "pricing_approved_by_this_endpoint": False,
         "cost_source_certified": False,
+    }, source="connected_data")
+
+
+@router.get("/sources/assessments/{assessment_id}")
+async def pricing_purchase_assessment_source(
+    assessment_id: UUID,
+    response: Response,
+    user: dict = Depends(get_pricing_user),
+    db=Depends(get_db),
+):
+    """Read accepted-case and supplier cost evidence without purchasing rights.
+
+    Prior allocated landed charges in an assessment remain unclassified;
+    they cannot be treated as a confirmed component or silently applied twice.
+    The returned costs are explicitly provisional, and no writes occur.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    company_id = user["company_id"]
+    from app.api.logistics import _load_finance_assessment, _read_purchasing_rows
+    from app.services.purchasing_finance import value_receipts
+
+    assessment, order, lines = _load_finance_assessment(db, company_id, assessment_id)
+    documents = _read_purchasing_rows(
+        db.table("warehouse_receipt_documents")
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("po_id", assessment["po_id"])
+        .limit(501)
+    )
+    if len(documents) > 500:
+        raise HTTPException(status_code=503, detail="Receipt scope exceeds supported page")
+    receipt_lines = []
+    if documents:
+        receipt_lines = _read_purchasing_rows(
+            db.table("warehouse_receipt_lines")
+            .select("receipt_id,sku,accepted_qty::text,damaged_qty::text,quarantined_qty::text")
+            .eq("company_id", company_id)
+            .in_("receipt_id", [d["id"] for d in documents])
+            .limit(1001)
+        )
+        if len(receipt_lines) > 1000:
+            raise HTTPException(status_code=503, detail="Receipt line scope exceeds supported page")
+    try:
+        valuation = value_receipts(assessment, lines, receipt_lines)
+    except (ValueError, TypeError, KeyError, ArithmeticError) as exc:
+        log.warning("Pricing receipt cost preview unavailable")
+        raise HTTPException(
+            status_code=503, detail="Purchase assessment cannot be valued safely",
+        ) from exc
+    return advisory_response({
+        "assessment_id": str(assessment_id),
+        "po_number": order["po_number"],
+        "assertion_status": assessment["assertion_status"],
+        "currency": valuation["currency"],
+        "landed_cost_total": valuation["landed_cost_total"],
+        "lines": [
+            {
+                "sku": item["sku"],
+                "unit_cost": item["unit_cost"],
+                "allocated_landed_cost": item["allocated_landed_cost"],
+                "cases": item["cases"],
+            }
+            for item in valuation["lines"]
+        ],
+        "valuation_verified": False,
+        "accounting_reconciled": False,
+        "preallocated_landed_cost_not_applied": True,
+        "read_consistency": "separate_tenant_scoped_queries_not_atomic_snapshot",
     }, source="connected_data")

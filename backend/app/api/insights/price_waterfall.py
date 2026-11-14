@@ -142,7 +142,7 @@ async def price_waterfall_preview(
         "documented_cost_components": result.documented_cost_components,
         "exception_reasons": list(result.exception_reasons),
         "review_status": result.status,
-        "fully_loaded_pricing_ready": bool(
+        "fully_loaded_inputs_complete": bool(
             result.complete_cost_components
             and result.complete_warehouse_components
             and result.documented_cost_components

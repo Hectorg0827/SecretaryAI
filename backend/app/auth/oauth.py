@@ -17,10 +17,14 @@ QBO_SCOPES = "com.intuit.quickbooks.accounting"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-# Personal Lola Gmail connector only. Never request Google Drive/Sheets
-# permissions alongside a private employee mailbox consent.
-# Gmail modify supports reading, marking as read, drafts and approved sends.
-GOOGLE_SCOPES = "https://www.googleapis.com/auth/gmail.modify"
+# Legacy app-level OAuth scope retained for compatibility with company Sheets.
+# Personal Lola must use the separate least-privilege Gmail-only scope below.
+GOOGLE_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.modify "
+    "https://www.googleapis.com/auth/spreadsheets "
+    "https://www.googleapis.com/auth/drive.file"
+)
+PERSONAL_GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.modify"
 
 
 def build_authorization_url(state: str) -> str:
@@ -98,13 +102,13 @@ async def revoke_token(token: str) -> bool:
 
 # ─── Google OAuth ──────────────────────────────────────────────────────────────
 
-def build_google_authorization_url(state: str) -> str:
+def build_google_authorization_url(state: str, *, personal_gmail: bool = False) -> str:
     """Build the URL to redirect the user to for Google OAuth consent."""
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
-        "scope": GOOGLE_SCOPES,
+        "scope": PERSONAL_GMAIL_SCOPES if personal_gmail else GOOGLE_SCOPES,
         "access_type": "offline",   # get a refresh token
         "prompt": "consent",        # always show consent so we always get refresh_token
         "state": state,

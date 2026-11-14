@@ -86,8 +86,11 @@ async def list_pending_actions(
     company_id = user["company_id"]
     queue = ApprovalQueue(db)
     drafts = await queue.get_pending(company_id)
-    # Legacy company-level email proposals cannot be exposed to managers.
-    drafts = [d for d in drafts if "email" not in str(d.get("action_type") or "").lower()]
+    # Company-approved business drafts remain visible as before. Employee Lola
+    # communication drafts live in private vaults and must NEVER be enqueued
+    # into this company-wide approval queue.
+    drafts = [d for d in drafts if d.get("visibility") != "personal"
+              and not d.get("private_user_id")]
     return {"drafts": drafts, "company_id": company_id}
 
 
@@ -122,8 +125,8 @@ async def approve_draft(
     except Exception:
         draft = {}
 
-    if not draft or "email" in str(draft.get("action_type") or "").lower():
-        # Personal correspondence is never a managerial approval artifact.
+    if not draft or draft.get("visibility") == "personal" or draft.get("private_user_id"):
+        # Private employee correspondence must not be approved as company work.
         raise HTTPException(status_code=404, detail="Draft not found")
 
     # Idempotency: only a still-pending draft may be approved/executed. A second
@@ -232,8 +235,8 @@ async def reject_draft(
     except Exception:
         draft = {}
 
-    if not draft or "email" in str(draft.get("action_type") or "").lower():
-        # Personal correspondence is never a managerial approval artifact.
+    if not draft or draft.get("visibility") == "personal" or draft.get("private_user_id"):
+        # Private employee correspondence must not be approved as company work.
         raise HTTPException(status_code=404, detail="Draft not found")
 
     # Idempotency: don't re-process an already-resolved draft.

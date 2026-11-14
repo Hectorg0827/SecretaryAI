@@ -108,6 +108,46 @@ async def sync_private_gmail(
     }
 
 
+class PrivatePreferences(BaseModel):
+    proactive_enabled: bool = False
+    push_enabled: bool = False
+    timezone: str = Field(default="America/New_York", max_length=64)
+    reminder_hour: int = Field(default=9, ge=0, le=23)
+
+
+@router.get("/preferences")
+def get_private_preferences(user: dict = Depends(get_current_user), db=Depends(get_db)):
+    try:
+        rows = _owned(db, "lola_private_preferences", user).limit(1).execute().data or []
+    except Exception:
+        raise HTTPException(status_code=503, detail="Private preferences unavailable") from None
+    return {"preferences": {
+        **PrivatePreferences().model_dump(),
+        **({k: v for k, v in rows[0].items() if k in PrivatePreferences.model_fields} if rows else {}),
+    }}
+
+
+@router.put("/preferences")
+def save_private_preferences(
+    body: PrivatePreferences,
+    user: dict = Depends(get_current_user), db=Depends(get_db),
+):
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        ZoneInfo(body.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=422, detail="Unknown timezone") from None
+    company_id, user_id = _scope(user)
+    try:
+        db.table("lola_private_preferences").upsert({
+            "company_id": company_id, "user_id": user_id, **body.model_dump(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="company_id,user_id").execute()
+        return {"preferences": body.model_dump(), "saved": True}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Could not save private preferences") from None
+
+
 @router.get("/contacts")
 def list_private_contacts(user: dict = Depends(get_current_user), db=Depends(get_db)):
     try:

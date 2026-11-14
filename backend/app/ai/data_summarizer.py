@@ -58,7 +58,7 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
     lines.append(f"  {len(healthy)} products at verified healthy stock levels.")
     if unassessed:
         lines.append(f"  {len(unassessed)} product(s) could not be assessed; do not claim inventory is healthy.")
-    return "\n".join(lines)
+    return chr(10).join(lines)
 
 
 def summarize_account(account: dict, recent_orders: list[dict], industry_module=None) -> str:
@@ -152,6 +152,38 @@ def build_query_context(intent: str, data: dict, industry_module=None) -> str:
     Route intent to appropriate summarizer and return context string.
     industry_module: optional, used to apply correct terminology.
     """
+    if intent == "compliance_check":
+        compliance = data.get("compliance")
+        if not isinstance(compliance, dict):
+            return "Compliance source unavailable. Do not infer regulatory authorization."
+        counts = compliance.get("counts") or {}
+        lines = [
+            "Source: company-scoped Lion BI compliance registry; records are not independently verified with regulators.",
+            "Registry setup: " + ("complete per saved records" if compliance.get("is_setup") else
+                                  "INCOMPLETE — regulatory approval or clearance cannot be confirmed"),
+            "Recorded inventory: "
+            + ", ".join(f"{name}={counts.get(name, 'unknown')}" for name in (
+                "products_count", "licenses_count", "federal_permits_count",
+                "distributors_count", "brand_registrations_count", "colas_count"
+            )),
+            f"Registry status: {compliance.get('overall_status', 'unverified')}. "
+            "This is not proof of current license or regulator approval.",
+            f"Current compliance alerts recorded: {compliance.get('alerts_count', 'unknown')}.",
+        ]
+        missing = compliance.get("missing") or []
+        if missing:
+            lines.append("Missing required setup records: " + ", ".join(missing) + ".")
+        for alert in compliance.get("alerts", [])[:10]:
+            lines.append(
+                f"  [ALERT] {alert.get('priority', 'unknown')}: "
+                f"{alert.get('item_name', '')} ({alert.get('state_code', '')})"
+            )
+        lines.append(
+            "Do not say the business, its products, or a shipment is licensed, "
+            "approved, or compliant without complete authoritative evidence."
+        )
+        return chr(10).join(lines)
+
     if intent == "inventory_check":
         return summarize_inventory(data.get("inventory", []), industry_module)
 

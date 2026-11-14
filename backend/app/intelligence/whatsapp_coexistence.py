@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -132,3 +133,34 @@ def resolve_signed_event_routes(
                 field=field, event_count=len(messages),
             ))
     return results
+
+
+
+def validated_whatsapp_routing_candidates(
+    *,
+    raw_body: bytes,
+    signature: str | None,
+    app_secret: str,
+    phone_owners: dict[str, list[dict]],
+    staging_pilot_enabled: bool = False,
+    written_meta_policy_clearance: bool = False,
+) -> list[RoutingEnvelope]:
+    """Pre-ingestion only: verify authenticity, size and explicit legal gates.
+
+    This function contains NO persistence, no user message processing,
+    no outgoing sends and no tokens. Real data ingestion still requires a
+    separate explicitly reviewed and enabled connector implementation.
+    """
+    if not staging_pilot_enabled or not written_meta_policy_clearance:
+        return []
+    if not isinstance(raw_body, bytes) or len(raw_body) > 256 * 1024:
+        return []
+    if not verify_meta_signature(raw_body, signature, app_secret):
+        return []
+    try:
+        payload = json.loads(raw_body)
+    except (TypeError, ValueError, UnicodeError):
+        return []
+    return resolve_signed_event_routes(
+        payload, phone_owners=phone_owners, signature_verified=True
+    )

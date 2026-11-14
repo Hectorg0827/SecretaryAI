@@ -58,7 +58,7 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
     lines.append(f"  {len(healthy)} products at verified healthy stock levels.")
     if unassessed:
         lines.append(f"  {len(unassessed)} product(s) could not be assessed; do not claim inventory is healthy.")
-    return "\n".join(lines)
+        return chr(10).join(lines)
 
 
 def summarize_account(account: dict, recent_orders: list[dict], industry_module=None) -> str:

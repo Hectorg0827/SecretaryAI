@@ -52,6 +52,10 @@ const COST_FIELDS = [
   { key: 'customs_brokerage', label: 'Customs brokerage' },
   { key: 'port_fees', label: 'Port fees' },
   { key: 'domestic_freight', label: 'Domestic freight' },
+  { key: 'fuel_surcharge', label: 'Freight fuel surcharge' },
+  { key: 'origin_charges', label: 'Origin documentation / terminal charges' },
+  { key: 'demurrage', label: 'Demurrage and detention' },
+  { key: 'exam_fees', label: 'Customs examination fees' },
   { key: 'excise', label: 'Excise tax' },
   { key: 'other_taxes', label: 'Other taxes' },
 ] as const;

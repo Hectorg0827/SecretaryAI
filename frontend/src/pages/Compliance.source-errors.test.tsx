@@ -36,7 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSetupStatus.mockResolvedValue({ is_setup: true });
   mocks.getStatus.mockResolvedValue({
-    overall: 'compliant', active_states: 1, total_products: 0,
+    overall: 'ok', active_states: 1, total_products: 0,
     critical_alerts: 0, warning_alerts: 0, deadlines_due_7_days: 0,
     state_status: {},
   });

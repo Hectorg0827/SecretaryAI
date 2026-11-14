@@ -120,6 +120,9 @@ export default function ShipmentPricing() {
       const source = await api.get<FinanceAssessment>(
         `/api/logistics/finance/assessments/${encodeURIComponent(assessmentId.trim())}`,
       );
+      if (source.currency !== 'USD') {
+        throw new Error('The assessment currency is not USD. Verify and document the FX conversion before using these supplier costs for USD pricing.');
+      }
       if (!source.lines?.length) throw new Error('The assessment has no usable product lines.');
       const mapped = source.lines
         .filter((line) => Number(line.cases?.available) > 0)

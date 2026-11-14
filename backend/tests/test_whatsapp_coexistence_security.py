@@ -5,6 +5,7 @@ import json
 
 from app.intelligence.whatsapp_coexistence import (
     resolve_signed_event_routes, verify_meta_signature,
+    validated_whatsapp_routing_candidates,
 )
 
 
@@ -107,4 +108,46 @@ def test_unknown_payload_rejected_instead_of_tenant_broadcast():
     assert resolve_signed_event_routes(
         {"object": "other", "entry": _payload()["entry"]},
         phone_owners={"phone-A": [_owner()]}, signature_verified=True
+    ) == []
+
+
+
+def test_routing_gate_never_accepts_unsigned_or_unapproved_pilot_payloads():
+    raw_body = json.dumps(_payload()).encode()
+    secret = "fixture-meta-app-secret"
+    signature = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    base = {
+        "raw_body": raw_body, "signature": signature, "app_secret": secret,
+        "phone_owners": {"phone-A": [_owner()]},
+    }
+    assert validated_whatsapp_routing_candidates(**base) == []
+    assert validated_whatsapp_routing_candidates(
+        **base, staging_pilot_enabled=True
+    ) == []
+    assert validated_whatsapp_routing_candidates(
+        **base, written_meta_policy_clearance=True
+    ) == []
+    assert validated_whatsapp_routing_candidates(
+        **{**base, "signature": "sha256=" + "0" * 64},
+        staging_pilot_enabled=True, written_meta_policy_clearance=True
+    ) == []
+    routed = validated_whatsapp_routing_candidates(
+        **base, staging_pilot_enabled=True,
+        written_meta_policy_clearance=True,
+    )
+    assert len(routed) == 1
+    assert routed[0].user_id == "employee-A"
+    assert "Confidential" not in repr(routed)
+
+
+def test_invalid_json_and_excessive_webhook_size_are_rejected():
+    assert validated_whatsapp_routing_candidates(
+        raw_body=b"{bad", signature=None, app_secret="secret",
+        phone_owners={}, staging_pilot_enabled=True,
+        written_meta_policy_clearance=True,
+    ) == []
+    assert validated_whatsapp_routing_candidates(
+        raw_body=b"x" * (256 * 1024 + 1), signature=None, app_secret="secret",
+        phone_owners={}, staging_pilot_enabled=True,
+        written_meta_policy_clearance=True,
     ) == []

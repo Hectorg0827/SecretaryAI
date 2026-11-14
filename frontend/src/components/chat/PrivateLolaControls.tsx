@@ -26,6 +26,9 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [prefs, setPrefs] = useState<Preferences>(defaults);
   const [gmailConnected, setGmailConnected] = useState(false);
+  const [whatsapp, setWhatsapp] = useState<{ status: string; employee_consented: boolean;
+    history_sync_requested: boolean; can_launch_embedded_signup: boolean } | null>(null);
+  const [historyConsent, setHistoryConsent] = useState(false);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -43,11 +46,15 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
       api.get<{ contacts: Contact[] }>('/api/lola/continuity/contacts'),
       api.get<{ preferences: Preferences }>('/api/lola/continuity/preferences'),
       api.settings.integrations(),
-    ]).then(([people, settings, integrations]) => {
+      api.get<{ status: string; employee_consented: boolean; history_sync_requested: boolean;
+        can_launch_embedded_signup: boolean }>('/api/lola/continuity/whatsapp/readiness'),
+    ]).then(([people, settings, integrations, whatsappState]) => {
       if (!active) return;
       setContacts(people.contacts);
       setPrefs(settings.preferences);
       setGmailConnected(Boolean(integrations.gmail?.connected));
+      setWhatsapp(whatsappState);
+      setHistoryConsent(whatsappState.history_sync_requested);
       setReady(true);
     }).catch(() => {
       if (active) setError('Your private vault is unavailable; no messages were accessed.');
@@ -108,6 +115,35 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
     }
   };
 
+  const updateWhatsAppConsent = async (consent: boolean) => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (consent) {
+        const response = await api.put<{ status: string; employee_consented: boolean;
+          history_sync_requested: boolean }>('/api/lola/continuity/whatsapp/consent', {
+          consent: true, allow_one_time_history_sync: historyConsent,
+        });
+        setWhatsapp((previous) => previous ? { ...previous,
+          status: response.status, employee_consented: true,
+          history_sync_requested: response.history_sync_requested,
+        } : null);
+        setNotice('Your choice was saved privately. WhatsApp is NOT connected or syncing; Meta approval is still required.');
+      } else {
+        await api.delete('/api/lola/continuity/whatsapp/consent');
+        setWhatsapp((previous) => previous ? { ...previous,
+          status: 'disconnected', employee_consented: false, history_sync_requested: false,
+        } : null);
+        setHistoryConsent(false);
+        setNotice('Your local WhatsApp connection request was withdrawn.');
+      }
+      onUpdated();
+    } catch {
+      setError('Unable to update your private WhatsApp consent.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const syncGmail = async () => {
     setBusy(true); setError(''); setNotice('');
     try {
@@ -162,12 +198,31 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
               <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                 <h3 className="text-sm font-semibold text-slate-800">My WhatsApp Business</h3>
                 <p className="text-xs font-medium text-amber-800">
-                  Not connected — official Meta Coexistence approval is pending.
+                  {whatsapp?.employee_consented
+                    ? 'Permission requested — Meta Coexistence not connected.'
+                    : 'Not connected — official Meta Coexistence approval is pending.'}
                 </p>
                 <p className="text-xs text-slate-600">
                   Lola does not access your WhatsApp account. You can keep using your existing
                   WhatsApp Business app and record an activity manually below.
                   Manual notes are marked as unverified by WhatsApp.
+                </p>
+                <label className="flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" disabled={busy || Boolean(whatsapp?.employee_consented)}
+                    checked={historyConsent}
+                    onChange={(event) => setHistoryConsent(event.target.checked)} />
+                  Request optional one-time past message history sharing if Meta approves it
+                </label>
+                <button type="button" disabled={busy}
+                  onClick={() => void updateWhatsAppConsent(!whatsapp?.employee_consented)}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50">
+                  {whatsapp?.employee_consented
+                    ? 'Withdraw my connection request'
+                    : 'Request a private WhatsApp connection'}
+                </button>
+                <p className="text-xs text-slate-500">
+                  Recording a request does not grant Meta access or sync any chats.
+                  Only the owner can grant consent. Managers cannot connect a number on behalf of an employee.
                 </p>
                 <a
                   className="inline-block text-xs font-medium text-slate-700 underline"

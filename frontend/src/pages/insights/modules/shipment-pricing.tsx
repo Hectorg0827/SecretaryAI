@@ -122,7 +122,7 @@ export default function ShipmentPricing() {
     setError(null); setLoadingSource(true); setResult(null);
     try {
       const source = await api.get<FinanceAssessment>(
-        `/api/logistics/finance/assessments/${encodeURIComponent(assessmentId.trim())}`,
+        `/api/insights/price-book/sources/assessments/${encodeURIComponent(assessmentId.trim())}`,
       );
       if (source.currency !== 'USD') {
         throw new Error('The assessment currency is not USD. Verify and document the FX conversion before using these supplier costs for USD pricing.');

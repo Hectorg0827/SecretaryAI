@@ -17,6 +17,17 @@ REQUIRED_COMPONENTS = frozenset({
     "customs_brokerage", "port_fees", "domestic_freight",
     "excise", "other_taxes",
 })
+# Costs incurred after warehouse arrival are NOT additional customs landed cost.
+# A fully loaded selling price must also recover these operating expenses.
+WAREHOUSE_COMPONENTS = frozenset({
+    "warehouse_receiving",     # unloading, counting, palletizing
+    "warehouse_storage",       # forecast pallet-days / pallet-months
+    "warehouse_handling",      # picking, case handling, order preparation
+    "warehouse_outbound",      # delivery from warehouse to customer
+    "warehouse_shrink",        # damage, breakage and shrinkage provision
+    "inventory_carrying",      # working-capital / inventory financing cost
+})
+KNOWN_COST_COMPONENTS = REQUIRED_COMPONENTS | WAREHOUSE_COMPONENTS
 
 
 def _nonnegative(value: Decimal, label: str) -> None:
@@ -67,6 +78,12 @@ class PriceWaterfall:
     estimated_retailer_to_consumer: Decimal
     complete_cost_components: bool
     documented_cost_components: bool
+    warehouse_cost_per_case: Decimal
+    fully_loaded_cost_per_case: Decimal
+    fully_loaded_contribution_margin_pct: Decimal
+    minimum_list_price_at_target_margin: Decimal
+    missing_warehouse_components: tuple[str, ...]
+    complete_warehouse_components: bool
     exception_reasons: tuple[str, ...]
     approval_required: bool = True
     status: str = "draft_unverified"
@@ -88,25 +105,35 @@ def calculate_price_waterfall(data: PriceScenario) -> PriceWaterfall:
 
     seen: set[str] = set()
     for line in data.cost_lines:
-        if not line.component or line.component in seen:
-            raise ValueError("Cost component names must be nonempty and unique")
+        if line.component not in KNOWN_COST_COMPONENTS or line.component in seen:
+            raise ValueError("Unknown or duplicate cost component")
         seen.add(line.component)
         _nonnegative(line.amount_per_case, f"{line.component} cost")
 
     complete = REQUIRED_COMPONENTS.issubset(seen)
     documented = complete and all(line.source_record_id and line.source_revision for line in data.cost_lines)
-    landed = sum((line.amount_per_case for line in data.cost_lines), ZERO)
+    landed = sum((line.amount_per_case for line in data.cost_lines
+                  if line.component in REQUIRED_COMPONENTS), ZERO)
+    warehouse = sum((line.amount_per_case for line in data.cost_lines
+                     if line.component in WAREHOUSE_COMPONENTS), ZERO)
+    fully_loaded = landed + warehouse
+    warehouse_complete = WAREHOUSE_COMPONENTS.issubset(seen)
     net = data.price_to_distributor - data.discount_per_case - data.returns_allowance_per_case
     if net <= 0:
         raise ValueError("Discounts and allowances consume all net revenue")
     gross_profit = net - landed
-    contribution = gross_profit - data.commission_per_case - data.marketing_per_case
+    contribution = gross_profit - warehouse - data.commission_per_case - data.marketing_per_case
 
     # Gross-margin (not markup) percentages. The downstream chain is a
     # scenario and excludes jurisdiction-specific taxes/fees at retail.
     distributor_to_retailer = net / (Decimal("1") - data.distributor_margin_pct / HUNDRED)
     retailer_to_consumer = distributor_to_retailer / (Decimal("1") - data.retailer_margin_pct / HUNDRED)
     margin_pct = HUNDRED * gross_profit / net
+    minimum_list_price = (
+        (fully_loaded + data.commission_per_case + data.marketing_per_case)
+        / (Decimal("1") - data.target_margin_pct / HUNDRED)
+        + data.discount_per_case + data.returns_allowance_per_case
+    )
     reasons = []
     if not complete:
         reasons.append("missing_cost_categories")
@@ -132,6 +159,12 @@ def calculate_price_waterfall(data: PriceScenario) -> PriceWaterfall:
         estimated_retailer_to_consumer=retailer_to_consumer,
         complete_cost_components=complete,
         documented_cost_components=bool(documented),
+        warehouse_cost_per_case=warehouse,
+        fully_loaded_cost_per_case=fully_loaded,
+        fully_loaded_contribution_margin_pct=HUNDRED * contribution / net,
+        minimum_list_price_at_target_margin=minimum_list_price,
+        missing_warehouse_components=tuple(sorted(WAREHOUSE_COMPONENTS - seen)),
+        complete_warehouse_components=warehouse_complete,
         exception_reasons=tuple(reasons),
     )
 

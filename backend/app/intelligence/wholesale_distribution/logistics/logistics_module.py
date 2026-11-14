@@ -32,6 +32,7 @@ from .customs import CustomsMonitor, ReceiptProcessor
 from .cost_reconciliation import CostReconciliationEngine
 from .learning import LandedCostBreakdown as LCDType, LearningEngine, LeadTimeRecord
 from .notifications import AlertType, LogisticsAlert, NotificationRouter
+from .journey import JourneyStage
 
 
 # ─── Configuration ────────────────────────────────────────────────────────────
@@ -672,14 +673,17 @@ class LogisticsModule:
         """
         Return a human-readable summary of where a ProcurementCycle stands.
         """
-        days_in_stage = cycle.days_in_current_stage()
+        # Previously read cycle.current_stage / started_at / supplier_id /
+        # total_cases, none of which exist on ProcurementCycle (AttributeError).
+        po = cycle.purchase_order
         return {
             "po_number": cycle.po_number,
-            "current_stage": cycle.current_stage.value,
-            "days_in_current_stage": days_in_stage,
-            "started_at": cycle.started_at,
-            "supplier_id": cycle.supplier_id,
-            "total_cases": cycle.total_cases,
+            "current_stage": cycle.stage.value,
+            "status": cycle.status.value,
+            "days_in_current_stage": round(cycle.days_in_current_stage(), 1),
+            "started_at": cycle.created_at,
+            "supplier_id": po.supplier_id if po else "",
+            "total_cases": po.total_cases if po else 0,
             "has_freight_booking": cycle.freight_booking is not None,
             "has_warehouse_receipt": cycle.warehouse_receipt is not None,
             "cost_variances_count": len(cycle.cost_variances),
@@ -703,6 +707,21 @@ class LogisticsModule:
                 "Stage 8 — Cost Reconciliation & Variance Detection",
                 "Stage 9 — Learning & Refinement",
             ],
+            "journey": {
+                "stages": [st.label for st in JourneyStage],
+                "capabilities": [
+                    "provenance-tracked milestones (verified vs reported)",
+                    "ETA provenance and delay detection",
+                    "document intelligence (B/L, packing list, invoices, customs, POD, damage, claims)",
+                    "receiving reconciliation with damage segregation and claim drafts",
+                    "proactive monitoring with reviewable drafts",
+                    "role-scoped visibility and conversational Q&A",
+                ],
+                "never_executes": [
+                    "freight bookings", "customs submissions", "financial writes",
+                    "stock adjustments", "supplier/customer communications",
+                ],
+            },
             "config": {
                 "service_level_target": self.config.service_level_target,
                 "target_gross_margin_pct": self.config.target_gross_margin_pct,

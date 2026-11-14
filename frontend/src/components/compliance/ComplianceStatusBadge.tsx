@@ -6,13 +6,13 @@ import { ComplianceStatus } from '../../lib/api';
 type OverallStatus = ComplianceStatus['overall'];
 
 const STATUS_STYLES: Record<OverallStatus, string> = {
-  ok:       'bg-green-100 text-green-700',
+  ok:       'bg-slate-100 text-slate-700',
   warning:  'bg-amber-100 text-amber-700',
   critical: 'bg-red-100 text-red-700',
 };
 
 const STATUS_LABELS: Record<OverallStatus, string> = {
-  ok:       'Compliant',
+  ok:       'No recorded alerts',
   warning:  'Warning',
   critical: 'Critical',
 };

@@ -119,6 +119,9 @@ def test_unverified_new_shipment_identifiers_are_hidden_until_named_person_confi
     assert ledger.get("SHP-1").container_numbers == ["MSCU1234566"]
     updated = purchase_journey_coverage([po()], ledger)["orders"][0]
     assert updated["shipment_link_status"] == "linked_staff_attested"
+    assert updated["linked_shipment_ids"] == ["SHP-1"]
+    assert updated["reported_unverified_shipment_ids"] == []
+    assert updated["shipping_status_verified"] is False
 
 
 def test_unverified_update_cannot_replace_or_append_official_shipment_identifiers():
@@ -140,3 +143,51 @@ def test_unverified_update_cannot_replace_or_append_official_shipment_identifier
     assert updated.po_numbers == ["PO-1", "PO-UNVERIFIED"]
     assert updated.bol_number == "UNVERIFIEDBOL"
     assert not updated.pending_evidence()
+
+
+def test_confirmed_email_po_link_survives_full_event_replay():
+    ledger = ShipmentLedger("company-A")
+    report = event(ledger, source=SourceType.EMAIL_PARSED)
+    ledger.confirm_evidence(report.evidence_id, confirmed_by="warehouse-operator-1")
+    replayed = ShipmentLedger.rebuild("company-A", ledger.events())
+    assert replayed.get("SHP-1").po_numbers == ["PO-1"]
+    result = purchase_journey_coverage([po()], replayed)["orders"][0]
+    assert result["shipment_link_status"] == "linked_staff_attested"
+    assert result["linked_shipment_ids"] == ["SHP-1"]
+    assert result["reported_unverified_shipment_ids"] == []
+    assert result["container_receipt_verified"] is False
+
+
+def test_confirming_different_evidence_does_not_promote_unreviewed_po_link():
+    ledger = ShipmentLedger("company-A")
+    reported = event(ledger, source=SourceType.EMAIL_PARSED)
+    other = ledger.ingest(LogisticsEvent(
+        company_id="company-A", shipment_id="SHP-1", kind="milestone",
+        code="vessel_departed", source=SourceType.EMAIL_PARSED,
+        source_ref="gmail-independent-carrier-update",
+    ))
+    ledger.confirm_evidence(other.evidence_id, confirmed_by="warehouse-operator-2")
+    result = purchase_journey_coverage([po()], ledger)["orders"][0]
+    assert result["shipment_link_status"] == "unverified_report_only"
+    assert result["linked_shipment_ids"] == []
+    assert result["reported_unverified_shipment_ids"] == ["SHP-1"]
+    assert reported.evidence_id != other.evidence_id
+
+
+def test_confirmed_po_update_survives_replay_without_claiming_customs_release():
+    ledger = ShipmentLedger("company-A")
+    event(ledger, number="PO-OTHER")
+    proposed = ledger.ingest(LogisticsEvent(
+        company_id="company-A", shipment_id="SHP-1",
+        kind="shipment_updated", source=SourceType.EMAIL_PARSED,
+        source_ref="gmail-proposed-po",
+        payload={"po_numbers": ["PO-1"]},
+    ))
+    before = purchase_journey_coverage([po()], ledger)["orders"][0]
+    assert before["shipment_link_status"] == "unverified_report_only"
+    ledger.confirm_evidence(proposed.evidence_id, confirmed_by="manager-1")
+    replayed = ShipmentLedger.rebuild("company-A", ledger.events())
+    after = purchase_journey_coverage([po()], replayed)["orders"][0]
+    assert after["shipment_link_status"] == "linked_staff_attested"
+    assert after["shipping_status_verified"] is False
+    assert after["warehouse_receipt_attributed_to_shipment"] is False

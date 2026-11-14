@@ -39,11 +39,36 @@ def purchase_journey_coverage(rows: list[dict], ledger: ShipmentLedger) -> dict:
             raise PurchaseCoverageInvalid("Purchase order belongs to another tenant")
         po_index[number] = row
 
-    # Only events written under the real tenant can establish an association.
-    # User-reported/email/AI links remain explicitly non-authoritative.
+    # Evidence confirmations are separate append-only events. The original
+    # email/document report retains its untrusted source after confirmation,
+    # so resolve the named employee's *actual confirmed evidence* before
+    # projecting it as staff-attested. Never trust a bare confirmation claim.
     associations = defaultdict(list)
-    active_shipments = {s.shipment_id for s in ledger.shipments()}
-    for event in ledger.events():
+    active = {s.shipment_id: s for s in ledger.shipments()}
+    events = ledger.events()
+    confirmed_events = {
+        (event.shipment_id, event.source_ref, event.confirmed_by)
+        for event in events
+        if (event.company_id == ledger.company_id
+            and event.shipment_id in active
+            and event.kind == "evidence_confirmed"
+            and event.source == SourceType.USER_CONFIRMED
+            and bool(event.confirmed_by)
+            and bool(event.source_ref))
+    }
+    confirmed_evidence = {
+        (shipment_id, evidence.evidence_id): evidence
+        for shipment_id, shipment in active.items()
+        for evidence in shipment.evidence
+        if (evidence.kind in PO_EVENT_KINDS
+            and evidence.status == "confirmed"
+            and bool(evidence.reviewed_by)
+            and (shipment_id, evidence.evidence_id, evidence.reviewed_by)
+                in confirmed_events)
+    }
+    # Only events written under the real tenant can establish an association.
+    # User-reported/email/AI links remain unverified until named confirmation.
+    for event in events:
         if event.company_id != ledger.company_id or event.kind not in PO_EVENT_KINDS:
             continue
         if event.shipment_id not in active_shipments:
@@ -53,9 +78,21 @@ def purchase_journey_coverage(rows: list[dict], ledger: ShipmentLedger) -> dict:
             continue
         for number in set(n for n in numbers if isinstance(n, str)):
             if number in po_index:
+                origin = AUTHORISED_PO_LINK_SOURCES.get(event.source, "unverified_report")
+                if origin == "unverified_report":
+                    evidence = confirmed_evidence.get(
+                        (event.shipment_id, f"evd-{event.idempotency_key[:16]}")
+                    )
+                    # A confirmation must point to precisely this event and
+                    # its recorded PO payload; merely confirming other
+                    # evidence on the shipment must not promote the PO link.
+                    if (evidence is not None and evidence.payload == event.payload
+                            and evidence.source == event.source
+                            and evidence.source_ref == event.source_ref):
+                        origin = "staff_attested"
                 associations[number].append({
                     "shipment_id": event.shipment_id,
-                    "origin": AUTHORISED_PO_LINK_SOURCES.get(event.source, "unverified_report"),
+                    "origin": origin,
                     "source": event.source.value,
                     "source_ref": event.source_ref,
                 })
@@ -65,7 +102,9 @@ def purchase_journey_coverage(rows: list[dict], ledger: ShipmentLedger) -> dict:
         entries = associations[number]
         verified = [e for e in entries if e["origin"] != "unverified_report"]
         verified_ids = sorted({e["shipment_id"] for e in verified})
-        reported_ids = sorted({e["shipment_id"] for e in entries if e["origin"] == "unverified_report"})
+        reported_ids = sorted({
+            e["shipment_id"] for e in entries if e["origin"] == "unverified_report"
+        } - set(verified_ids))
         if len(verified_ids) > 1:
             link_state = "multiple_journeys_review_required"
         elif any(e["origin"] == "erp_recorded" for e in verified):

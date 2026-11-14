@@ -261,7 +261,7 @@ async def gmail_connect_url(user: dict = Depends(get_current_user)):
         "company_id": user["company_id"], "user_id": user["sub"],
         "provider": "gmail",
     }))
-    return {"url": build_google_authorization_url(state)}
+    return {"url": build_google_authorization_url(state, personal_gmail=True)}
 
 
 @router.get("/gmail/callback")

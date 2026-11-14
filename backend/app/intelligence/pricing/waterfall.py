@@ -27,7 +27,28 @@ WAREHOUSE_COMPONENTS = frozenset({
     "warehouse_shrink",        # damage, breakage and shrinkage provision
     "inventory_carrying",      # working-capital / inventory financing cost
 })
-KNOWN_COST_COMPONENTS = REQUIRED_COMPONENTS | WAREHOUSE_COMPONENTS
+# Additional import exceptions present in the Logistics freight/port ledger.
+# They must not disappear into an unlabeled "other" deduction or be double counted.
+EXTRA_LOGISTICS_COMPONENTS = frozenset({
+    "fuel_surcharge", "origin_charges", "demurrage", "exam_fees",
+})
+INBOUND_COMPONENTS = REQUIRED_COMPONENTS | EXTRA_LOGISTICS_COMPONENTS
+KNOWN_COST_COMPONENTS = INBOUND_COMPONENTS | WAREHOUSE_COMPONENTS
+
+# One-way integration dictionary. Never charge both alias and canonical value
+# for the same source invoice line.
+LOGISTICS_TO_PRICE_COMPONENT = {
+    "ocean_freight": "international_freight",
+    "fuel_surcharge": "fuel_surcharge",
+    "origin_charges": "origin_charges",
+    "insurance": "insurance",
+    "customs_duty": "duty",
+    "broker_fees": "customs_brokerage",
+    "port_charges": "port_fees",
+    "demurrage": "demurrage",
+    "drayage": "domestic_freight",
+    "exam_fees": "exam_fees",
+}
 
 
 def _nonnegative(value: Decimal, label: str) -> None:
@@ -113,7 +134,7 @@ def calculate_price_waterfall(data: PriceScenario) -> PriceWaterfall:
     complete = REQUIRED_COMPONENTS.issubset(seen)
     documented = complete and all(line.source_record_id and line.source_revision for line in data.cost_lines)
     landed = sum((line.amount_per_case for line in data.cost_lines
-                  if line.component in REQUIRED_COMPONENTS), ZERO)
+                  if line.component in INBOUND_COMPONENTS), ZERO)
     warehouse = sum((line.amount_per_case for line in data.cost_lines
                      if line.component in WAREHOUSE_COMPONENTS), ZERO)
     fully_loaded = landed + warehouse

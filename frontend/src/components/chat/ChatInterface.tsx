@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, RotateCcw, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
+import { PrivateFollowups } from './PrivateFollowups';
 
 const QUICK_PROMPTS = [
   'How\'s our inventory looking?',
@@ -49,6 +50,8 @@ export function ChatInterface() {
           <RotateCcw size={16} />
         </button>
       </div>
+
+      <PrivateFollowups onDraft={sendMessage} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">

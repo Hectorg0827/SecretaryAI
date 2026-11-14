@@ -70,7 +70,9 @@ describe('compliance clearance evidence', () => {
     expect(page.textContent).toContain('Setup incomplete · clearance not verified');
     expect(page.textContent).toContain('No recorded alerts does not mean regulatory approval');
     expect(page.textContent).not.toContain('Compliant');
-    expect(page.textContent).not.toContain('No recorded alerts' + '</span>');
+    const headerStatuses = Array.from(page.querySelectorAll('[role="status"]'))
+      .map((element) => element.textContent);
+    expect(headerStatuses).not.toContain('No recorded alerts');
   });
 
   it('does not claim clearance if setup source fails even when status says ok', async () => {

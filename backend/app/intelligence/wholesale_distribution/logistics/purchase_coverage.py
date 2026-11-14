@@ -71,7 +71,7 @@ def purchase_journey_coverage(rows: list[dict], ledger: ShipmentLedger) -> dict:
     for event in events:
         if event.company_id != ledger.company_id or event.kind not in PO_EVENT_KINDS:
             continue
-        if event.shipment_id not in active_shipments:
+        if event.shipment_id not in active:
             continue
         numbers = event.payload.get("po_numbers") if isinstance(event.payload, dict) else None
         if not isinstance(numbers, list):

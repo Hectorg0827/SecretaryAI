@@ -85,7 +85,7 @@ def pending_followups(
             "last_outbound_at": at.isoformat(),
             "due_at": due_at.isoformat(),
             "summary": outbound.get("summary", ""),
-            "reason": "No response found after the most recent outbound draft or quotation",
+            "reason": "No reply recorded in the available activity after the last draft or quotation",
         })
     result.sort(key=lambda item: (item["due_at"], item["contact_id"], item["project_key"]))
     return result

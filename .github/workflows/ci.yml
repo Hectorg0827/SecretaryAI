@@ -50,6 +50,25 @@ jobs:
       - name: Mutation-test Phase 4 security guards
         run: python scripts/mutation_phase4.py
 
+  backend-browser-container:
+    name: Backend Chromium container (non-root smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build actual staging backend image and launch Chromium as appuser
+        run: |
+          docker build --progress=plain \
+            -f backend/Dockerfile \
+            -t lionbi-backend-browser-qa:${{ github.sha }} \
+            backend
+      - name: Verify runtime browser in finished container
+        run: |
+          docker run --rm \
+            --entrypoint python \
+            lionbi-backend-browser-qa:${{ github.sha }} \
+            scripts/verify_playwright_runtime.py
+
   frontend:
     name: Web frontend (lint / typecheck / build)
     runs-on: ubuntu-latest

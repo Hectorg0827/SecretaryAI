@@ -7,7 +7,7 @@ import { INSIGHTS, insightsForRole } from './insights/registry';
 import type { Role } from '../hooks/useAuth';
 
 // Roles the /insights route admits (App.tsx RoleGuard).
-const ROUTE_ROLES: readonly Role[] = ['owner', 'manager', 'sales_rep', 'back_office'];
+const ROUTE_ROLES: readonly Role[] = ['owner', 'manager', 'sales_rep', 'back_office', 'pricing_billbacks'];
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;

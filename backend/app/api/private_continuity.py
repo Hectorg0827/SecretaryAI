@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_db, get_adapter
+from app.config import get_settings
 from app.auth.rbac import get_current_user
 from app.intelligence.private_continuity import pending_followups, canonical_project_key
 

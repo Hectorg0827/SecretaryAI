@@ -59,7 +59,7 @@ def configured_client(base: str) -> httpx.Client:
 def read_json(client: httpx.Client, path: str) -> dict:
     response = client.get(path)
     check(response.status_code == 200,
-          f"GET {path.split('?')[0]} returned HTTP {response.status_code} (not accepted)")
+          f"Authenticated staging read returned HTTP {response.status_code} (not accepted)")
     check(response.headers.get("content-type", "").startswith("application/json"),
           "Expected verified application JSON")
     data = response.json()

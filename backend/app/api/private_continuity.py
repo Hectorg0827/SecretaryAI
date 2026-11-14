@@ -95,7 +95,7 @@ async def sync_private_gmail(
             if existing:
                 continue
             db.table("lola_private_events").insert({
-                "company_id": company_id, "user_id": user_id, **activity
+                "company_id": company_id, "user_id": user_id, "origin": "gmail_api", **activity
             }).execute()
             created += 1
     except Exception:
@@ -197,21 +197,16 @@ def record_private_event(body: NewEvent, user: dict = Depends(get_current_user),
     if occurred.tzinfo is None or occurred > datetime.now(timezone.utc) + timedelta(minutes=5):
         raise HTTPException(status_code=422, detail="Valid past timezone-aware timestamp required")
     if body.source_ref:
-        try:
-            existing = (_owned(db, "lola_private_events", user)
-                .eq("channel", body.channel).eq("source_ref", body.source_ref)
-                .limit(1).execute())
-            if existing.data:
-                return {"event": existing.data[0], "deduplicated": True}
-        except Exception:
-            raise HTTPException(status_code=503, detail="Private event verification unavailable") from None
+        # Public callers may record a manual observation, never impersonate an
+        # API-verified provider message by supplying its opaque source ID.
+        raise HTTPException(status_code=422, detail="Provider source IDs are assigned by connector sync only")
     try:
         rows = db.table("lola_private_events").insert({
             "company_id": company_id, "user_id": user_id,
             "contact_id": contact["id"], "project_key": body.project_key.strip().lower(),
             "channel": body.channel, "direction": body.direction, "kind": body.kind,
             "occurred_at": occurred.isoformat(), "summary": body.summary,
-            "source_ref": body.source_ref,
+            "source_ref": None, "origin": "manual",
         }).execute()
         return {"event": (rows.data or [None])[0], "deduplicated": False}
     except Exception:
@@ -237,7 +232,7 @@ def private_timeline(
 
 @router.get("/followups")
 def private_followups(user: dict = Depends(get_current_user), db=Depends(get_db)):
-    """On-demand due list; durable scheduler/push must be added before GA."""
+    """On-demand due list of recorded activity; unconnected channels remain unknown."""
     company_id, user_id = _scope(user)
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
@@ -263,6 +258,13 @@ def private_followups(user: dict = Depends(get_current_user), db=Depends(get_db)
         if not contact:
             continue
         item["contact_name"] = contact["display_name"]
+        item["evidence_origin"] = next(
+            (e.get("origin", "manual") for e in events if str(e.get("id")) == str(item["event_id"])),
+            "manual",
+        )
+        item["coverage_warning"] = (
+            "Lola can only evaluate activity recorded in connected or manually logged channels."
+        )
         item["available_channels"] = [
             channel for channel, key in (("email", "email"), ("whatsapp", "phone"))
             if contact.get(key)

@@ -10,18 +10,19 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
-def load_account_memory(db, company_id: str, account_names: list[str]) -> str:
+def load_account_memory(db, company_id: str, account_names: list[str], user_id: str | None = None) -> str:
     """
     Load memory facts for named accounts, return as a formatted string
     suitable for injection into the AI system prompt.
     """
-    if not account_names:
+    if not account_names or not user_id:
         return ""
     try:
         rows = (
-            db.table("account_memory")
+            db.table("lola_personal_account_memory")
             .select("account_name, facts")
             .eq("company_id", company_id)
+            .eq("user_id", user_id)
             .in_("account_name", account_names[:10])
             .execute()
         ).data or []
@@ -39,11 +40,13 @@ def load_account_memory(db, company_id: str, account_names: list[str]) -> str:
         return ""
 
 
-def extract_and_save_memory(db, company_id: str, account_name: str, ai_response: str) -> None:
+def extract_and_save_memory(db, company_id: str, account_name: str, ai_response: str, user_id: str | None = None) -> None:
     """
     Parse the AI response for durable facts about an account and upsert them.
     Called asynchronously after each conversation turn.
     """
+    if not user_id:
+        return  # Never persist AI-derived personal facts to legacy company memory.
     import anthropic
     from app.config import get_settings
     from app.ai.model_router import model_for
@@ -70,9 +73,10 @@ def extract_and_save_memory(db, company_id: str, account_name: str, ai_response:
                 return
             # Load existing
             existing = (
-                db.table("account_memory")
+                db.table("lola_personal_account_memory")
                 .select("facts")
                 .eq("company_id", company_id)
+                .eq("user_id", user_id)
                 .eq("account_name", account_name)
                 .maybe_single()
                 .execute()
@@ -86,9 +90,9 @@ def extract_and_save_memory(db, company_id: str, account_name: str, ai_response:
                     current_facts.append({"fact": nf["fact"], "updated_at": now})
             # Keep only the 20 most recent facts
             current_facts = current_facts[-20:]
-            db.table("account_memory").upsert(
-                {"company_id": company_id, "account_name": account_name, "facts": current_facts, "updated_at": now},
-                on_conflict="company_id,account_name",
+            db.table("lola_personal_account_memory").upsert(
+                {"company_id": company_id, "user_id": user_id, "account_name": account_name, "facts": current_facts, "updated_at": now},
+                on_conflict="company_id,user_id,account_name",
             ).execute()
         except Exception as exc:
             log.warning("Memory extraction failed for %s: %s", account_name, exc)

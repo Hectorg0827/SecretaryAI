@@ -234,17 +234,19 @@ async def test_general_business_context_accepts_object_invoices_with_zero_and_em
     from decimal import Decimal
     from app.api.chat import _fetch_data_for_intent
     inv = SimpleNamespace(
-        customer_id="synthetic-customer", customer_name="Synthetic",
-        date=date.today(), total=Decimal("0"), line_items=[],
+        qb_id="INV-ZERO", customer_id="synthetic-customer", customer_name="Synthetic",
+        date=date.today(), total=Decimal("0"), status="paid", line_items=[],
     )
     adapter = SimpleNamespace(
-        get_all_customers=AsyncMock(return_value=[]),
+        get_all_customers=AsyncMock(return_value=[
+            SimpleNamespace(qb_id="synthetic-customer", name="Synthetic", balance=Decimal("0"))
+        ]),
         get_orders_last_n_days=AsyncMock(return_value=[inv]),
         get_inventory_merged=AsyncMock(return_value=[]),
     )
     data = await _fetch_data_for_intent("general_question", "Today's status", adapter)
     assert data["sales_summary"]["order_count"] == 1
-    assert data["sales_summary"]["total_revenue"] == 0
+    assert data["sales_summary"]["gross_billed_amount"] == 0
 
 
 @pytest.mark.asyncio

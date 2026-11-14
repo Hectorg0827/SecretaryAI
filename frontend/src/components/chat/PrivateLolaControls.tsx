@@ -20,7 +20,7 @@ const defaults: Preferences = {
   timezone: 'America/New_York', reminder_hour: 9,
 };
 
-export function PrivateLolaControls() {
+export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [prefs, setPrefs] = useState<Preferences>(defaults);
@@ -66,6 +66,7 @@ export function PrivateLolaControls() {
       setContacts((rows) => [...rows, response.contact]);
       setPerson(''); setEmail(''); setPhone('');
       setNotice('Contact saved. Confirm its identifiers before Lola links conversations.');
+      onUpdated();
     } catch { setError('Could not save private contact.'); }
     finally { setBusy(false); }
   };
@@ -78,6 +79,7 @@ export function PrivateLolaControls() {
         row.id === contact.id ? { ...row, identity_verified: true } : row
       ));
       setNotice('Identifiers confirmed by you for your private Lola only.');
+      onUpdated();
     } catch { setError('Could not confirm the identity.'); }
     finally { setBusy(false); }
   };
@@ -88,6 +90,7 @@ export function PrivateLolaControls() {
       await api.put('/api/lola/continuity/preferences', next);
       setPrefs(next);
       setNotice('Private preferences saved.');
+      onUpdated();
     } catch { setError('Could not save private preferences.'); }
     finally { setBusy(false); }
   };
@@ -115,6 +118,7 @@ export function PrivateLolaControls() {
         r.matched_verified_contacts + ' matched to confirmed contacts; ' +
         r.recorded + ' private events recorded. Nothing shared with the company.'
       );
+      onUpdated();
     } catch { setError('Private Gmail synchronization failed; no company mailbox was used.'); }
     finally { setBusy(false); }
   };

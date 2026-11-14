@@ -182,7 +182,7 @@ def build_query_context(intent: str, data: dict, industry_module=None) -> str:
             "Do not say the business, its products, or a shipment is licensed, "
             "approved, or compliant without complete authoritative evidence."
         )
-        return "\\n".join(lines)
+        return chr(10).join(lines)
 
     if intent == "inventory_check":
         return summarize_inventory(data.get("inventory", []), industry_module)

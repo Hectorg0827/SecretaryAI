@@ -19,7 +19,13 @@ interface WaterfallResponse extends AdvisoryFields {
   currency: string;
   steps: Step[];
   pocket_price_per_case: number;
-  landed_cost_per_case: number;
+  landed_cost_per_case?: number;
+  warehouse_cost_per_case?: number;
+  fully_loaded_cost_per_case?: number;
+  minimum_list_price_at_target_margin?: number;
+  missing_warehouse_components?: string[];
+  complete_warehouse_components?: boolean;
+  fully_loaded_pricing_ready?: boolean;
   gross_margin_pct: number;
   contribution_per_case: number;
   contribution_margin_pct: number;
@@ -50,13 +56,24 @@ const COST_FIELDS = [
   { key: 'other_taxes', label: 'Other taxes' },
 ] as const;
 
+const WAREHOUSE_FIELDS = [
+  { key: 'warehouse_receiving', label: 'Warehouse receiving / unloading' },
+  { key: 'warehouse_storage', label: 'Storage (expected pallet-months per case)' },
+  { key: 'warehouse_handling', label: 'Picking and order handling' },
+  { key: 'warehouse_outbound', label: 'Delivery from warehouse to customer' },
+  { key: 'warehouse_shrink', label: 'Breakage, shrink and spoilage allowance' },
+  { key: 'inventory_carrying', label: 'Inventory finance / carrying charge' },
+] as const;
+
 const PCT_FIELDS = [
   { key: 'target_margin_pct', label: 'Your target gross margin %', initial: '30' },
   { key: 'distributor_margin_pct', label: 'Distributor margin %', initial: '25' },
   { key: 'retailer_margin_pct', label: 'Retailer margin %', initial: '30' },
 ] as const;
 
-const COST_LABELS: Record<string, string> = Object.fromEntries(COST_FIELDS.map(({ key, label }) => [key, label]));
+const COST_LABELS: Record<string, string> = Object.fromEntries(
+  [...COST_FIELDS, ...WAREHOUSE_FIELDS].map(({ key, label }) => [key, label])
+);
 
 const REASONS: Record<string, string> = {
   missing_cost_categories: 'Some landed-cost items were left blank, so the cost may be understated.',
@@ -71,6 +88,7 @@ const initialValues = (): Record<string, string> => ({
   product_label: '', cost_evidence_reference: '', cost_evidence_version: '',
   ...Object.fromEntries(PRICE_FIELDS.map(({ key }) => [key, ''])),
   ...Object.fromEntries(COST_FIELDS.map(({ key }) => [key, ''])),
+  ...Object.fromEntries(WAREHOUSE_FIELDS.map(({ key }) => [key, ''])),
   ...Object.fromEntries(PCT_FIELDS.map(({ key, initial }) => [key, initial])),
 });
 
@@ -111,7 +129,7 @@ export default function PriceWaterfall() {
       return;
     }
     for (const [key, value] of numbers) if (value != null) body[key] = value;
-    body.cost_lines = COST_FIELDS
+    body.cost_lines = [...COST_FIELDS, ...WAREHOUSE_FIELDS]
       .filter(({ key }) => parse(key) != null)
       .map(({ key }) => ({ component: key, amount_per_case: parse(key) }));
     setError(null);
@@ -134,7 +152,8 @@ export default function PriceWaterfall() {
     <InsightShell title={meta.title} description={meta.description}>
       <AdvisoryNotice source="user_supplied" />
       <p className="text-xs text-slate-500">
-        Discounts, allowances and landed costs are not in your connected systems, so enter them per case. Nothing is saved.
+        Enter inbound freight and warehouse operating costs separately. Include storage over the expected holding period.
+        Costs are user-supplied estimates until reconciled to receipts and invoices. Nothing is saved.
       </p>
       <form onSubmit={submit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
         <label className="block text-xs text-slate-600">Product (optional)
@@ -163,6 +182,18 @@ export default function PriceWaterfall() {
               placeholder="e.g. October 2026" onChange={(e) => set('cost_evidence_version')(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
           </label>
+        </fieldset>
+        <fieldset className="grid gap-2 sm:grid-cols-3">
+          <legend className="text-xs font-semibold text-slate-500 mb-1">
+            Warehouse &amp; distribution cost per case (blank means unknown, not zero)
+          </legend>
+          {WAREHOUSE_FIELDS.map(({ key, label }) => (
+            <NumberInput key={key} name={key} label={label} value={values[key]} onChange={set(key)} />
+          ))}
+          <p className="sm:col-span-3 text-xs text-slate-500">
+            Avoid double counting: inbound domestic freight ends at the warehouse; outbound delivery begins there.
+            Explicitly enter 0 only when the cost is genuinely zero and evidenced.
+          </p>
         </fieldset>
         <fieldset className="grid gap-2 sm:grid-cols-3">
           <legend className="text-xs font-semibold text-slate-500 mb-1">Margins</legend>
@@ -206,6 +237,32 @@ export default function PriceWaterfall() {
               <div className="text-xs text-slate-500">{result.contribution_margin_pct.toFixed(1)}% of net revenue</div>
             </div>
           </div>
+          {typeof result.fully_loaded_cost_per_case === 'number' && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Warehouse cost per case</div>
+                <div className="text-lg font-bold text-slate-900">{fmt(result.warehouse_cost_per_case ?? 0)}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Fully loaded cost per case</div>
+                <div className="text-lg font-bold text-slate-900">{fmt(result.fully_loaded_cost_per_case)}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Minimum list price at target contribution margin</div>
+                <div className="text-lg font-bold text-slate-900">
+                  {fmt(result.minimum_list_price_at_target_margin ?? 0)}
+                </div>
+              </div>
+            </div>
+          )}
+          {result.complete_warehouse_components === false && (
+            <p role="status" className="text-xs text-amber-800">
+              Warehouse inputs are incomplete: a fully loaded price cannot be certified.
+              Missing: {(result.missing_warehouse_components ?? []).map(
+                (key) => COST_LABELS[key] ?? key
+              ).join(', ')}.
+            </p>
+          )}
           <p className="text-xs text-slate-500">
             Estimated shelf prices at these margins: {fmt(result.estimated_distributor_to_retailer)} to the retailer,{' '}
             {fmt(result.estimated_retailer_to_consumer)} to the consumer (before retail taxes).

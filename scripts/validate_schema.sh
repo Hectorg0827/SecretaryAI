@@ -39,6 +39,15 @@ for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
 echo "✓ All schema files applied cleanly."
+
+echo '── validating logistics event append-only privileges and company erasure cascade'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261109000011_logistics_journey.sql
+# Simulate the broad Supabase default service_role grant observed on staging.
+# The security migration must revoke DELETE while retaining read/append.
+psql -v ON_ERROR_STOP=1 -c "GRANT SELECT, INSERT, DELETE ON TABLE public.logistics_events TO service_role"
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261114230000_logistics_events_service_delete_revoke.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_events_delete_privileges.sql
+echo '✓ Ledger direct deletion denied and company deletion cascade preserved.'
 echo '── testing legacy core RLS and no unsafe client grants'
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_core_security.sql
 echo '✓ Legacy module security checks passed.'

@@ -169,12 +169,19 @@ async def get_dashboard_summary(
         try:
             result = (
                 db.table("drafts")
-                .select("id", count="exact")
+                .select("action_type")
                 .eq("company_id", company_id)
                 .eq("status", "pending")
+                .limit(1000)
                 .execute()
             )
-            pending_count = result.count if result.count is not None else None
+            # Managers must not even see counts derived from private email drafts.
+            rows = result.data or []
+            pending_count = (
+                sum(1 for draft in rows
+                    if "email" not in str(draft.get("action_type") or "").lower())
+                if len(rows) < 1000 else None
+            )
         except Exception:
             log.warning("Dashboard summary: pending count unavailable")
 

@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.rbac import get_current_user
+from app.api.deps import get_db
+from pricing_auth_testkit import RoleDB
 from app.main import app
 from app.intelligence.pricing.shipment_allocation import (
     AllocationScenario, ProductLine, ExpenseLine, allocate_shipment,
@@ -135,8 +137,10 @@ def api_client():
     app.dependency_overrides[get_current_user] = lambda: {
         "sub": "pricing-user", "role": "owner", "company_id": "tenant-a"
     }
+    app.dependency_overrides[get_db] = lambda: RoleDB(identity="pricing-user")
     yield TestClient(app)
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 
 def test_api_rejects_client_company_override_and_number_floats(api_client):
@@ -178,6 +182,7 @@ def test_role_without_financial_access_denied():
     app.dependency_overrides[get_current_user] = lambda: {
         "sub": "rep", "role": "sales_rep", "company_id": "tenant-a"
     }
+    app.dependency_overrides[get_db] = lambda: RoleDB(identity="rep", role="sales_rep")
     try:
         response = TestClient(app).post("/api/insights/shipment-pricing/preview", json={
             "shipment_ref": "shipment-1",
@@ -187,3 +192,4 @@ def test_role_without_financial_access_denied():
         assert response.status_code == 403
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_db, None)

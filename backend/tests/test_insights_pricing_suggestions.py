@@ -7,7 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_adapter
+from app.api.deps import get_adapter, get_db
+from pricing_auth_testkit import RoleDB
 from app.api.insights import pricing_suggestions
 from app.auth.rbac import get_current_user
 
@@ -53,6 +54,7 @@ def client(role="owner", adapter=None):
         "company_id": "tenant-a", "sub": "user-a", "role": role,
     }
     app.dependency_overrides[get_adapter] = lambda: adapter
+    app.dependency_overrides[get_db] = lambda: RoleDB(identity='user-a',company='tenant-a',role=role)
     return TestClient(app)
 
 

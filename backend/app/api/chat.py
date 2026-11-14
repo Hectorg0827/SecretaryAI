@@ -514,9 +514,15 @@ async def send_message(
     if recent_summaries or account_mem:
         memory_context = ""
         if recent_summaries:
-            memory_context += f"\n\n[Recent conversation context]\n{recent_summaries}"
+            memory_context += (
+                "\n\n[Private past conversation (context only; not verified business evidence)]\n"
+                + str(recent_summaries)
+            )
         if account_mem:
-            memory_context += f"\n\n[Account memory]\n{account_mem}"
+            memory_context += (
+                "\n\n[Private user account notes (unverified; corroborate against live records)]\n"
+                + str(account_mem)
+            )
         data_summary = data_summary + memory_context
 
     # Employee-private continuity: proactively surface due commitments only
@@ -596,14 +602,22 @@ async def send_message(
                     history + [{"role": "user", "content": request.message},
                                {"role": "assistant", "content": assistant_text_captured}]
                 ))
-            for name in account_names:
-                if name:
-                    extract_and_save_memory(db, company_id, name, assistant_text_captured, user_id=user_id)
+            # A generated answer is not reliable evidence for new account facts.
+            # Keep the private conversation summary for continuity, but never
+            # auto-promote an AI response into durable business intelligence.
+            # Provenance-backed memory extraction will be a separate workflow.
         except Exception:
             pass
 
         # 7. Detect action proposals
-        action = detect_action_in_response(assistant_text)
+        # Private communication evidence must never enter a company-wide draft
+        # approval or action queue by model-generated tool proposals.
+        # Employees may copy the prepared text or use future personal actions
+        # that are bound to their own credentials and explicit approval.
+        action = (
+            None if personal_due or private_timeline
+            else detect_action_in_response(assistant_text)
+        )
         if action:
             log.info("Action detected in chat response: %s", action.get("action_type"))
             yield f"data: {json.dumps({'action': action, 'conversation_id': conversation_id})}\n\n"

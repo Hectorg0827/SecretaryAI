@@ -495,12 +495,11 @@ async def send_message(
         "preferred_language": user.get("preferred_language", "English"),
     }
 
-    # Load memory context
-    # Sales reps must not inherit historical company-wide summaries or
-    # account memory that predates the permission hardening.
-    recent_summaries = [] if role == "sales_rep" else load_recent_summaries(db, company_id, user_id)
-    account_names = [] if role == "sales_rep" else _detect_account_names(request.message, history)
-    account_mem = [] if role == "sales_rep" else load_account_memory(db, company_id, account_names)
+    # Private memories belong to the authenticated employee, not a role.
+    # Never inject legacy company-wide account facts derived from chats.
+    recent_summaries = load_recent_summaries(db, company_id, user_id)
+    account_names = _detect_account_names(request.message, history)
+    account_mem = load_account_memory(db, company_id, account_names, user_id=user_id)
 
     if recent_summaries or account_mem:
         memory_context = ""
@@ -543,7 +542,7 @@ async def send_message(
                 ))
             for name in account_names:
                 if name:
-                    extract_and_save_memory(db, company_id, name, assistant_text_captured)
+                    extract_and_save_memory(db, company_id, name, assistant_text_captured, user_id=user_id)
         except Exception:
             pass
 

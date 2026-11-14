@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_db
 from app.api.insights._common import advisory_response
-from app.auth.rbac import require_permission
+from app.api.insights._pricing_access import get_pricing_user
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,7 +31,7 @@ FIELDS = (
 async def list_price_book(
     offset: int = Query(0, ge=0, le=100000),
     limit: int = Query(50, ge=1, le=100),
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
     db=Depends(get_db),
 ):
     """Read only this company, with bounded pagination and no silent fallback."""

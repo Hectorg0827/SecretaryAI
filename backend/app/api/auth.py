@@ -251,15 +251,25 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
     return {"status": "disconnected"}
 
 
-# ─── Google OAuth (Gmail + Sheets) ───────────────────────────────────────────
+# ─── Employee-private Gmail OAuth ──────────────────────────────────────────
+
+def _require_employee_mail_pilot() -> None:
+    cfg = get_settings()
+    if (str(getattr(cfg, "secretaryai_deployment_env", "")).strip().lower() != "staging"
+            or not bool(getattr(cfg, "lola_private_intelligence_enabled", False))):
+        raise HTTPException(status_code=404, detail="Not found")
+
 
 @router.get("/gmail/connect-url")
 async def gmail_connect_url(user: dict = Depends(get_current_user)):
-    """Return the Google OAuth consent URL as JSON (frontend handles the redirect)."""
+    """Gmail connection state identifies the employee, not just the company."""
+    _require_employee_mail_pilot()
     state = secrets.token_urlsafe(32)
-    _state_set(state, user["company_id"])
-    url = build_google_authorization_url(state)
-    return {"url": url}
+    _state_set(state, json.dumps({
+        "company_id": user["company_id"], "user_id": user["sub"],
+        "provider": "gmail",
+    }))
+    return {"url": build_google_authorization_url(state, personal_gmail=True)}
 
 
 @router.get("/gmail/callback")
@@ -268,71 +278,87 @@ async def gmail_callback(
     state: Annotated[str, Query()] = "",
     error: Annotated[str, Query()] = "",
 ):
-    """
-    Google redirects here after the user approves or denies access.
-    Stores encrypted access + refresh tokens, then redirects back to the app.
-    """
-    if error:
-        log.warning("Google OAuth error: %s", error)
-        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason={error}")
-
-    company_id = _state_pop(state)
-    if not company_id:
+    """Persist Gmail tokens in the employee vault; never in companies."""
+    _require_employee_mail_pilot()
+    state_data = _state_pop(state)
+    if not state_data:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    try:
+        data = json.loads(state_data)
+        company_id = data["company_id"]
+        user_id = data["user_id"]
+        if data.get("provider") != "gmail" or not company_id or not user_id:
+            raise ValueError("Wrong provider")
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from None
 
+    # Revalidate identity after consent: a deactivated employee must not create
+    # or refresh a mailbox connection merely by completing an old OAuth flow.
+    from supabase import create_client
+    db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    try:
+        active = (db.table("users").select("id")
+                  .eq("id", user_id).eq("company_id", company_id)
+                  .eq("is_active", True).limit(1).execute())
+        if not active.data:
+            raise HTTPException(status_code=403, detail="Employee is no longer active")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Cannot validate employee identity") from None
+
+    if error:
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error")
     if not code:
-        raise HTTPException(status_code=400, detail="Missing code from Google")
-
+        raise HTTPException(status_code=400, detail="Missing Google authorization code")
     try:
         tokens = await exchange_google_code_for_tokens(code)
-    except Exception as exc:
-        log.error("Google token exchange failed: %s", exc)
-        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason=token_exchange")
-
-    encrypted_access = encrypt(tokens["access_token"], settings.secret_key)
-    encrypted_refresh = encrypt(tokens["refresh_token"], settings.secret_key) if tokens["refresh_token"] else None
+        if not tokens.get("access_token") or not tokens.get("refresh_token"):
+            raise ValueError("Google did not provide a refresh credential")
+    except Exception:
+        log.warning("Employee Gmail OAuth exchange failed")
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error")
 
     try:
-        from supabase import create_client
-        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        db.table("companies").update({
-            "google_access_token":  encrypted_access,
-            "google_refresh_token": encrypted_refresh,
-            "google_connected_at":  datetime.now(timezone.utc).isoformat(),
-        }).eq("id", company_id).execute()
-        log.info("Google tokens stored for company %s", company_id)
-    except Exception as exc:
-        log.error("Failed to store Google tokens for company %s: %s", company_id, exc)
-        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error&reason=db_write")
-
+        encrypted_access = encrypt(tokens["access_token"], settings.secret_key)
+        encrypted_refresh = encrypt(tokens["refresh_token"], settings.secret_key)
+        db.table("employee_integrations").upsert({
+            "company_id": company_id,
+            "user_id": user_id,
+            "provider": "gmail",
+            "access_token": encrypted_access,
+            "refresh_token": encrypted_refresh,
+            "connected_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="company_id,user_id,provider").execute()
+    except Exception:
+        log.warning("Employee Gmail credential storage unavailable")
+        return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=error")
     return RedirectResponse(url=f"{_app_base_url()}/settings?gmail=connected")
 
 
 @router.delete("/gmail/disconnect")
 async def gmail_disconnect(user: dict = Depends(get_current_user)):
-    """Revoke Google tokens and clear connection in DB."""
-    company_id = user["company_id"]
-
+    """Disconnect ONLY this employee's personal Gmail connection."""
+    _require_employee_mail_pilot()
+    from supabase import create_client
+    db = create_client(settings.supabase_url, settings.supabase_service_role_key)
     try:
-        from supabase import create_client
-        from app.utils.encryption import decrypt
-        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
-        result = db.table("companies").select("google_access_token").eq("id", company_id).execute()
-        company = result.data[0] if result.data else {}
-
-        if company.get("google_access_token"):
-            token = decrypt(company["google_access_token"], settings.secret_key)
-            await revoke_google_token(token)
-
-        db.table("companies").update({
-            "google_access_token":  None,
-            "google_refresh_token": None,
-            "google_connected_at":  None,
-        }).eq("id", company_id).execute()
-    except Exception as exc:
-        log.error("Google disconnect failed for %s: %s", company_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to disconnect Google")
-
+        result = (db.table("employee_integrations").select("access_token")
+            .eq("company_id", user["company_id"]).eq("user_id", user["sub"])
+            .eq("provider", "gmail").limit(1).execute())
+        rows = result.data or []
+        token = decrypt(rows[0]["access_token"], settings.secret_key) if rows and rows[0].get("access_token") else None
+        # Local revocation is mandatory, even if the provider is unreachable.
+        db.table("employee_integrations").delete().eq("company_id", user["company_id"]).eq(
+            "user_id", user["sub"]).eq("provider", "gmail").execute()
+        if token:
+            try:
+                await revoke_google_token(token)
+            except Exception:
+                log.warning("Google remote revoke unavailable; local credential deleted")
+    except Exception:
+        raise HTTPException(status_code=503, detail="Could not disconnect private mailbox") from None
     return {"status": "disconnected"}
 
 

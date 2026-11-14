@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, RotateCcw, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
+import { PrivateFollowups } from './PrivateFollowups';
+import { PrivateLolaControls } from './PrivateLolaControls';
 
 const QUICK_PROMPTS = [
   'How\'s our inventory looking?',
@@ -13,6 +15,7 @@ const QUICK_PROMPTS = [
 export function ChatInterface() {
   const { messages, isStreaming, sendMessage, clearConversation } = useChatStore();
   const [input, setInput] = useState('');
+  const [privateRefresh, setPrivateRefresh] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,7 +42,7 @@ export function ChatInterface() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-green-400 rounded-full" />
-          <span className="font-semibold text-gray-800">SecretaryAI</span>
+          <span className="font-semibold text-gray-800">Lola</span>
         </div>
         <button
           onClick={clearConversation}
@@ -49,6 +52,9 @@ export function ChatInterface() {
           <RotateCcw size={16} />
         </button>
       </div>
+
+      <PrivateLolaControls onUpdated={() => setPrivateRefresh((n) => n + 1)} />
+      <PrivateFollowups refreshKey={privateRefresh} onDraft={sendMessage} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">

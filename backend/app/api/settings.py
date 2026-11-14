@@ -81,7 +81,7 @@ async def get_integrations(
             .select(
                 "qb_type, qb_connection_status, qbo_realm_id, qbo_connected_at, "
                 "conductor_end_user_id, "
-                "google_access_token, google_connected_at, ms_access_token, ms_refresh_token"
+                "google_connected_at"
             )
             .eq("id", company_id)
             .execute()
@@ -97,8 +97,22 @@ async def get_integrations(
         and bool(row.get("qbo_realm_id"))
     )
     qbd_connected = bool(row.get("conductor_end_user_id"))
-    google_connected = bool(row.get("google_access_token"))
-    outlook_connected = bool(row.get("ms_access_token") and row.get("ms_refresh_token"))
+    # Personal mailboxes are never reported as connected from company tokens.
+    # A failed/missing vault query means disconnected, not an unsafe fallback.
+    google_connected = False
+    personal_connected_at = None
+    try:
+        private = (db.table("employee_integrations")
+            .select("provider,connected_at,access_token,refresh_token")
+            .eq("company_id", company_id).eq("user_id", user["sub"])
+            .eq("provider", "gmail").limit(1).execute()).data or []
+        if private and private[0].get("access_token") and private[0].get("refresh_token"):
+            google_connected = True
+            personal_connected_at = private[0].get("connected_at")
+    except Exception:
+        log.warning("Employee integration status unavailable")
+    # Outlook cannot claim employee privacy until its OAuth flow is migrated.
+    outlook_connected = False
 
     return {
         "quickbooks_online": {
@@ -112,14 +126,12 @@ async def get_integrations(
         },
         "gmail": {
             "connected": google_connected,
-            "connected_at": row.get("google_connected_at"),
+            "connected_at": personal_connected_at,
         },
         "outlook": {"connected": outlook_connected},
-        # Google Sheets reuses the same Google OAuth token as Gmail
-        "google_sheets": {
-            "connected": google_connected,
-            "connected_at": row.get("google_connected_at"),
-        },
+        # Employee Gmail permission does not grant Google Sheets access.
+        # Existing company Sheets integration requires an independent consent.
+        "google_sheets": {"connected": False, "connected_at": None},
     }
 
 

@@ -13,11 +13,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.compose",
-]
+# Match the narrowly scoped employee Gmail OAuth grant.
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 
 class GmailConnector:

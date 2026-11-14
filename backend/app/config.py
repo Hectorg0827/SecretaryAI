@@ -27,6 +27,21 @@ class Settings(BaseSettings):
     secretaryai_expected_supabase_project_ref: str = ""
     # Explicit opt-in; staging acceptance must not contact customer devices.
     secretaryai_push_delivery_enabled: bool = False
+    # Employee-private communication pilot: off by default and staging only.
+    lola_private_intelligence_enabled: bool = False
+    # Private WhatsApp Coexistence: no real numbers until independent Meta
+    # permissions, AI-use policy and WABA administrator privacy signoffs.
+    lola_meta_app_id: str = ""
+    lola_meta_configuration_id: str = ""
+    lola_meta_app_secret: str = ""
+    lola_meta_webhook_verify_token: str = ""
+    lola_meta_webhooks_enabled: bool = False
+    lola_meta_app_review_approved: bool = False
+    lola_meta_ai_policy_approved: bool = False
+    lola_meta_waba_privacy_approved: bool = False
+    lola_meta_policy_clearance_reference: str = ""
+    # Additional send switch stays disabled; no send implementation in pilot.
+    lola_whatsapp_send_enabled: bool = False
     secretaryai_email_delivery_mode: str = "disabled"
     secretaryai_live_email_delivery_approved: bool = False
     secretaryai_staging_email_pilot_enabled: bool = False

@@ -66,7 +66,7 @@ class UnifiedDataAdapter:
             )
 
         # Gmail
-        if cfg.get("gmail_credentials"):
+        if cfg.get("_private_mailbox_owner_id") and cfg.get("gmail_credentials"):
             self._gmail = GmailConnector(credentials=cfg["gmail_credentials"])
 
         # Google Sheets
@@ -74,7 +74,7 @@ class UnifiedDataAdapter:
             self._sheets = GoogleSheetsConnector(credentials=cfg["google_credentials"])
 
         # Outlook connector
-        if cfg.get("ms_tenant_id") and cfg.get("ms_access_token"):
+        if cfg.get("_private_mailbox_owner_id") and cfg.get("ms_tenant_id") and cfg.get("ms_access_token"):
             self._outlook = OutlookConnector(
                 tenant_id=cfg["ms_tenant_id"],
                 client_id=cfg.get("ms_client_id", ""),

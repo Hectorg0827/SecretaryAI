@@ -88,6 +88,9 @@ async def get_inbox_feed(
                 .execute()
             )
             for d in res.data or []:
+                # Private email drafts never appear in a managerial approval inbox.
+                if "email" in str(d.get("action_type") or "").lower():
+                    continue
                 atype   = d.get("action_type", "")
                 content = d.get("content") or {}
                 if "email" in atype:
@@ -156,14 +159,15 @@ async def get_inbox_feed(
         except Exception as exc:
             log.warning("inbox: inventory load failed: %s", exc)
 
-    # ── 3. Priority emails (high + medium only) ────────────────────────────
-    if role in ("owner", "manager"):
+    # ── 3. Employee-owned priority emails (all roles, owner-scoped) ──────
+    if user.get("sub"):
         try:
             # Pull cached email analysis from the companies/emails table
             res = (
                 db.table("emails")
                 .select("id, thread_id, from_name, from_email, subject, ai_priority, ai_summary, ai_action_needed, received_at, is_read")
                 .eq("company_id", company_id)
+                .eq("user_id", user["sub"])
                 .in_("ai_priority", ["high", "medium"])
                 .order("received_at", desc=True)
                 .limit(20)
@@ -256,7 +260,7 @@ async def mark_inbox_item_read(
     try:
         if item_type == "email":
             email_id = item_id.split(":", 1)[1]
-            db.table("emails").update({"is_read": True}).eq("id", email_id).eq("company_id", company_id).execute()
+            db.table("emails").update({"is_read": True}).eq("id", email_id).eq("company_id", company_id).eq("user_id", user["sub"]).execute()
         elif item_type == "health":
             # Mark health events as acknowledged via a flag on accounts
             account_id = item_id.split(":", 1)[1]

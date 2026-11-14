@@ -19,7 +19,10 @@ async def test_memory_extraction_schedules_instead_of_running_a_nested_event_loo
         patch("app.ai.model_router.model_for", return_value="test-model"),
         patch("asyncio.run", side_effect=AssertionError("Nested asyncio.run is prohibited")),
     ):
-        extract_and_save_memory(MagicMock(), "company-a", "Synthetic account", "No durable new facts.")
+        extract_and_save_memory(
+            MagicMock(), "company-a", "Synthetic account",
+            "No durable new facts.", user_id="employee-a",
+        )
         for _ in range(10):
             await asyncio.sleep(0.01)
             if client.messages.create.await_count:

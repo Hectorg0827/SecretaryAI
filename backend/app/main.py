@@ -310,6 +310,13 @@ app.include_router(actions.router,          prefix="/api/actions",       tags=["
 app.include_router(agent.router,            prefix="/api/agent",         tags=["agent"],         dependencies=_PAID)
 app.include_router(notifications.router,    prefix="/api/notifications", tags=["notifications"], dependencies=_PAID)
 app.include_router(inbox.router,            prefix="/api/inbox",         tags=["inbox"],         dependencies=_PAID)
+from app.api import private_continuity as private_continuity_router
+app.include_router(
+    private_continuity_router.router,
+    prefix="/api/lola/continuity",
+    tags=["lola-private-continuity"],
+    dependencies=[Depends(private_continuity_router.require_private_pilot), *_PAID],
+)
 app.include_router(workflows.router,        prefix="/api/workflows",     tags=["workflows"],     dependencies=_PAID)
 app.include_router(feed.router,             prefix="/api/feed",          tags=["feed"],          dependencies=_PAID)
 app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=["computer-use"], dependencies=_PAID)
@@ -317,6 +324,8 @@ app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=
 # Free — see the note above for why each one is not gated.
 app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
 app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
+from app.api import lola_whatsapp_webhooks as lola_whatsapp_webhook_router
+app.include_router(lola_whatsapp_webhook_router.router, prefix="/webhooks/lola-whatsapp", tags=["lola-whatsapp-webhook"])
 app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
 app.include_router(outlook_oauth_router.router, prefix="/auth/outlook", tags=["auth"])
 app.include_router(account_security_router.router, prefix="/auth",          tags=["account-security"])

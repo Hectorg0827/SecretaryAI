@@ -170,49 +170,20 @@ def build_adapter(company: dict) -> UnifiedDataAdapter:
     if cfg.get("qbo_refresh_token"):
         cfg["_qbo_expected_refresh_ciphertext"] = cfg["qbo_refresh_token"]
         cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
-    if cfg.get("google_access_token"):
-        cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
-    if cfg.get("google_refresh_token"):
-        cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
-    # Match the request adapter: Outlook's persisted rotated tokens and client
-    # secret are ciphertext.
-    if cfg.get("ms_access_token"):
-        cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
-    if cfg.get("ms_refresh_token"):
-        cfg["_ms_expected_refresh_ciphertext"] = cfg["ms_refresh_token"]
-        cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
-    if cfg.get("ms_client_secret"):
-        cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
-    cfg["ms_client_id"] = cfg.get("ms_client_id") or getattr(settings, "ms_client_id", "")
-    cfg["ms_client_secret"] = cfg.get("ms_client_secret") or getattr(settings, "ms_client_secret", "")
+    # Background jobs have no employee identity, so they must never receive
+    # Gmail/Outlook credentials from company-wide storage. Historical company
+    # tokens are intentionally ignored; private mailbox workers require a
+    # separately authenticated employee-scoped connection.
+    for key in (
+        "google_access_token", "google_refresh_token", "gmail_credentials",
+        "google_credentials", "ms_access_token", "ms_refresh_token",
+        "ms_client_secret", "ms_tenant_id", "_ms_expected_refresh_ciphertext",
+    ):
+        cfg.pop(key, None)
 
     # Proactively refresh QBO access token if close to expiry
     if cfg.get("qbo_access_token") and cfg.get("qbo_refresh_token"):
         _refresh_qbo_if_needed(company, cfg, get_supabase())
-
-    # Build gmail_credentials dict that GmailConnector expects (refresh token if expired)
-    if cfg.get("google_access_token") and cfg.get("google_refresh_token"):
-        google_creds = {
-            "token":         cfg["google_access_token"],
-            "refresh_token": cfg["google_refresh_token"],
-            "client_id":     settings.google_client_id,
-            "client_secret": settings.google_client_secret,
-            "token_uri":     "https://oauth2.googleapis.com/token",
-        }
-        try:
-            from app.auth.oauth import refresh_google_token_if_needed
-            from app.utils.encryption import encrypt
-            updated_creds, was_refreshed = refresh_google_token_if_needed(google_creds)
-            if was_refreshed:
-                db = get_supabase()
-                new_encrypted = encrypt(updated_creds["token"], settings.secret_key)
-                db.table("companies").update({
-                    "google_access_token": new_encrypted,
-                }).eq("id", company["id"]).execute()
-                google_creds["token"] = updated_creds["token"]
-        except Exception as exc:
-            log.warning("Google token refresh failed in task: %s", exc)
-        cfg["gmail_credentials"] = google_creds
 
     # Map column names to adapter config keys
     cfg.setdefault("qbo_client_id", settings.intuit_client_id)

@@ -189,6 +189,7 @@ async def test_outlook_cannot_rotate_refresh_without_durable_callback():
 
 def test_unified_adapter_wires_durable_outlook_token_callback():
     config = {"ms_tenant_id": "tenant", "ms_access_token": "access",
-              "ms_client_id": "client", "ms_client_secret": "secret", "ms_refresh_token": "refresh"}
+              "ms_client_id": "client", "ms_client_secret": "secret", "ms_refresh_token": "refresh",
+              "_private_mailbox_owner_id": "employee-test-only"}
     adapter = UnifiedDataAdapter(config)
     assert callable(adapter._outlook._on_token_refresh)

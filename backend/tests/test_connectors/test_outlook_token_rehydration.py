@@ -31,7 +31,8 @@ def _company(settings):
     }
 
 
-def test_api_adapter_decrypts_persisted_outlook_rotation_before_graph_setup():
+def test_api_adapter_never_receives_company_mailbox_tokens():
+    """Company OAuth credentials have no verified personal owner."""
     from app.api import deps
 
     settings = _settings()
@@ -40,18 +41,18 @@ def test_api_adapter_decrypts_persisted_outlook_rotation_before_graph_setup():
     with patch.object(deps, "get_settings", return_value=settings), \
          patch.object(deps, "_load_company", return_value=company), \
          patch("app.connectors.unified_adapter.UnifiedDataAdapter") as adapter_type:
-        adapter = deps.get_adapter(user={"company_id": "tenant-fixture"}, db=db)
-
+        adapter = deps.get_adapter(
+            user={"sub": "employee-a", "company_id": "tenant-fixture"}, db=db
+        )
     config = adapter_type.call_args.args[0]
-    assert config["ms_access_token"] == "rotated-access-token"
-    assert config["ms_refresh_token"] == "rotated-refresh-token"
-    assert config["ms_client_secret"] == "fixture-client-secret"
-    assert company["ms_access_token"] != config["ms_access_token"]
-    assert company["ms_refresh_token"] != config["ms_refresh_token"]
+    for key in ("ms_access_token", "ms_refresh_token", "ms_client_secret", "ms_tenant_id"):
+        assert key not in config
+    assert "_private_mailbox_owner_id" not in config
     adapter.set_db.assert_called_once_with(db)
 
 
-def test_worker_adapter_decrypts_persisted_outlook_rotation_before_graph_setup():
+
+def test_background_worker_never_receives_company_mailbox_tokens():
     from tasks import base
 
     settings = _settings()
@@ -59,15 +60,14 @@ def test_worker_adapter_decrypts_persisted_outlook_rotation_before_graph_setup()
     with patch.object(base, "settings", settings), \
          patch.object(base, "UnifiedDataAdapter") as adapter_type:
         base.build_adapter(company)
-
     config = adapter_type.call_args.args[0]
-    assert config["ms_access_token"] == "rotated-access-token"
-    assert config["ms_refresh_token"] == "rotated-refresh-token"
-    assert config["ms_client_secret"] == "fixture-client-secret"
-    assert company["ms_access_token"] != config["ms_access_token"]
+    for key in ("ms_access_token", "ms_refresh_token", "ms_client_secret", "ms_tenant_id"):
+        assert key not in config
 
 
-def test_api_adapter_rejects_corrupt_outlook_refresh_ciphertext():
+
+def test_api_adapter_never_decrypts_unowned_corrupt_outlook_refresh():
+    """An invalid company ciphertext is not even consulted by personal Lola."""
     from app.api import deps
 
     settings = _settings()
@@ -75,22 +75,25 @@ def test_api_adapter_rejects_corrupt_outlook_refresh_ciphertext():
     company["ms_refresh_token"] = encrypt("unexpected", "different-fixture-key")
     with patch.object(deps, "get_settings", return_value=settings), \
          patch.object(deps, "_load_company", return_value=company):
-        with pytest.raises(ValueError):
-            deps.get_adapter(user={"company_id": "tenant-fixture"}, db=MagicMock())
+        adapter = deps.get_adapter(
+            user={"sub": "employee-a", "company_id": "tenant-fixture"}, db=MagicMock()
+        )
+    assert adapter._outlook is None
 
 
-def test_api_adapter_gives_graph_connector_the_decrypted_client_secret():
+
+def test_api_adapter_never_exposes_company_mailbox_client_secret():
     from app.api import deps
 
     settings = _settings()
     company = _company(settings)
     with patch.object(deps, "get_settings", return_value=settings), \
          patch.object(deps, "_load_company", return_value=company):
-        adapter = deps.get_adapter(user={"company_id": "tenant-fixture"}, db=MagicMock())
+        adapter = deps.get_adapter(
+            user={"sub": "employee-a", "company_id": "tenant-fixture"}, db=MagicMock()
+        )
+    assert adapter._outlook is None
 
-    # This value is posted to Microsoft's token endpoint on every refresh.
-    assert adapter._outlook._client_secret == "fixture-client-secret"
-    assert adapter._outlook._refresh_token == "rotated-refresh-token"
 
 
 @pytest.mark.asyncio
@@ -139,20 +142,23 @@ async def test_outlook_refresh_uses_tenant_and_ciphertext_generation_cas():
 
 
 @pytest.mark.parametrize("factory", ["api", "worker"])
-def test_corrupt_outlook_client_secret_fails_closed_without_leaking(factory):
+def test_corrupt_company_outlook_client_secret_never_leaks_to_personal_adapters(factory):
     settings = _settings()
     company = _company(settings)
     company["ms_client_secret"] = encrypt("leak-canary-secret", "different-fixture-key")
-    with pytest.raises(ValueError) as err:
-        if factory == "api":
-            from app.api import deps
-            with patch.object(deps, "get_settings", return_value=settings), \
-                 patch.object(deps, "_load_company", return_value=company):
-                deps.get_adapter(user={"company_id": "tenant-fixture"}, db=MagicMock())
-        else:
-            from tasks import base
-            with patch.object(base, "settings", settings), \
-                 patch.object(base, "UnifiedDataAdapter"):
-                base.build_adapter(company)
-    assert "leak-canary-secret" not in str(err.value)
-    assert company["ms_client_secret"] not in str(err.value)
+    if factory == "api":
+        from app.api import deps
+        with patch.object(deps, "get_settings", return_value=settings), \
+             patch.object(deps, "_load_company", return_value=company):
+            adapter = deps.get_adapter(
+                user={"sub": "employee-a", "company_id": "tenant-fixture"}, db=MagicMock()
+            )
+        assert adapter._outlook is None
+    else:
+        from tasks import base
+        with patch.object(base, "settings", settings), \
+             patch.object(base, "UnifiedDataAdapter") as adapter_type:
+            base.build_adapter(company)
+        config = adapter_type.call_args.args[0]
+        assert "ms_client_secret" not in config
+        assert "ms_access_token" not in config

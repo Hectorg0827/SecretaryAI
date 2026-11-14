@@ -61,49 +61,59 @@ def get_adapter(
     if cfg.get("qbo_refresh_token"):
         cfg["_qbo_expected_refresh_ciphertext"] = cfg["qbo_refresh_token"]
         cfg["qbo_refresh_token"] = decrypt(cfg["qbo_refresh_token"], settings.secret_key)
-    if cfg.get("google_access_token"):
-        cfg["google_access_token"] = decrypt(cfg["google_access_token"], settings.secret_key)
-    if cfg.get("google_refresh_token"):
-        cfg["google_refresh_token"] = decrypt(cfg["google_refresh_token"], settings.secret_key)
-    # Outlook rotation persists encrypted tokens; both must be decrypted before
-    # UnifiedDataAdapter constructs the Graph connector. The client secret is
-    # stored encrypted too and is sent to Microsoft on every token refresh.
-    if cfg.get("ms_access_token"):
-        cfg["ms_access_token"] = decrypt(cfg["ms_access_token"], settings.secret_key)
-    if cfg.get("ms_refresh_token"):
-        cfg["_ms_expected_refresh_ciphertext"] = cfg["ms_refresh_token"]
-        cfg["ms_refresh_token"] = decrypt(cfg["ms_refresh_token"], settings.secret_key)
-    if cfg.get("ms_client_secret"):
-        cfg["ms_client_secret"] = decrypt(cfg["ms_client_secret"], settings.secret_key)
-    cfg["ms_client_id"] = cfg.get("ms_client_id") or getattr(settings, "ms_client_id", "")
-    cfg["ms_client_secret"] = cfg.get("ms_client_secret") or getattr(settings, "ms_client_secret", "")
+    # Never pass legacy company-wide mailbox tokens into an employee request.
+    # They have no verified employee owner. Separate QBO/company credentials
+    # from personal Gmail/Outlook credentials before connector construction.
+    for key in (
+        "google_access_token", "google_refresh_token", "gmail_credentials",
+        "google_credentials", "ms_access_token", "ms_refresh_token",
+        "_ms_expected_refresh_ciphertext", "ms_tenant_id", "ms_client_secret",
+        "_private_mailbox_owner_id",
+    ):
+        cfg.pop(key, None)
 
-    # Build the gmail_credentials dict that GmailConnector expects.
-    # Refresh the access token proactively if it is expired before building the adapter.
-    if cfg.get("google_access_token") and cfg.get("google_refresh_token"):
-        google_creds = {
-            "token":         cfg["google_access_token"],
-            "refresh_token": cfg["google_refresh_token"],
-            "client_id":     settings.google_client_id,
-            "client_secret": settings.google_client_secret,
-            "token_uri":     "https://oauth2.googleapis.com/token",
-        }
+    # Fail closed if personal-connection storage is unavailable or not migrated.
+    # A manager/owner has exactly the same personal-mailbox restrictions.
+    user_id = str(user.get("sub") or "")
+    if (user_id and str(getattr(settings, "secretaryai_deployment_env", "")).strip().lower() == "staging"
+            and bool(getattr(settings, "lola_private_intelligence_enabled", False))):
         try:
-            from app.auth.oauth import refresh_google_token_if_needed
-            updated_creds, was_refreshed = refresh_google_token_if_needed(google_creds)
-            if was_refreshed:
-                new_encrypted = encrypt(updated_creds["token"], settings.secret_key)
-                db.table("companies").update({
-                    "google_access_token": new_encrypted,
-                }).eq("id", user["company_id"]).execute()
-                cfg["google_access_token"] = updated_creds["token"]
-                google_creds["token"] = updated_creds["token"]
-                log.info("Google access token refreshed for company %s", user["company_id"])
-        except Exception as exc:
-            log.warning("Google token refresh failed (continuing with existing token): %s", exc)
+            rows = (db.table("employee_integrations")
+                .select("access_token,refresh_token")
+                .eq("company_id", user["company_id"])
+                .eq("user_id", user_id)
+                .eq("provider", "gmail")
+                .limit(1).execute()).data or []
+            personal = rows[0] if rows else {}
+            if personal.get("access_token") and personal.get("refresh_token"):
+                google_creds = {
+                    "token": decrypt(personal["access_token"], settings.secret_key),
+                    "refresh_token": decrypt(personal["refresh_token"], settings.secret_key),
+                    "client_id": settings.google_client_id,
+                    "client_secret": settings.google_client_secret,
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+                from app.auth.oauth import refresh_google_token_if_needed
+                updated, was_refreshed = refresh_google_token_if_needed(google_creds)
+                if was_refreshed:
+                    update = (db.table("employee_integrations")
+                        .update({"access_token": encrypt(updated["token"], settings.secret_key)})
+                        .eq("company_id", user["company_id"]).eq("user_id", user_id)
+                        .eq("provider", "gmail")
+                        .eq("refresh_token", personal["refresh_token"]).execute())
+                    if not update.data:
+                        raise RuntimeError("Employee Gmail credential changed during refresh")
+                    google_creds = updated
+                cfg["gmail_credentials"] = google_creds
+                cfg["_private_mailbox_owner_id"] = user_id
+        except Exception:
+            # Do not fall back to a colleague's/company's OAuth credentials.
+            log.warning("Employee mailbox unavailable; refusing shared-credential fallback")
+            cfg.pop("gmail_credentials", None)
+            cfg.pop("_private_mailbox_owner_id", None)
 
-        cfg["gmail_credentials"] = google_creds
-
+    # Outlook remains disabled for personal use pending its user-scoped OAuth
+    # and rotation migration. Existing company-scoped Outlook is not private.
     # Fill in app-level credentials
     cfg.setdefault("qbo_client_id", settings.intuit_client_id)
     cfg.setdefault("qbo_client_secret", settings.intuit_client_secret)

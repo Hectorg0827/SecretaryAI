@@ -179,6 +179,14 @@ async def pricing_suggestions(
             "segment": "All customers together; customer-specific prices are averaged.",
         },
         "prices_changed": False,
+        "cost_basis": "quickbooks_purchase_cost_only",
+        "fully_loaded_cost_verified": False,
+        "pricing_decision_ready": False,
+        "cost_warning": (
+            "Purchase cost excludes unverified inbound freight, customs, "
+            "warehouse receiving, storage, handling, outbound delivery and carrying costs. "
+            "Recommendations are analysis only, not approved prices."
+        ),
     }, source="connected_data")
 
 
@@ -239,6 +247,9 @@ async def pricing_preview(
         **row,
         **_elasticity_fields(elasticity),
         "prices_changed": False,
+        "cost_basis": "entered_unit_cost_unreconciled",
+        "fully_loaded_cost_verified": False,
+        "pricing_decision_ready": False,
     }, source="user_supplied")
 
 

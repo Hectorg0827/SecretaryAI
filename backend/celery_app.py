@@ -32,6 +32,7 @@ app = Celery(
         "tasks.connector_health",
         "tasks.ingestion_scheduler",
         "tasks.cu_worker",
+        "tasks.lola_private_reminders",
     ],
 )
 
@@ -53,6 +54,11 @@ celery_app = app
 
 # ─── Beat schedule ─────────────────────────────────────────────────────────────
 app.conf.beat_schedule = {
+    # Opt-in and per-user only; generic push copy avoids lock-screen leakage.
+    "lola-private-reminders": {
+        "task": "tasks.lola_private_reminders.scan_all",
+        "schedule": crontab(minute=0),
+    },
     # Full overnight scan — 2 AM UTC every night
     "overnight-scan": {
         "task": "tasks.overnight.run_overnight_scan_all_companies",

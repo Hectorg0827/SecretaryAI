@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_db, get_adapter
 from app.auth.rbac import get_current_user
-from app.intelligence.private_continuity import pending_followups
+from app.intelligence.private_continuity import pending_followups, canonical_project_key
 
 router = APIRouter()
 
@@ -256,7 +256,7 @@ def record_private_event(body: NewEvent, user: dict = Depends(get_current_user),
     try:
         rows = db.table("lola_private_events").insert({
             "company_id": company_id, "user_id": user_id,
-            "contact_id": contact["id"], "project_key": body.project_key.strip().lower(),
+            "contact_id": contact["id"], "project_key": canonical_project_key(body.project_key),
             "channel": body.channel, "direction": body.direction, "kind": body.kind,
             "occurred_at": occurred.isoformat(), "summary": body.summary,
             "source_ref": None, "origin": "manual",

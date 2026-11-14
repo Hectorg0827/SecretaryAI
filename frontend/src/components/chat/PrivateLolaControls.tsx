@@ -160,6 +160,25 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
                 </p>
               </div>
               <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+                <h3 className="text-sm font-semibold text-slate-800">My WhatsApp Business</h3>
+                <p className="text-xs font-medium text-amber-800">
+                  Not connected — official Meta Coexistence approval is pending.
+                </p>
+                <p className="text-xs text-slate-600">
+                  Lola does not access your WhatsApp account. You can keep using your existing
+                  WhatsApp Business app and record an activity manually below.
+                  Manual notes are marked as unverified by WhatsApp.
+                </p>
+                <a
+                  className="inline-block text-xs font-medium text-slate-700 underline"
+                  href="https://developers.facebook.com/documentation/business-messaging/whatsapp/overview/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Meta's official WhatsApp Business Platform
+                </a>
+              </div>
+              <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                 <h3 className="text-sm font-semibold text-slate-800">My verified contact links</h3>
                 <p className="text-xs text-slate-600">
                   Add the email and WhatsApp number of one person; confirm that they belong together.

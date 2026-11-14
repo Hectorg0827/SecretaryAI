@@ -64,7 +64,10 @@ def test_other_roles_denied(role):
 
 @pytest.mark.parametrize("role", ["finance_controller", "ar_specialist", "ap_specialist", "pricing_billbacks"])
 def test_department_roles_have_no_broad_access(role):
-    assert ROLE_PERMISSIONS[role] == {"view_finance_workspace"}
+    expected_permissions = {"view_finance_workspace"}
+    if role == "pricing_billbacks":
+        expected_permissions.add("view_pricing")  # narrowly scoped read; no view_financials
+    assert ROLE_PERMISSIONS[role] == expected_permissions
     assert not ROLE_PERMISSIONS[role].intersection({
         "view_all", "view_financials", "run_reports", "approve_actions",
         "trigger_actions", "manage_billing", "manage_users", "view_customers",

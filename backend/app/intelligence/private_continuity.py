@@ -14,6 +14,14 @@ from typing import Any
 FOLLOW_UP_KINDS = frozenset({"draft_sent", "quote_sent", "followup_sent"})
 
 
+def canonical_project_key(value: str) -> str:
+    """Use the same conservative project key across email and manual channels."""
+    import re
+    subject = re.sub(r"^(?:(?:re|fw|fwd)\s*:\s*)+", "", value or "", flags=re.I)
+    return re.sub(r"[^a-z0-9]+", "-", subject.casefold()).strip("-")[:140]
+
+
+
 def _timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -46,7 +54,7 @@ def pending_followups(
     groups: dict[tuple[str, str], list[tuple[datetime, dict]]] = defaultdict(list)
     for event in events:
         contact_id = event.get("contact_id")
-        project_key = event.get("project_key")
+        project_key = canonical_project_key(str(event.get("project_key") or ""))
         if not contact_id or not project_key:
             continue  # Unverified identity/project: never manufacture a match.
         try:

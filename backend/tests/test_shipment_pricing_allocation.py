@@ -67,6 +67,20 @@ def test_inbound_and_warehouse_stay_separate():
     assert sum(D(p["warehouse_total"]) for p in result["products"]) == D("102")
 
 
+def test_demurrage_inspection_fuel_and_origin_charges_are_inbound():
+    expenses = (
+        expense("demurrage", "15.00", "cases", "demurrage-1"),
+        expense("exam_fees", "5.00", "cases", "exam-1"),
+        expense("fuel_surcharge", "10.00", "cases", "fuel-1"),
+        expense("origin_charges", "15.00", "cases", "origin-1"),
+    )
+    result = allocate_shipment(scenario(expenses))
+    assert result["expenses_total"] == "45.00"
+    assert result["products"][0]["inbound_cost_per_case"] == "18.300000"
+    assert result["products"][1]["inbound_cost_per_case"] == "20.300000"
+    assert all(p["warehouse_cost_per_case"] == "0.000000" for p in result["products"])
+
+
 def test_one_cent_remainder_is_deterministic_and_conserved():
     products_override = tuple(
         ProductLine(code, D("1"), D("1")) for code in ("A", "B", "C")

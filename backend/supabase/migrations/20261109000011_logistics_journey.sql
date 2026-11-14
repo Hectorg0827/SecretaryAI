@@ -40,8 +40,16 @@ CREATE INDEX IF NOT EXISTS idx_logistics_events_shipment
 
 ALTER TABLE logistics_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "company_isolation" ON logistics_events
-    FOR ALL USING (company_id = (auth.jwt() ->> 'company_id')::uuid);
+-- Only the trusted application server may read/write this full-fidelity
+-- ledger. Public Data API clients MUST NOT be able to forge a machine source,
+-- delete audit events, or bypass the backend's role-scoped commercial masking.
+-- Supabase service_role remains server-side and bypasses RLS; every application
+-- endpoint must still enforce JWT tenant and role authorization.
+-- Revoke default grants, which may exist even with RLS enabled.
+REVOKE ALL ON TABLE public.logistics_events FROM PUBLIC, anon, authenticated;
+DROP POLICY IF EXISTS "company_isolation" ON public.logistics_events;
+-- No anon/authenticated policies: default deny under RLS. Never grant client
+-- SELECT here because raw events include commercial terms and customer IDs.
 
 -- Append-only: block UPDATE even for clients that pass RLS. DELETE stays
 -- possible so company deletion (ON DELETE CASCADE) and data-erasure requests work.

@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_adapter
 from app.auth.rbac import get_current_user
 from app.intelligence.private_continuity import pending_followups
 
@@ -66,6 +66,46 @@ class NewEvent(BaseModel):
 
 class SnoozeRequest(BaseModel):
     until: datetime
+
+
+@router.post("/sync/gmail")
+async def sync_private_gmail(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+    adapter=Depends(get_adapter),
+):
+    """Explicit, user-initiated synchronization of the employee's own Gmail.
+
+    Reads only the credential loaded for this authenticated employee. Unknown
+    contacts and ambiguous identities are skipped. Does NOT sync company mail.
+    """
+    if not getattr(adapter, "_gmail", None):
+        raise HTTPException(status_code=409, detail="Connect your own Gmail account first")
+    company_id, user_id = _scope(user)
+    from app.intelligence.private_email_events import map_gmail_to_private_events
+    try:
+        contacts = (_owned(db, "lola_private_contacts", user).limit(500).execute()).data or []
+        messages = await adapter.get_emails(query="newer_than:30d", max_results=100)
+        mapped = map_gmail_to_private_events(messages, contacts)
+        created = 0
+        for activity in mapped:
+            existing = (_owned(db, "lola_private_events", user)
+                .eq("channel", "email").eq("source_ref", activity["source_ref"])
+                .limit(1).execute()).data or []
+            if existing:
+                continue
+            db.table("lola_private_events").insert({
+                "company_id": company_id, "user_id": user_id, **activity
+            }).execute()
+            created += 1
+    except Exception:
+        # Never return provider message contents or private addresses on error.
+        raise HTTPException(status_code=503, detail="Private Gmail synchronization unavailable") from None
+    return {
+        "scanned": len(messages), "matched_verified_contacts": len(mapped),
+        "recorded": created, "private": True,
+        "note": "Only verified contacts and unambiguous email projects are linked",
+    }
 
 
 @router.get("/contacts")

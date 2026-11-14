@@ -1141,6 +1141,7 @@ async def get_setup_status(
     permits_count = _count("compliance_federal_permits")
     distributors_count = _count("compliance_distributors")
     brand_regs_count = _count("compliance_brand_registrations")
+    colas_count = _count("compliance_colas")
 
     if permits_count == 0:
         missing.append("federal_permits")
@@ -1158,6 +1159,7 @@ async def get_setup_status(
         "federal_permits_count": permits_count,
         "distributors_count": distributors_count,
         "brand_registrations_count": brand_regs_count,
+        "colas_count": colas_count,
         "missing": missing,
     }
 

@@ -1,0 +1,23 @@
+name: Lion BI staging public auth smoke
+
+on:
+  push:
+    branches:
+      - test/lionbi-staging-public-auth-smoke-20261114
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-staging-public-boundary:
+    name: No-credential staging health and auth-boundary smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Smoke live staging with GET only and no credentials
+        run: python backend/scripts/staging_public_auth_smoke.py

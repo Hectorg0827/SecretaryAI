@@ -29,7 +29,7 @@ class FakeSupabase:
     """Minimal in-memory Supabase: tables are lists of dicts; filters honoured."""
 
     def __init__(self):
-        self.tables: dict[str, list[dict]] = {"companies": [], "logistics_events": [], "drafts": [],
+        self.tables: dict[str, list[dict]] = {"companies": [{"id": "company-A"}, {"id": "company-B"}], "logistics_events": [], "drafts": [],
                                               "action_log": [], "procurement_cycles": [],
                                               "policy_rules": [], "company_features": []}
         self.fail_writes_to: set[str] = set()
@@ -246,7 +246,7 @@ class TestReceivingAcceptanceOverHTTP:
         assert j["claims"][0]["claim_type"] == "carrier_cargo_claim"
         assert {a["status"] for a in j["approvals"]} == {"pending_approval"}
         # Only the event log and the approval queue were written — no stock, no money.
-        written = {t for t, rows in db.tables.items() if rows} - {"logistics_events", "drafts", "action_log"}
+        written = {t for t, rows in db.tables.items() if rows} - {"logistics_events", "drafts", "action_log", "companies"}
         assert written == set(), written
         assert len(db.tables["drafts"]) == 3
         assert all(d["status"] == "pending" for d in db.tables["drafts"])
@@ -307,7 +307,7 @@ class TestLegacyEndpointRegressions:
     def test_receipt_process(self, client, db):
         r = client.post("/api/logistics/receipt/process", headers=_tok(), json={
             "booking_id": "BK-1", "po_number": "PO-1",
-            "line_items": [{"sku": "A", "qty_ordered": 10, "qty_received": 8}]})
+            "line_items": [{"sku": "A", "qty_ordered": 10, "qty_received": 8, "unit": "case"}]})
         assert r.status_code == 200, r.text
         assert r.json()["shortage_count"] == 1
 
@@ -321,7 +321,7 @@ class TestLegacyEndpointRegressions:
             "booking_id": "BK-1", "subject": "Container status",
             "body": "Your cargo has NOT been released. CBP placed a hold for documentation review."})
         assert r.status_code == 200
-        assert r.json()["milestone_detected"] == "hold_placed"
+        assert r.json()["candidate_milestone"] == "hold_placed"
         assert r.json()["verification"].startswith("unverified")
 
     def test_broker_email_evidence_recorded_on_shipment(self, client, db):

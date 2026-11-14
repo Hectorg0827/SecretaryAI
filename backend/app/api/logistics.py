@@ -147,6 +147,8 @@ class VendorResponseRequest(BaseModel):
     supplier_id: str = Field(min_length=1, max_length=200)
     email_subject: str = Field(max_length=500)
     email_body: str = Field(min_length=1, max_length=25000)
+    shipment_id: Optional[str] = Field(default=None, max_length=120)
+    message_id: Optional[str] = Field(default=None, max_length=300)
 
 
 class FreightInvoiceRequest(BaseModel):
@@ -171,6 +173,8 @@ class BrokerEmailRequest(BaseModel):
     booking_id: str = Field(min_length=1, max_length=150)
     subject: str = Field(max_length=500)
     body: str = Field(min_length=1, max_length=25000)
+    shipment_id: Optional[str] = Field(default=None, max_length=120)
+    message_id: Optional[str] = Field(default=None, max_length=300)
 
 
 class LegacyReceiptLine(BaseModel):
@@ -1353,6 +1357,7 @@ async def generate_purchase_orders(
 async def parse_vendor_response(
     request: VendorResponseRequest,
     user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
 ):
     """
     Preview a vendor email response without changing an order or pipeline state.
@@ -1375,8 +1380,23 @@ async def parse_vendor_response(
     )
     parsed = VendorResponseParser().parse(request.email_subject, request.email_body, po)
 
+    evidence = None
+    if request.shipment_id:
+        # User-supplied email text is never proof of a supplier milestone.
+        # Only an operator may link UNVERIFIED evidence to a real shipment.
+        _operator(user)
+        if parsed.order_confirmed:
+            evidence = _record_email_evidence(
+                user, db, request.shipment_id, "supplier_confirmed",
+                occurred_at=parsed.ship_date or "",
+                source_ref=request.message_id or request.email_subject[:80],
+                payload={"po_number": request.po_number, "reported_ship_date": parsed.ship_date},
+            )
+
     return {
         "po_number": request.po_number,
+        "verification": "unverified — supplied vendor email is not authoritative",
+        "ledger_evidence": evidence,
         "status": "analysis_only",
         "candidate_confirmation": parsed.order_confirmed,
         "candidate_rejection": parsed.rejection,
@@ -1523,8 +1543,27 @@ async def parse_broker_email(
     lm = _get_logistics_module(user, db)
     result = lm.parse_broker_email(request.booking_id, request.subject, request.body)
 
+    evidence = None
+    if request.shipment_id:
+        _operator(user)
+        code_map = {
+            "released": "customs_released",
+            "hold_placed": "customs_hold",
+            "entry_filed": "entry_filed",
+            "duties_paid": "duties_paid",
+        }
+        code = code_map.get(result["milestone"])
+        if code:
+            evidence = _record_email_evidence(
+                user, db, request.shipment_id, code,
+                source_ref=request.message_id or request.subject[:80],
+                payload={"reason": result["event"].hold_reason} if result.get("event") and result["event"].hold_reason else {},
+            )
+
     return {
         "booking_id": request.booking_id,
+        "verification": "unverified — broker email is a candidate, not a customs-system release",
+        "ledger_evidence": evidence,
         "status": "analysis_only",
         "candidate_milestone": result["milestone"],
         "candidate_event": {

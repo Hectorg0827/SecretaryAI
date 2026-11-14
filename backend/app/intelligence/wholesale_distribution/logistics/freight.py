@@ -219,7 +219,7 @@ class TransitTracker:
         position = {}
         if booking.container_numbers:
             position = self._adapter.get_position(booking.container_numbers[0])
-        if position.get("source") == "stub":
+        if isinstance(self._adapter, StubVesselTracker) or position.get("source") in ("stub", "unavailable"):
             # No live carrier/AIS feed configured: never present placeholder
             # coordinates or vessel names as if they were real tracking data.
             position = {"status": "no_live_tracking_feed", "current_port": ""}

@@ -68,6 +68,32 @@ async def verify_meta_coexistence_signup(
             if not isinstance(access_token, str) or not access_token:
                 raise MetaVerificationError("Meta exchange did not confirm access")
 
+            # Read-only Graph token introspection. A successful Embedded Signup
+            # screen is not evidence that the app holds these permissions.
+            debug = await client.get(
+                f"/{GRAPH_VERSION}/debug_token",
+                params={"input_token": access_token},
+                headers={"Authorization": f"Bearer {meta_app_id}|{meta_app_secret}"},
+            )
+            debug.raise_for_status()
+            token_info = debug.json().get("data", {})
+            required_scopes = {
+                "whatsapp_business_management", "whatsapp_business_messaging"
+            }
+            if (
+                not isinstance(token_info, dict)
+                or token_info.get("is_valid") is not True
+                or str(token_info.get("app_id", "")) != meta_app_id
+                or not required_scopes.issubset(set(token_info.get("scopes") or []))
+            ):
+                raise MetaVerificationError("Meta access or permissions not verified")
+            for scope in token_info.get("granular_scopes") or []:
+                if not isinstance(scope, dict):
+                    raise MetaVerificationError("Invalid token permission detail")
+                if scope.get("scope") in required_scopes and scope.get("target_ids"):
+                    if claimed_waba_id not in set(map(str, scope["target_ids"])):
+                        raise MetaVerificationError("WABA is outside the granted token assets")
+
             # App secret proof binds this token request to our configured app.
             appsecret_proof = hmac.new(
                 meta_app_secret.encode(), access_token.encode(), hashlib.sha256

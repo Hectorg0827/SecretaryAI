@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.insights._common import advisory_response
-from app.auth.rbac import require_permission
+from app.api.insights._pricing_access import get_pricing_user
 from app.intelligence.pricing.shipment_allocation import (
     AllocationScenario, ExpenseLine, ProductLine, allocate_shipment,
 )
@@ -66,7 +66,7 @@ class AllocationInput(BaseModel):
 @router.post("/preview")
 async def preview_shipment_pricing(
     body: AllocationInput,
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
 ):
     """Preview per-SKU costs; the source and company are never trusted from client."""
     try:

@@ -98,7 +98,10 @@ export function Compliance() {
     setSourceErrors((current) => current.includes(source) ? current : [...current, source]);
   };
 
-  // Setup wizard state
+  // Never present a green status before setup evidence has been loaded.
+  const [setupState, setSetupState] = useState<'loading' | 'complete' | 'incomplete' | 'unavailable'>('loading');
+
+  // Setup wizard visibility is dismissible, unlike source completeness.
   const [showSetupWizard, setShowSetupWizard] = useState(false);
 
   function fetchLicenses() {
@@ -124,11 +127,21 @@ export function Compliance() {
 
   function fetchAll() {
     setSourceErrors([]);
+    setSetupState('loading');
     api.compliance.getSetupStatus()
       .then((setup) => {
+        if (typeof setup?.is_setup !== 'boolean') {
+          setSetupState('unavailable');
+          markUnavailable('Compliance setup');
+          return;
+        }
+        setSetupState(setup.is_setup ? 'complete' : 'incomplete');
         if (!setup.is_setup) setShowSetupWizard(true);
       })
-      .catch(() => markUnavailable('Compliance setup'));
+      .catch(() => {
+        setSetupState('unavailable');
+        markUnavailable('Compliance setup');
+      });
     setStatus(null);
     setAlerts([]);
     setDeadlines([]);
@@ -204,8 +217,26 @@ export function Compliance() {
               aria-label="Open compliance setup">
               <LionUIIcon kind="settings" size={15} /> Setup
             </button>
-            {status && (
+            {status && status.overall !== 'ok' && (
               <ComplianceStatusBadge status={status.overall} />
+            )}
+            {status?.overall === 'ok' && setupState === 'complete' && sourceErrors.length === 0 && (
+              <ComplianceStatusBadge status="ok" />
+            )}
+            {setupState === 'loading' && (
+              <span role="status" className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
+                Verifying setup
+              </span>
+            )}
+            {setupState === 'incomplete' && (
+              <span role="status" className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-800">
+                Setup incomplete · clearance not verified
+              </span>
+            )}
+            {(setupState === 'unavailable' || sourceErrors.length > 0) && (
+              <span role="status" className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700">
+                Compliance evidence unavailable
+              </span>
             )}
             {criticalCount > 0 && (
               <div className="flex items-center gap-1 text-red-600 text-sm font-semibold bg-red-50 px-3 py-1.5 rounded-lg">
@@ -258,6 +289,12 @@ export function Compliance() {
         </div>
       </div>
 
+      {setupState === 'incomplete' && (
+        <div role="alert" className="mx-6 mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Compliance setup is incomplete. No recorded alerts does not mean regulatory approval.
+          Confirm required products, licenses and permits in Setup before relying on the registry.
+        </div>
+      )}
       {sourceErrors.length > 0 && (
         <div role="alert" className="mx-6 mt-3 flex items-start justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
           <span>
@@ -284,6 +321,9 @@ export function Compliance() {
                 </div>
               ) : status ? (
                 <>
+                  <p className="mb-4 text-xs text-slate-500" role="note">
+                    Registry status reflects internally recorded information, not independent verification by regulators.
+                  </p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                     <StatCard label="Active States" value={status.active_states} />
                     <StatCard label="Products" value={status.total_products} />

@@ -34,6 +34,7 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
     critical = [i for i in inventory_rows if i.get("stock_status") in ("critical", "out_of_stock")]
     low = [i for i in inventory_rows if i.get("stock_status") == "low"]
     healthy = [i for i in inventory_rows if i.get("stock_status") == "healthy"]
+    unassessed = [i for i in inventory_rows if i.get("stock_status") == "unassessed"]
 
     for item in critical:
         weeks = item.get("weeks_remaining")
@@ -49,7 +50,14 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
             f"  [LOW] {item['product_name']}: {item['total_qty']} {unit}, {wks_str} supply"
         )
 
-    lines.append(f"  {len(healthy)} products at healthy stock levels.")
+    for item in unassessed:
+        lines.append(
+            f"  [UNASSESSED] {item['product_name']}: {item['total_qty']} {unit}; "
+            "weekly sell-through was not verified, so stock coverage is unknown"
+        )
+    lines.append(f"  {len(healthy)} products at verified healthy stock levels.")
+    if unassessed:
+        lines.append(f"  {len(unassessed)} product(s) could not be assessed; do not claim inventory is healthy.")
     return "\n".join(lines)
 
 

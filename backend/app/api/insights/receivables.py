@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_adapter
 from app.api.insights._common import advisory_response, read_source, row_value
+from app.connectors.unified_adapter import read_invoice_summaries
 from app.auth.rbac import require_permission
 from app.intelligence.receivables import age_invoice_balances
 
@@ -121,7 +122,7 @@ async def receivables(
 
     customers = await read_source(adapter.get_all_customers(), source_name="Customer list")
     invoices = await read_source(
-        adapter.get_orders_last_n_days((today - HISTORY_START).days),
+        read_invoice_summaries(adapter, (today - HISTORY_START).days),
         source_name="Invoices",
     )
     observed_at = datetime.now(timezone.utc)

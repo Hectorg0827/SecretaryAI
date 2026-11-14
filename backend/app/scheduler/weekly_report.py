@@ -20,11 +20,13 @@ import anthropic
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import get_settings
+from app.connectors.unified_adapter import read_invoice_summaries
 from app.ai.model_router import model_for
 from app.scheduler.dashboard_snapshot import (
     SnapshotReadUnavailable,
     _invoice_amount,
     _invoice_date,
+    _billable_invoice_rows,
     _row_value,
     compute_dashboard_payload,
     store_snapshot,
@@ -122,7 +124,7 @@ async def collect_weekly_figures(adapter, *, period_start: date, period_end: dat
     prior_start = period_start - timedelta(days=7)
     try:
         dashboard = await compute_dashboard_payload(adapter)
-        invoices = await adapter.get_orders_last_n_days(14)
+        invoices = _billable_invoice_rows(await read_invoice_summaries(adapter, 14))
 
         sales = {"this": 0.0, "prior": 0.0}
         counts = {"this": 0, "prior": 0}

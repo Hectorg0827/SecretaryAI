@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_adapter
 from app.api.insights._common import advisory_response, read_source, row_value
+from app.connectors.unified_adapter import read_invoice_summaries
 from app.auth.rbac import require_permission
 from app.intelligence.anomaly_detection import detect_order_anomalies
 from app.intelligence.sales_analytics import filter_billable_invoices
@@ -110,7 +111,7 @@ async def anomalies(
     today = date.today()
     window_start = today - timedelta(days=lookback_days)
     invoices = await read_source(
-        adapter.get_orders_last_n_days(lookback_days), source_name="Order history",
+        read_invoice_summaries(adapter, lookback_days), source_name="Order history",
     )
 
     rows: list[dict] = []

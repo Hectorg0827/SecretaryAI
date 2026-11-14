@@ -309,10 +309,14 @@ DASHBOARD = {
     "sales_30d": 9000.0,
 }
 INVOICES = [
-    {"date": "2026-10-26", "total": 1200, "customer_name": "Corner Bar"},   # this week
-    {"date": "2026-10-31", "total": 300, "customer_name": "Hotel Grand"},   # this week
-    {"date": "2026-10-20", "total": 800, "customer_name": "Corner Bar"},    # prior week
-    {"date": "2026-11-01", "total": 999, "customer_name": "Today Only"},    # today: excluded
+    {"id": "INV-1", "customer_id": "C-1", "status": "paid",
+     "date": "2026-10-26", "total": 1200, "customer_name": "Corner Bar"},   # this week
+    {"id": "INV-2", "customer_id": "C-2", "status": "paid",
+     "date": "2026-10-31", "total": 300, "customer_name": "Hotel Grand"},  # this week
+    {"id": "INV-3", "customer_id": "C-1", "status": "paid",
+     "date": "2026-10-20", "total": 800, "customer_name": "Corner Bar"},   # prior week
+    {"id": "INV-4", "customer_id": "C-3", "status": "paid",
+     "date": "2026-11-01", "total": 999, "customer_name": "Today Only"},   # today: excluded
 ]
 
 

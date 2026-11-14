@@ -4,29 +4,48 @@ Updates health_status and health_score in the DB.
 """
 import logging
 from datetime import date, timedelta
+from app.connectors.unified_adapter import read_invoice_summaries
+from app.scheduler.dashboard_snapshot import _billable_invoice_rows
 
 log = logging.getLogger(__name__)
+
+
+def _store_account_health(db, company_id: str, customer_id: str, payload: dict) -> None:
+    """A matched tenant-scoped DB row is required before claiming an update."""
+    if not hasattr(db, "table"):
+        raise RuntimeError("Account health destination unavailable")
+    result = (db.table("accounts").update(payload)
+              .eq("qb_customer_id", customer_id).eq("company_id", company_id).execute())
+    rows = getattr(result, "data", None)
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise RuntimeError("Account health persistence was not confirmed")
+    row = rows[0]
+    if (not isinstance(row, dict) or str(row.get("company_id")) != str(company_id)
+            or str(row.get("qb_customer_id")) != str(customer_id)):
+        raise RuntimeError("Account health update did not match its company and customer")
 
 
 async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
     """Re-score every account and persist updated scores."""
     from app.intelligence.account_health import score_account
 
-    results = {"updated": 0, "unscored": 0, "alerts": []}
+    results = {"updated": 0, "unscored": 0, "failed": 0, "alerts": []}
 
     customers = await adapter.get_all_customers()
     date_to = date.today()
     date_from = date_to - timedelta(days=365)
-    invoices = await adapter.get_orders_last_n_days(365)
+    invoices = _billable_invoice_rows(await read_invoice_summaries(adapter, 365))
 
     # Group invoices by customer
     by_customer: dict[str, list[dict]] = {}
     for inv in invoices:
-        cid = inv.customer_id if hasattr(inv, "customer_id") else inv.get("customer_id", "")
-        by_customer.setdefault(cid, []).append(
-            {"date": inv.date if hasattr(inv, "date") else inv.get("order_date"),
-             "total": float(inv.total if hasattr(inv, "total") else inv.get("total_amount", 0))}
-        )
+        # _billable_invoice_rows produces verified dictionaries with "date"
+        # and "total" keys. Do not read obsolete order_date/total_amount keys.
+        cid = inv["customer_id"]
+        by_customer.setdefault(cid, []).append({
+            "date": inv["date"],
+            "total": inv["total"],
+        })
 
     for customer in customers:
         cid = customer.qb_id if hasattr(customer, "qb_id") else customer.get("qb_id", "")
@@ -58,26 +77,27 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
             log.warning("Health refresh: account %s is unscored", cid)
             results["unscored"] += 1
             try:
-                if hasattr(db, "table"):
-                    db.table("accounts").update({
-                        "health_status": "unknown",
-                        "health_score": None,
-                        "last_health_check": date.today().isoformat(),
-                    }).eq("qb_customer_id", cid).eq("company_id", company_id).execute()
+                _store_account_health(db, company_id, cid, {
+                    "health_status": "unknown",
+                    "health_score": None,
+                    "last_health_check": date.today().isoformat(),
+                })
             except Exception as exc:
-                log.error("Health refresh: unscored DB update failed for %s: %s", cid, exc)
+                log.error("Health refresh: unscored DB update failed for %s: %s", cid, type(exc).__name__)
+                results["failed"] += 1
             continue
 
         # Update account in DB
         try:
-            if hasattr(db, "table"):
-                db.table("accounts").update({
-                    "health_status": health.status,
-                    "health_score": health.score,
-                    "last_health_check": date.today().isoformat(),
-                }).eq("qb_customer_id", cid).eq("company_id", company_id).execute()
+            _store_account_health(db, company_id, cid, {
+                "health_status": health.status,
+                "health_score": health.score,
+                "last_health_check": date.today().isoformat(),
+            })
         except Exception as e:
-            log.error("Health refresh: DB update failed for %s: %s", cid, e)
+            log.error("Health refresh: DB update failed for %s: %s", cid, type(e).__name__)
+            results["failed"] += 1
+            continue
 
         results["updated"] += 1
 

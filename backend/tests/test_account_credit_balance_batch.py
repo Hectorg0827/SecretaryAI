@@ -29,6 +29,7 @@ class RecordingDB:
     def __init__(self):
         self.updates = []
         self.pending = None
+        self.filters = {}
 
     def table(self, name):
         assert name == "accounts"
@@ -39,11 +40,16 @@ class RecordingDB:
         return self
 
     def eq(self, key, value):
+        self.filters[key] = value
         return self
 
     def execute(self):
         self.updates.append(self.pending)
-        return SimpleNamespace(data=[self.pending])
+        return SimpleNamespace(data=[{
+            **self.pending,
+            "company_id": self.filters["company_id"],
+            "qb_customer_id": self.filters["qb_customer_id"],
+        }])
 
 
 @pytest.mark.asyncio

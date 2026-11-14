@@ -173,13 +173,83 @@ def _record_value(record, key: str, fallback: str | None = None, default=None):
     return value if value is not None else getattr(record, fallback, default) if fallback else default
 
 
-async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
-    """
-    Fetch real QB data matching the classified intent.
-    Returns a dict consumed by build_query_context().
-    """
-    data: dict = {}
+def _account_name_key(value: str) -> str:
+    """Normalize apostrophes and punctuation for safe *unique* name matching."""
+    import re
+    return " ".join(re.findall(r"[a-z0-9]+", value.casefold().replace("'", "").replace("\u2019", "")))
 
+
+def _match_accounts(customers: list, message: str) -> list:
+    """Resolve the account mentioned by the user/context, never pick an ambiguous match."""
+    from app.api.accounts import _field
+
+    query = f" {_account_name_key(message)} "
+    exact = [
+        c for c in customers
+        if (name := _account_name_key(_field(c, "name") or ""))
+        and len(name) >= 5 and f" {name} " in query
+    ]
+    if exact:
+        return exact
+    # People commonly omit suffixes: "Bills Windsurf" -> "Bill's Windsurf Shop".
+    partial = []
+    for c in customers:
+        parts = _account_name_key(_field(c, "name") or "").split()
+        if len(parts) >= 2 and f" {' '.join(parts[:2])} " in query:
+            partial.append(c)
+    return partial
+
+
+def _validated_account_rows(customers: list, invoices: list) -> tuple[list, dict]:
+    """Use precisely the Accounts API invoice validation and billable filtering."""
+    from app.api.accounts import _field, _invoice_row
+    from app.intelligence.sales_analytics import filter_billable_invoices
+
+    visible_ids = {_field(c, "qb_id") for c in customers}
+    rows = [_invoice_row(inv) for inv in invoices if _field(inv, "customer_id") in visible_ids]
+    billable = filter_billable_invoices(rows)
+    by_customer: dict[str, list] = {}
+    for row in billable:
+        by_customer.setdefault(row["customer_id"], []).append(row)
+    return billable, by_customer
+
+
+def _account_snapshot(customer, billed: list) -> dict:
+    """Share the Accounts screen's scoring rules, including the unscored cases."""
+    from app.api.accounts import _to_account_dict
+    from app.intelligence.account_health import score_account
+    from app.intelligence.sales_analytics import compute_account_velocity, compute_trend_comparison
+
+    score_rows = [{"date": r["date"], "total": r["total"]} for r in billed]
+    last = max((r["date"] for r in billed), default=None)
+    account = _to_account_dict(customer, score_rows, last)
+    account["invoice_count_365d"] = len(billed)
+    account["history_window_days"] = 365
+    account["source"] = "QuickBooks verified invoice headers"
+    account["item_level_analysis_available"] = False
+    account["velocity"] = compute_account_velocity(billed) if billed else {}
+    account["trend_30d"] = compute_trend_comparison(billed, days=30) if billed else None
+    account["trend_90d"] = compute_trend_comparison(billed, days=90) if billed else None
+    account["health_flags"] = []
+    if billed and account["health_score"] is not None:
+        health = score_account(
+            account_id=account["id"], account_name=account["name"],
+            last_order_date=date.fromisoformat(last),
+            avg_order_cycle_days=None, order_history=score_rows,
+            current_balance=Decimal(str(account["current_balance"])),
+        )
+        account["health_flags"] = health.flags
+    return account
+
+
+async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
+    """Fetch authorized provider records; a source outage must never masquerade as no data."""
+    from fastapi import HTTPException
+    from app.api.accounts import _field
+    from app.connectors.unified_adapter import read_invoice_summaries
+    from app.intelligence.sales_analytics import compute_period_sales
+
+    data: dict = {}
     try:
         if intent == "customs_status":
             data["customs"] = await adapter.get_customs_status()
@@ -189,7 +259,6 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
 
         elif intent == "inventory_check":
             items = await adapter.get_inventory_merged()
-            # Convert to the format expected by summarize_inventory
             data["inventory"] = [
                 {
                     "product_name": i.get("product_name", ""),
@@ -200,127 +269,97 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                 for i in items
             ]
 
-        elif intent == "account_status":
+        elif intent in ("account_status", "sales_report", "general_question"):
+            # The UI uses the QBO header-only path. A bad item Qty must not
+            # prevent account/financial analysis, but must never become a
+            # fabricated SKU quantity.
             customers = await adapter.get_all_customers()
-            invoices = await adapter.get_orders_last_n_days(90)
-            # Try to find a specific account named in the message
-            msg_lower = message.lower()
-            specific = next(
-                (c for c in customers if getattr(c, "name", "").lower() in msg_lower), None
-            )
-            if specific:
-                cid = getattr(specific, "qb_id", "")
-                acct_invoices = [
-                    inv for inv in invoices
-                    if _record_value(inv, "customer_id", default="") == cid
-                ]
-                data["account"] = {
-                    "name": getattr(specific, "name", ""),
-                    "health_status": "unknown",
-                    "last_order_date": max(
-                        (str(_record_value(inv, "date", "order_date", "")) for inv in acct_invoices),
-                        default="never",
-                    ),
-                    "current_balance": float(getattr(specific, "balance", 0)),
-                }
-                data["orders"] = [
-                    {
-                        "order_date": str(_record_value(inv, "date", "order_date", "")),
-                        "total_amount": float(_record_value(inv, "total", "total_amount", 0)),
-                    }
-                    for inv in acct_invoices
-                ]
+            invoices = await read_invoice_summaries(adapter, 365)
+            billable, by_customer = _validated_account_rows(customers, invoices)
+
+            if intent == "account_status":
+                matches = _match_accounts(customers, message)
+                if len(matches) == 1:
+                    customer = matches[0]
+                    cid = _field(customer, "qb_id")
+                    account_invoices = by_customer.get(cid, [])
+                    data["account"] = _account_snapshot(customer, account_invoices)
+                    data["orders"] = [
+                        {"order_date": r["date"], "total_amount": r["total"]}
+                        for r in sorted(account_invoices,
+                                        key=lambda row: (row["date"], row["id"]))[-5:]
+                    ]
+                elif len(matches) > 1:
+                    data["ambiguous_accounts"] = [
+                        _field(c, "name") for c in matches[:8]
+                    ]
+                else:
+                    data["accounts"] = []
+                    for customer in customers:
+                        try:
+                            data["accounts"].append(
+                                _account_snapshot(customer, by_customer.get(_field(customer, "qb_id"), []))
+                            )
+                        except (ValueError, TypeError, ArithmeticError):
+                            # Unknown remains unscored; never pretend a credit
+                            # or invalid source balance is $0.
+                            data["accounts"].append({
+                                "name": _field(customer, "name"),
+                                "health_status": "unknown", "health_score": None,
+                            })
             else:
-                # Overview of all accounts
-                from app.intelligence.account_health import score_account
                 data["accounts"] = []
                 for customer in customers:
-                    cid = getattr(customer, "qb_id", "")
-                    cust_invoices = [
-                        {"date": str(getattr(inv, "date", "")), "total": float(getattr(inv, "total", 0))}
-                        for inv in invoices
-                        if _record_value(inv, "customer_id", default="") == cid
-                    ]
-                    dates = [o["date"] for o in cust_invoices if o["date"]]
-                    last_order = None
-                    if dates:
-                        try:
-                            last_order = date.fromisoformat(max(dates))
-                        except ValueError:
-                            pass
+                    if len(data["accounts"]) >= 100:
+                        break
                     try:
-                        balance = getattr(customer, "balance", None)
-                        if balance is None or isinstance(balance, bool):
-                            raise ValueError("Customer balance not observed")
-                        health = score_account(
-                            account_id=cid,
-                            account_name=getattr(customer, "name", ""),
-                            last_order_date=last_order,
-                            avg_order_cycle_days=None,
-                            order_history=cust_invoices,
-                            current_balance=Decimal(str(balance)),
-                        )
-                    except (ValueError, TypeError, ArithmeticError):
-                        # Credit balances and missing/malformed source values
-                        # are unscorable, not zero or a reason to hide other
-                        # customers from the chat overview.
+                        snapshot = _account_snapshot(customer, by_customer.get(_field(customer, "qb_id"), []))
                         data["accounts"].append({
-                            "name": getattr(customer, "name", ""),
-                            "health_status": "unknown",
-                            "health_score": None,
+                            "name": snapshot["name"], "health_status": snapshot["health_status"],
+                            "health_score": snapshot["health_score"],
                         })
-                        continue
-                    data["accounts"].append({
-                        "name": getattr(customer, "name", ""),
-                        "health_status": health.status,
-                        "health_score": health.score,
-                    })
+                    except (ValueError, TypeError, ArithmeticError):
+                        data["accounts"].append({
+                            "name": _field(customer, "name"),
+                            "health_status": "unknown", "health_score": None,
+                        })
 
-        elif intent in ("sales_report", "general_question"):
-            customers = await adapter.get_all_customers()
-            invoices = await adapter.get_orders_last_n_days(30)
-            items = await adapter.get_inventory_merged()
-
-            from app.intelligence.account_health import score_account
-            from app.intelligence.sales_analytics import compute_period_sales
-
-            account_summaries = []
-            for customer in customers[:30]:  # cap for context size
-                account_summaries.append({
-                    "name": getattr(customer, "name", ""),
-                    "health_status": "unknown",  # quick pass, no scoring
-                })
-
-            invoice_dicts = [
-                {
-                    "customer_name": _record_value(inv, "customer_name", default=""),
-                    "order_date": str(_record_value(inv, "date", "order_date", "")),
-                    "total_amount": float(_record_value(inv, "total", "total_amount", 0)),
-                    "items": _record_value(inv, "line_items", default=[]),
+                today = date.today()
+                period_start = today - timedelta(days=29)
+                period = compute_period_sales(billable, period_start, today)
+                data["sales_summary"] = {
+                    "gross_billed_amount": float(period.total_revenue),
+                    "order_count": period.order_count,
+                    "top_accounts": period.top_accounts[:5],
+                    "period_start": period_start.isoformat(),
+                    "period_end": today.isoformat(),
+                    "source": "QuickBooks invoice headers",
+                    "product_breakdown_available": False,
                 }
-                for inv in invoices
-            ]
+                if intent == "general_question":
+                    try:
+                        items = await adapter.get_inventory_merged()
+                        data["inventory"] = [
+                            {
+                                "product_name": i.get("product_name", ""),
+                                "total_qty": i.get("total_qty", 0),
+                                "stock_status": _qty_to_status(i),
+                                "weeks_remaining": _weeks_remaining(i),
+                            }
+                            for i in items
+                        ]
+                    except Exception:
+                        log.warning("Inventory unavailable in general business chat")
+                        data["inventory_unavailable"] = True
 
-            today = date.today()
-            period = compute_period_sales(invoice_dicts, today - timedelta(days=30), today)
-            data["accounts"] = account_summaries
-            data["inventory"] = [
-                {
-                    "product_name": i.get("product_name", ""),
-                    "total_qty": i.get("total_qty", 0),
-                    "stock_status": _qty_to_status(i),
-                    "weeks_remaining": _weeks_remaining(i),
-                }
-                for i in items
-            ]
-            data["sales_summary"] = {
-                "total_revenue": float(period.total_revenue),
-                "order_count": period.order_count,
-                "top_accounts": period.top_accounts[:5],
-            }
-
+    except HTTPException:
+        raise
     except Exception as exc:
         log.warning("Data fetch for intent '%s' failed: %s", intent, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Verified business data is temporarily unavailable. Please retry; no business analysis was generated.",
+        ) from exc
 
     return data
 

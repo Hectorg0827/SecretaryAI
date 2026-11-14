@@ -86,6 +86,8 @@ async def list_pending_actions(
     company_id = user["company_id"]
     queue = ApprovalQueue(db)
     drafts = await queue.get_pending(company_id)
+    # Legacy company-level email proposals cannot be exposed to managers.
+    drafts = [d for d in drafts if "email" not in str(d.get("action_type") or "").lower()]
     return {"drafts": drafts, "company_id": company_id}
 
 
@@ -120,7 +122,8 @@ async def approve_draft(
     except Exception:
         draft = {}
 
-    if not draft:
+    if not draft or "email" in str(draft.get("action_type") or "").lower():
+        # Personal correspondence is never a managerial approval artifact.
         raise HTTPException(status_code=404, detail="Draft not found")
 
     # Idempotency: only a still-pending draft may be approved/executed. A second
@@ -229,7 +232,8 @@ async def reject_draft(
     except Exception:
         draft = {}
 
-    if not draft:
+    if not draft or "email" in str(draft.get("action_type") or "").lower():
+        # Personal correspondence is never a managerial approval artifact.
         raise HTTPException(status_code=404, detail="Draft not found")
 
     # Idempotency: don't re-process an already-resolved draft.

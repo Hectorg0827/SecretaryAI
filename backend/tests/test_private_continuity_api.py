@@ -92,3 +92,57 @@ def test_missing_user_identity_fails_closed():
     with pytest.raises(HTTPException) as denied:
         private_followups(user={"company_id": str(uuid4()), "role": "owner"}, db=DB())
     assert denied.value.status_code == 401
+
+
+def test_chat_private_context_loads_only_verified_owned_contact_events():
+    from app.api.private_continuity import private_context_for_query
+    company_id, employee_a, employee_b = str(uuid4()), str(uuid4()), str(uuid4())
+    contact_a, contact_b = str(uuid4()), str(uuid4())
+    base = {
+        "company_id": company_id,
+        "display_name": "Joan", "email": "joan@example.test",
+        "identity_verified": True,
+    }
+    db = DB(
+        lola_private_contacts=[
+            dict(base, id=contact_a, user_id=employee_a),
+            dict(base, id=contact_b, user_id=employee_b),
+        ],
+        lola_private_events=[
+            {
+                "id": str(uuid4()), "company_id": company_id, "user_id": employee_a,
+                "contact_id": contact_a, "project_key": "label-artwork",
+                "channel": "whatsapp", "direction": "outbound",
+                "kind": "draft_sent", "origin": "manual",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "summary": "Draft sent by me",
+            },
+            {
+                "id": str(uuid4()), "company_id": company_id, "user_id": employee_b,
+                "contact_id": contact_b, "project_key": "private-pricing",
+                "channel": "email", "direction": "inbound",
+                "kind": "request", "origin": "gmail_api",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "summary": "Confidential to employee B",
+            },
+        ],
+    )
+    a = private_context_for_query(db, {"company_id": company_id, "sub": employee_a}, "What happened with Joan?")
+    b = private_context_for_query(db, {"company_id": company_id, "sub": employee_b, "role": "owner"}, "What happened with Joan?")
+    assert len(a) == len(b) == 1
+    assert a[0]["project"] == "label-artwork"
+    assert b[0]["project"] == "private-pricing"
+    assert "Confidential" not in str(a)
+    assert "Draft sent" not in str(b)
+
+
+def test_chat_context_ambiguous_contact_name_does_not_merge_histories():
+    from app.api.private_continuity import private_context_for_query
+    company_id, employee = str(uuid4()), str(uuid4())
+    db = DB(lola_private_contacts=[
+        {"id": str(uuid4()), "company_id": company_id, "user_id": employee,
+         "display_name": "Joan", "identity_verified": True},
+        {"id": str(uuid4()), "company_id": company_id, "user_id": employee,
+         "display_name": "Joan", "identity_verified": True},
+    ])
+    assert private_context_for_query(db, {"company_id": company_id, "sub": employee}, "Any updates from Joan?") == []

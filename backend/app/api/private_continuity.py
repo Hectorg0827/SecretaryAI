@@ -68,6 +68,59 @@ class SnoozeRequest(BaseModel):
     until: datetime
 
 
+def private_context_for_query(db, user: dict, question: str, limit: int = 24) -> list[dict]:
+    """Employee-only evidence for a named contact in Lola chat.
+
+    Select the contact ONLY if one unique, confirmed full display name occurs
+    as a token-delimited phrase in the question. Never search everyone else's
+    conversations or guess which 'Joan' the user intended.
+    """
+    import re
+    from unicodedata import normalize
+
+    if not question or not question.strip():
+        return []
+    try:
+        contacts = (_owned(db, "lola_private_contacts", user)
+                    .eq("identity_verified", True).limit(500).execute()).data or []
+    except Exception:
+        return []
+
+    q = normalize("NFKC", question).casefold()
+    matched = []
+    for contact in contacts:
+        name = normalize("NFKC", str(contact.get("display_name") or "")).casefold().strip()
+        if len(name) < 3:
+            continue
+        if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", q):
+            matched.append(contact)
+    # Ambiguous identity -> no private context; explicitly ask to clarify.
+    if len(matched) != 1:
+        return []
+
+    contact = matched[0]
+    try:
+        rows = (_owned(db, "lola_private_events", user)
+                .eq("contact_id", contact["id"])
+                .order("occurred_at", desc=True)
+                .limit(min(max(limit, 1), 50)).execute()).data or []
+    except Exception:
+        return []
+    return [
+        {
+            "contact_name": contact["display_name"],
+            "project": row["project_key"],
+            "channel": row["channel"],
+            "direction": row["direction"],
+            "event_type": row["kind"],
+            "occurred_at": row["occurred_at"],
+            "source_quality": row.get("origin", "manual"),
+            "summary": str(row.get("summary") or "")[:350],
+        }
+        for row in rows
+    ]
+
+
 @router.post("/sync/gmail")
 async def sync_private_gmail(
     user: dict = Depends(get_current_user),

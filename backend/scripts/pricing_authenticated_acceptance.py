@@ -2,6 +2,8 @@
 
 Only the operator's local shell may hold the bearer tokens below. Never paste
 them in ChatGPT, CI, GitHub comments, command arguments, or evidence artifacts.
+The primary session must be an active company OWNER, because tenant membership
+of the restricted staff is independently verified with /api/team/members.
 No real price or accounting writes. This script requires three separate
 authorized staging users and a real same-tenant purchase assessment. A fourth
 private owner/manager token from another tenant optionally verifies 404 cross-
@@ -106,15 +108,34 @@ def verify_suggestions(client: httpx.Client, company: str) -> dict:
     return {"count": len(rows), "prices_changed": False}
 
 
-def verify_denied(client: httpx.Client) -> dict:
-    confirm_role(client, {
-        "back_office", "sales_rep", "viewer",
-        "finance_controller", "ar_specialist", "ap_specialist",
-    })
+def verify_denied(owner: httpx.Client, client: httpx.Client) -> dict:
+    """Do not mistake foreign-company isolation for same-company role denial.
+
+    The test must use a real, active staff member from the owner's company.
+    /api/team/members is deliberately owner-only and supplies the independent
+    company membership evidence; never print member details or identifiers.
+    """
+    current = read_json(client, "/auth/me")
+    role = current.get("role")
+    check(role in {"back_office", "sales_rep", "viewer",
+                   "finance_controller", "ar_specialist", "ap_specialist"},
+          "Denied-user session has an unexpected current role")
+    user_id = current.get("id")
+    check(isinstance(user_id, str) and bool(user_id),
+          "Denied-user session lacks a stable identity")
+    members = read_json(owner, "/api/team/members").get("members")
+    check(isinstance(members, list),
+          "Owner's tenant membership source unavailable")
+    matching = [m for m in members if isinstance(m, dict)
+                and m.get("id") == user_id]
+    check(len(matching) == 1
+          and matching[0].get("is_active") is True
+          and matching[0].get("role") == role,
+          "Denied user is not an active restricted member of owner's tenant")
     result = client.get(BOOK_PATH)
     check(result.status_code == 403,
-          "Unprivileged staff did not receive 403 on price-book access")
-    return {"book_access": "DENIED_403"}
+          "Same-tenant restricted staff did not receive pricing HTTP 403")
+    return {"book_access": "DENIED_403", "same_tenant_active_role": True}
 
 
 def verify_foreign_tenant(foreign: httpx.Client, owner_company: str,
@@ -139,7 +160,7 @@ def verify_foreign_tenant(foreign: httpx.Client, owner_company: str,
 def check_role_matrix(owner: httpx.Client, pricing: httpx.Client,
                       denied: httpx.Client, assessment_id: str,
                       foreign: httpx.Client | None = None) -> dict:
-    confirm_role(owner, {"owner", "manager"})
+    confirm_role(owner, {"owner"})
     confirm_role(pricing, {"pricing_billbacks"})
     a = verify_book(owner)
     b = verify_book(pricing)
@@ -151,7 +172,7 @@ def check_role_matrix(owner: httpx.Client, pricing: httpx.Client,
     staff_assessment = verify_assessment(pricing, assessment_id)
     check(owner_assessment == staff_assessment,
           "Owner and pricing staff see inconsistent purchase assessment evidence")
-    rejection = verify_denied(denied)
+    rejection = verify_denied(owner, denied)
     suggestions = verify_suggestions(owner, a["company"])
     isolation = (verify_foreign_tenant(foreign, a["company"], assessment_id)
                  if foreign is not None else

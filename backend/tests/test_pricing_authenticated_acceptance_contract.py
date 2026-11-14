@@ -27,6 +27,7 @@ class Client:
                  suggestions=None, foreign_assessment_status=None):
         self.role = role
         self.company = company
+        self.identity = f"{company}:{role}"
         self.book = book
         self.assessment = assessment
         self.suggestions = suggestions
@@ -36,7 +37,16 @@ class Client:
     def get(self, path):
         self.paths.append(path)
         if path == "/auth/me":
-            return Response(200, {"role": self.role})
+            return Response(200, {"id": self.identity, "role": self.role})
+        if path == "/api/team/members":
+            if self.role != "owner":
+                return Response(403)
+            return Response(200, {"members": [
+                {"id": f"{self.company}:back_office",
+                 "role": "back_office", "is_active": True},
+                {"id": f"{self.company}:viewer",
+                 "role": "viewer", "is_active": True},
+            ]})
         if path == BOOK_PATH:
             if self.role not in {"owner", "manager", "pricing_billbacks"}:
                 return Response(403)
@@ -88,6 +98,8 @@ def test_role_matrix_requires_three_real_permission_classes():
     result = check_role_matrix(owner, pricing, denied, ASSESSMENT)
     assert result["pricing_book"]["state"] == "unpopulated"
     assert result["denied_role"]["book_access"] == "DENIED_403"
+    assert result["denied_role"]["same_tenant_active_role"] is True
+    assert "/api/team/members" in owner.paths
     assert result["accounting_certification"] == "NOT_ESTABLISHED"
     assert result["release_signoff"] == "MANUAL_EVIDENCE_REVIEW_REQUIRED"
     assert all(x in owner.paths for x in (BOOK_PATH, SUGGESTIONS, ASSESSMENTS+ASSESSMENT))
@@ -162,3 +174,21 @@ def test_optional_cross_tenant_must_be_explicitly_unverified_when_absent():
     assert result["cross_tenant"]["assessment_access"] == (
         "NOT_RUN_SECOND_TENANT_SESSION_REQUIRED"
     )
+
+def test_denied_role_from_another_tenant_cannot_fake_role_protection():
+    with pytest.raises(AcceptanceBlocked, match="not an active restricted member"):
+        check_role_matrix(Client("owner"), Client("pricing_billbacks"),
+                          Client("back_office", company="foreign-tenant"),
+                          ASSESSMENT)
+
+
+def test_manager_cannot_run_owner_membership_parity_probe():
+    with pytest.raises(AcceptanceBlocked, match="unexpected current role"):
+        check_role_matrix(Client("manager"), Client("pricing_billbacks"),
+                          Client("back_office"), ASSESSMENT)
+
+
+def test_same_tenant_unlisted_restricted_role_does_not_pass():
+    with pytest.raises(AcceptanceBlocked, match="not an active restricted member"):
+        check_role_matrix(Client("owner"), Client("pricing_billbacks"),
+                          Client("ar_specialist"), ASSESSMENT)

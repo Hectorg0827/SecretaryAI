@@ -2273,3 +2273,57 @@ async def ask_lola_logistics(
     viewer = _viewer(user)
     ledger = _load_ledger(user, db)
     return LogisticsAssistant(ledger, viewer).ask(request.question, as_of=_as_of(request.as_of)).to_dict()
+
+
+# ─── Read-only linkage to canonical purchasing and receiving records ─────────
+
+@router.get("/journey/shipments/{shipment_id}/purchasing-crosscheck")
+async def crosscheck_shipment_purchasing(
+    shipment_id: str,
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Compare recorded shipment PO refs with server-approved purchase records.
+
+    Does NOT map a PO receipt to one particular shipment, certify carrier
+    arrival, post inventory, issue a claim, or reconcile QuickBooks. A PO may
+    cover several containers; unrelated tenant records are never read.
+    """
+    from app.intelligence.wholesale_distribution.logistics.purchase_bridge import (
+        InvalidPurchaseEvidence, compare_purchase_records,
+    )
+
+    _require_purchasing_employee(user)
+    viewer = _viewer(user)
+    ledger = _load_ledger(user, db)
+    shipment = ledger.get(shipment_id)
+    if shipment is None or not viewer.can_see_shipment(shipment):
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    if len(shipment.po_numbers) > 20:
+        raise HTTPException(status_code=503, detail="Shipment has too many linked POs for this view")
+
+    # Multiple shipment journeys sharing a PO make receipt attribution ambiguous.
+    shared_pos = {
+        po for po in shipment.po_numbers
+        if any(
+            other.shipment_id != shipment.shipment_id and po in other.po_numbers
+            for other in ledger.shipments(include_cancelled=True)
+        )
+    }
+    purchase_details = {}
+    for po_number in shipment.po_numbers:
+        try:
+            purchase_details[po_number] = await get_durable_purchase_order_detail(
+                po_number=po_number, user=user, db=db
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            purchase_details[po_number] = None
+    try:
+        return compare_purchase_records(shipment, purchase_details, shared_pos)
+    except InvalidPurchaseEvidence as exc:
+        log.warning("Shipment purchasing comparison unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=503, detail="Purchasing comparison could not be verified"
+        ) from exc

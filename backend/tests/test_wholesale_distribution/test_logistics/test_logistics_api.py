@@ -33,6 +33,7 @@ class FakeSupabase:
                                               "action_log": [], "procurement_cycles": [],
                                               "policy_rules": [], "company_features": []}
         self.fail_writes_to: set[str] = set()
+        self.fail_reads_from: set[str] = set()
 
     def table(self, name):
         return _Query(self, name)
@@ -45,6 +46,7 @@ class _Query:
     def select(self, *a, **k): return self
     def order(self, *a, **k): return self
     def lt(self, *a, **k): return self
+    def limit(self, count): self.cap = count; return self
     def maybe_single(self): return self
 
     def eq(self, col, val):
@@ -64,6 +66,8 @@ class _Query:
         return self
 
     def execute(self):
+        if self.op == "select" and self.name in self.db.fail_reads_from:
+            raise ConnectionError("synthetic provider outage")
         rows = self.db.tables.setdefault(self.name, [])
         if self.op in ("insert", "upsert"):
             if self.name in self.db.fail_writes_to:
@@ -75,6 +79,8 @@ class _Query:
             rows.append(copy.deepcopy(self.row))
             return type("R", (), {"data": [self.row]})()
         data = [r for r in rows if all(str(r.get(c)) == str(v) for c, v in self.filters)]
+        if hasattr(self, "cap"):
+            data = data[:self.cap]
         return type("R", (), {"data": data})()
 
 
@@ -356,3 +362,83 @@ class TestErrorsDoNotLeakDetails:
         _seed_shipment(db)
         r = client.post("/api/logistics/journey/evidence/evd-nope/confirm", headers=_tok(), json={})
         assert r.status_code == 404 and "evd-nope" not in r.text
+
+
+# ── Actual purchasing-ledger / journey bridge contract ───────────────────────
+
+@pytest.fixture
+def linked_po(db):
+    _seed_shipment(db)
+    db.tables["purchasing_orders"] = [{
+        "id": "po-uuid-1", "company_id": "company-A", "po_number": "PO-1001",
+        "supplier_ref": "SUP-1", "warehouse_id": "warehouse-A",
+        "status": "received", "created_at": "2026-09-10", "approved_at": "2026-09-11",
+        "created_by": "employee-1", "approved_by": "manager-1",
+    }]
+    db.tables["purchasing_order_lines"] = [{
+        "company_id": "company-A", "po_id": "po-uuid-1",
+        "sku": "WINE-RED", "qty_ordered": "1200", "qty_received": "1200",
+    }]
+    db.tables["staged_warehouse_receipts"] = []
+    db.tables["warehouse_receipt_documents"] = [{
+        "company_id": "company-A", "po_id": "po-uuid-1",
+        "id": "receipt-1", "receipt_key": "delivery-1",
+        "received_by": "receiver-1", "approved_by": "manager-1",
+        "posted_at": "2026-11-10",
+    }]
+    return db
+
+
+def test_shipment_purchase_crosscheck_reads_real_po_without_posting(client, linked_po):
+    before = copy.deepcopy(linked_po.tables)
+    r = client.get("/api/logistics/journey/shipments/SHP-1/purchasing-crosscheck",
+                   headers=_tok())
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert result["status"] == "po_quantities_match_not_receipt_attribution"
+    assert result["po_results"][0]["ordered_cases"] == "1200"
+    assert result["po_results"][0]["received_cases_all_conditions"] == "1200"
+    assert result["po_results"][0]["posted_receipt_count"] == 1
+    assert result["posted_receipts_prove_shipment_received"] is False
+    assert result["accounting_reconciled"] is False
+    assert result["shipment_inventory_reconciled"] is False
+    assert linked_po.tables == before  # no event, stock or account write
+
+
+def test_shipment_purchase_crosscheck_denies_sales_rep_and_other_tenant(client, linked_po):
+    path = "/api/logistics/journey/shipments/SHP-1/purchasing-crosscheck"
+    assert client.get(path, headers=_tok(role="sales_rep", sub="rep-1")).status_code == 403
+    assert client.get(path, headers=_tok(company="company-B")).status_code == 404
+
+
+def test_shipment_purchase_crosscheck_flags_shared_po_without_claiming_receipt(client, linked_po):
+    from app.api.logistics import ingest_integration_events
+    ingest_integration_events(linked_po, "company-A", [LogisticsEvent(
+        company_id="company-A", shipment_id="SHP-2", kind="shipment_created",
+        source="erp", payload={"po_numbers": ["PO-1001"],
+                               "lines": [{"sku": "WINE-RED", "qty_cases": 1200}]},
+    )])
+    r = client.get("/api/logistics/journey/shipments/SHP-1/purchasing-crosscheck",
+                   headers=_tok())
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "shared_po_needs_allocation_review"
+    assert r.json()["posted_receipts_prove_shipment_received"] is False
+
+
+def test_shipment_purchase_crosscheck_missing_record_is_not_zero_stock(client, db):
+    _seed_shipment(db)
+    r = client.get("/api/logistics/journey/shipments/SHP-1/purchasing-crosscheck",
+                   headers=_tok())
+    assert r.status_code == 200
+    assert r.json()["status"] == "missing_purchasing_record"
+    assert r.json()["po_results"][0]["status"] == "not_found"
+    assert r.json()["shipment_inventory_reconciled"] is False
+
+
+def test_shipment_purchase_crosscheck_source_outage_fails_closed(client, linked_po):
+    linked_po.fail_reads_from.add("purchasing_order_lines")
+    r = client.get("/api/logistics/journey/shipments/SHP-1/purchasing-crosscheck",
+                   headers=_tok())
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()
+    assert "synthetic provider outage" not in r.text

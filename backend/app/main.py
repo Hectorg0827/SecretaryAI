@@ -324,6 +324,8 @@ app.include_router(computer_use_router.router, prefix="/api/computer-use", tags=
 # Free — see the note above for why each one is not gated.
 app.include_router(settings_router.router,  prefix="/api/settings",      tags=["settings"])
 app.include_router(webhooks.router,         prefix="/webhooks",          tags=["webhooks"])
+from app.api import lola_whatsapp_webhooks as lola_whatsapp_webhook_router
+app.include_router(lola_whatsapp_webhook_router.router, prefix="/webhooks/lola-whatsapp", tags=["lola-whatsapp-webhook"])
 app.include_router(auth.router,             prefix="/auth",              tags=["auth"])
 app.include_router(outlook_oauth_router.router, prefix="/auth/outlook", tags=["auth"])
 app.include_router(account_security_router.router, prefix="/auth",          tags=["account-security"])

@@ -89,6 +89,29 @@ describe('shipment and warehouse costing', () => {
     expect(page.querySelectorAll('[aria-label^="Accepted cases SKU"]').length).toBe(1);
   });
 
+  it('refuses a non-USD source rather than silently pricing foreign currency costs in USD', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      po_number: 'PO-24', assertion_status: 'provisional', landed_cost_total: '100.00',
+      currency: 'EUR', lines: [{
+        sku: 'EUR-1', unit_cost: '17', allocated_landed_cost: '5',
+        cases: { available: '10', damaged: '0', quarantined: '0' },
+      }],
+    });
+    const page = await render();
+    const input = page.querySelector<HTMLInputElement>('[aria-label="Purchasing assessment UUID"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '123e4567-e89b-12d3-a456-426614174000');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      Array.from(page.querySelectorAll('button'))
+        .find((b) => b.textContent?.includes('Load source'))!.click();
+    });
+    expect(page.textContent).toContain('Verify and document the FX conversion');
+    expect(page.querySelector<HTMLInputElement>('[name="shipment_ref"]')?.value).toBe('');
+  });
+
   it('renders calculated loaded cost with explicit incomplete-cost warning', async () => {
     vi.mocked(api.post).mockResolvedValue({
       status: 'analysis_only', expenses_total: '5.00',

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS pricing_cost_lines (
     component TEXT NOT NULL CHECK (component IN (
         'product','international_freight','insurance','duty','customs_brokerage',
         'port_fees','domestic_freight','excise','other_taxes',
+        'fuel_surcharge','origin_charges','demurrage','exam_fees',
         'warehouse_receiving','warehouse_storage','warehouse_handling',
         'warehouse_outbound','warehouse_shrink','inventory_carrying'
     )),

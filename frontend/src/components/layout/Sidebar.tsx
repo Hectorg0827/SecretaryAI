@@ -31,7 +31,7 @@ const ALL_NAV_ITEMS = [
   // domain owner provides a scoped account read contract.
   { to: '/accounts',  label: 'Accounts',  icon: 'accounts',         exact: false, roles: ['owner', 'manager', 'back_office'], badge: null        },
   { to: '/inventory', label: 'Inventory', icon: 'inventory',       exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
-  { to: '/insights',  label: 'Insights',  icon: 'insights',     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office'], badge: null        },
+  { to: '/insights',  label: 'Insights',  icon: 'insights',     exact: false, roles: ['owner', 'manager', 'sales_rep', 'back_office', 'pricing_billbacks'], badge: null        },
   { to: '/logistics',   label: 'Logistics',   icon: 'logistics',     exact: false, roles: ['owner', 'manager', 'back_office'],             badge: null        },
   { to: '/compliance',  label: 'Compliance',  icon: 'compliance',     exact: false, roles: ['owner', 'manager'],                            badge: null        },
   { to: '/connectors', label: 'Connectors', icon: 'connectors',     exact: false, roles: ['owner', 'manager'],                            badge: null        },

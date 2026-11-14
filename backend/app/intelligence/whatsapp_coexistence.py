@@ -123,7 +123,11 @@ def resolve_signed_event_routes(
             owner = _validated_owner(candidates[0], phone_number_id)
             if owner is None:
                 continue
-            messages = value.get("messages")
+            # Meta uses message_echoes for Business App outgoing events;
+            # normal inbound events use messages. Never misclassify a sent
+            # draft as an inbound customer reply opening a 24-hour window.
+            event_list_key = "message_echoes" if field == "smb_message_echoes" else "messages"
+            messages = value.get(event_list_key)
             if not isinstance(messages, list) or not 0 < len(messages) <= 100:
                 continue
             # Only provide count and verified owner route, no identifiers/body.

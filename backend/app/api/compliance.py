@@ -18,6 +18,9 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, get_db
 from app.auth.rbac import require_permission
+from app.api.compliance_integrity import (
+    observed_rows, source_error, save_record, delete_record, require_existing_record,
+)
 from app.intelligence.compliance import ComplianceModule, ComplianceConfig
 from app.intelligence.compliance.models import (
     AlcoholProduct,
@@ -47,7 +50,10 @@ def _get_compliance_module(user: dict, db) -> ComplianceModule:
     """
     company_id = user["company_id"]
     result = db.table("companies").select("*").eq("id", company_id).execute()
-    company = result.data[0] if result.data else {}
+    companies = observed_rows(result)
+    if len(companies) != 1:
+        raise HTTPException(status_code=503, detail="Compliance company configuration unavailable")
+    company = companies[0]
 
     active_states_raw = company.get("compliance_active_states", "")
     active_states = [s.strip() for s in active_states_raw.split(",") if s.strip()] if active_states_raw else []
@@ -68,13 +74,13 @@ def _get_compliance_module(user: dict, db) -> ComplianceModule:
 def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> None:
     """
     Hydrate the module's in-memory registry from Supabase DB tables.
-    Uses try/except to handle missing tables gracefully.
+    Required registry records must be complete; a failed read is not an empty list.
     """
 
     # State licenses
     try:
         res = db.table("compliance_licenses").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 product_types = [ProductType(pt) for pt in (row.get("product_types") or [])]
                 module.add_state_license(StateLicense(
@@ -91,14 +97,16 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     notes=row.get("notes", ""),
                 ))
             except Exception as exc:
-                log.warning("Failed to load license row: %s", exc)
+                raise source_error("invalid_license", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_licenses table not available: %s", exc)
+        raise source_error("compliance_licenses", exc) from exc
 
     # Products
     try:
         res = db.table("compliance_products").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 module.add_product(AlcoholProduct(
                     id=row.get("id", ""),
@@ -114,14 +122,16 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     requires_formula_approval=bool(row.get("requires_formula_approval", False)),
                 ))
             except Exception as exc:
-                log.warning("Failed to load product row: %s", exc)
+                raise source_error("invalid_product", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_products table not available: %s", exc)
+        raise source_error("compliance_products", exc) from exc
 
     # Brand registrations
     try:
         res = db.table("compliance_brand_registrations").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 module.add_brand_registration(BrandRegistration(
                     id=row.get("id", ""),
@@ -135,14 +145,16 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     state_label_approval_number=row.get("state_label_approval_number", ""),
                 ))
             except Exception as exc:
-                log.warning("Failed to load brand registration row: %s", exc)
+                raise source_error("invalid_brand_registration", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_brand_registrations table not available: %s", exc)
+        raise source_error("compliance_brand_registrations", exc) from exc
 
     # Federal permits
     try:
         res = db.table("compliance_federal_permits").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 module.add_federal_permit(FederalPermit(
                     id=row.get("id", ""),
@@ -154,14 +166,16 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     notes=row.get("notes", ""),
                 ))
             except Exception as exc:
-                log.warning("Failed to load federal permit row: %s", exc)
+                raise source_error("invalid_federal_permit", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_federal_permits table not available: %s", exc)
+        raise source_error("compliance_federal_permits", exc) from exc
 
     # Distributors
     try:
         res = db.table("compliance_distributors").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 product_types = [ProductType(pt) for pt in (row.get("product_types") or [])]
                 module.add_distributor(DistributorRelationship(
@@ -181,14 +195,16 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     notes=row.get("notes", ""),
                 ))
             except Exception as exc:
-                log.warning("Failed to load distributor row: %s", exc)
+                raise source_error("invalid_distributor", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_distributors table not available: %s", exc)
+        raise source_error("compliance_distributors", exc) from exc
 
     # COLAs
     try:
         res = db.table("compliance_colas").select("*").eq("company_id", company_id).execute()
-        for row in (res.data or []):
+        for row in observed_rows(res):
             try:
                 module.add_cola(COLARecord(
                     id=row.get("id", ""),
@@ -202,9 +218,11 @@ def _load_registry_from_db(module: ComplianceModule, company_id: str, db) -> Non
                     lab_analysis_on_file=bool(row.get("lab_analysis_on_file", False)),
                 ))
             except Exception as exc:
-                log.warning("Failed to load COLA row: %s", exc)
+                raise source_error("invalid_COLA", exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        log.debug("compliance_colas table not available: %s", exc)
+        raise source_error("compliance_colas", exc) from exc
 
 
 # ─── Serialization helpers ─────────────────────────────────────────────────────
@@ -638,8 +656,7 @@ async def add_product(
 
     product = AlcoholProduct(**kwargs)
 
-    try:
-        db.table("compliance_products").upsert({
+    save_record(db, "compliance_products", {
             "id": product.id,
             "company_id": company_id,
             "sku": product.sku,
@@ -652,9 +669,7 @@ async def add_product(
             "country_of_origin": product.country_of_origin,
             "foreign_producer_id": product.foreign_producer_id,
             "requires_formula_approval": product.requires_formula_approval,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist product to DB: %s", exc)
+    })
 
     return _serialize_dataclass(product)
 
@@ -702,8 +717,7 @@ async def add_license(
 
     license_ = StateLicense(**kwargs)
 
-    try:
-        db.table("compliance_licenses").upsert({
+    save_record(db, "compliance_licenses", {
             "id": license_.id,
             "company_id": company_id,
             "state_code": license_.state_code,
@@ -716,9 +730,7 @@ async def add_license(
             "annual_fee": license_.annual_fee,
             "status": license_.status.value,
             "notes": license_.notes,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist license to DB: %s", exc)
+    })
 
     return _serialize_dataclass(license_)
 
@@ -764,8 +776,7 @@ async def add_brand_registration(
 
     reg = BrandRegistration(**kwargs)
 
-    try:
-        db.table("compliance_brand_registrations").upsert({
+    save_record(db, "compliance_brand_registrations", {
             "id": reg.id,
             "company_id": company_id,
             "product_id": reg.product_id,
@@ -776,9 +787,7 @@ async def add_brand_registration(
             "registration_fee": reg.registration_fee,
             "status": reg.status.value,
             "state_label_approval_number": reg.state_label_approval_number,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist brand registration to DB: %s", exc)
+    })
 
     return _serialize_dataclass(reg)
 
@@ -822,8 +831,7 @@ async def add_federal_permit(
 
     permit = FederalPermit(**kwargs)
 
-    try:
-        db.table("compliance_federal_permits").upsert({
+    save_record(db, "compliance_federal_permits", {
             "id": permit.id,
             "company_id": company_id,
             "permit_type": permit.permit_type.value,
@@ -832,9 +840,7 @@ async def add_federal_permit(
             "expiration_date": _serialize_date(permit.expiration_date),
             "status": permit.status.value,
             "notes": permit.notes,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist federal permit to DB: %s", exc)
+    })
 
     return _serialize_dataclass(permit)
 
@@ -883,8 +889,7 @@ async def add_distributor(
 
     dist = DistributorRelationship(**kwargs)
 
-    try:
-        db.table("compliance_distributors").upsert({
+    save_record(db, "compliance_distributors", {
             "id": dist.id,
             "company_id": company_id,
             "state_code": dist.state_code,
@@ -898,9 +903,7 @@ async def add_distributor(
             "termination_restriction": dist.termination_restriction.value,
             "contract_document_ref": dist.contract_document_ref,
             "notes": dist.notes,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist distributor to DB: %s", exc)
+    })
 
     return _serialize_dataclass(dist)
 
@@ -946,8 +949,7 @@ async def add_cola(
 
     cola = COLARecord(**kwargs)
 
-    try:
-        db.table("compliance_colas").upsert({
+    save_record(db, "compliance_colas", {
             "id": cola.id,
             "company_id": company_id,
             "product_id": cola.product_id,
@@ -958,9 +960,7 @@ async def add_cola(
             "status": cola.status.value,
             "formula_approved": cola.formula_approved,
             "lab_analysis_on_file": cola.lab_analysis_on_file,
-        }).execute()
-    except Exception as exc:
-        log.warning("Could not persist COLA to DB: %s", exc)
+    })
 
     return _serialize_dataclass(cola)
 
@@ -975,7 +975,7 @@ async def delete_product(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_products").delete().eq("id", product_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_products", product_id, company_id)
     return {"deleted": True, "id": product_id}
 
 
@@ -986,7 +986,7 @@ async def delete_license(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_licenses").delete().eq("id", license_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_licenses", license_id, company_id)
     return {"deleted": True, "id": license_id}
 
 
@@ -997,7 +997,7 @@ async def delete_brand_registration(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_brand_registrations").delete().eq("id", reg_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_brand_registrations", reg_id, company_id)
     return {"deleted": True, "id": reg_id}
 
 
@@ -1008,7 +1008,7 @@ async def delete_federal_permit(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_federal_permits").delete().eq("id", permit_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_federal_permits", permit_id, company_id)
     return {"deleted": True, "id": permit_id}
 
 
@@ -1019,7 +1019,7 @@ async def delete_distributor(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_distributors").delete().eq("id", distributor_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_distributors", distributor_id, company_id)
     return {"deleted": True, "id": distributor_id}
 
 
@@ -1030,7 +1030,7 @@ async def delete_cola(
     db=Depends(get_db),
 ):
     company_id = user["company_id"]
-    db.table("compliance_colas").delete().eq("id", cola_id).eq("company_id", company_id).execute()
+    delete_record(db, "compliance_colas", cola_id, company_id)
     return {"deleted": True, "id": cola_id}
 
 
@@ -1044,9 +1044,10 @@ async def update_product(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = product_id
+    require_existing_record(db, "compliance_products",     request.id = product_id
     return await add_product(request, user, db)
-
+, user["company_id"])
+product_id
 
 @router.put("/licenses/{license_id}")
 async def update_license(
@@ -1055,9 +1056,10 @@ async def update_license(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = license_id
+    require_existing_record(db, "compliance_licenses",     request.id = license_id
     return await add_license(request, user, db)
-
+, user["company_id"])
+license_id
 
 @router.put("/brand-registrations/{reg_id}")
 async def update_brand_registration(
@@ -1066,9 +1068,10 @@ async def update_brand_registration(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = reg_id
+    require_existing_record(db, "compliance_brand_registrations",     request.id = reg_id
     return await add_brand_registration(request, user, db)
-
+, user["company_id"])
+reg_id
 
 @router.put("/federal-permits/{permit_id}")
 async def update_federal_permit(
@@ -1077,9 +1080,10 @@ async def update_federal_permit(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = permit_id
+    require_existing_record(db, "compliance_federal_permits",     request.id = permit_id
     return await add_federal_permit(request, user, db)
-
+, user["company_id"])
+permit_id
 
 @router.put("/distributors/{distributor_id}")
 async def update_distributor(
@@ -1088,9 +1092,10 @@ async def update_distributor(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = distributor_id
+    require_existing_record(db, "compliance_distributors",     request.id = distributor_id
     return await add_distributor(request, user, db)
-
+, user["company_id"])
+distributor_id
 
 @router.put("/colas/{cola_id}")
 async def update_cola(
@@ -1099,9 +1104,10 @@ async def update_cola(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    request.id = cola_id
+    require_existing_record(db, "compliance_colas",     request.id = cola_id
     return await add_cola(request, user, db)
-
+, user["company_id"])
+cola_id
 
 # ─── Setup status ─────────────────────────────────────────────────────────────
 
@@ -1121,9 +1127,12 @@ async def get_setup_status(
     def _count(table: str) -> int:
         try:
             res = db.table(table).select("id", count="exact").eq("company_id", company_id).execute()
-            return res.count or len(res.data or [])
-        except Exception:
-            return 0
+            count = getattr(res, "count", None)
+            if isinstance(count, int) and count >= 0:
+                return count
+            return len(observed_rows(res))
+        except Exception as exc:
+            raise source_error(table, exc) from exc
 
     products_count = _count("compliance_products")
     licenses_count = _count("compliance_licenses")

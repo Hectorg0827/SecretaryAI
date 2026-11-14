@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LockKeyhole, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api } from '../../lib/api';
+import { PrivateActivityLog } from './PrivateActivityLog';
 
 type Contact = {
   id: string;
@@ -194,6 +195,7 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
                   </div>
                 ))}
               </div>
+              <PrivateActivityLog contacts={contacts} disabled={busy} onUpdated={onUpdated} />
               <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                 <h3 className="text-sm font-semibold text-slate-800">Private reminders</h3>
                 <label className="flex items-center gap-2 text-xs text-slate-700">

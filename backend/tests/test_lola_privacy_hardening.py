@@ -41,7 +41,7 @@ def test_migration_contains_owning_user_keys_and_valid_postgresql_delimiter():
 def test_gmail_oauth_never_grants_employee_drive_or_sheets_access():
     src = (Path(__file__).resolve().parents[1] / "app" / "auth" / "oauth.py")
     text = src.read_text(encoding="utf-8")
-    grant = text.split("GOOGLE_SCOPES =", 1)[1].split("\n\n", 1)[0]
+    grant = text.split("PERSONAL_GMAIL_SCOPES =", 1)[1].split("\n", 1)[0]
     assert "gmail.modify" in grant
     assert "spreadsheets" not in grant
     assert "drive.file" not in grant

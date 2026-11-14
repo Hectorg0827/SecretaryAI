@@ -16,7 +16,7 @@ import httpx
 GRAPH_ORIGIN = "https://graph.facebook.com"
 GRAPH_VERSION = "v27.0"
 _META_ID = re.compile(r"^[0-9]{5,35}$")
-_META_CODE = re.compile(r"^[A-Za-z0-9_.+-]{10,4096}$")
+_META_CODE = re.compile(r"^[A-Za-z0-9_.+|/-]{10,4096}$")
 
 
 class MetaVerificationError(Exception):
@@ -75,7 +75,7 @@ async def verify_meta_coexistence_signup(
             headers = {"Authorization": f"Bearer {access_token}"}
             waba_numbers = await client.get(
                 f"/{GRAPH_VERSION}/{claimed_waba_id}/phone_numbers",
-                params={"fields": "id,is_on_biz_app,platform_type", "limit": 200,
+                params={"fields": "id", "limit": 200,
                         "appsecret_proof": appsecret_proof},
                 headers=headers,
             )
@@ -83,20 +83,31 @@ async def verify_meta_coexistence_signup(
             response = waba_numbers.json()
             if not isinstance(response, dict):
                 raise MetaVerificationError("Invalid WABA result")
-            candidates = [
-                number for number in (response.get("data") or [])
-                if isinstance(number, dict)
-                and str(number.get("id")) == claimed_phone_number_id
-                and number.get("is_on_biz_app") is True
-                and number.get("platform_type") == "CLOUD_API"
+            ids = [
+                str(number["id"]) for number in (response.get("data") or [])
+                if isinstance(number, dict) and number.get("id") is not None
             ]
-            # Restrict to exact phone and WABA under the same Meta token.
-            if len(candidates) != 1:
-                raise MetaVerificationError("Meta did not confirm Coexistence ownership")
-            if response.get("paging", {}).get("next"):
-                # The phone could be valid but a paginated account requires
-                # explicit server-side pagination before claiming ownership.
-                raise MetaVerificationError("WABA number listing incomplete")
+            if (claimed_phone_number_id not in ids
+                    or len(ids) != len(set(ids))
+                    or response.get("paging", {}).get("next")):
+                raise MetaVerificationError("WABA ownership was not confirmed")
+
+            # Coexistence eligibility is checked on the individual phone node
+            # rather than assuming every WABA-listed number is a Business App.
+            phone = await client.get(
+                f"/{GRAPH_VERSION}/{claimed_phone_number_id}",
+                params={"fields": "id,is_on_biz_app,platform_type",
+                        "appsecret_proof": appsecret_proof},
+                headers=headers,
+            )
+            phone.raise_for_status()
+            details = phone.json()
+            if (not isinstance(details, dict)
+                    or str(details.get("id")) != claimed_phone_number_id
+                    or details.get("is_on_biz_app") is not True
+                    or details.get("platform_type") != "CLOUD_API"):
+                raise MetaVerificationError("Meta did not confirm Coexistence eligibility")
+
             return VerifiedMetaAsset(
                 waba_id=claimed_waba_id,
                 phone_number_id=claimed_phone_number_id,

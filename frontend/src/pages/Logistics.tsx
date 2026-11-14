@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { Truck, ClipboardList, FileText, PackageCheck, Warehouse, Undo2, Wrench } from 'lucide-react';
+import { Truck, ClipboardList, FileText, PackageCheck, Warehouse, Undo2, Wrench, Ship } from 'lucide-react';
 
 import { ReorderQueue } from '../components/logistics/ReorderQueue';
+import { ShipmentControlTower } from '../components/logistics/ShipmentControlTower';
 import { PurchasingRecords } from '../components/logistics/PurchasingRecords';
 import { PendingReceipts } from '../components/logistics/PendingReceipts';
 import { StockReconciliation } from '../components/logistics/StockReconciliation';
@@ -12,14 +13,15 @@ import { LogisticsTools } from '../components/logistics/LogisticsTools';
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
-// Shipment tracking and landed-cost analysis have no stored data source yet,
-// so they are not offered as tabs (an always-empty tab would read as "all clear").
-type TabId = 'reorder' | 'pos' | 'receiving' | 'warehouse' | 'returns' | 'tools';
+// Shipment journeys have a provenance-backed ledger; no claims are made about live carrier feeds.
+// Final landed-cost analysis remains unavailable until financial sources are reconciled.
+type TabId = 'reorder' | 'pos' | 'receiving' | 'shipments' | 'warehouse' | 'returns' | 'tools';
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'reorder',   label: 'Reorder Queue',    icon: ClipboardList },
   { id: 'pos',       label: 'Purchase Orders',  icon: FileText      },
   { id: 'receiving', label: 'Receiving',         icon: PackageCheck  },
+  { id: 'shipments', label: 'Shipments',         icon: Ship          },
   { id: 'warehouse', label: 'Warehouse',         icon: Warehouse     },
   { id: 'returns',   label: 'Returns',           icon: Undo2         },
   { id: 'tools',     label: 'Customs & Seasonality', icon: Wrench    },
@@ -111,6 +113,8 @@ export function Logistics() {
               <StockReconciliation />
             </div>
           )}
+
+          {activeTab === 'shipments' && <ShipmentControlTower />}
 
           {activeTab === 'warehouse' && <WarehousePreviews />}
 

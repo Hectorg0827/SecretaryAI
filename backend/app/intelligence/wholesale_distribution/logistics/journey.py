@@ -1127,6 +1127,8 @@ def _apply_exception(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
 
 
 def _apply_exception_resolved(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
+    if ev.source in UNVERIFIED_SOURCES:
+        raise ConfirmerRequiredError("An unverified report cannot resolve a logistics exception")
     xid = ev.payload.get("exception_id")
     for e in s.exceptions:
         if e.exception_id == xid:
@@ -1136,11 +1138,15 @@ def _apply_exception_resolved(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
 
 
 def _apply_evidence_confirmed(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
+    if ev.source != SourceType.USER_CONFIRMED or _is_non_human(ev.confirmed_by):
+        raise ConfirmerRequiredError("Evidence confirmation requires a named person")
     target = next((e for e in s.evidence if e.evidence_id == ev.source_ref), None)
     if target is None:
         raise RecordNotFoundError("evidence not found on shipment")
     if target.status != "unverified":
         return ApplyResult(applied=True, message=f"evidence already {target.status}")
+    if target.kind == "receipt_reconciled":
+        raise LedgerError("Receipt evidence requires the controlled receiving workflow")
     target.status, target.reviewed_by = "confirmed", ev.confirmed_by
     replay = LogisticsEvent(
         company_id=ev.company_id, shipment_id=ev.shipment_id, kind=target.kind,
@@ -1162,6 +1168,12 @@ def _apply_evidence_confirmed(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
 
 
 def _apply_receipt(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
+    if ev.source in UNVERIFIED_SOURCES:
+        evidence = _add_evidence(s, ev, "receipt_reconciled")
+        return ApplyResult(
+            applied=True, evidence_id=evidence.evidence_id,
+            message="Reported receipt is unverified; no warehouse receipt was accepted",
+        )
     s.receipt = dict(ev.payload.get("summary", {}))
     exc = []
     for x in ev.payload.get("exceptions", []):

@@ -2072,6 +2072,18 @@ async def record_journey_event(
         raise HTTPException(status_code=403, detail=(
             f"source '{source.value}' can only be recorded by an integration "
             "(or via /documents/ingest for reviewed documents)"))
+    # These workflows have their own identity, inspection and approval gates.
+    # A generic client-provided event must not bypass them.
+    if request.kind in {"evidence_confirmed", "receipt_reconciled"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Use the dedicated evidence or receiving approval workflow",
+        )
+    if request.kind == "exception_resolved" and source != SourceType.USER_CONFIRMED:
+        raise HTTPException(
+            status_code=403,
+            detail="An unverified report cannot resolve a logistics exception",
+        )
     ledger = _load_ledger(user, db)
     event = LogisticsEvent(
         company_id=user["company_id"], shipment_id=request.shipment_id, kind=request.kind,

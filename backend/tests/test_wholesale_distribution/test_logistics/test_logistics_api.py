@@ -545,3 +545,20 @@ def test_email_created_journey_identifiers_require_named_person_confirmation(cli
     assert after.json()["po_numbers"] == ["PO-1001"]
     assert after.json()["container_numbers"] == ["MSCU1234566"]
     assert after.json()["pending_evidence"] == []
+
+
+def test_generic_events_cannot_bypass_evidence_or_receipt_workflows(client, db):
+    _seed_shipment(db)
+    before = copy.deepcopy(db.tables["logistics_events"])
+    forbidden = [
+        {"shipment_id": "SHP-1", "kind": "evidence_confirmed",
+         "source": "user_confirmed", "source_ref": "evd-fabricated"},
+        {"shipment_id": "SHP-1", "kind": "receipt_reconciled",
+         "source": "user_confirmed", "payload": {"summary": {"good_cases": 1200}}},
+        {"shipment_id": "SHP-1", "kind": "exception_resolved",
+         "source": "email_parsed", "payload": {"exception_id": "exc-fabricated"}},
+    ]
+    for body in forbidden:
+        r = client.post("/api/logistics/journey/events", headers=_tok(), json=body)
+        assert r.status_code == 403, (body, r.text)
+    assert db.tables["logistics_events"] == before

@@ -25,12 +25,22 @@ def source_error(table: str, exc: Exception) -> HTTPException:
 def save_record(db, table: str, record: dict) -> None:
     """Confirm id/company match in the storage response before acknowledgement."""
     try:
+        # The service-role client bypasses RLS. Check the global primary-key
+        # owner before an upsert so supplied IDs cannot overwrite another tenant.
+        existing = observed_rows(
+            db.table(table).select("id,company_id").eq("id", record["id"])
+            .limit(1).execute()
+        )
+        if any(str(row.get("company_id")) != str(record["company_id"]) for row in existing):
+            raise HTTPException(status_code=403, detail="Compliance record belongs to another company")
         result = db.table(table).upsert(record).execute()
         rows = observed_rows(result)
         if (len(rows) != 1
                 or str(rows[0].get("id")) != str(record["id"])
                 or str(rows[0].get("company_id")) != str(record["company_id"])):
             raise ValueError("Unconfirmed write result")
+    except HTTPException:
+        raise
     except Exception as exc:
         log.error("Compliance persistence unverified table=%s error_type=%s", table, type(exc).__name__)
         raise HTTPException(status_code=503, detail="Compliance record was not verified as saved") from exc

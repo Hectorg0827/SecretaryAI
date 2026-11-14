@@ -36,7 +36,10 @@ price, QuickBooks item, accounting transaction or approved price is changed.
 **Inbound landed cost (arrival at warehouse):**
 supplier merchandise/FOB, ocean/international freight, cargo insurance,
 customs duties, broker charges, port fees, domestic port-to-warehouse drayage,
-excise tax and other applicable import taxes.
+fuel/BAF surcharges, origin charges, demurrage/detention, customs exam fees,
+excise tax and other applicable import taxes. The integration mapping preserves
+Logistics aliases (ocean_freight, broker_fees, port_charges, drayage) without
+creating duplicate charges.
 
 **Warehousing / fulfillment (after arrival):**
 receiving/unloading/palletizing, storage for expected holding time, picking/

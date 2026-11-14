@@ -4,6 +4,8 @@ Updates health_status and health_score in the DB.
 """
 import logging
 from datetime import date, timedelta
+from app.connectors.unified_adapter import read_invoice_summaries
+from app.scheduler.dashboard_snapshot import _billable_invoice_rows
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ async def refresh_all_account_health(company_id: str, adapter, db) -> dict:
     customers = await adapter.get_all_customers()
     date_to = date.today()
     date_from = date_to - timedelta(days=365)
-    invoices = await adapter.get_orders_last_n_days(365)
+    invoices = _billable_invoice_rows(await read_invoice_summaries(adapter, 365))
 
     # Group invoices by customer
     by_customer: dict[str, list[dict]] = {}

@@ -66,8 +66,9 @@ def get_adapter(
     # from personal Gmail/Outlook credentials before connector construction.
     for key in (
         "google_access_token", "google_refresh_token", "gmail_credentials",
-        "ms_access_token", "ms_refresh_token", "_ms_expected_refresh_ciphertext",
-        "ms_tenant_id", "_private_mailbox_owner_id",
+        "google_credentials", "ms_access_token", "ms_refresh_token",
+        "_ms_expected_refresh_ciphertext", "ms_tenant_id", "ms_client_secret",
+        "_private_mailbox_owner_id",
     ):
         cfg.pop(key, None)
 

@@ -3,6 +3,7 @@ import { Send, RotateCcw, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageBubble } from './MessageBubble';
 import { PrivateFollowups } from './PrivateFollowups';
+import { PrivateLolaControls } from './PrivateLolaControls';
 
 const QUICK_PROMPTS = [
   'How\'s our inventory looking?',
@@ -51,6 +52,7 @@ export function ChatInterface() {
         </button>
       </div>
 
+      <PrivateLolaControls />
       <PrivateFollowups onDraft={sendMessage} />
 
       {/* Messages */}

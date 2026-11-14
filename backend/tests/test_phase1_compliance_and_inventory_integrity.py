@@ -138,6 +138,14 @@ async def test_compliance_registry_never_fails_open_for_missing_table(table):
 
 
 @pytest.mark.asyncio
+async def test_unavailable_company_configuration_cannot_claim_compliance():
+    db = FakeDB(fail_table="companies")
+    with pytest.raises(HTTPException) as error:
+        await api.get_compliance_status(user=USER, db=db)
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_corrupted_registry_row_is_error_not_compliance_clearance():
     db = FakeDB()
     db.rows["compliance_licenses"] = [

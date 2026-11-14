@@ -45,3 +45,30 @@ def test_gmail_oauth_never_grants_employee_drive_or_sheets_access():
     assert "gmail.modify" in grant
     assert "spreadsheets" not in grant
     assert "drive.file" not in grant
+
+
+
+@pytest.mark.parametrize("environment,enabled,allowed", [
+    ("production", True, False),
+    ("staging", False, False),
+    ("", True, False),
+    ("staging", True, True),
+])
+def test_employee_private_pilot_requires_explicit_staging_gate(
+    monkeypatch, environment, enabled, allowed
+):
+    from types import SimpleNamespace
+    from app.api import private_continuity, auth
+    settings = SimpleNamespace(
+        secretaryai_deployment_env=environment,
+        lola_private_intelligence_enabled=enabled,
+    )
+    monkeypatch.setattr(private_continuity, "get_settings", lambda: settings)
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    for guard in (private_continuity.require_private_pilot, auth._require_employee_mail_pilot):
+        if allowed:
+            guard()
+        else:
+            with pytest.raises(HTTPException) as blocked:
+                guard()
+            assert blocked.value.status_code == 404

@@ -19,7 +19,8 @@ class OverviewAdapter:
     async def get_orders_last_n_days(self, days):
         recent = date.today() - timedelta(days=3)
         return [
-            SimpleNamespace(customer_id=cid, date=recent, total=Decimal("100"))
+            SimpleNamespace(qb_id=f"INV-{cid}", customer_id=cid, date=recent,
+                            total=Decimal("100"), status="paid", line_items=[])
             for cid in ("QB-1", "QB-2", "QB-3")
         ]
 

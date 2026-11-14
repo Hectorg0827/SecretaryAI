@@ -54,31 +54,56 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
 
 
 def summarize_account(account: dict, recent_orders: list[dict], industry_module=None) -> str:
-    """Build a plain-language account summary for AI context."""
+    """Explain verified account metrics, not a speculative reason for slowdown."""
     terms = _get_terminology(industry_module)
-    account_term = terms.get("account", "account").capitalize()
-    order_term = terms.get("order", "order")
-
     name = account.get("name", "Unknown")
-    health = account.get("health_status", "unknown")
-    score = account.get("health_score", 0)
-    last_order = account.get("last_order_date", "never")
-    balance = account.get("current_balance", 0)
-    cycle = account.get("avg_order_cycle_days")
-
+    status = account.get("health_status", "unknown")
+    score = account.get("health_score")
+    last_order = account.get("last_order_date")
+    balance = account.get("current_balance")
+    velocity = account.get("velocity") or {}
+    cycle = velocity.get("avg_days_between_orders")
     lines = [
-        f"{account_term}: {name}",
-        f"  Health: {health.upper()} (score: {score}/100)",
-        f"  Last {order_term}: {last_order}",
-        f"  Avg {order_term} cycle: {cycle} days" if cycle else f"  {order_term.capitalize()} cycle: not enough history",
-        f"  Outstanding balance: ${float(balance):,.2f}",
+        f"{terms.get('account', 'account').capitalize()}: {name}",
+        "Source: QuickBooks verified invoice headers; last 365 days (not lifetime history).",
+        f"  Account health: {status.upper()} (score: {score}/100)" if score is not None else
+        "  Account health: UNKNOWN (not enough verified data to score)",
+        f"  Last invoiced purchase: {last_order}" if last_order else
+        "  Last invoiced purchase: not observed in the 365-day window",
+        f"  Average observed days between invoices: {cycle}" if cycle is not None else
+        "  Average observed days between invoices: insufficient history",
+        f"  Current account balance: ${float(balance):,.2f}" if balance is not None else
+        "  Current account balance: unavailable",
+        f"  Billable invoices observed (365d): {account.get('invoice_count_365d', 'unknown')}",
     ]
-
+    flags = account.get("health_flags") or []
+    if flags:
+        lines.append("  Health-scoring evidence: " + "; ".join(flags))
+    for days in (30, 90):
+        trend = account.get(f"trend_{days}d")
+        if trend is None:
+            continue
+        cur, prior = trend["current"], trend["prior"]
+        lines.append(
+            f"  Last {days} days: ${cur['revenue']:,.2f} gross billed / {cur['orders']} invoices; "
+            f"previous {days} days: ${prior['revenue']:,.2f} / {prior['orders']} invoices."
+        )
+        if trend.get("change_pct") is not None:
+            lines.append(f"  {days}-day billed amount change: {trend['change_pct']:+.1f}%.")
+        else:
+            lines.append(f"  {days}-day percentage change unavailable (no positive prior-period billed amount).")
     if recent_orders:
-        lines.append(f"  Recent {order_term}s ({len(recent_orders)}):")
-        for o in recent_orders[-5:]:
-            lines.append(f"    {o.get('order_date')}: ${float(o.get('total_amount', 0)):,.2f}")
-
+        lines.append(f"  Most recent invoiced purchases ({len(recent_orders)}):")
+        for order in reversed(recent_orders[-5:]):
+            lines.append(
+                f"    {order['order_date']}: ${float(order['total_amount']):,.2f}"
+            )
+    lines.append(
+        "Interpretation: health classification is a scoring heuristic, not proof "
+        "of an underlying cause. Invoice data does not establish sell-through, "
+        "depletion rates, SKU breadth, competitor activity, or a credit hold. "
+        "Do not attribute a slowdown to any of these without additional authorized evidence."
+    )
     return "\n".join(lines)
 
 
@@ -105,7 +130,7 @@ def summarize_accounts_overview(accounts: list[dict], industry_module=None) -> s
         f"  Unknown / unscored: {by_status.get('unknown', 0)}",
     ]
 
-    at_risk = [a for a in accounts if a.get("health_status") in ("at_risk", "dormant")]
+    at_risk = [a for a in accounts if a.get("health_status") in ("slowing", "at_risk", "dormant")]
     if at_risk:
         lines.append(f"  {account_term.capitalize()}s needing attention:")
         for a in at_risk[:5]:
@@ -123,6 +148,10 @@ def build_query_context(intent: str, data: dict, industry_module=None) -> str:
         return summarize_inventory(data.get("inventory", []), industry_module)
 
     if intent == "account_status":
+        ambiguous = data.get("ambiguous_accounts")
+        if ambiguous:
+            return ("Multiple accounts match that name: " + ", ".join(ambiguous) +
+                    ". Ask which account the user means. Do not select one or invent sales data.")
         account = data.get("account")
         if account:
             return summarize_account(account, data.get("orders", []), industry_module)
@@ -130,10 +159,24 @@ def build_query_context(intent: str, data: dict, industry_module=None) -> str:
 
     if intent in ("sales_report", "general_question"):
         parts = []
+        sales = data.get("sales_summary")
+        if sales:
+            parts.append(
+                f"Verified gross billed invoices ({sales['period_start']} to {sales['period_end']}): "
+                f"${sales['gross_billed_amount']:,.2f} across {sales['order_count']} billable invoices. "
+                "Source: QuickBooks invoice headers. This is gross billed amount, NOT recognized revenue; "
+                "SKU/product sales breakdown is unavailable with header-only data."
+            )
+            if sales.get("top_accounts"):
+                parts.append("Top billed accounts in this period: " +
+                    "; ".join(f"{a['name']}: ${a['revenue']:,.2f} ({a['order_count']} invoices)"
+                              for a in sales["top_accounts"]))
         if data.get("accounts"):
             parts.append(summarize_accounts_overview(data["accounts"], industry_module))
         if data.get("inventory"):
             parts.append(summarize_inventory(data["inventory"], industry_module))
+        if data.get("inventory_unavailable"):
+            parts.append("Inventory source is unavailable; do not infer inventory or sell-through.")
         return "\n\n".join(parts) if parts else "No data available for this query."
 
     return "Data context not available for this query type."

@@ -1,5 +1,7 @@
 """The chat account overview must not hide customers after a credit balance."""
 
+from datetime import date, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,7 +19,14 @@ async def test_credit_balance_does_not_truncate_chat_account_overview():
             SimpleNamespace(qb_id="account-2", name="Credit Account", balance=-25.50),
             SimpleNamespace(qb_id="account-3", name="Last Account", balance=15),
         ]),
-        get_orders_last_n_days=AsyncMock(return_value=[]),
+        get_orders_last_n_days=AsyncMock(return_value=[
+            SimpleNamespace(qb_id="INV-1", customer_id="account-1",
+                            date=date.today() - timedelta(days=5), total=Decimal("100"),
+                            status="paid", line_items=[]),
+            SimpleNamespace(qb_id="INV-3", customer_id="account-3",
+                            date=date.today() - timedelta(days=5), total=Decimal("100"),
+                            status="paid", line_items=[]),
+        ]),
     )
 
     result = await _fetch_data_for_intent("account_status", "overview of all accounts", adapter)
@@ -43,7 +52,11 @@ async def test_unobserved_or_invalid_balance_is_not_scored_as_zero(balance):
             SimpleNamespace(qb_id="bad", name="Needs Review", balance=balance),
             SimpleNamespace(qb_id="good", name="Still Scored", balance=0),
         ]),
-        get_orders_last_n_days=AsyncMock(return_value=[]),
+        get_orders_last_n_days=AsyncMock(return_value=[
+            SimpleNamespace(qb_id="INV-GOOD", customer_id="good",
+                            date=date.today() - timedelta(days=5), total=Decimal("100"),
+                            status="paid", line_items=[]),
+        ]),
     )
 
     result = await _fetch_data_for_intent("account_status", "all account statuses", adapter)

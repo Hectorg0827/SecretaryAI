@@ -9,7 +9,7 @@ export const meta: InsightMeta = {
   description: 'Follow one case from list price down to the pocket price and margin you actually keep.',
   group: 'Pricing',
   // Backend permission view_financials admits owner and manager only.
-  roles: ['owner', 'manager'],
+  roles: ['owner', 'manager', 'pricing_billbacks'],
 };
 
 interface Step { key: string; label: string; amount: number; running: number }

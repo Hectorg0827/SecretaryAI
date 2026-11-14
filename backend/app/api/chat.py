@@ -242,6 +242,66 @@ def _account_snapshot(customer, billed: list) -> dict:
     return account
 
 
+async def _verified_compliance_context(user: dict, db) -> dict:
+    """Load company-scoped, persisted compliance evidence for Lola.
+
+    Only owner/manager may request business-wide regulatory records. The
+    registry remains unverified when onboarding is incomplete; zero records
+    must never become a statement of regulatory approval.
+    """
+    if user.get("role") not in {"owner", "manager"}:
+        raise HTTPException(status_code=403, detail="Compliance intelligence requires owner or manager access")
+
+    from app.api.compliance import get_setup_status, get_compliance_status, get_compliance_alerts
+
+    setup = await get_setup_status(user=user, db=db)
+    status = await get_compliance_status(user=user, db=db)
+    alerts = await get_compliance_alerts(days=90, user=user, db=db)
+
+    if not isinstance(setup, dict) or not isinstance(status, dict) or not isinstance(alerts, dict):
+        raise HTTPException(status_code=503, detail="Compliance source evidence is incomplete")
+
+    fields = (
+        "products_count", "licenses_count", "federal_permits_count",
+        "distributors_count", "brand_registrations_count", "colas_count",
+    )
+    for field in fields:
+        if not isinstance(setup.get(field), int) or setup[field] < 0:
+            raise HTTPException(status_code=503, detail="Compliance source counts are incomplete")
+
+    if not isinstance(setup.get("is_setup"), bool) or not isinstance(setup.get("missing"), list):
+        raise HTTPException(status_code=503, detail="Compliance setup status is unavailable")
+
+    overall = status.get("overall")
+    if overall not in {"ok", "warning", "critical"}:
+        raise HTTPException(status_code=503, detail="Compliance status could not be verified")
+
+    raw_alerts = alerts.get("alerts")
+    if not isinstance(raw_alerts, list) or not isinstance(alerts.get("count"), int):
+        raise HTTPException(status_code=503, detail="Compliance alerts are unavailable")
+
+    return {
+        "compliance": {
+            "source": "company-scoped Lion BI compliance registry",
+            "source_quality": "registry_observed_not_regulator_verified",
+            "is_setup": setup["is_setup"],
+            "missing": [str(item) for item in setup["missing"][:10]],
+            "counts": {field: setup[field] for field in fields},
+            "overall_status": overall if setup["is_setup"] else "unverified",
+            "active_states": status.get("active_states"),
+            "alerts_count": alerts["count"],
+            "alerts": [
+                {
+                    "priority": str(row.get("priority", "unknown")),
+                    "item_name": str(row.get("item_name", ""))[:140],
+                    "state_code": str(row.get("state_code", ""))[:10],
+                }
+                for row in raw_alerts[:10] if isinstance(row, dict)
+            ],
+        }
+    }
+
+
 async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
     """Fetch authorized provider records; a source outage must never masquerade as no data."""
     from fastapi import HTTPException
@@ -459,6 +519,8 @@ async def send_message(
         raise HTTPException(status_code=403, detail="This business data requires a higher permission")
     if role == "sales_rep" and intent == "general_question":
         data = {}
+    elif intent == "compliance_check":
+        data = await _verified_compliance_context(user, db)
     else:
         data = await _fetch_data_for_intent(intent, focus + request.message, adapter)
     data_summary = build_query_context(intent, data)

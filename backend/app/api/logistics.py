@@ -2082,6 +2082,43 @@ async def record_journey_event(
     return _ingest(ledger, event)
 
 
+
+@router.get("/journey/purchasing-coverage")
+async def list_unlinked_purchase_coverage(
+    user: dict = Depends(require_permission("view_inventory")),
+    db=Depends(get_db),
+):
+    """Read-only gap inventory: which durable POs lack recorded shipment links.
+
+    No PO's approval or warehouse receipt is assumed to prove ocean transit,
+    customs clearance, a container receipt or financial reconciliation.
+    """
+    from app.intelligence.wholesale_distribution.logistics.purchase_coverage import (
+        PurchaseCoverageInvalid, purchase_journey_coverage,
+    )
+
+    _require_purchasing_employee(user)
+    records = _read_purchasing_rows(
+        db.table("purchasing_orders")
+          .select("company_id,po_number,supplier_ref,status,created_at")
+          .eq("company_id", user["company_id"])
+          .order("created_at", desc=True)
+          .limit(201)
+    )
+    if len(records) > 200:
+        raise HTTPException(
+            status_code=503, detail="Purchase coverage exceeds supported scope"
+        )
+    ledger = _load_ledger(user, db)
+    try:
+        return purchase_journey_coverage(records, ledger)
+    except PurchaseCoverageInvalid as exc:
+        log.warning("Purchase coverage unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=503, detail="Purchase and shipment coverage unavailable"
+        ) from exc
+
+
 @router.get("/journey/shipments")
 async def list_journey_shipments(
     user: dict = Depends(get_current_user),

@@ -446,3 +446,69 @@ def test_shipment_purchase_crosscheck_source_outage_fails_closed(client, linked_
     assert r.status_code == 503
     assert "unavailable" in r.json()["detail"].lower()
     assert "synthetic provider outage" not in r.text
+
+
+# ── Read-only gap analysis: POs not yet associated with shipment journeys ─────
+
+def _purchase_coverage_row(company="company-A", number="PO-1001", status="approved"):
+    return {
+        "id": f"id-{number}", "company_id": company,
+        "po_number": number, "status": status, "supplier_ref": "SUP-TEST",
+        "created_at": "2026-11-14T12:00:00Z",
+    }
+
+
+def test_purchasing_coverage_without_shipment_events(client, db):
+    db.tables["purchasing_orders"] = [
+        _purchase_coverage_row(number="PO-1001"),
+        _purchase_coverage_row(number="PO-1002", status="received"),
+    ]
+    before = copy.deepcopy(db.tables)
+    r = client.get("/api/logistics/journey/purchasing-coverage", headers=_tok())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["purchase_order_count"] == 2
+    assert body["not_linked_count"] == 2
+    assert body["orders"][1]["po_status"] == "received"
+    assert body["orders"][1]["warehouse_receipt_attributed_to_shipment"] is False
+    assert body["inventory_posted_by_this_operation"] is False
+    assert db.tables == before
+
+
+def test_purchasing_coverage_erp_link_only_does_not_prove_arrival(client, db):
+    db.tables["purchasing_orders"] = [_purchase_coverage_row()]
+    _seed_shipment(db)
+    r = client.get("/api/logistics/journey/purchasing-coverage", headers=_tok())
+    assert r.status_code == 200, r.text
+    row = r.json()["orders"][0]
+    assert row["shipment_link_status"] == "linked_erp_recorded"
+    assert row["linked_shipment_ids"] == ["SHP-1"]
+    assert row["shipping_status_verified"] is False
+    assert row["container_receipt_verified"] is False
+
+
+def test_purchasing_coverage_denies_rep_and_excludes_other_tenant(client, db):
+    db.tables["purchasing_orders"] = [
+        _purchase_coverage_row(company="company-A", number="PO-A"),
+        _purchase_coverage_row(company="company-B", number="PO-B"),
+    ]
+    url = "/api/logistics/journey/purchasing-coverage"
+    assert client.get(url, headers=_tok(role="sales_rep")).status_code == 403
+    other = client.get(url, headers=_tok(company="company-B"))
+    assert other.status_code == 200
+    assert [p["po_number"] for p in other.json()["orders"]] == ["PO-B"]
+
+
+def test_purchasing_coverage_provider_outage_is_not_an_empty_success(client, db):
+    db.fail_reads_from.add("purchasing_orders")
+    r = client.get("/api/logistics/journey/purchasing-coverage", headers=_tok())
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()
+    assert "synthetic provider outage" not in r.text
+
+
+def test_purchasing_coverage_exceeding_supported_page_fails_closed(client, db):
+    db.tables["purchasing_orders"] = [_purchase_coverage_row(number=f"PO-{i}") for i in range(201)]
+    r = client.get("/api/logistics/journey/purchasing-coverage", headers=_tok())
+    assert r.status_code == 503
+    assert "scope" in r.json()["detail"].lower()

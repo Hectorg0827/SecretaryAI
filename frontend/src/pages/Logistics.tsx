@@ -4,6 +4,7 @@ import { Truck, ClipboardList, FileText, PackageCheck, Warehouse, Undo2, Wrench,
 
 import { ReorderQueue } from '../components/logistics/ReorderQueue';
 import { ShipmentControlTower } from '../components/logistics/ShipmentControlTower';
+import { PurchaseCoveragePanel } from '../components/logistics/PurchaseCoveragePanel';
 import { PurchasingRecords } from '../components/logistics/PurchasingRecords';
 import { PendingReceipts } from '../components/logistics/PendingReceipts';
 import { StockReconciliation } from '../components/logistics/StockReconciliation';
@@ -114,7 +115,12 @@ export function Logistics() {
             </div>
           )}
 
-          {activeTab === 'shipments' && <ShipmentControlTower />}
+          {activeTab === 'shipments' && (
+            <div className="p-4 sm:p-6 space-y-4">
+              <PurchaseCoveragePanel />
+              <ShipmentControlTower />
+            </div>
+          )}
 
           {activeTab === 'warehouse' && <WarehousePreviews />}
 

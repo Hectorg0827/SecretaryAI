@@ -124,6 +124,11 @@ export function Compliance() {
 
   function fetchAll() {
     setSourceErrors([]);
+    api.compliance.getSetupStatus()
+      .then((setup) => {
+        if (!setup.is_setup) setShowSetupWizard(true);
+      })
+      .catch(() => markUnavailable('Compliance setup'));
     setStatus(null);
     setAlerts([]);
     setDeadlines([]);
@@ -151,16 +156,8 @@ export function Compliance() {
     fetchLicenses();
   }
 
-  // Load on mount — check setup status first
+  // Load on mount; retries re-check setup status as well as registry sources.
   useEffect(() => {
-    api.compliance.getSetupStatus()
-      .then((s) => {
-        if (!s.is_setup) {
-          setShowSetupWizard(true);
-        }
-      })
-      .catch(() => markUnavailable('Compliance setup'));
-
     fetchAll();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

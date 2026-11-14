@@ -129,11 +129,9 @@ async def get_integrations(
             "connected_at": personal_connected_at,
         },
         "outlook": {"connected": outlook_connected},
-        # Google Sheets reuses the same Google OAuth token as Gmail
-        "google_sheets": {
-            "connected": google_connected,
-            "connected_at": personal_connected_at,
-        },
+        # Employee Gmail permission does not grant Google Sheets access.
+        # Existing company Sheets integration requires an independent consent.
+        "google_sheets": {"connected": False, "connected_at": None},
     }
 
 

@@ -297,9 +297,14 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                     data["accounts"] = []
                     for customer in customers:
                         try:
-                            data["accounts"].append(
-                                _account_snapshot(customer, by_customer.get(_field(customer, "qb_id"), []))
+                            snapshot = _account_snapshot(
+                                customer, by_customer.get(_field(customer, "qb_id"), [])
                             )
+                            data["accounts"].append({
+                                "name": snapshot["name"],
+                                "health_status": snapshot["health_status"],
+                                "health_score": snapshot["health_score"],
+                            })
                         except (ValueError, TypeError, ArithmeticError):
                             # Unknown remains unscored; never pretend a credit
                             # or invalid source balance is $0.

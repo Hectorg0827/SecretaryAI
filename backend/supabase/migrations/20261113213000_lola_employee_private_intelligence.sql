@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS lola_private_events (
     occurred_at timestamptz NOT NULL,
     summary text NOT NULL DEFAULT '',
     source_ref text,
+    origin text NOT NULL DEFAULT 'manual'
+        CHECK (origin IN ('manual', 'gmail_api', 'whatsapp_api', 'document')),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (company_id, user_id, id),
     FOREIGN KEY (company_id, user_id, contact_id)

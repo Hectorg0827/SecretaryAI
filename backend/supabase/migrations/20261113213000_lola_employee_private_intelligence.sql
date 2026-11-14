@@ -4,6 +4,9 @@
 -- service-role client, so every API query MUST filter company_id + user_id.
 -- Revoke direct anon/authenticated access; RLS is defense in depth.
 
+-- Enforce that personal records cannot claim a user from a different tenant.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_identity ON users(company_id, id);
+
 CREATE TABLE IF NOT EXISTS employee_integrations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -13,7 +16,8 @@ CREATE TABLE IF NOT EXISTS employee_integrations (
     refresh_token text,
     connected_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (company_id, user_id, provider)
+    UNIQUE (company_id, user_id, provider),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS lola_private_contacts (
@@ -25,7 +29,8 @@ CREATE TABLE IF NOT EXISTS lola_private_contacts (
     phone text,
     identity_verified boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (company_id, user_id, id)
+    UNIQUE (company_id, user_id, id),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_lola_private_contacts_owner
@@ -49,6 +54,7 @@ CREATE TABLE IF NOT EXISTS lola_private_events (
         CHECK (origin IN ('manual', 'gmail_api', 'whatsapp_api', 'document')),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (company_id, user_id, id),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE,
     FOREIGN KEY (company_id, user_id, contact_id)
         REFERENCES lola_private_contacts(company_id, user_id, id)
         ON DELETE CASCADE
@@ -68,6 +74,7 @@ CREATE TABLE IF NOT EXISTS lola_private_followup_state (
     resolved_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (company_id, user_id, event_id),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE,
     FOREIGN KEY (company_id, user_id, event_id)
         REFERENCES lola_private_events(company_id, user_id, id)
         ON DELETE CASCADE
@@ -79,7 +86,8 @@ CREATE TABLE IF NOT EXISTS lola_personal_account_memory (
     account_name text NOT NULL,
     facts jsonb NOT NULL DEFAULT '[]'::jsonb,
     updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (company_id, user_id, account_name)
+    PRIMARY KEY (company_id, user_id, account_name),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE
 );
 
 -- Legacy emails have no established employee owner and remain invisible.
@@ -119,7 +127,8 @@ CREATE TABLE IF NOT EXISTS lola_private_preferences (
     reminder_hour smallint NOT NULL DEFAULT 9
         CHECK (reminder_hour BETWEEN 0 AND 23),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (company_id, user_id)
+    PRIMARY KEY (company_id, user_id),
+    FOREIGN KEY (company_id, user_id) REFERENCES users(company_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS lola_private_reminder_receipts (

@@ -253,9 +253,17 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
 
 # ─── Employee-private Gmail OAuth ──────────────────────────────────────────
 
+def _require_employee_mail_pilot() -> None:
+    cfg = get_settings()
+    if (cfg.secretaryai_deployment_env.strip().lower() != "staging"
+            or not cfg.lola_private_intelligence_enabled):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/gmail/connect-url")
 async def gmail_connect_url(user: dict = Depends(get_current_user)):
     """Gmail connection state identifies the employee, not just the company."""
+    _require_employee_mail_pilot()
     state = secrets.token_urlsafe(32)
     _state_set(state, json.dumps({
         "company_id": user["company_id"], "user_id": user["sub"],
@@ -271,6 +279,7 @@ async def gmail_callback(
     error: Annotated[str, Query()] = "",
 ):
     """Persist Gmail tokens in the employee vault; never in companies."""
+    _require_employee_mail_pilot()
     state_data = _state_pop(state)
     if not state_data:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
@@ -331,6 +340,7 @@ async def gmail_callback(
 @router.delete("/gmail/disconnect")
 async def gmail_disconnect(user: dict = Depends(get_current_user)):
     """Disconnect ONLY this employee's personal Gmail connection."""
+    _require_employee_mail_pilot()
     from supabase import create_client
     db = create_client(settings.supabase_url, settings.supabase_service_role_key)
     try:

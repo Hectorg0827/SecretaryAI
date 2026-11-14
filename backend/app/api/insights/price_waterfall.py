@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.insights._common import advisory_response
 from app.api.insights._product_sales import from_input, money
-from app.auth.rbac import require_permission
+from app.api.insights._pricing_access import get_pricing_user
 from app.intelligence.pricing.waterfall import (
     REQUIRED_COMPONENTS, WAREHOUSE_COMPONENTS, LandedCostLine, PriceScenario, calculate_price_waterfall,
 )
@@ -59,7 +59,7 @@ class WaterfallPreviewRequest(BaseModel):
 @router.post("/preview")
 async def price_waterfall_preview(
     body: WaterfallPreviewRequest,
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
 ):
     """Walk one case from list price down to pocket price and margin."""
     price = from_input(body.price_per_case)

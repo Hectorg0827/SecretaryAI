@@ -75,7 +75,8 @@ def get_adapter(
     # Fail closed if personal-connection storage is unavailable or not migrated.
     # A manager/owner has exactly the same personal-mailbox restrictions.
     user_id = str(user.get("sub") or "")
-    if user_id:
+    if (user_id and settings.secretaryai_deployment_env.strip().lower() == "staging"
+            and settings.lola_private_intelligence_enabled):
         try:
             rows = (db.table("employee_integrations")
                 .select("access_token,refresh_token")

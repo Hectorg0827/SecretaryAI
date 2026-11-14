@@ -82,7 +82,7 @@ describe('shipment and warehouse costing', () => {
     const button = Array.from(page.querySelectorAll('button')).find((b) => b.textContent?.includes('Load source'))!;
     await act(async () => { button.click(); });
     expect(api.get).toHaveBeenCalledWith(
-      '/api/logistics/finance/assessments/123e4567-e89b-12d3-a456-426614174000',
+      '/api/insights/price-book/sources/assessments/123e4567-e89b-12d3-a456-426614174000',
     );
     expect(page.textContent).toContain('provisional');
     expect(page.textContent).toContain('That amount is NOT added');

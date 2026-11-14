@@ -9,11 +9,27 @@ price, QuickBooks item, accounting transaction or approved price is changed.
 - `Insights > Price waterfall` has separate inbound and warehouse inputs.
 - `Insights > Price book` reads a tenant-scoped proposed/versioned registry
   and fails closed when the backing table is not installed or readable.
+- `Insights > Shipment cost allocation` now previews shared invoice-line
+  charges on multiple SKU receipt quantities. Select case count, weight,
+  volume, pallet-days or handling picks explicitly. Raw charge totals are
+  conserved to exact cents using deterministic largest-remainder allocation.
+  Warehouse storage requires pallet-days (never automatic per-case fallback).
+- The shipment costing screen can read a known purchasing-finance assessment
+  using the existing protected Logistics endpoint. It takes only **accepted**
+  quantities and provisional merchandise cost. The assessment's previously
+  allocated, unclassified `landed_cost_total` remains a separately flagged
+  source gap and **is not added again**. The user must reconcile and itemize
+  that charge before using the draft price. This prevents accidental double
+  counting when a PO already contains transport charges.
+- The price-suggestion screen now states that QuickBooks purchase costs may
+  omit the relevant freight and warehouse components; no suggestion is
+  marked cost-verified.
+
 - A new additive schema stores versioned price-book rows by
   (company, SKU, package, market, channel, customer, effective date, revision),
   links a cost snapshot, and records one source-backed cost line per component.
 - Price publication, supplier billbacks, historical customer-contract sync,
-  warehouse invoice ingestion and approval/rollback are **not implemented**.
+  automated warehouse invoice ingestion and approval/rollback are **not implemented**.
 
 ## Cost boundaries and source-of-truth mapping
 
@@ -93,6 +109,7 @@ minimum list price = $42.00/case. This is **not** an actual Lion BI SKU price.
    no same-person self-approval.
 3. Reconcile a real PO, freight invoice, accepted receipt, storage invoice,
    customer-route delivery and QuickBooks bill/invoice to the **same SKU**.
+   Confirm a provisional PO's preallocated landed charge is not included twice.
 4. Reconcile source invoice totals and each allocation including weight/volume
    and pallet-day scenarios. Independent finance confirmation.
 5. Demonstrate a mixed-SKU container where a warehouse charge is not also

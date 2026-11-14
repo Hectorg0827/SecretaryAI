@@ -380,7 +380,12 @@ def whatsapp_readiness(
         "employee_consented": bool(connection.get("employee_consented_at") and not connection.get("employee_revoked_at")),
         "history_sync_requested": bool(connection.get("history_sync_consented", False)),
         "meta_phone_verified": bool(connection.get("meta_verified_at")),
-        "can_launch_embedded_signup": False,
+        "can_launch_embedded_signup": (
+            _meta_embedded_signup_is_authorized()
+            and connection.get("status") == "pending_meta_approval"
+            and bool(connection.get("employee_consented_at"))
+            and not connection.get("employee_revoked_at")
+        ),
         "can_sync_messages": False,
         "can_send_messages": False,
         "required_permissions": ["whatsapp_business_messaging", "whatsapp_business_management"],

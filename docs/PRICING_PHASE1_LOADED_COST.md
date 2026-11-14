@@ -1,8 +1,10 @@
 # Lion BI / Lola — Phase 1: price book and fully loaded pricing
 
-Status: **staging branch implementation, not production-ready**. The migration
-and new UI are not applied/deployed merely by merging this code. No customer
-price, QuickBooks item, accounting transaction or approved price is changed.
+Status: **staging branch implementation, not production-ready**. The price-book
+and FK-index migrations were applied to **Supabase SecretaryAI-Staging only**
+on 2026-11-14 and verified for RLS and read-only grants. The new backend/UI
+code is still **not deployed**; the PR remains draft. No customer price,
+QuickBooks item, accounting transaction or approved price was changed.
 
 ## Current implementation
 
@@ -24,6 +26,15 @@ price, QuickBooks item, accounting transaction or approved price is changed.
 - The price-suggestion screen now states that QuickBooks purchase costs may
   omit the relevant freight and warehouse components; no suggestion is
   marked cost-verified.
+- All pricing endpoints use a fresh database role and company check on
+  every request, rejecting role changes, revoked employees, mismatched tenants
+  and authorization-source outages. The Pricing & Billbacks staff role has
+  the narrow `view_pricing` permission, not the broad `view_financials` right.
+  This includes a protected read-only source endpoint for warehouse-accepted
+  PO assessment quantities that does not grant general inventory privileges.
+- The staging schema's foreign-key index advisor findings for the new price-book
+  tables were remediated by an additive second migration. Existing unrelated
+  project lint notices remain out of scope.
 
 - A new additive schema stores versioned price-book rows by
   (company, SKU, package, market, channel, customer, effective date, revision),
@@ -106,8 +117,10 @@ minimum list price = $42.00/case. This is **not** an actual Lion BI SKU price.
 
 ## Required acceptance gates
 
-1. Price-book migration staged and RLS/grants verified against staging only;
-   unauthenticated direct DB readers cannot list price/cost data.
+1. Price-book schema and covering-index migration applied to staging; checked:
+   RLS enabled, anon/authenticated reads denied, service role SELECT-only,
+   foreign-key indexes present. Database is not yet populated with verified
+   selling prices or shipment costs.
 2. Test version history, price-effective-date overlap, and independent approval;
    no same-person self-approval.
 3. Reconcile a real PO, freight invoice, accepted receipt, storage invoice,
@@ -118,7 +131,8 @@ minimum list price = $42.00/case. This is **not** an actual Lion BI SKU price.
 5. Demonstrate a mixed-SKU container where a warehouse charge is not also
    included as inbound drayage or product cost.
 6. Verify role-specific views for Pricing & Billbacks staff and deny access to
-   unrelated tenants and expired/revoked roles.
+   unrelated tenants and expired/revoked roles. Source-level role regression
+   tests have been added and must pass on the final exact commit.
 7. Confirm Lola cites source documents, refuses missing/mixed-currency prices
    and never executes price updates without audited human approval.
 8. Browser and backend tests on the exact deploy commit, followed by a

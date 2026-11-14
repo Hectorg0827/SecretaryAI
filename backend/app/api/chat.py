@@ -497,9 +497,19 @@ async def send_message(
 
     # Private memories belong to the authenticated employee, not a role.
     # Never inject legacy company-wide account facts derived from chats.
-    recent_summaries = load_recent_summaries(db, company_id, user_id)
-    account_names = _detect_account_names(request.message, history)
-    account_mem = load_account_memory(db, company_id, account_names, user_id=user_id)
+    # Preserve the role gate on ordinary/general requests. Employee-private
+    # named-contact recall below remains separately scoped to its owner.
+    allow_personal_memory = role != "sales_rep" or intent != "general_question"
+    recent_summaries = (
+        load_recent_summaries(db, company_id, user_id) if allow_personal_memory else ""
+    )
+    account_names = (
+        _detect_account_names(request.message, history) if allow_personal_memory else []
+    )
+    account_mem = (
+        load_account_memory(db, company_id, account_names, user_id=user_id)
+        if allow_personal_memory else ""
+    )
 
     if recent_summaries or account_mem:
         memory_context = ""

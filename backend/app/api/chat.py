@@ -392,6 +392,47 @@ def _detect_account_names(message: str, history: list[dict]) -> list[str]:
     return list(set(candidates))[:5]
 
 
+def _verified_logistics_chat_context(user: dict, db, question: str) -> str:
+    """Load only the caller's role-scoped shipment facts, never a simulated live feed.
+
+    This is a *read*: the ledger's source provenance and deterministic answer
+    are provided as untrusted data to the model, not commands to execute.
+    Missing or inaccessible source data fails closed rather than becoming an
+    empty shipment list or an invented ETA.
+    """
+    from app.intelligence.wholesale_distribution.logistics.assistant import LogisticsAssistant
+    from app.intelligence.wholesale_distribution.logistics.journey import ShipmentLedger
+    from app.intelligence.wholesale_distribution.logistics.store import SupabaseEventStore
+    from app.intelligence.wholesale_distribution.logistics.visibility import (
+        LogisticsAccessDenied, LogisticsViewer,
+    )
+
+    viewer = LogisticsViewer.from_user(user)
+    try:
+        viewer.require_access()
+    except LogisticsAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="No logistics data access for this role") from exc
+    try:
+        ledger = ShipmentLedger.load(user["company_id"], SupabaseEventStore(db))
+        answer = LogisticsAssistant(ledger, viewer).ask(question).to_dict()
+        visible_count = len(viewer.visible(ledger.shipments()))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Logistics data access denied") from exc
+    except Exception as exc:
+        log.warning("Lola logistics lookup unavailable: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Verified logistics data is unavailable. No shipment status was inferred.",
+        ) from exc
+    return json.dumps({
+        "source": "tenant_scoped_logistics_events",
+        "coverage": "recorded events only; external carrier, customs and WMS feeds may be missing",
+        "recorded_visible_shipments": visible_count,
+        "retrieval_status": "loaded",
+        "answer": answer,
+    }, ensure_ascii=False, default=str)
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/message")
@@ -457,11 +498,19 @@ async def send_message(
     # customers; never let it do that for a rep.
     if role == "sales_rep" and intent not in {"inventory_check", "general_question"}:
         raise HTTPException(status_code=403, detail="This business data requires a higher permission")
+    # The chat now uses the same provenance-backed, tenant-scoped facts as the
+    # shipment control tower, instead of unrelated or unverified customs data.
+    logistics_lookup = intent == "customs_status" or (
+        bool(ui_context and ui_context.workspace == "logistics")
+        and intent == "general_question"
+    )
     if role == "sales_rep" and intent == "general_question":
-        data = {}
+        data_summary = ""
+    elif logistics_lookup:
+        data_summary = _verified_logistics_chat_context(user, db, focus + request.message)
     else:
         data = await _fetch_data_for_intent(intent, focus + request.message, adapter)
-    data_summary = build_query_context(intent, data)
+        data_summary = build_query_context(intent, data)
     if role == "sales_rep" and intent == "general_question":
         data_summary = (
             "No business data was retrieved for this question. "

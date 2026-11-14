@@ -183,14 +183,16 @@ def test_broker_message_is_candidate_not_confirmed_release():
     db.rpc.assert_not_called()
 
 
-def test_negated_broker_release_does_not_become_release_candidate():
+def test_negated_broker_release_reports_unverified_hold_not_release():
     client, db = _client()
     response = client.post("/api/logistics/customs/parse-broker-email", json={
         "booking_id": "BK-100", "subject": "Clearance status",
         "body": "The shipment is on hold and has not yet been released.",
     })
     assert response.status_code == 200, response.text
-    assert response.json()["candidate_milestone"] is None
+    assert response.json()["candidate_milestone"] == "hold_placed"
+    assert response.json()["message_verified"] is False
+    assert response.json()["customs_event_verified"] is False
     assert response.json()["requires_human_review"] is True
     db.rpc.assert_not_called()
 
@@ -213,4 +215,4 @@ def test_default_vessel_adapter_must_not_invent_live_location():
     )
     assert event.vessel_lat is None
     assert event.vessel_lon is None
-    assert event.status_description == "unknown"
+    assert event.status_description == "no_live_tracking_feed"

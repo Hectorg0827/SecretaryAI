@@ -211,6 +211,114 @@ def save_private_preferences(
         raise HTTPException(status_code=503, detail="Could not save private preferences") from None
 
 
+class WhatsAppConsent(BaseModel):
+    # Explicit opt-in is a local employee request, NEVER proof of Meta consent.
+    consent: bool
+    allow_one_time_history_sync: bool = False
+
+
+@router.get("/whatsapp/readiness")
+def whatsapp_readiness(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Private per-employee Meta onboarding status; NO token or Meta call."""
+    _scope(user)
+    try:
+        rows = _owned(db, "lola_employee_whatsapp_connections", user).limit(1).execute().data or []
+    except Exception:
+        # Any problem leaves Meta features disabled; never claim connected.
+        raise HTTPException(status_code=503, detail="Private WhatsApp state unavailable") from None
+    connection = rows[0] if rows else {}
+    # App permission grants and Meta policy clearance require external review;
+    # they are not inferred from local settings or employee consent.
+    return {
+        "status": connection.get("status", "not_requested"),
+        "employee_consented": bool(connection.get("employee_consented_at") and not connection.get("employee_revoked_at")),
+        "history_sync_requested": bool(connection.get("history_sync_consented", False)),
+        "meta_phone_verified": bool(connection.get("meta_verified_at")),
+        "can_launch_embedded_signup": False,
+        "can_sync_messages": False,
+        "can_send_messages": False,
+        "required_permissions": ["whatsapp_business_messaging", "whatsapp_business_management"],
+        "required_webhook_fields": ["messages", "smb_message_echoes", "account_update"],
+        "optional_webhook_fields": ["history", "smb_app_state_sync"],
+        "reason": "Meta app permissions, employee asset verification and written policy clearance must be completed separately",
+    }
+
+
+@router.put("/whatsapp/consent")
+def request_private_whatsapp_connection(
+    body: WhatsAppConsent,
+    user: dict = Depends(get_current_user), db=Depends(get_db),
+):
+    """Record only the logged-in employee's choice. No Meta onboarding yet."""
+    if body.consent is not True:
+        raise HTTPException(status_code=422, detail="Employee must explicitly opt in")
+    company_id, user_id = _scope(user)
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        existing = _owned(db, "lola_employee_whatsapp_connections", user).limit(1).execute().data or []
+        if existing and existing[0].get("status") == "active":
+            raise HTTPException(status_code=409, detail="Existing verified connection must be reviewed separately")
+        row = {
+            "company_id": company_id, "user_id": user_id,
+            "status": "pending_meta_approval",
+            "employee_consented_at": now,
+            "employee_revoked_at": None,
+            "history_sync_consented": body.allow_one_time_history_sync,
+            "meta_verified_at": None, "policy_clearance_id": None,
+            "phone_number_id": None, "waba_id": None,
+            "updated_at": now,
+        }
+        db.table("lola_employee_whatsapp_connections").upsert(
+            row, on_conflict="company_id,user_id"
+        ).execute()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Could not save WhatsApp consent") from None
+    return {
+        "status": "pending_meta_approval",
+        "employee_consented": True,
+        "history_sync_requested": body.allow_one_time_history_sync,
+        "connected": False,
+        "message_access": False,
+    }
+
+
+@router.delete("/whatsapp/consent")
+def revoke_private_whatsapp_consent(
+    user: dict = Depends(get_current_user), db=Depends(get_db),
+):
+    """Stop eligibility immediately, even before Meta/BSP offboarding.
+
+    Actual Meta token revocation must be implemented and verified before any
+    live employee account is ever allowed; this endpoint is staging-only.
+    """
+    company_id, user_id = _scope(user)
+    try:
+        rows = _owned(db, "lola_employee_whatsapp_connections", user).limit(1).execute().data or []
+        if not rows:
+            return {"status": "not_connected", "consent_revoked": True}
+        if rows[0].get("status") == "active":
+            # Do not give false assurance about remote deauthorization.
+            raise HTTPException(status_code=409, detail="Contact Meta support to revoke live access; employee offboarding not yet implemented")
+        db.table("lola_employee_whatsapp_connections").update({
+            "status": "disconnected",
+            "history_sync_consented": False,
+            "employee_revoked_at": datetime.now(timezone.utc).isoformat(),
+            "phone_number_id": None, "waba_id": None,
+            "meta_verified_at": None, "policy_clearance_id": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("company_id", company_id).eq("user_id", user_id).execute()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Could not revoke WhatsApp consent") from None
+    return {"status": "disconnected", "consent_revoked": True}
+
+
 @router.get("/contacts")
 def list_private_contacts(user: dict = Depends(get_current_user), db=Depends(get_db)):
     try:

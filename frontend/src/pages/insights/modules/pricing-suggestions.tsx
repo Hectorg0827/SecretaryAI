@@ -12,7 +12,7 @@ export const meta: InsightMeta = {
   title: 'Price suggestions',
   description: 'Suggested prices based on your margins and how customers reacted to past price changes. Advisory only.',
   group: 'Pricing',
-  roles: ['owner', 'manager'],
+  roles: ['owner', 'manager', 'pricing_billbacks'],
 };
 
 interface Suggestion {

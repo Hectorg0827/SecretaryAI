@@ -512,8 +512,15 @@ async def send_message(
     # Employee-private continuity: proactively surface due commitments only
     # from this employee's vault. No company-wide email or memory retrieval.
     try:
-        from app.api.private_continuity import private_followups as get_private_followups
-        personal_due = get_private_followups(user=user, db=db)["followups"][:5]
+        from app.api.private_continuity import (
+            private_followups as get_private_followups,
+            get_private_preferences,
+        )
+        personal_prefs = get_private_preferences(user=user, db=db)["preferences"]
+        personal_due = (
+            get_private_followups(user=user, db=db)["followups"][:5]
+            if personal_prefs.get("proactive_enabled") else []
+        )
     except Exception:
         personal_due = []  # Storage not installed: never fall back to another user.
     if personal_due:

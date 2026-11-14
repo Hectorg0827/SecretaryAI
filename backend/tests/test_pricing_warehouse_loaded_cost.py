@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.insights import price_waterfall
+from app.api.deps import get_db
+from pricing_auth_testkit import RoleDB
 from app.auth.rbac import get_current_user
 from app.intelligence.pricing.waterfall import (
     REQUIRED_COMPONENTS, WAREHOUSE_COMPONENTS, LandedCostLine, PriceScenario,
@@ -115,6 +117,7 @@ def test_api_shows_warehouse_step_and_never_writes_price():
     app.dependency_overrides[get_current_user] = lambda: {
         "sub": "test-user", "company_id": "tenant-a", "role": "owner",
     }
+    app.dependency_overrides[get_db] = lambda: RoleDB(identity="test-user")
     try:
         payload = {
             "product_label": "Test SKU", "price_per_case": 30,
@@ -144,3 +147,4 @@ def test_api_shows_warehouse_step_and_never_writes_price():
         assert body["price_written"] is False
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_db, None)

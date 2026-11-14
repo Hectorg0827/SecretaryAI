@@ -20,6 +20,15 @@ from app.intelligence.private_continuity import pending_followups, canonical_pro
 router = APIRouter()
 
 
+def require_private_pilot() -> None:
+    """No private mailbox/sync API before explicit staging pilot opt-in."""
+    cfg = get_settings()
+    if (cfg.secretaryai_deployment_env.strip().lower() != "staging"
+            or not cfg.lola_private_intelligence_enabled):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+
 def _scope(user: dict) -> tuple[str, str]:
     company_id = str(user.get("company_id") or "")
     user_id = str(user.get("sub") or "")

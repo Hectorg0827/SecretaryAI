@@ -28,7 +28,10 @@ def map_gmail_to_private_events(messages: list[dict], contacts: list[dict]) -> l
         message_id = message.get("id")
         if not message_id:
             continue
-        sent = "SENT" in (message.get("labels") or [])
+        labels = set(message.get("labels") or [])
+        if labels.intersection({"DRAFT", "SPAM", "TRASH"}):
+            continue  # Unsent or excluded messages cannot close commitments.
+        sent = "SENT" in labels
         participant = message.get("to", "") if sent else message.get("from", "")
         # Avoid silently attributing messages with multiple recipients.
         if "," in participant or ";" in participant:

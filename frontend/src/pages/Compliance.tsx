@@ -92,6 +92,11 @@ export function Compliance() {
   const [loadingAlerts,   setLoadingAlerts]   = useState(false);
   const [loadingDeadlines, setLoadingDeadlines] = useState(false);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
+  // Source failures are not empty registries or evidence of compliance.
+  const [sourceErrors, setSourceErrors] = useState<string[]>([]);
+  const markUnavailable = (source: string) => {
+    setSourceErrors((current) => current.includes(source) ? current : [...current, source]);
+  };
 
   // Setup wizard state
   const [showSetupWizard, setShowSetupWizard] = useState(false);
@@ -108,42 +113,51 @@ export function Compliance() {
         setBrandRegs(brands as BrandRegistration[]);
         setFederalPermits(fed as FederalPermit[]);
       })
-      .catch(() => null)
+      .catch(() => {
+        setLicenses([]);
+        setBrandRegs([]);
+        setFederalPermits([]);
+        markUnavailable('Licenses and permits');
+      })
       .finally(() => setLoadingLicenses(false));
   }
 
   function fetchAll() {
+    setSourceErrors([]);
+    api.compliance.getSetupStatus()
+      .then((setup) => {
+        if (!setup.is_setup) setShowSetupWizard(true);
+      })
+      .catch(() => markUnavailable('Compliance setup'));
+    setStatus(null);
+    setAlerts([]);
+    setDeadlines([]);
     setLoadingStatus(true);
     api.compliance.getStatus()
       .then(setStatus)
-      .catch(() => null)
+      .catch(() => {
+        setStatus(null);
+        markUnavailable('Compliance status');
+      })
       .finally(() => setLoadingStatus(false));
 
     setLoadingAlerts(true);
     api.compliance.getAlerts()
       .then(setAlerts)
-      .catch(() => [])
+      .catch(() => markUnavailable('Compliance alerts'))
       .finally(() => setLoadingAlerts(false));
 
     setLoadingDeadlines(true);
     api.compliance.getDeadlines()
       .then(setDeadlines)
-      .catch(() => [])
+      .catch(() => markUnavailable('Compliance deadlines'))
       .finally(() => setLoadingDeadlines(false));
 
     fetchLicenses();
   }
 
-  // Load on mount — check setup status first
+  // Load on mount; retries re-check setup status as well as registry sources.
   useEffect(() => {
-    api.compliance.getSetupStatus()
-      .then((s) => {
-        if (!s.is_setup) {
-          setShowSetupWizard(true);
-        }
-      })
-      .catch(() => null);
-
     fetchAll();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -244,6 +258,17 @@ export function Compliance() {
         </div>
       </div>
 
+      {sourceErrors.length > 0 && (
+        <div role="alert" className="mx-6 mt-3 flex items-start justify-between gap-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          <span>
+            Compliance evidence is unavailable ({sourceErrors.join(', ')}).
+            No missing license or permit should be interpreted as a verified absence or clearance.
+          </span>
+          <button type="button" className="shrink-0 font-semibold underline" onClick={fetchAll}>
+            Retry
+          </button>
+        </div>
+      )}
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
         <div key={activeTab} className="lionbi-compliance__content bg-white min-h-full shadow-sm">
@@ -280,7 +305,9 @@ export function Compliance() {
                 </>
               ) : (
                 <div className="py-12 text-center text-slate-400 text-sm">
-                  No compliance data yet. Add licenses and products to get started.
+                  {sourceErrors.includes('Compliance status')
+                    ? 'Compliance status unavailable. No clearance decision can be made.'
+                    : 'No compliance data yet. Add licenses and products to get started.'}
                 </div>
               )}
             </div>

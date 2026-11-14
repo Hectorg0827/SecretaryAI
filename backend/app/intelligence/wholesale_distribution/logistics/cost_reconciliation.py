@@ -80,26 +80,25 @@ class CostReconciliationEngine:
         # Allocate freight costs across cases
         if freight_booking and freight_booking.cost_components:
             total_cases_in_booking = max(cases, 1)
+            # Accumulate (+=): an invoice can carry the same component on
+            # several lines (e.g. two drayage legs); overwriting dropped cost.
+            field_for = {
+                "ocean_freight": "ocean_freight_per_case",
+                "fuel_surcharge": "fuel_surcharge_per_case",
+                "origin_charges": "origin_charges_per_case",
+                "insurance": "insurance_per_case",
+                "broker_fees": "broker_fees_per_case",
+                "port_charges": "port_charges_per_case",
+                "demurrage": "demurrage_per_case",
+                "detention": "demurrage_per_case",
+                "drayage": "drayage_per_case",
+                "exam_fees": "exam_fees_per_case",
+            }
             for comp in freight_booking.cost_components:
                 per_case = comp.amount_usd / total_cases_in_booking
-                if comp.component == "ocean_freight":
-                    lcd.ocean_freight_per_case = per_case
-                elif comp.component == "fuel_surcharge":
-                    lcd.fuel_surcharge_per_case = per_case
-                elif comp.component == "origin_charges":
-                    lcd.origin_charges_per_case = per_case
-                elif comp.component == "insurance":
-                    lcd.insurance_per_case = per_case
-                elif comp.component == "broker_fees":
-                    lcd.broker_fees_per_case = per_case
-                elif comp.component == "port_charges":
-                    lcd.port_charges_per_case = per_case
-                elif comp.component == "demurrage":
-                    lcd.demurrage_per_case = per_case
-                elif comp.component == "drayage":
-                    lcd.drayage_per_case = per_case
-                elif comp.component == "exam_fees":
-                    lcd.exam_fees_per_case = per_case
+                attr = field_for.get(comp.component)
+                if attr:
+                    setattr(lcd, attr, getattr(lcd, attr) + per_case)
 
         return lcd
 

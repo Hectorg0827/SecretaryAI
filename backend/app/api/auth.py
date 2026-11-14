@@ -255,8 +255,8 @@ async def qbo_disconnect(user: dict = Depends(get_current_user)):
 
 def _require_employee_mail_pilot() -> None:
     cfg = get_settings()
-    if (cfg.secretaryai_deployment_env.strip().lower() != "staging"
-            or not cfg.lola_private_intelligence_enabled):
+    if (str(getattr(cfg, "secretaryai_deployment_env", "")).strip().lower() != "staging"
+            or not bool(getattr(cfg, "lola_private_intelligence_enabled", False))):
         raise HTTPException(status_code=404, detail="Not found")
 
 

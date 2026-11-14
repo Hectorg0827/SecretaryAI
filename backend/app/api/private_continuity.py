@@ -211,6 +211,149 @@ def save_private_preferences(
         raise HTTPException(status_code=503, detail="Could not save private preferences") from None
 
 
+def _meta_embedded_signup_is_authorized() -> bool:
+    cfg = get_settings()
+    return (
+        cfg.secretaryai_deployment_env.strip().lower() == "staging"
+        and cfg.lola_private_intelligence_enabled
+        and cfg.lola_meta_app_review_approved
+        and cfg.lola_meta_ai_policy_approved
+        and cfg.lola_meta_waba_privacy_approved
+        and bool(cfg.lola_meta_policy_clearance_reference.strip())
+        and bool(cfg.lola_meta_app_id and cfg.lola_meta_configuration_id and cfg.lola_meta_app_secret)
+    )
+
+
+class MetaSignupFinished(BaseModel):
+    session_id: str = Field(min_length=32, max_length=128)
+    event: str
+    authorization_code: str = Field(min_length=10, max_length=4096)
+    waba_id: str = Field(pattern=r"^[0-9]{5,35}$")
+    phone_number_id: str = Field(pattern=r"^[0-9]{5,35}$")
+
+
+@router.post("/whatsapp/embedded-signup/start")
+def start_employee_whatsapp_signup(
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Start an employee-bound, one-time Meta Embedded Signup session.
+
+    Still no message sync, tokens, subscription or ability to send.
+    """
+    import json
+    import secrets
+    from app.api.auth import _state_set
+    if not _meta_embedded_signup_is_authorized():
+        raise HTTPException(status_code=409, detail="Meta app and policy approvals are not complete")
+    company_id, user_id = _scope(user)
+    try:
+        rows = _owned(db, "lola_employee_whatsapp_connections", user).limit(1).execute().data or []
+    except Exception:
+        raise HTTPException(status_code=503, detail="Private WhatsApp vault unavailable") from None
+    if not rows or rows[0].get("status") != "pending_meta_approval":
+        raise HTTPException(status_code=409, detail="Employee consent is required first")
+    if not rows[0].get("employee_consented_at") or rows[0].get("employee_revoked_at"):
+        raise HTTPException(status_code=409, detail="Employee consent is not active")
+    session_id = "wa-" + secrets.token_urlsafe(32)
+    _state_set(session_id, json.dumps({
+        "kind": "lola_wa_embedded_signup", "company_id": company_id, "user_id": user_id,
+        "employee_consented_at": rows[0]["employee_consented_at"],
+    }))
+    settings = get_settings()
+    return {
+        "session_id": session_id,
+        "app_id": settings.lola_meta_app_id,
+        "configuration_id": settings.lola_meta_configuration_id,
+        "feature_type": "whatsapp_business_app_onboarding",
+        "history_requested": rows[0].get("history_sync_consented", False),
+        "connected": False,
+    }
+
+
+@router.post("/whatsapp/embedded-signup/finish")
+async def finish_employee_whatsapp_signup(
+    body: MetaSignupFinished,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Verify Meta's one-time code; save *pending* owner binding, not token.
+
+    Requires explicit employee consent and independent app/policy approvals.
+    """
+    import json
+    from app.api.auth import _state_pop
+    from app.intelligence.meta_embedded_signup import (
+        verify_meta_coexistence_signup, MetaVerificationError,
+    )
+    if not _meta_embedded_signup_is_authorized():
+        raise HTTPException(status_code=409, detail="Meta approval missing")
+    if body.event != "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING":
+        raise HTTPException(status_code=422, detail="Expected WhatsApp Business App Coexistence signup")
+    company_id, user_id = _scope(user)
+    # Consume exactly once, even if Graph verification fails.
+    raw = _state_pop(body.session_id)
+    if not raw:
+        raise HTTPException(status_code=409, detail="Invalid or expired Meta signup session")
+    try:
+        state = json.loads(raw)
+        if state.get("kind") != "lola_wa_embedded_signup" or (
+            state.get("company_id") != company_id or state.get("user_id") != user_id
+        ):
+            raise ValueError("Cross-employee state")
+        rows = _owned(db, "lola_employee_whatsapp_connections", user).limit(1).execute().data or []
+        if (not rows or rows[0].get("status") != "pending_meta_approval"
+                or not rows[0].get("employee_consented_at")
+                or rows[0]["employee_consented_at"] != state.get("employee_consented_at")
+                or rows[0].get("employee_revoked_at")):
+            raise ValueError("Consent changed")
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(status_code=403, detail="Meta signup is not authorized for this employee") from None
+    except Exception:
+        raise HTTPException(status_code=503, detail="Private enrollment state unavailable") from None
+
+    cfg = get_settings()
+    try:
+        verified = await verify_meta_coexistence_signup(
+            authorization_code=body.authorization_code,
+            claimed_waba_id=body.waba_id,
+            claimed_phone_number_id=body.phone_number_id,
+            meta_app_id=cfg.lola_meta_app_id,
+            meta_app_secret=cfg.lola_meta_app_secret,
+        )
+    except MetaVerificationError:
+        raise HTTPException(status_code=409, detail="Meta could not verify this WhatsApp Business App number") from None
+
+    # No Meta access token retained, no activation, no synchronization.
+    try:
+        result = (
+            db.table("lola_employee_whatsapp_connections")
+            .update({
+                "waba_id": verified.waba_id,
+                "phone_number_id": verified.phone_number_id,
+                "meta_verified_at": datetime.now(timezone.utc).isoformat(),
+                "status": "pending_privacy_review",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("company_id", company_id).eq("user_id", user_id)
+            .eq("status", "pending_meta_approval")
+            .eq("employee_consented_at", state["employee_consented_at"])
+            .is_("employee_revoked_at", "null")
+            .execute()
+        )
+        if not result.data:
+            raise ValueError("Owner or consent changed")
+    except Exception:
+        # Unique phone ID constraint also blocks cross-employee re-binding.
+        raise HTTPException(status_code=409, detail="Meta number could not be reserved for this employee") from None
+
+    return {
+        "status": "pending_privacy_review", "phone_verified": True,
+        "connected": False, "message_access": False, "can_send": False,
+        "note": "Meta ownership verified, but no token was saved; a separate reviewed activation is required.",
+    }
+
+
 class WhatsAppConsent(BaseModel):
     # Explicit opt-in is a local employee request, NEVER proof of Meta consent.
     consent: bool

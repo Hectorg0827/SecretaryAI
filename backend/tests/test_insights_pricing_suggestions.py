@@ -7,7 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_adapter
+from app.api.deps import get_adapter, get_db
+from pricing_auth_testkit import RoleDB
 from app.api.insights import pricing_suggestions
 from app.auth.rbac import get_current_user
 
@@ -53,6 +54,7 @@ def client(role="owner", adapter=None):
         "company_id": "tenant-a", "sub": "user-a", "role": role,
     }
     app.dependency_overrides[get_adapter] = lambda: adapter
+    app.dependency_overrides[get_db] = lambda: RoleDB(identity='user-a',company='tenant-a',role=role)
     return TestClient(app)
 
 
@@ -65,6 +67,10 @@ def test_connected_suggestions_need_observed_price_changes():
     assert body["source"] == "connected_data"
     assert body["actions_executed"] is False
     assert body["prices_changed"] is False
+    assert body["fully_loaded_cost_verified"] is False
+    assert body["pricing_decision_ready"] is False
+    assert body["cost_basis"] == "quickbooks_purchase_cost_only"
+    assert "warehouse" in body["cost_warning"]
     assert body["company_id"] == "tenant-a"
     adapter.get_orders_last_n_days.assert_awaited_once_with(364)
 

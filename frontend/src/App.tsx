@@ -204,7 +204,7 @@ function AppShell() {
               key={path}
               path={path}
               element={
-                <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office']}>
+                <RoleGuard roles={['owner', 'manager', 'sales_rep', 'back_office', 'pricing_billbacks']}>
                   <Insights />
                 </RoleGuard>
               }

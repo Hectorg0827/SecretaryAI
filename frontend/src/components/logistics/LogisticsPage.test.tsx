@@ -126,13 +126,13 @@ describe('logistics reorder queue', () => {
   });
 });
 
-describe('logistics tabs without a data source', () => {
-  it('does not offer Shipments or Cost Analysis tabs', async () => {
+describe('logistics tabs with a provenance-backed shipment ledger', () => {
+  it('offers Shipments but keeps unverified Cost Analysis unavailable', async () => {
     setRole('owner');
     mockApi({ '/api/inventory/alerts': { alerts: [], count: 0 } });
     const container = await render(<Logistics />);
     const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim());
-    expect(labels).not.toContain('Shipments');
+    expect(labels).toContain('Shipments');
     expect(labels).not.toContain('Cost Analysis');
     expect(labels).toEqual(expect.arrayContaining([
       'Reorder Queue', 'Purchase Orders', 'Receiving', 'Warehouse', 'Returns', 'Customs & Seasonality',

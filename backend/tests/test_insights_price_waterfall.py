@@ -5,6 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.insights import price_waterfall
+from app.api.deps import get_db
+from pricing_auth_testkit import RoleDB
 from app.auth.rbac import get_current_user
 from app.intelligence.pricing.waterfall import REQUIRED_COMPONENTS, calculate_price_waterfall
 from app.main import app
@@ -23,10 +25,14 @@ def client():
         app.dependency_overrides[get_current_user] = lambda: {
             "sub": "user-1", "company_id": company_id, "role": role,
         }
+        app.dependency_overrides[get_db] = lambda: RoleDB(
+            identity="user-1", company=company_id, role=role,
+        )
         return TestClient(app)
 
     yield make
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 
 def _body(**changes):

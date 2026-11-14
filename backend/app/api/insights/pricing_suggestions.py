@@ -22,7 +22,7 @@ from app.api.insights._common import advisory_response, read_source
 from app.api.insights._supply_chain_sources import (
     ItemIndex, SaleLine, clean_invoices, finite_number, inventory_list, sales_by_item,
 )
-from app.auth.rbac import require_permission
+from app.api.insights._pricing_access import get_pricing_user
 from app.intelligence.wholesale_distribution.dynamic_pricing import (
     DynamicPricingEngine, PricingTier,
 )
@@ -96,7 +96,7 @@ def _elasticity_fields(elasticity) -> dict:
 @router.get("")
 async def pricing_suggestions(
     target_margin_pct: float = Query(30.0, ge=0, le=95, allow_inf_nan=False),
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
     adapter=Depends(get_adapter),
 ):
     """Per-item price suggestion or hold, with margin against the target."""
@@ -179,6 +179,14 @@ async def pricing_suggestions(
             "segment": "All customers together; customer-specific prices are averaged.",
         },
         "prices_changed": False,
+        "cost_basis": "quickbooks_purchase_cost_only",
+        "fully_loaded_cost_verified": False,
+        "pricing_decision_ready": False,
+        "cost_warning": (
+            "Purchase cost excludes unverified inbound freight, customs, "
+            "warehouse receiving, storage, handling, outbound delivery and carrying costs. "
+            "Recommendations are analysis only, not approved prices."
+        ),
     }, source="connected_data")
 
 
@@ -212,7 +220,7 @@ class PriceCheck(BaseModel):
 @router.post("/preview")
 async def pricing_preview(
     body: PriceCheck,
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
 ):
     """Suggested price for one product from entered prices, costs and history."""
     engine = DynamicPricingEngine(company_id=user["company_id"], target_gross_margin_pct=body.target_margin_pct)
@@ -239,6 +247,9 @@ async def pricing_preview(
         **row,
         **_elasticity_fields(elasticity),
         "prices_changed": False,
+        "cost_basis": "entered_unit_cost_unreconciled",
+        "fully_loaded_cost_verified": False,
+        "pricing_decision_ready": False,
     }, source="user_supplied")
 
 
@@ -266,7 +277,7 @@ class SupplierIncrease(BaseModel):
 @router.post("/supplier-increase")
 async def supplier_increase_preview(
     body: SupplierIncrease,
-    user: dict = Depends(require_permission("view_financials")),
+    user: dict = Depends(get_pricing_user),
 ):
     """How much of a supplier cost increase to pass on, per customer group."""
     engine = DynamicPricingEngine(company_id=user["company_id"])

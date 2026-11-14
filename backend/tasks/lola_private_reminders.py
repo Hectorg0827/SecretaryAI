@@ -45,6 +45,14 @@ def scan_all(self):
                 .eq("is_active", True).limit(1).execute()).data or []
             if not active:
                 continue
+            # Never consume a one-time reminder receipt before the employee
+            # registers a device. Otherwise a missing phone makes a future
+            # legitimately due reminder permanently undeliverable.
+            device = (db.table("device_push_tokens").select("token")
+                .eq("company_id", company_id).eq("user_id", user_id)
+                .limit(1).execute()).data or []
+            if not device:
+                continue
             due = private_followups(
                 user={"company_id": company_id, "sub": user_id}, db=db
             )["followups"]

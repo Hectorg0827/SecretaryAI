@@ -32,6 +32,14 @@ describe('shipment control tower evidence handling', () => {
         { code: 'SHIPMENT_DELAYED', severity: 'high', message: 'Five day delay', shipment_id: 'SHP-TEST-1' },
       ] },
       '/api/logistics/journey/shipments/SHP-TEST-1': detail,
+      '/api/logistics/journey/shipments/SHP-TEST-1/purchasing-crosscheck': {
+        shipment_id: 'SHP-TEST-1', status: 'po_quantities_match_not_receipt_attribution',
+        po_results: [{ po_number: 'PO-TEST-1', status: 'approved',
+          ordered_cases: '1200', received_cases_all_conditions: '1180', remaining_cases: '20',
+          posted_receipt_count: 1 }],
+        posted_receipts_prove_shipment_received: false,
+        shipment_inventory_reconciled: false, accounting_reconciled: false, review_required: true,
+      },
     });
     const container = await render(<ShipmentControlTower />);
     expect(container.textContent).toContain('Verified ETA: 2026-11-15');
@@ -42,6 +50,9 @@ describe('shipment control tower evidence handling', () => {
     expect(get).toHaveBeenCalledWith('/api/logistics/journey/shipments/SHP-TEST-1');
     expect(container.textContent).toContain('Departed origin · carrier_api');
     expect(container.textContent).toContain('unverified report(s) awaiting human review');
+    expect(container.textContent).toContain('PO quantities agree');
+    expect(container.textContent).toContain('Shipment-level');
+    expect(get).toHaveBeenCalledWith('/api/logistics/journey/shipments/SHP-TEST-1/purchasing-crosscheck');
     expect(post).not.toHaveBeenCalled();
   });
 

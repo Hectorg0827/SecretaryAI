@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { PurchaseCrosscheck } from './PurchaseCrosscheck';
 
 type Eta = { eta: string; source: string; verified: boolean } | null;
 type JourneySummary = {
@@ -177,6 +178,7 @@ export function ShipmentControlTower() {
           </p>}
         </li>)}
       </ol>
+      <PurchaseCrosscheck shipmentId={detail.shipment_id} />
     </div>}
     <div className="space-y-2" aria-label="Logistics monitoring">
       <h3 className="font-semibold text-slate-900">Monitoring and exceptions</h3>

@@ -440,6 +440,12 @@ export default function PricingSuggestionsInsight() {
   return (
     <InsightShell title={meta.title} description={meta.description}>
       <AdvisoryNotice source={data?.source ?? 'connected_data'} />
+      <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        Margin estimates currently use QuickBooks purchase cost. Inbound logistics,
+        warehousing, fulfillment and financing may not be included. Suggested changes
+        are provisional and must not be published until the full-cost price book
+        and source invoices are reconciled. Use Price waterfall for a loaded-cost scenario.
+      </p>
       <label className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
         <span>Target gross margin:</span>
         <select name="target_margin" className="rounded-lg border border-slate-300 px-2 py-1 text-xs"

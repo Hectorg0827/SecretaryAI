@@ -65,6 +65,10 @@ def test_connected_suggestions_need_observed_price_changes():
     assert body["source"] == "connected_data"
     assert body["actions_executed"] is False
     assert body["prices_changed"] is False
+    assert body["fully_loaded_cost_verified"] is False
+    assert body["pricing_decision_ready"] is False
+    assert body["cost_basis"] == "quickbooks_purchase_cost_only"
+    assert "warehouse" in body["cost_warning"]
     assert body["company_id"] == "tenant-a"
     adapter.get_orders_last_n_days.assert_awaited_once_with(364)
 

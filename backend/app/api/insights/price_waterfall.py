@@ -16,7 +16,7 @@ from app.api.insights._common import advisory_response
 from app.api.insights._product_sales import from_input, money
 from app.auth.rbac import require_permission
 from app.intelligence.pricing.waterfall import (
-    REQUIRED_COMPONENTS, LandedCostLine, PriceScenario, calculate_price_waterfall,
+    REQUIRED_COMPONENTS, WAREHOUSE_COMPONENTS, LandedCostLine, PriceScenario, calculate_price_waterfall,
 )
 
 router = APIRouter()
@@ -108,10 +108,16 @@ async def price_waterfall_preview(
          "running": money(result.net_revenue_per_case - commission)},
         {"key": "marketing", "label": "Marketing support", "amount": money(-marketing),
          "running": money(pocket)},
-        {"key": "landed_cost", "label": "Landed product cost", "amount": money(-result.landed_cost_per_case),
-         "running": money(result.contribution_per_case)},
+        {"key": "landed_cost", "label": "Inbound landed product cost", "amount": money(-result.landed_cost_per_case),
+         "running": money(result.contribution_per_case + result.warehouse_cost_per_case)},
     ]
     entered = {line.component for line in body.cost_lines}
+    if entered & WAREHOUSE_COMPONENTS:
+        steps.append({
+            "key": "warehouse_cost", "label": "Warehouse and fulfillment cost",
+            "amount": money(-result.warehouse_cost_per_case),
+            "running": money(result.contribution_per_case),
+        })
     return advisory_response({
         "product_label": body.product_label.strip(),
         "currency": body.currency,
@@ -119,6 +125,12 @@ async def price_waterfall_preview(
         "net_revenue_per_case": money(result.net_revenue_per_case),
         "pocket_price_per_case": money(pocket),
         "landed_cost_per_case": money(result.landed_cost_per_case),
+        "warehouse_cost_per_case": money(result.warehouse_cost_per_case),
+        "fully_loaded_cost_per_case": money(result.fully_loaded_cost_per_case),
+        "minimum_list_price_at_target_margin": money(result.minimum_list_price_at_target_margin),
+        "complete_warehouse_components": result.complete_warehouse_components,
+        "missing_warehouse_components": list(result.missing_warehouse_components),
+        "fully_loaded_contribution_margin_pct": money(result.fully_loaded_contribution_margin_pct, 1),
         "gross_profit_per_case": money(result.gross_profit_per_case),
         "gross_margin_pct": money(result.gross_margin_pct, 1),
         "contribution_per_case": money(result.contribution_per_case),
@@ -130,4 +142,12 @@ async def price_waterfall_preview(
         "documented_cost_components": result.documented_cost_components,
         "exception_reasons": list(result.exception_reasons),
         "review_status": result.status,
+        "fully_loaded_inputs_complete": bool(
+            result.complete_cost_components
+            and result.complete_warehouse_components
+            and result.documented_cost_components
+            and body.approved_price_per_case is not None
+        ),
+        "warehouse_costs_verified": False,
+        "price_written": False,
     }, source="user_supplied")

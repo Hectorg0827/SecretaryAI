@@ -47,6 +47,26 @@ def test_reconciled_waterfall_uses_gross_margin_not_markup():
     assert "below_target_margin" in result.exception_reasons
 
 
+def test_exceptional_logistics_costs_increase_inbound_cost_without_replacing_required_fields():
+    from app.intelligence.pricing.waterfall import LOGISTICS_TO_PRICE_COMPONENT
+    assert LOGISTICS_TO_PRICE_COMPONENT["ocean_freight"] == "international_freight"
+    assert LOGISTICS_TO_PRICE_COMPONENT["drayage"] == "domestic_freight"
+    assert LOGISTICS_TO_PRICE_COMPONENT["broker_fees"] == "customs_brokerage"
+    assert LOGISTICS_TO_PRICE_COMPONENT["demurrage"] == "demurrage"
+    assert LOGISTICS_TO_PRICE_COMPONENT["exam_fees"] == "exam_fees"
+    existing = _scenario()
+    extended = replace(existing, cost_lines=existing.cost_lines + (
+        LandedCostLine("demurrage", D("2"), source_record_id="synthetic-demurrage", source_revision="v1"),
+        LandedCostLine("exam_fees", D("1"), source_record_id="synthetic-exam", source_revision="v1"),
+        LandedCostLine("fuel_surcharge", D("0.5"), source_record_id="synthetic-fuel", source_revision="v1"),
+    ))
+    before = calculate_price_waterfall(existing)
+    after = calculate_price_waterfall(extended)
+    assert after.landed_cost_per_case - before.landed_cost_per_case == D("3.5")
+    assert after.contribution_per_case == before.contribution_per_case - D("3.5")
+    assert after.complete_cost_components
+
+
 def test_missing_duty_or_evidence_never_counts_as_complete_cost():
     baseline = _scenario()
     missing = replace(baseline, cost_lines=tuple(x for x in baseline.cost_lines if x.component != "duty"))

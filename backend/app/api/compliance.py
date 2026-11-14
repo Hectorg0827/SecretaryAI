@@ -1044,10 +1044,10 @@ async def update_product(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_products",     request.id = product_id
+    require_existing_record(db, "compliance_products", product_id, user["company_id"])
+    request.id = product_id
     return await add_product(request, user, db)
-, user["company_id"])
-product_id
+
 
 @router.put("/licenses/{license_id}")
 async def update_license(
@@ -1056,10 +1056,10 @@ async def update_license(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_licenses",     request.id = license_id
+    require_existing_record(db, "compliance_licenses", license_id, user["company_id"])
+    request.id = license_id
     return await add_license(request, user, db)
-, user["company_id"])
-license_id
+
 
 @router.put("/brand-registrations/{reg_id}")
 async def update_brand_registration(
@@ -1068,10 +1068,10 @@ async def update_brand_registration(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_brand_registrations",     request.id = reg_id
+    require_existing_record(db, "compliance_brand_registrations", reg_id, user["company_id"])
+    request.id = reg_id
     return await add_brand_registration(request, user, db)
-, user["company_id"])
-reg_id
+
 
 @router.put("/federal-permits/{permit_id}")
 async def update_federal_permit(
@@ -1080,10 +1080,10 @@ async def update_federal_permit(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_federal_permits",     request.id = permit_id
+    require_existing_record(db, "compliance_federal_permits", permit_id, user["company_id"])
+    request.id = permit_id
     return await add_federal_permit(request, user, db)
-, user["company_id"])
-permit_id
+
 
 @router.put("/distributors/{distributor_id}")
 async def update_distributor(
@@ -1092,10 +1092,10 @@ async def update_distributor(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_distributors",     request.id = distributor_id
+    require_existing_record(db, "compliance_distributors", distributor_id, user["company_id"])
+    request.id = distributor_id
     return await add_distributor(request, user, db)
-, user["company_id"])
-distributor_id
+
 
 @router.put("/colas/{cola_id}")
 async def update_cola(
@@ -1104,10 +1104,9 @@ async def update_cola(
     user: dict = Depends(require_permission("manage_inventory")),
     db=Depends(get_db),
 ):
-    require_existing_record(db, "compliance_colas",     request.id = cola_id
+    require_existing_record(db, "compliance_colas", cola_id, user["company_id"])
+    request.id = cola_id
     return await add_cola(request, user, db)
-, user["company_id"])
-cola_id
 
 # ─── Setup status ─────────────────────────────────────────────────────────────
 

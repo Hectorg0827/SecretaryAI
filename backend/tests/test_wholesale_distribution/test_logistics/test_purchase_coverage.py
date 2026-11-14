@@ -97,3 +97,46 @@ def test_record_cap_is_explicit_not_silent():
     ledger = ShipmentLedger("company-A")
     with pytest.raises(PurchaseCoverageInvalid, match="bounded"):
         purchase_journey_coverage([po(f"PO-{i}") for i in range(201)], ledger)
+
+
+def test_unverified_new_shipment_identifiers_are_hidden_until_named_person_confirms():
+    ledger = ShipmentLedger("company-A")
+    response = event(ledger, source=SourceType.EMAIL_PARSED)
+    assert response.verified is False
+    assert response.evidence_id.startswith("evd-")
+    shipment = ledger.get("SHP-1")
+    assert shipment.po_numbers == []
+    assert shipment.container_numbers == []
+    assert shipment.pending_evidence()[0].kind == "shipment_created"
+
+    coverage = purchase_journey_coverage([po()], ledger)["orders"][0]
+    assert coverage["shipment_link_status"] == "unverified_report_only"
+    assert coverage["linked_shipment_ids"] == []
+
+    ledger.confirm_evidence(response.evidence_id, confirmed_by="operations-1")
+    assert shipment is not ledger.get("SHP-1")  # event source preserves atomic snapshots
+    assert ledger.get("SHP-1").po_numbers == ["PO-1"]
+    assert ledger.get("SHP-1").container_numbers == ["MSCU1234566"]
+    updated = purchase_journey_coverage([po()], ledger)["orders"][0]
+    assert updated["shipment_link_status"] == "linked_staff_attested"
+
+
+def test_unverified_update_cannot_replace_or_append_official_shipment_identifiers():
+    ledger = ShipmentLedger("company-A")
+    event(ledger)
+    reported = ledger.ingest(LogisticsEvent(
+        company_id="company-A", shipment_id="SHP-1", kind="shipment_updated",
+        source=SourceType.EMAIL_PARSED, source_ref="gmail-test-12",
+        payload={"po_numbers": ["PO-UNVERIFIED"], "bol_number": "UNVERIFIEDBOL"},
+    ))
+    assert reported.verified is False
+    assert reported.evidence_id
+    original = ledger.get("SHP-1")
+    assert original.po_numbers == ["PO-1"]
+    assert original.bol_number == ""
+    assert len(original.pending_evidence()) == 1
+    ledger.confirm_evidence(reported.evidence_id, confirmed_by="manager-1")
+    updated = ledger.get("SHP-1")
+    assert updated.po_numbers == ["PO-1", "PO-UNVERIFIED"]
+    assert updated.bol_number == "UNVERIFIEDBOL"
+    assert not updated.pending_evidence()

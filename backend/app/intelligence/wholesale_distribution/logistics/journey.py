@@ -859,6 +859,12 @@ class ShipmentLedger:
 
 
 def _apply_created(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
+    if ev.source in UNVERIFIED_SOURCES:
+        evidence = _add_evidence(s, ev, "shipment_created")
+        return ApplyResult(
+            applied=True, evidence_id=evidence.evidence_id,
+            message="Reported shipment created as unverified evidence; identifiers not trusted",
+        )
     _merge_static(s, ev.payload)
     return ApplyResult(applied=True, verified=True)
 
@@ -875,8 +881,11 @@ def _apply_updated(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
                     f"{key} {p[key]!r} from {ev.source.value} conflicts with {getattr(s, key)!r}",
                     None, ev,
                 ))
-        return ApplyResult(applied=True, exceptions=exc,
-                           message="unverified update recorded as conflict only" if exc else "")
+        evidence = _add_evidence(s, ev, "shipment_updated")
+        return ApplyResult(
+            applied=True, evidence_id=evidence.evidence_id, exceptions=exc,
+            message="Reported shipment changes await named-person confirmation",
+        )
     _merge_static(s, p)
     return ApplyResult(applied=True, verified=True)
 
@@ -1144,7 +1153,10 @@ def _apply_evidence_confirmed(s: Shipment, ev: LogisticsEvent) -> ApplyResult:
         return _apply_milestone(s, replay)
     if target.kind == "eta":
         return _apply_eta(s, replay)
-    if target.kind in ("allocation", "allocation_update", "appointment", "port_terms"):
+    if target.kind in (
+        "shipment_created", "shipment_updated",
+        "allocation", "allocation_update", "appointment", "port_terms",
+    ):
         return _APPLY[target.kind](s, replay)
     return ApplyResult(applied=True, verified=True)
 

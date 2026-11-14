@@ -512,3 +512,36 @@ def test_purchasing_coverage_exceeding_supported_page_fails_closed(client, db):
     r = client.get("/api/logistics/journey/purchasing-coverage", headers=_tok())
     assert r.status_code == 503
     assert "scope" in r.json()["detail"].lower()
+
+
+def test_email_created_journey_identifiers_require_named_person_confirmation(client, db):
+    body = {
+        "shipment_id": "SHP-EMAIL-1", "kind": "shipment_created",
+        "source": "email_parsed", "source_ref": "gmail-test-501",
+        "payload": {
+            "po_numbers": ["PO-1001"],
+            "container_numbers": ["MSCU1234566"],
+            "destination": "New York",
+        },
+    }
+    report = client.post("/api/logistics/journey/events", headers=_tok(sub="ops-1"), json=body)
+    assert report.status_code == 200, report.text
+    result = report.json()
+    assert result["verified"] is False
+    assert result["evidence_id"]
+    early = client.get("/api/logistics/journey/shipments/SHP-EMAIL-1", headers=_tok())
+    assert early.status_code == 200
+    assert early.json()["po_numbers"] == []
+    assert early.json()["container_numbers"] == []
+    assert len(early.json()["pending_evidence"]) == 1
+
+    confirmed = client.post(
+        f'/api/logistics/journey/evidence/{result["evidence_id"]}/confirm',
+        headers=_tok(role="manager", sub="manager-2"), json={},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["verified"] is True
+    after = client.get("/api/logistics/journey/shipments/SHP-EMAIL-1", headers=_tok())
+    assert after.json()["po_numbers"] == ["PO-1001"]
+    assert after.json()["container_numbers"] == ["MSCU1234566"]
+    assert after.json()["pending_evidence"] == []

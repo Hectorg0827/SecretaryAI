@@ -22,6 +22,9 @@ Current WhatsApp Terms for WhatsApp Business Platform (effective 2026-09-23) inc
 
 The WhatsApp Business Solution Terms' AI Providers clause restricts providers/developers whose primary offering via the Platform is a general-purpose AI assistant. AI used incidentally in legitimate business messaging is different, but Lola is itself primarily an AI assistant, so **do not treat this carve-out as approval**. The precise applicability of the platform terms to ingestion of an employee's business messages into Lola's off-WhatsApp intelligence engine requires written determination from Meta or an authorized solution partner before ingesting real message content. Regional exceptions must NOT be presumed for U.S. numbers.
 
+The legacy Business Solution Terms also restrict using WhatsApp Business Solution Data to build or augment profiles about individual WhatsApp users, subject to an exception relating to message-thread content. **Lola's desired cross-channel identity linking/relationship memory therefore needs specific written clarification**: merely using a supported API does not establish the legality of merging WhatsApp contacts with email/project histories.
+See https://www.whatsapp.com/legal/business-solution-terms/.
+
 The terms prohibit using WhatsApp Business Solution Data (including derived forms) to train/improve third-party AI models. Vendor DPAs, no-training protections, clear retention controls and independent review are mandatory. Message handling for inference may also require separate consent, legal and Meta review.
 
 Messaging policy: outbound customer-initiated replies within the 24-hour service window may be sent without a template; outside it, approved templates and other applicable opt-in/marketing rules apply. Lola must not autonomously message contacts; later private-send flows must require the individual employee's approval. See https://whatsappbusiness.com/policy/.
@@ -46,3 +49,18 @@ Each employee keeps their own account/number and voluntarily authorizes a connec
 4. Test Joan's email request and WhatsApp draft with independent test numbers, then opt-in reminders and (separately) approved outbound drafts.
 
 **Until gates 2–4 are satisfied, WhatsApp activity in Lola remains user-entered, labeled "manual", with no claim of WhatsApp account/API connection.**
+
+## Written policy clearance questions for Meta / authorized BSP
+
+Before collecting actual WhatsApp data, request a case-specific answer to all of the following:
+
+1. Can an **employee's existing WhatsApp Business app number** use the official Coexistence API via Lion BI as Tech Provider/BSP, where Lola's main assistant runs in Lion BI (not within WhatsApp)?
+2. Is processing that employee's WhatsApp message text/attachments for **private business commitment reminders** via an AI service (under no-training controls) permitted under the AI Providers clause?
+3. Can the employee privately link a verified WhatsApp business correspondent to the same person's email address for thread/project continuity, or is that prohibited user profiling under the Business Solution Terms?
+4. What Meta Business Account/WABA ownership and assignment configuration prevents corporate managers from independently reading employee chats or using delegated tokens?
+5. Are message history sync and `smb_message_echoes` supported for our specific U.S. employee Business App numbers, and what employee/customer consent is required?
+6. Must Lola obtain a separate Meta app review or permissions beyond `whatsapp_business_messaging` and `whatsapp_business_management`, and what is the allowed retention period?
+7. Can the provider access history at all if employee declines optional history sharing? Lola must never treat missing history as absence of reply.
+8. Can future **employee-approved** outbound follow-ups use the normal 24-hour customer-service window/approved templates, with no automated sends?
+
+Record the written authorization and policy version in a reviewed, time-limited configuration before any staging API ingestion or customer message processing. A BSP's marketing statement is **not equivalent** to permission for Lola's distinct AI use case.

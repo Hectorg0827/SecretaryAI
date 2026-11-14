@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { LockKeyhole, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api } from '../../lib/api';
 import { PrivateActivityLog } from './PrivateActivityLog';
+import { MetaEmbeddedSignup } from './MetaEmbeddedSignup';
 
 type Contact = {
   id: string;
@@ -136,11 +137,25 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
         setHistoryConsent(false);
         setNotice('Your local WhatsApp connection request was withdrawn.');
       }
+      await reloadWhatsAppReadiness();
       onUpdated();
     } catch {
       setError('Unable to update your private WhatsApp consent.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const reloadWhatsAppReadiness = async () => {
+    try {
+      const status = await api.get<{ status: string; employee_consented: boolean;
+        history_sync_requested: boolean; can_launch_embedded_signup: boolean }>(
+        '/api/lola/continuity/whatsapp/readiness'
+      );
+      setWhatsapp(status);
+      setHistoryConsent(status.history_sync_requested);
+    } catch {
+      setError('Unable to retrieve your private WhatsApp connection status.');
     }
   };
 
@@ -224,6 +239,12 @@ export function PrivateLolaControls({ onUpdated }: { onUpdated: () => void }) {
                   Recording a request does not grant Meta access or sync any chats.
                   Only the owner can grant consent. Managers cannot connect a number on behalf of an employee.
                 </p>
+                {whatsapp?.can_launch_embedded_signup && (
+                  <MetaEmbeddedSignup onComplete={() => {
+                    void reloadWhatsAppReadiness();
+                    onUpdated();
+                  }} />
+                )}
                 <a
                   className="inline-block text-xs font-medium text-slate-700 underline"
                   href="https://developers.facebook.com/documentation/business-messaging/whatsapp/overview/"

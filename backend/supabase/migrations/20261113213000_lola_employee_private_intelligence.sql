@@ -84,13 +84,13 @@ CREATE TABLE IF NOT EXISTS lola_personal_account_memory (
 -- Do NOT backfill ownership by company role or by guessed email address.
 ALTER TABLE IF EXISTS emails
     ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id);
-DO $
+DO $lola$
 BEGIN
     IF to_regclass('public.emails') IS NOT NULL THEN
         EXECUTE 'CREATE INDEX IF NOT EXISTS idx_emails_private_owner ON public.emails(company_id, user_id, received_at DESC)';
     END IF;
 END
-$;
+$lola$;
 
 ALTER TABLE employee_integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lola_private_contacts ENABLE ROW LEVEL SECURITY;

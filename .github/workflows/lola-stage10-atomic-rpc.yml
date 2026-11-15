@@ -62,7 +62,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Restore synthetic consent after the preceding revocation test.
           psql -X -v ON_ERROR_STOP=1 -c "UPDATE public.lola_channel_authorizations SET employee_consent_revoked_at=NULL WHERE channel='email'"
           psql -X -qAt -v ON_ERROR_STOP=1 -v event=4 -v cursor_cipher=U -v cursor_digest=e \
             -f backend/tests/sql/lola_stage10_racing_worker.sql > /tmp/lola-race-first.out &
@@ -72,52 +71,8 @@ jobs:
           second=$!
           wait "$first"
           wait "$second"
-          test "$(cat /tmp/lola-race-first.out /tmp/lola-race-second.out | grep -c '^true
-
-  cli-generated-migration-check:
-    name: Verify pinned Supabase CLI migration provenance (no hosted access)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      # This migration was generated in a prior CI job with pinned CLI v2.
-      # V3 changes remote defaults; never use db push or --remote here.
-      - uses: supabase/setup-cli@v1
-        with:
-          version: '2.122.0'
-      - name: Verify CLI available and generated migration exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase --version
-          supabase migration new --help >/dev/null
-          test -f supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql
-          test $(find supabase/migrations -maxdepth 1 -name '*_lola_delta_atomic_checkpoint_stage10.sql' -type f | wc -l) -eq 1
-          echo 'CLI-generated migration present; no hosted operation executed'
-)" -eq 1
-          test "$(cat /tmp/lola-race-first.out /tmp/lola-race-second.out | grep -c '^false
-
-  cli-generated-migration-check:
-    name: Verify pinned Supabase CLI migration provenance (no hosted access)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      # This migration was generated in a prior CI job with pinned CLI v2.
-      # V3 changes remote defaults; never use db push or --remote here.
-      - uses: supabase/setup-cli@v1
-        with:
-          version: '2.122.0'
-      - name: Verify CLI available and generated migration exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase --version
-          supabase migration new --help >/dev/null
-          test -f supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql
-          test $(find supabase/migrations -maxdepth 1 -name '*_lola_delta_atomic_checkpoint_stage10.sql' -type f | wc -l) -eq 1
-          echo 'CLI-generated migration present; no hosted operation executed'
-)" -eq 1
+          test "$(cat /tmp/lola-race-first.out /tmp/lola-race-second.out | grep -c '^true$')" -eq 1
+          test "$(cat /tmp/lola-race-first.out /tmp/lola-race-second.out | grep -c '^false$')" -eq 1
           psql -X -v ON_ERROR_STOP=1 -f backend/tests/sql/lola_stage10_race_assert.sql
 
   cli-generated-migration-check:

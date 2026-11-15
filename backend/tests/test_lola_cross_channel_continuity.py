@@ -70,7 +70,10 @@ def test_verified_email_request_and_whatsapp_draft_no_reply_review_only():
     assert result.state == ContinuityState.REVIEW_FOLLOW_UP
     assert result.requires_human_review is True
     assert result.cross_channel_link_verified is True
-    assert result.supporting_record_ids == ("gmail-44", "wa-echo-18")
+    assert len(result.supporting_record_ids) == 2
+    assert all(ref.startswith("source-") and len(ref) == 31 for ref in result.supporting_record_ids)
+    assert "gmail-44" not in result.supporting_record_ids
+    assert "wa-echo-18" not in result.supporting_record_ids
     assert len(result.evidence_fingerprint) == 64
     assert result.follow_up_after == (SENT.observed_at + timedelta(hours=24)).isoformat()
     assert result.messages_sent is False
@@ -82,7 +85,8 @@ def test_verified_reply_after_sent_suppresses_follow_up():
     result = inspect(activities=[REQUEST, SENT, REPLY])
     assert result.state == ContinuityState.REPLIED
     assert result.requires_human_review is False
-    assert "wa-in-19" in result.supporting_record_ids
+    assert len(result.supporting_record_ids) == 3
+    assert all("wa-in-19" not in ref for ref in result.supporting_record_ids)
 
 
 def test_reply_on_email_also_suppresses_follow_up():
@@ -231,6 +235,18 @@ def test_naive_timestamp_is_rejected():
     result = inspect(activities=[REQUEST, replace(SENT, observed_at=NOW.replace(tzinfo=None))])
     assert result.state == ContinuityState.EVIDENCE_UNAVAILABLE
 
+
+
+def test_provider_message_id_with_personal_address_is_never_exposed():
+    sensitive = replace(
+        SENT,
+        source_record_id="joan@example.com-opaque-provider-id",
+    )
+    result = inspect(activities=[REQUEST, sensitive])
+    assert result.state == ContinuityState.REVIEW_FOLLOW_UP
+    assert all("@" not in reference and "example.com" not in reference
+               for reference in result.supporting_record_ids)
+    assert len(result.supporting_record_ids) == 2
 
 def test_observation_timestamp_changes_evidence_fingerprint():
     baseline = inspect()

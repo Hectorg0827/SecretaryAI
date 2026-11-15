@@ -113,6 +113,7 @@ def test_zero_colas_in_internal_registry_are_not_proof_of_legal_prohibition():
 @pytest.mark.parametrize("unsupported", [
     "There are no COLAs on file, so you cannot legally import.",
     "Importation is blocked until you register every COLA.",
+    "The importation and sale of these products would be blocked.",
     "The business is fully compliant because no alerts were found.",
     "You are prohibited from selling the product.",
 ])

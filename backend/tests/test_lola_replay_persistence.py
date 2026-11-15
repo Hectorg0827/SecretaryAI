@@ -325,3 +325,80 @@ def test_duplicate_or_cross_tenant_database_row_not_trusted():
     db.checkpoints.append(deepcopy(db.checkpoints[0]))
     with pytest.raises(CheckpointUnavailable):
         read_checkpoint(db=db, scope=scope(), vault=v)
+
+
+def test_stage11_gmail_baseline_atomically_persists_encrypted_cursor_but_not_reply_status():
+    from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
+    db = FakeDB()
+    v = vault()
+    baseline = GmailBootstrapEvidence(
+        next_history_id="1001",
+        changed_records=(ChangeRef("PRIVATE-gmail-id", "added"),),
+        page_count=2, message_count=1, history_record_count=0,
+        digest="1" * 64,
+    )
+    result = commit_replay(
+        db=db, scope=scope(provider="gmail", resource=GMAIL),
+        vault=v, replay=baseline, previously_read=None, observed_at=NOW,
+    )
+    assert result.provider == "gmail" and result.generation == 1
+    assert result.stored_event_count == 1
+    assert result.complete_mailbox_history is False
+    assert result.reply_absence_proven is False
+    assert result.outbound_action_approved is False
+    saved = read_checkpoint(
+        db=db, scope=scope(provider="gmail", resource=GMAIL), vault=v,
+    )
+    assert saved.plaintext_cursor == "1001"
+    assert saved.baseline_only is True
+    assert "PRIVATE-gmail-id" not in str(db.events)
+    assert "1001" not in db.checkpoints[0]["cursor_ciphertext"]
+
+
+def test_stage11_gmail_baseline_rejects_existing_checkpoint_and_forged_claims():
+    from dataclasses import replace
+    from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
+    db = FakeDB()
+    v = vault()
+    baseline = GmailBootstrapEvidence(
+        next_history_id="1001", changed_records=(),
+        page_count=2, message_count=0, history_record_count=0, digest="2"*64,
+    )
+    mailbox = scope(provider="gmail", resource=GMAIL)
+    commit_replay(db=db, scope=mailbox, vault=v, replay=baseline,
+                  previously_read=None, observed_at=NOW)
+    checkpoint = read_checkpoint(db=db, scope=mailbox, vault=v)
+    for forged in (replace(baseline, complete_mailbox_history=True),
+                   replace(baseline, reply_absence_proven=True),
+                   replace(baseline, outbound_action_approved=True)):
+        with pytest.raises(CheckpointUnavailable):
+            commit_replay(
+                db=db, scope=mailbox, vault=v, replay=forged,
+                previously_read=None, observed_at=NOW,
+            )
+    with pytest.raises(CheckpointUnavailable):
+        commit_replay(
+            db=db, scope=mailbox, vault=v, replay=baseline,
+            previously_read=checkpoint, observed_at=NOW,
+        )
+
+
+def test_stage11_gmail_incremental_after_baseline_remains_nonactionable():
+    from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
+    db = FakeDB()
+    v = vault()
+    mailbox = scope(provider="gmail", resource=GMAIL)
+    baseline = GmailBootstrapEvidence(
+        next_history_id="1000", changed_records=(),
+        page_count=2, message_count=0, history_record_count=0, digest="3"*64,
+    )
+    commit_replay(db=db, scope=mailbox, vault=v, replay=baseline,
+                  previously_read=None, observed_at=NOW)
+    first = read_checkpoint(db=db, scope=mailbox, vault=v)
+    replay = GmailReplay(next_history_id="1010", changed_records=(),
+                         page_count=1, record_count=0, digest="4"*64)
+    second = commit_replay(db=db, scope=mailbox, vault=v, replay=replay,
+                           previously_read=first, observed_at=NOW)
+    assert second.generation == 2
+    assert second.reply_absence_proven is False
+    assert second.complete_mailbox_history is False

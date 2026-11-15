@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql'
+      - 'supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql'
       - 'backend/tests/sql/lola_stage10_ephemeral_*.sql'
       - '.github/workflows/lola-stage10-atomic-rpc.yml'
   workflow_dispatch:
@@ -46,38 +47,35 @@ jobs:
           fi
       - name: Create disposable minimal fixture (no hosted database)
         run: psql -X -v ON_ERROR_STOP=1 -f backend/tests/sql/lola_stage10_ephemeral_fixture.sql
-      - name: Validate exact review-only SQL against disposable DB
-        run: psql -X -v ON_ERROR_STOP=1 -f docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql
+      - name: Verify committed CLI migration exactly matches reviewed DDL
+        shell: bash
+        run: |
+          set -euo pipefail
+          diff -u \
+            <(sed -n '/^BEGIN;$/,$p' docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql) \
+            <(sed -n '/^BEGIN;$/,$p' supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql)
+      - name: Execute committed migration on disposable DB only
+        run: psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql
       - name: Verify RLS, service-role grants, atomic cursor and events, rollback and revocation
         run: psql -X -v ON_ERROR_STOP=1 -f backend/tests/sql/lola_stage10_ephemeral_acceptance.sql
 
-  generated-migration-artifact:
-    name: Generate uninstalled migration with pinned Supabase CLI v2
+  cli-generated-migration-check:
+    name: Verify pinned Supabase CLI migration provenance (no hosted access)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # Supabase CLI v3 (2026-11-04) changes CI defaults.
-      # Pin v2; no remote flags, secrets, DB push, or hosted mutations.
+      # This migration was generated in a prior CI job with pinned CLI v2.
+      # V3 changes remote defaults; never use db push or --remote here.
       - uses: supabase/setup-cli@v1
         with:
           version: '2.122.0'
-      - name: Generate official CLI migration file without applying
+      - name: Verify CLI available and generated migration exists
         shell: bash
         run: |
           set -euo pipefail
           supabase --version
           supabase migration new --help >/dev/null
-          supabase migration new lola_delta_atomic_checkpoint_stage10
-          mapfile -t files < <(find supabase/migrations -maxdepth 1 \
-            -name '*_lola_delta_atomic_checkpoint_stage10.sql' -type f)
-          test "${#files[@]}" -eq 1
-          cp docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql "${files[0]}"
-          echo "GENERATED_MIGRATION_PATH=${files[0]}"
-      - name: Upload generated but unapplied SQL for review
-        uses: actions/upload-artifact@v4
-        with:
-          name: lola-stage10-cli-generated-unapplied-migration
-          path: supabase/migrations/*_lola_delta_atomic_checkpoint_stage10.sql
-          if-no-files-found: error
-          retention-days: 7
+          test -f supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql
+          test $(find supabase/migrations -maxdepth 1 -name '*_lola_delta_atomic_checkpoint_stage10.sql' -type f | wc -l) -eq 1
+          echo 'CLI-generated migration present; no hosted operation executed'

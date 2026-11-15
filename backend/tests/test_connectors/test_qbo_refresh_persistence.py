@@ -224,8 +224,10 @@ def test_task_proactive_rotation_checks_cas_before_updating_credentials():
     }
     cfg = {"qbo_access_token": "old-access", "qbo_refresh_token": "old-refresh"}
     new_tokens = {"access_token": "new-access", "refresh_token": "new-refresh"}
-    with patch("app.auth.oauth.refresh_qbo_token", new_callable=AsyncMock, return_value=new_tokens), \
-         patch("app.utils.qbo_token_store.persist_rotated_qbo_tokens", return_value="new-encrypted-refresh") as store:
+    with patch("app.utils.qbo_refresh_coordination.sync_qbo_refresh_lock", return_value=nullcontext()), \
+         patch("app.utils.qbo_refresh_coordination.read_current_qbo", return_value={"qbo_refresh_token": "old-encrypted-refresh"}), \
+         patch("app.auth.oauth.refresh_qbo_token", new_callable=AsyncMock, return_value=new_tokens), \
+         patch("app.utils.qbo_refresh_coordination.persist_rotated_qbo_tokens", return_value="new-encrypted-refresh") as store:
         _refresh_qbo_if_needed(company, cfg, MagicMock())
     assert store.call_args.kwargs["expected_refresh_ciphertext"] == "old-encrypted-refresh"
     assert store.call_args.kwargs["realm_id"] == "realm-1"
@@ -240,8 +242,10 @@ def test_task_proactive_rotation_fails_closed_on_cas_conflict():
     }
     cfg = {"qbo_access_token": "old-access", "qbo_refresh_token": "old-refresh"}
     new_tokens = {"access_token": "new-access", "refresh_token": "new-refresh"}
-    with patch("app.auth.oauth.refresh_qbo_token", new_callable=AsyncMock, return_value=new_tokens), \
-         patch("app.utils.qbo_token_store.persist_rotated_qbo_tokens", side_effect=RuntimeError("CAS conflict")):
+    with patch("app.utils.qbo_refresh_coordination.sync_qbo_refresh_lock", return_value=nullcontext()), \
+         patch("app.utils.qbo_refresh_coordination.read_current_qbo", return_value={"qbo_refresh_token": "old-encrypted-refresh"}), \
+         patch("app.auth.oauth.refresh_qbo_token", new_callable=AsyncMock, return_value=new_tokens), \
+         patch("app.utils.qbo_refresh_coordination.persist_rotated_qbo_tokens", side_effect=RuntimeError("CAS conflict")):
         with pytest.raises(RuntimeError, match="proactive token refresh failed"):
             _refresh_qbo_if_needed(company, cfg, MagicMock())
     assert cfg["qbo_refresh_token"] == "old-refresh"
@@ -266,8 +270,10 @@ def test_scheduled_qbo_refresh_uses_cas_and_reports_conflicts(
     with patch("tasks.qbo_token_refresh.task_lock", return_value=nullcontext(True)), \
          patch("tasks.qbo_token_refresh.get_supabase", return_value=db), \
          patch("app.utils.encryption.decrypt", return_value="old-refresh"), \
+         patch("app.utils.qbo_refresh_coordination.sync_qbo_refresh_lock", return_value=nullcontext()), \
+         patch("app.utils.qbo_refresh_coordination.read_current_qbo", return_value={"qbo_refresh_token": "old-encrypted-refresh"}), \
          patch("app.auth.oauth.refresh_qbo_token", new_callable=AsyncMock, return_value=new_tokens), \
-         patch("app.utils.qbo_token_store.persist_rotated_qbo_tokens", side_effect=failure) as store:
+         patch("app.utils.qbo_refresh_coordination.persist_rotated_qbo_tokens", side_effect=failure) as store:
         summary = refresh_expiring_tokens.run()
     assert summary["refreshed"] == expected_refreshed
     assert summary["errors"] == expected_errors

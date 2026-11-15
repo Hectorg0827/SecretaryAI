@@ -60,16 +60,13 @@ def require_existing_record(db, table: str, record_id: str, company_id: str) -> 
 
 
 def delete_record(db, table: str, record_id: str, company_id: str) -> None:
-    """Require exactly one confirmed deleted row; never claim a no-op deleted it."""
-    try:
-        rows = observed_rows(
-            db.table(table).delete().eq("id", record_id)
-            .eq("company_id", company_id).execute()
-        )
-    except Exception as exc:
-        log.error("Compliance deletion unverified table=%s error_type=%s", table, type(exc).__name__)
-        raise HTTPException(status_code=503, detail="Compliance deletion could not be verified") from exc
-    if not rows:
-        raise HTTPException(status_code=404, detail="Compliance record not found")
-    if len(rows) != 1 or str(rows[0].get("id")) != str(record_id):
-        raise HTTPException(status_code=503, detail="Compliance deletion result incomplete")
+    """Forbid destructive compliance deletion until an approved retention flow exists.
+
+    Keep this shared guard even if an API route is renamed. A database update,
+    archival workflow, or tenant-deletion exception must be independently
+    designed, reviewed and audited before it can be implemented.
+    """
+    raise HTTPException(
+        status_code=403,
+        detail="Compliance records are retained. Deletion is prohibited.",
+    )

@@ -140,6 +140,17 @@ def is_valid_container_number(number: str) -> bool:
 # optional/starred pieces that can all match the same whitespace, and number
 # runs carry a look-behind so a search cannot restart inside a long digit run.
 # Uploaded text can be up to 200k characters; all patterns below are linear.
+#
+# Defence in depth for callers that do not go through the HTTP schema limit
+# (connectors, workers, email ingestion): text beyond this is not scanned.
+# Kept equal to the API's own limit so no accepted document loses fields.
+MAX_OCR_TEXT_LENGTH = 200_000
+
+
+def _bounded(text: str) -> str:
+    return (text or "")[:MAX_OCR_TEXT_LENGTH]
+
+
 _SEP = r"[\s:#.]{0,20}"                       # spaces / ':' / '#' / '.' between label and value
 _NO = r"(?:\s{1,10}(?:no|number|nbr|ref(?:erence)?)\b)?"   # optional "No" / "Number" word
 
@@ -179,11 +190,12 @@ _LABELLED_DATE_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})", re.I)
 _TIME_WINDOW_RE = re.compile(r"(\d{1,2}:\d{2})\s{0,3}(?:-|to|–)\s{0,3}(\d{1,2}:\d{2})")
 _NEGATION_RE = re.compile(
-    r"\b(not|no|pending|awaiting|unable|cannot|has\s+not|have\s+not|yet\s+to)\b[^.\n]{0,40}"
+    r"\b(not|no|pending|awaiting|unable|cannot|has\s{1,5}not|have\s{1,5}not|yet\s{1,5}to)\b[^.\n]{0,40}"
     r"\b(release|released|clear|cleared|clearance)\b"
-    r"|\b(release|clearance)\s+(?:is\s+|still\s+)?(?:pending|awaited|on\s+hold|not\s+(?:yet\s+)?issued)\b",
+    r"|\b(release|clearance)\s{1,5}(?:is\s{1,5}|still\s{1,5})?"
+    r"(?:pending|awaited|on\s{1,5}hold|not\s{1,5}(?:yet\s{1,5})?issued)\b",
     re.I)
-_RELEASE_RE = re.compile(r"\b(released|cleared|cargo\s+release|liberad[oa]|despachad[oa])\b", re.I)
+_RELEASE_RE = re.compile(r"\b(released|cleared|cargo\s{1,5}release|liberad[oa]|despachad[oa])\b", re.I)
 
 _FREIGHT_COMPONENT_KEYWORDS = {
     "ocean_freight": ("ocean freight", "sea freight", "flete"),
@@ -228,7 +240,7 @@ class DocumentIntelligence:
     """Deterministic classify / extract / validate / link for logistics documents."""
 
     def classify(self, text: str, hint: str = "") -> tuple[DocumentType, float]:
-        low = f"{hint}\n{text}".lower()
+        low = f"{_bounded(hint)}\n{_bounded(text)}".lower()
         scores = {
             dt: sum(w for kw, w in kws.items() if kw in low)
             for dt, kws in _CLASSIFIER.items()
@@ -242,6 +254,7 @@ class DocumentIntelligence:
         return best, confidence
 
     def extract(self, text: str, doc_id: str = "", hint: str = "") -> ExtractedDocument:
+        text = _bounded(text)
         doc_type, conf = self.classify(text, hint)
         doc_id = doc_id or "doc-" + hashlib.sha256(text.encode()).hexdigest()[:12]
         up = text.upper()
@@ -446,6 +459,7 @@ def broker_status(text: str) -> str:
     clearance") and any hold/exam language win over the word "released".
     Returns "hold" | "exam" | "not_released" | "released" | "unknown".
     """
+    text = _bounded(text)
     low = text.lower()
     has_hold = bool(re.search(r"\b(hold|on hold|detained|retenci[oó]n)\b", low))
     has_exam = bool(re.search(r"\b(exam|examination|inspection|intensive)\b", low))

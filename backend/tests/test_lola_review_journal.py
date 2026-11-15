@@ -33,12 +33,13 @@ class FakeLedger:
     def __init__(self, company_id=COMPANY, *, event_key="source-1"):
         self.company_id = company_id
         self._shipment = SimpleNamespace(shipment_id="shipment-a", company_id=company_id)
+        self._cancelled = []
         self._events = [
             SimpleNamespace(company_id=company_id, shipment_id="shipment-a",
                             idempotency_key=event_key),
         ]
-    def shipments(self):
-        return [self._shipment]
+    def shipments(self, include_cancelled=False):
+        return [self._shipment] + (self._cancelled if include_cancelled else [])
     def events(self):
         return self._events
 
@@ -279,6 +280,33 @@ def test_mismatched_logistics_tenant_does_not_store():
         capture(db, FakeLedger(company_id=OTHER))
     assert not any(call[1] == "upsert" for call in db.calls)
 
+
+
+def test_cancelled_shipment_events_do_not_invalidate_active_scan():
+    db = FakeDatabase()
+    ledger = FakeLedger()
+    ledger._cancelled.append(SimpleNamespace(
+        shipment_id="shipment-cancelled", company_id=COMPANY, cancelled=True))
+    ledger._events.append(SimpleNamespace(
+        company_id=COMPANY, shipment_id="shipment-cancelled",
+        idempotency_key="archived-event"))
+    result = capture(db, ledger)
+    assert result["candidate_records"] == 1
+    assert len(db.events) == 1
+
+
+def test_cancelled_shipment_cannot_be_recorded_as_current_alert():
+    db = FakeDatabase()
+    ledger = FakeLedger()
+    ledger._cancelled.append(SimpleNamespace(
+        shipment_id="shipment-cancelled", company_id=COMPANY, cancelled=True))
+    ledger._events.append(SimpleNamespace(
+        company_id=COMPANY, shipment_id="shipment-cancelled",
+        idempotency_key="archived-event"))
+    FakeMonitor.alerts = [FakeAlert(shipment_id="shipment-cancelled")]
+    with pytest.raises(j.ReviewJournalUnavailable):
+        capture(db, ledger)
+    assert not any(call[1] == "upsert" for call in db.calls)
 
 def test_untrusted_event_key_blocks_entire_batch():
     db = FakeDatabase()

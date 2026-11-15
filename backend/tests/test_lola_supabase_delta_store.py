@@ -350,3 +350,57 @@ def test_bad_key_configuration_rejected():
             db=db, user=USER, current_authorization=auth,
             encryption_key="short", hmac_key=b"short",
         )
+
+
+
+def test_gmail_event_identity_stable_across_page_walk_fingerprint_changes():
+    store, _db, _ = make()
+    baseline, _ = do_gmail()
+    changed_page_digest = replace(baseline, source_digest="f"*64)
+    first = store._event_ref(GMAIL_SCOPE, baseline, 0, baseline.changes[0])
+    second = store._event_ref(GMAIL_SCOPE, changed_page_digest, 1, baseline.changes[0])
+    assert first["event_ref"] == second["event_ref"]
+
+
+def test_graph_event_identity_scoped_to_previous_delta_cursor_not_page_order():
+    store, _db, _ = make()
+    baseline, _ = do_graph()
+    changed_page_digest = replace(baseline, source_digest="f"*64)
+    first = store._event_ref(GRAPH_SCOPE, baseline, 0, baseline.changes[0])
+    repeated = store._event_ref(GRAPH_SCOPE, changed_page_digest, 999, baseline.changes[0])
+    assert first["event_ref"] == repeated["event_ref"]
+    later_round = replace(baseline, previous_cursor="new-opaque-round-cursor")
+    later = store._event_ref(GRAPH_SCOPE, later_round, 0, baseline.changes[0])
+    assert later["event_ref"] != first["event_ref"]
+
+
+def test_repeated_provider_change_does_not_advance_cursor():
+    store, db, _ = make()
+    candidate, _ = do_graph()
+    duplicate = replace(
+        candidate,
+        changes=candidate.changes + (candidate.changes[0],),
+        changes_processed=candidate.changes_processed + 1,
+    )
+    with pytest.raises(CheckpointUnavailable, match="Duplicate"):
+        asyncio.run(store.commit_atomic(
+            scope=duplicate.scope, expected_version=0,
+            expected_cursor="", round_candidate=duplicate,
+        ))
+    assert not any(call[0] == RPC_COMMIT for call in db.calls)
+
+
+def test_gmail_change_must_have_a_verified_history_record_identity():
+    store, db, _ = make()
+    candidate, _ = do_gmail()
+    broken_change = replace(candidate.changes[0], history_id=None)
+    with pytest.raises(CheckpointUnavailable):
+        store._event_ref(GMAIL_SCOPE, candidate, 0, broken_change)
+
+
+def test_graph_delta_rejects_gmail_history_identity_in_source_event():
+    store, db, _ = make()
+    candidate, _ = do_graph()
+    broken_change = replace(candidate.changes[0], history_id="1234")
+    with pytest.raises(CheckpointUnavailable):
+        store._event_ref(GRAPH_SCOPE, candidate, 0, broken_change)

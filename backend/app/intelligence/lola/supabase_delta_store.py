@@ -136,9 +136,21 @@ class SupabaseAtomicRoundStore(AtomicRoundStore):
             _required(change.thread_id, "thread ID", 1024)
         if change.history_id is not None:
             _required(change.history_id, "history ID", 32)
+        # Deduplication must survive a retried page walk with a different
+        # final watermark or ordering. Gmail supplies a source history ID;
+        # Graph supplies no immutable change ID, so bind each observation
+        # to the exact preceding per-folder delta cursor.
+        if scope.provider == "gmail":
+            if change.history_id is None:
+                raise CheckpointUnavailable("Gmail change history identity missing")
+            source_epoch = change.history_id
+        else:
+            if change.history_id is not None:
+                raise CheckpointUnavailable("Graph change unexpectedly carries Gmail history")
+            source_epoch = candidate.previous_cursor
         material = _json([
-            candidate.source_digest, index, change.kind, change.message_id,
-            change.thread_id, change.history_id,
+            scope.provider, source_epoch, change.kind,
+            change.message_id, change.thread_id,
         ])
         event_ref = self._digest(scope, material)
         thread_ref = (
@@ -253,6 +265,12 @@ class SupabaseAtomicRoundStore(AtomicRoundStore):
             self._event_ref(scope, round_candidate, index, change)
             for index, change in enumerate(round_candidate.changes)
         ]
+        # A transaction must never acknowledge fewer inserted records than
+        # the complete source page batch. Reject repeated source changes
+        # before emitting any RPC, rather than hiding them behind ON CONFLICT.
+        refs = [row["event_ref"] for row in records]
+        if len(refs) != len(set(refs)):
+            raise CheckpointUnavailable("Duplicate provider change identity")
         terminal = _required(round_candidate.terminal_cursor, "new cursor")
         try:
             encrypted_terminal = encrypt(terminal, self._encryption_key)

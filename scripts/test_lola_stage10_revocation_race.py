@@ -152,8 +152,10 @@ async def main() -> None:
                 raise AssertionError("Revocation bypassed the checkpoint row lock")
             await tx.commit()
         except BaseException:
-            if tx._state == "started":
+            try:
                 await tx.rollback()
+            except Exception:
+                pass
             raise
         await asyncio.wait_for(revocation, timeout=5)
 

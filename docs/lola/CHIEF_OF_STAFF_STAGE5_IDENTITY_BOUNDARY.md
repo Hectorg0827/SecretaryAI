@@ -25,9 +25,40 @@ or outbound notifications have occurred.
   - Passes only correctly scoped events and coverage into Stage 4 policy.
   - Returns `EVIDENCE_UNAVAILABLE` rather than inventing that a user has not
     replied if records or checkpoints are incomplete.
+- `backend/app/intelligence/lola/existing_private_readiness.py`
+  - Read-only inventory of existing staging tables `employee_integrations`,
+    `lola_employee_whatsapp_connections` and `lola_private_contacts`.
+  - Avoids selecting credential tokens, phone numbers, email addresses,
+    message bodies or summaries.
+  - `identity_verified` on an existing private contact is a recorded flag,
+    not proof of independent two-provider business-case attribution.
+  - Even when a recorded WhatsApp connection is `active`, the response
+    always reports `eligible_for_follow_up_engine: false` until source
+    cursor completeness and a separate case mapping are verified.
+- `GET /api/lola/chief-of-staff/continuity/readiness`
+  - Authenticated active employee's own metadata only (current-role checked).
+  - Optional UUID contact selector, no cross-employee access.
+  - No-store, read-only endpoint; 503 when source evidence unavailable.
 - Synthetic no-network tests:
   - `backend/tests/test_lola_identity_registry.py`
   - `backend/tests/test_lola_continuity_service.py`
+  - `backend/tests/test_lola_existing_private_readiness.py`
+
+## Existing staging schema assessed (read-only)
+
+The connected **SecretaryAI-Staging** Supabase project already has private
+Lola tables including `lola_employee_whatsapp_connections`,
+`lola_private_contacts`, `lola_private_events`,
+`lola_private_followup_state`, and `employee_integrations`.
+Existing constraints scope private events to company, employee and contact;
+the WhatsApp active-state constraint requires Meta verification,
+employee consent and policy clearance metadata.
+
+Those tables do **not** supply a documented complete provider page cursor
+or independent two-channel work-item identity proof. This stage reuses them
+for conservative readiness reporting instead of creating duplicate private
+contacts or rewriting working migrations. No personal rows were read during
+schema inspection; only column and constraint metadata was inspected.
 
 ## Data sources needed BEFORE real use
 
@@ -73,8 +104,10 @@ Until these sources exist, the resolver correctly reports unavailable.
 - Wire official provider adapters to return persistent, versioned, complete
   evidence snapshots; verify page cursors and webhook authenticity.
 - Implement employee consent/revocation UI with a separate provider setup.
-- Add active-role-validated server API, source-audit navigation and an
-  authenticated end-to-end staging acceptance suite.
+- The employee-private metadata readiness endpoint exists; add a separate
+  verified follow-up API only after source onboarding, approval of necessary
+  persisted evidence, source-audit navigation and authenticated end-to-end
+  staging acceptance.
 - Only after those gates pass, add optional notification and execution
   paths subject to human authorization.
 

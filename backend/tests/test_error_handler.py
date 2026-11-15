@@ -58,6 +58,11 @@ def _make_app():
     def raise_generic():
         raise RuntimeError("unexpected crash")
 
+    @app.get("/qbo-reconnect")
+    def raise_qbo_reconnect():
+        from app.utils.qbo_token_store import QBOReconnectRequired
+        raise QBOReconnectRequired("secret-ciphertext-would-be-dangerous")
+
     @app.get("/ok")
     def ok():
         return {"status": "ok"}
@@ -102,6 +107,16 @@ class TestErrorHandlers:
         body = resp.json()
         assert body["error"] == "forbidden"
         assert "not allowed here" in body["message"]
+
+    def test_qbo_reconnect_returns_fixed_503_without_secret_leak(self):
+        resp = self.client.get("/qbo-reconnect")
+        assert resp.status_code == 503
+        assert resp.json() == {
+            "error": "qbo_reconnect_required",
+            "message": "QuickBooks needs to be reconnected",
+        }
+        assert resp.headers["cache-control"] == "no-store"
+        assert "secret-ciphertext" not in resp.text
 
     def test_generic_exception_returns_500(self):
         resp = self.client.get("/generic-error")

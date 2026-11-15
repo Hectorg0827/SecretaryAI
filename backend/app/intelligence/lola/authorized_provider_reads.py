@@ -29,6 +29,10 @@ class AuthorizedReadUnavailable(ReplayUnavailable):
     """A scoped provider operation cannot be verified or completed."""
 
 
+class GraphDeltaExpired(AuthorizedReadUnavailable):
+    """Graph returned a known expired per-folder delta cursor; resync required."""
+
+
 @dataclass(frozen=True)
 class VerifiedEmailConnection:
     provider: str
@@ -233,7 +237,7 @@ class GraphFolderDeltaTransport:
                     raise AuthorizedReadUnavailable("Graph OAuth principal mismatched")
                 response = await client.get(url, headers=headers)
                 if response.status_code == 410:
-                    raise AuthorizedReadUnavailable("Graph delta token expired; full baseline required")
+                    raise GraphDeltaExpired("Graph delta cursor expired; folder bootstrap required")
                 if response.status_code != 200:
                     raise AuthorizedReadUnavailable("Graph mailbox folder read unavailable")
                 data = response.json()

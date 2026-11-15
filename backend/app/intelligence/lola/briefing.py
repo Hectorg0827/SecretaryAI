@@ -37,11 +37,16 @@ def build_chief_of_staff_briefing(*, user: dict, ledger, as_of: date,
     # customer and commercial redaction before Lola sees any alert text.
     alerts = LogisticsMonitor(ledger).scan(as_of=as_of)
     scoped = viewer.filter_alerts(alerts, {s.shipment_id: s for s in shipments})
-    visible_count = len(viewer.visible(shipments))
+    visible_shipments = viewer.visible(shipments)
+    visible_count = len(visible_shipments)
+    visible_ids = {s.shipment_id for s in visible_shipments}
 
-    events = ledger.events()
-    if any(getattr(e, "company_id", None) != company for e in events):
+    all_events = ledger.events()
+    if any(getattr(e, "company_id", None) != company for e in all_events):
         raise BriefingUnavailable("Ledger event tenant mismatch")
+    # Event counts/fingerprints are also permission scoped. Sales roles cannot
+    # infer activity in shipments they are not assigned to.
+    events = [e for e in all_events if getattr(e, "shipment_id", None) in visible_ids]
     fingerprint = hashlib.sha256(
         (company + "\n" + as_of.isoformat() + "\n"
          + "\n".join(sorted(str(e.event_id) for e in events))).encode()

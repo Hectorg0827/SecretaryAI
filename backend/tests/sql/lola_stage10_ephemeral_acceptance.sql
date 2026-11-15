@@ -85,6 +85,12 @@ BEGIN
   THEN
     RAISE EXCEPTION 'Browser can access employee-private checkpoint data';
   END IF;
+  IF has_table_privilege('service_role','public.lola_delta_event_refs','UPDATE')
+     OR has_table_privilege('service_role','public.lola_delta_event_refs','DELETE')
+     OR NOT has_table_privilege('service_role','public.lola_delta_event_refs','INSERT')
+  THEN
+    RAISE EXCEPTION 'Provider event references must be append-only for service_role';
+  END IF;
   IF (
     SELECT count(*) FROM pg_catalog.pg_class
     WHERE oid IN (

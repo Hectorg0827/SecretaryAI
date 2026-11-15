@@ -51,7 +51,7 @@ class CommitOutcome:
     changes_applied: int
     observed_through: str
     checkpoint_confirmed_in_store: bool
-    source_history_replay_complete: bool
+    bounded_provider_round_persisted: bool
     cross_channel_case_verified: bool = False
     no_reply_verified: bool = False
     follow_up_allowed: bool = False
@@ -190,5 +190,5 @@ async def persist_verified_round(
         changes_applied=after.changes_applied,
         observed_through=observed_at.isoformat(),
         checkpoint_confirmed_in_store=True,
-        source_history_replay_complete=True,
+        bounded_provider_round_persisted=True,
     )

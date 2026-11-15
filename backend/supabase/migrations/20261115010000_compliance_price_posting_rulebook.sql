@@ -37,6 +37,51 @@ CREATE TABLE IF NOT EXISTS public.compliance_price_posting_rule_reviews (
 CREATE INDEX IF NOT EXISTS idx_price_rule_reviews_company
     ON public.compliance_price_posting_rule_reviews(company_id,rule_id);
 
+-- Reviews must be performed by an active human owner/manager OF THAT TENANT.
+-- Do not let a service-role caller supply a reviewer from another company.
+CREATE FUNCTION public.price_posting_rule_review_identity_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $guard$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM public.users u
+         WHERE u.id = NEW.reviewer_id
+           AND u.company_id = NEW.company_id
+           AND u.is_active IS TRUE
+           AND u.role IN ('owner','manager')
+    ) THEN
+        RAISE EXCEPTION 'Price rule human reviewer is not authorized for this tenant'
+            USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+END
+$guard$;
+
+CREATE TRIGGER trg_price_rule_review_identity
+BEFORE INSERT ON public.compliance_price_posting_rule_reviews
+FOR EACH ROW EXECUTE FUNCTION public.price_posting_rule_review_identity_guard();
+
+-- No rewriting reviewed evidence or rule versions; publish a NEW version
+-- when official guidance changes, then require tenant re-attestation.
+CREATE FUNCTION public.reject_price_posting_rule_history_mutation()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $immutable$
+BEGIN
+    RAISE EXCEPTION 'Verified regulatory history is immutable; create a new version'
+        USING ERRCODE = '42501';
+END
+$immutable$;
+
+CREATE TRIGGER trg_price_rule_versions_immutable
+BEFORE UPDATE OR DELETE ON public.compliance_price_posting_rule_versions
+FOR EACH ROW EXECUTE FUNCTION public.reject_price_posting_rule_history_mutation();
+CREATE TRIGGER trg_price_rule_reviews_immutable
+BEFORE UPDATE OR DELETE ON public.compliance_price_posting_rule_reviews
+FOR EACH ROW EXECUTE FUNCTION public.reject_price_posting_rule_history_mutation();
+
+
 ALTER TABLE public.compliance_price_posting_rule_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.compliance_price_posting_rule_reviews ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.compliance_price_posting_rule_versions,

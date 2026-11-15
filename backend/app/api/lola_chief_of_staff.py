@@ -173,3 +173,40 @@ async def acknowledge_lola_review(
         )
     except Exception as exc:
         raise _review_error(exc) from None
+
+
+
+@router.get("/continuity/readiness")
+async def private_communication_readiness(
+    response: Response,
+    contact_id: UUID | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Read existing employee-private connection metadata; no message bodies.
+
+    This is an inventory of recorded source readiness, not authority for a
+    cross-channel follow-up. It never claims conversation linkage or reply
+    completeness. Owner's company role alone does not grant access to another
+    employee's private records.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    from app.intelligence.lola.existing_private_readiness import (
+        inspect_existing_readiness,
+    )
+    from app.intelligence.lola.identity_registry import (
+        IdentityAccessDenied, IdentitySourceUnavailable,
+    )
+    try:
+        return inspect_existing_readiness(
+            user=user, db=db, contact_id=contact_id,
+        )
+    except IdentityAccessDenied:
+        raise HTTPException(403, "Employee private communication access denied") from None
+    except IdentitySourceUnavailable:
+        raise HTTPException(503, "Communication readiness sources unavailable") from None
+    except ValueError:
+        raise HTTPException(422, "Invalid private contact reference") from None
+    except Exception as exc:
+        log.warning("Lola private source status unavailable (%s)", type(exc).__name__)
+        raise HTTPException(503, "Communication readiness could not be verified") from None

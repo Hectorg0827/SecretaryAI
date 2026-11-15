@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.lola_review_events (
         CHECK (review_state IN ('pending','acknowledged')),
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     acknowledged_at TIMESTAMPTZ,
-    acknowledged_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    acknowledged_by UUID REFERENCES public.users(id) ON DELETE RESTRICT,
     CONSTRAINT lola_review_events_company_key_unique UNIQUE (company_id,event_key),
     CONSTRAINT lola_review_events_review_integrity CHECK (
         (review_state='pending' AND acknowledged_at IS NULL AND acknowledged_by IS NULL)

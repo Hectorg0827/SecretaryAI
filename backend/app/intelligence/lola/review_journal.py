@@ -189,8 +189,11 @@ def build_capture(*, user: dict, ledger, as_of: date) -> dict:
                 or not isinstance(code, str) or not _ALERT_CODE.fullmatch(code)
                 or severity not in _SEVERITIES):
             raise ReviewJournalUnavailable("Malformed monitor alert")
+        # Monitor thresholds depend on time (free time, detention, SLA).
+        # A new calendar day must not reuse yesterday's acknowledged alert
+        # even when the underlying shipment ledger is unchanged.
         revision = hashlib.sha256(
-            (company + "\n" + shipment + "\n"
+            (company + "\n" + shipment + "\n" + as_of.isoformat() + "\n"
              + "\n".join(sorted(keys[shipment]))).encode("utf-8")
         ).hexdigest()
         event_key = hashlib.sha256(

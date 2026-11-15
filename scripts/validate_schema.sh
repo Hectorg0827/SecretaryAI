@@ -74,6 +74,11 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115010000_compliance
 psql -v ON_ERROR_STOP=1 -f scripts/test_compliance_price_posting_rulebook.sql
 echo '✓ Regulatory candidate rules, per-tenant human review, and immutability checks passed.'
 
+echo '── validating owner-authorized, audited human rule attestation'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115020000_price_posting_human_attestation.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_human_attestation.sql
+echo '✓ Review authorization, tenant isolation and atomic audit rollback passed.'
+
 echo '── checking procurement and private morning briefing extensions'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000006_qbo_token_expiry.sql

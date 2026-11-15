@@ -139,6 +139,13 @@ def test_duplicate_channel_connection_is_not_accepted():
         resolve(db)
 
 
+
+def test_malformed_channel_identity_is_denied_not_exception():
+    db = FakeDB()
+    db.tables[GRANTS][0]["channel"] = ["email"]
+    with pytest.raises(IdentityNotVerified):
+        resolve(db)
+
 def test_whatsapp_auth_missing_is_not_backfilled_from_email():
     db = FakeDB()
     db.tables[GRANTS] = [db.tables[GRANTS][0]]

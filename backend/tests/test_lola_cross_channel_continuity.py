@@ -128,9 +128,20 @@ def test_before_waiting_period_is_not_due():
     assert result.requires_human_review is False
 
 
-def test_exact_waiting_threshold_is_due():
+def test_exact_waiting_threshold_is_due_when_both_channels_covered():
     now = SENT.observed_at + timedelta(hours=24)
-    assert inspect(now=now).state == ContinuityState.REVIEW_FOLLOW_UP
+    complete = [replace(c, complete_through=now) for c in channels(now)]
+    result = inspect(now=now, coverage=complete)
+    assert result.state == ContinuityState.REVIEW_FOLLOW_UP
+    assert result.checked_through == now.isoformat()
+
+
+def test_no_follow_up_if_provider_coverage_ends_before_deadline():
+    now = SENT.observed_at + timedelta(hours=24)
+    result = inspect(now=now)
+    assert result.state == ContinuityState.EVIDENCE_UNAVAILABLE
+    assert result.requires_human_review is False
+    assert result.checked_through is None
 
 
 @pytest.mark.parametrize("change", [
@@ -219,6 +230,21 @@ def test_unverified_future_provider_event_fails_closed():
 def test_naive_timestamp_is_rejected():
     result = inspect(activities=[REQUEST, replace(SENT, observed_at=NOW.replace(tzinfo=None))])
     assert result.state == ContinuityState.EVIDENCE_UNAVAILABLE
+
+
+def test_observation_timestamp_changes_evidence_fingerprint():
+    baseline = inspect()
+    moved_sent = replace(SENT, observed_at=SENT.observed_at + timedelta(minutes=5))
+    moved = inspect(activities=[REQUEST, moved_sent])
+    assert moved.state == baseline.state == ContinuityState.REVIEW_FOLLOW_UP
+    assert moved.evidence_fingerprint != baseline.evidence_fingerprint
+
+
+def test_due_review_includes_verified_coverage_end_not_a_live_status_claim():
+    result = inspect()
+    assert result.state == ContinuityState.REVIEW_FOLLOW_UP
+    assert result.checked_through == (NOW - timedelta(seconds=30)).isoformat()
+    assert "through verified coverage end" in result.reason
 
 
 def test_coverage_revision_changes_fingerprint():

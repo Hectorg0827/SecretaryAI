@@ -153,6 +153,7 @@ def test_whatsapp_auth_missing_is_not_backfilled_from_email():
     {"provider_verification_state": "pending"},
     {"provider_verified_at": None},
     {"authorization_expires_at": (NOW - timedelta(minutes=1)).isoformat()},
+    {"authorization_expires_at": None},
 ])
 def test_revoked_unverified_or_expired_channel_fails_closed(change):
     db = FakeDB()
@@ -168,6 +169,7 @@ def test_revoked_unverified_or_expired_channel_fails_closed(change):
     {"link_verified_at": None},
     {"link_revoked_at": NOW.isoformat()},
     {"verification_expires_at": (NOW - timedelta(seconds=1)).isoformat()},
+    {"verification_expires_at": None},
 ])
 def test_candidate_or_revoked_contact_link_fails_closed(change):
     db = FakeDB()
@@ -237,6 +239,31 @@ def test_source_outage_fails_closed_and_does_not_expose_provider_error(table):
         resolve(db)
     assert "SENSITIVE PROVIDER" not in str(info.value)
 
+
+
+def test_missing_registry_table_fails_closed_before_query_execution():
+    class MissingTableDb(FakeDB):
+        def table(self, name):
+            if name == LINKS:
+                raise RuntimeError("SENSITIVE MISSING TABLE EXCEPTION")
+            return super().table(name)
+    with pytest.raises(IdentitySourceUnavailable) as info:
+        resolve(MissingTableDb())
+    assert "SENSITIVE" not in str(info.value)
+
+
+def test_registry_query_construction_failure_is_sanitized():
+    class BrokenRegistryDb(FakeDB):
+        def table(self, name):
+            if name == GRANTS:
+                class Broken:
+                    def select(self, _columns):
+                        raise RuntimeError("SENSITIVE PRIVILEGE ERROR")
+                return Broken()
+            return super().table(name)
+    with pytest.raises(IdentitySourceUnavailable) as info:
+        resolve(BrokenRegistryDb())
+    assert "SENSITIVE" not in str(info.value)
 
 def test_source_revision_changes_scope_fingerprint():
     db = FakeDB()

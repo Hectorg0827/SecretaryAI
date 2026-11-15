@@ -495,6 +495,46 @@ def _verified_logistics_chat_context(user: dict, db, question: str) -> str:
     }, ensure_ascii=False, default=str)
 
 
+def _guard_compliance_answer(answer: str, evidence: dict) -> str:
+    """Prevent the assistant from converting internal registry gaps into legal findings.
+
+    Only a qualified external legal/regulator source could support an import or
+    sale prohibition/clearance. The supplied source is an internal registry,
+    including when its setup is complete, so fail conservatively on categorical
+    assertions before sending any response chunks to the user.
+    """
+    normalized = " ".join(answer.casefold().replace("’", "'").split())
+    unsupported_claims = (
+        "cannot legally import", "can't legally import", "cannot legally sell",
+        "can't legally sell", "illegal to import", "illegal to sell",
+        "prohibited from importing", "prohibited from selling",
+        "importation is blocked", "import is blocked", "selling is blocked",
+        "sale is blocked", "sales are blocked", "importation is prohibited",
+        "legally blocked from importing", "legally blocked from selling",
+        "fully compliant", "legally cleared to import", "legally cleared to sell",
+        "cleared to sell", "cleared to import",
+    )
+    if not any(claim in normalized for claim in unsupported_claims):
+        return answer
+
+    counts = evidence.get("counts") if isinstance(evidence, dict) else None
+    colas = counts.get("colas_count") if isinstance(counts, dict) else None
+    observed = (
+        f"{colas} COLA records are recorded in Lion BI"
+        if type(colas) is int and colas >= 0
+        else "Lion BI's COLA record count is unavailable"
+    )
+    return (
+        f"Internal compliance evidence: {observed}. "
+        "This reflects what is on file in the company's registry, not whether "
+        "valid approvals exist externally. The company's product-specific "
+        "import and sale authorization is UNVERIFIED from these records; "
+        "neither a legal ban nor regulatory clearance can be established. "
+        "Before making a shipment or sales decision, verify the applicable "
+        "TTB COLA/permit records and state requirements for the product."
+    )
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/message")
@@ -566,10 +606,12 @@ async def send_message(
         bool(ui_context and ui_context.workspace == "logistics")
         and intent == "general_question"
     )
+    compliance_registry: dict | None = None
     if role == "sales_rep" and intent == "general_question":
         data_summary = build_query_context(intent, {})
     elif intent == "compliance_check":
         data = await _verified_compliance_context(user, db)
+        compliance_registry = data["compliance"]
         data_summary = build_query_context(intent, data)
     elif logistics_lookup:
         data_summary = _verified_logistics_chat_context(user, db, focus + request.message)
@@ -621,11 +663,25 @@ async def send_message(
     full_response: list[str] = []
 
     async def generate():
-        async for chunk in stream_chat(
-            request.message, history, data_summary, company_context
-        ):
-            full_response.append(chunk)
-            yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}\n\n"
+        if compliance_registry is not None:
+            # Buffer compliance only: a categorical unsupported legal claim must
+            # be replaced BEFORE an SSE chunk reaches the user or saved history.
+            compliance_chunks = []
+            async for chunk in stream_chat(
+                request.message, history, data_summary, company_context
+            ):
+                compliance_chunks.append(chunk)
+            safe_answer = _guard_compliance_answer(
+                "".join(compliance_chunks), compliance_registry
+            )
+            full_response.append(safe_answer)
+            yield f"data: {json.dumps({'text': safe_answer, 'conversation_id': conversation_id})}\n\n"
+        else:
+            async for chunk in stream_chat(
+                request.message, history, data_summary, company_context
+            ):
+                full_response.append(chunk)
+                yield f"data: {json.dumps({'text': chunk, 'conversation_id': conversation_id})}\n\n"
 
         # 6. Persist conversation turn
         assistant_text = "".join(full_response)

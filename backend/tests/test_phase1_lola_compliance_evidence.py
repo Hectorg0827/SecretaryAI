@@ -6,7 +6,7 @@ from fastapi import HTTPException
 import pytest
 
 from app.api import compliance as compliance_api
-from app.api.chat import _verified_compliance_context
+from app.api.chat import _verified_compliance_context, _guard_compliance_answer
 from app.ai.data_summarizer import build_query_context
 
 
@@ -108,3 +108,28 @@ def test_zero_colas_in_internal_registry_are_not_proof_of_legal_prohibition():
     assert "does NOT prove" in summary
     assert "illegal or blocked" in summary
     assert "legal status is unverified" in summary
+
+
+@pytest.mark.parametrize("unsupported", [
+    "There are no COLAs on file, so you cannot legally import.",
+    "Importation is blocked until you register every COLA.",
+    "The business is fully compliant because no alerts were found.",
+    "You are prohibited from selling the product.",
+])
+def test_lola_regulator_claim_is_replaced_before_streaming(unsupported):
+    evidence = {"counts": {"colas_count": 0}, "is_setup": False,
+                "source_quality": "registry_observed_not_regulator_verified"}
+    guarded = _guard_compliance_answer(unsupported, evidence)
+    assert guarded != unsupported
+    assert "0 COLA records are recorded in Lion BI" in guarded
+    assert "UNVERIFIED" in guarded
+    assert "neither a legal ban nor regulatory clearance" in guarded
+
+
+def test_accurate_registry_uncertainty_is_preserved():
+    evidence = {"counts": {"colas_count": 0}, "is_setup": False}
+    good = (
+        "The internal registry contains zero COLAs on file. That does not "
+        "establish whether external approvals exist, so clearance is unverified."
+    )
+    assert _guard_compliance_answer(good, evidence) == good

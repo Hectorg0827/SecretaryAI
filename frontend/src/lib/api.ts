@@ -335,6 +335,48 @@ export interface StateLicense { id: string; state_code: string; license_type: st
 export interface BrandRegistration { id: string; product_id: string; state_code: string; registration_number: string; expiration_date: string; status: string }
 export interface FederalPermit { id: string; permit_type: string; permit_number: string; expiration_date: string; status: string }
 
+export interface PricePostingRuleProgram {
+  id: string;
+  program_key: string;
+  version: number;
+  country_code: string;
+  region_code: string;
+  program_name: string;
+  authority_title: string;
+  authority_url: string;
+  applicability_note: string;
+  official_template_url: string | null;
+  filing_deadline_rule: Record<string, unknown> | null;
+  human_verified_for_tenant: boolean;
+  submission_permitted: false;
+}
+export interface PricePostingRuleProgramsResponse {
+  programs: PricePostingRuleProgram[];
+  count: number;
+  notice: string;
+  agency_submission_enabled: false;
+}
+export interface PricePostingHumanReviewInput {
+  rule_id: string;
+  version: number;
+  evidence_ref: string;
+  review_note: string;
+  checked_current_official_source: boolean;
+  checked_tenant_license_applicability: boolean;
+  acknowledged_no_filing_authority: boolean;
+}
+export interface PricePostingRuleReviewReceipt {
+  rule_id: string;
+  version: number;
+  review_id: string;
+  audit_event_id: string;
+  state: 'documentary_review_recorded';
+  submission_permitted: false;
+  price_publication_permitted: false;
+  regulatory_deadlines_verified_by_this_action: false;
+}
+
+
 // ─── API surface ──────────────────────────────────────────────────────────────
 
 export interface ConnectorRegistration {
@@ -526,6 +568,15 @@ export const api = {
 
     // Import
     importRows: (body: {entity_type: string; rows: object[]}) => api.post<{imported: number; errors: object[]; total_rows: number}>('/api/compliance/import', body),
+  },
+
+  pricePosting: {
+    listPrograms: () =>
+      api.get<PricePostingRuleProgramsResponse>('/api/insights/price-posting/programs'),
+    recordHumanReview: (programKey: string, body: PricePostingHumanReviewInput) =>
+      api.post<PricePostingRuleReviewReceipt>(
+        `/api/insights/price-posting/programs/${encodeURIComponent(programKey)}/review`, body,
+      ),
   },
 
   logistics: {

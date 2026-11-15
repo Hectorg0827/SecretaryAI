@@ -1,0 +1,10 @@
+.lola-pricing { margin: 24px 0 10px; padding: clamp(18px,3vw,28px); border: 1px solid rgba(125,138,177,.22); border-radius: 20px; background: linear-gradient(140deg,rgba(112,121,146,.095),rgba(41,48,71,.025)); }
+.lola-pricing h3 { margin: 4px 0 14px; font-size: 1.12rem; }
+.lola-pricing__cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,245px),1fr)); gap: 12px; }
+.lola-pricing__card { padding: 16px; border: 1px solid rgba(139,149,179,.25); border-radius: 14px; background: rgba(127,140,172,.06); min-width: 0; }
+.lola-pricing__card p { font-size: .84rem; line-height: 1.5; overflow-wrap: anywhere; }
+.lola-pricing__card button { background: none; border: none; padding: 5px 0; color: inherit; cursor: pointer; font: inherit; font-size: .84rem; text-decoration: underline; text-underline-offset: 3px; }
+.lola-pricing__card button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.lola-pricing__detail { border-top: 1px solid rgba(139,149,179,.25); margin-top: 10px; padding-top: 12px; }
+.lola-pricing__detail ul { font-size: .83rem; padding-left: 18px; }
+.lola-pricing__disclaimer { font-size: .75rem; line-height: 1.5; opacity: .7; }

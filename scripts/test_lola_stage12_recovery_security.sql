@@ -137,11 +137,11 @@ BEGIN
   ) INTO generation;
   IF generation<>2 THEN RAISE EXCEPTION 'Expected reset to generation 2'; END IF;
   IF NOT EXISTS (
-    SELECT 1 FROM public.lola_provider_replay_checkpoints
-    WHERE company_id='11111111-1111-4111-8111-111111111111'::uuid
-      AND employee_id='22222222-2222-4222-8222-222222222222'::uuid
-      AND generation=2 AND recovery_epoch=1 AND baseline_only IS TRUE
-      AND cursor_sha256=repeat('f',64) AND replay_digest=repeat('9',64)
+    SELECT 1 FROM public.lola_provider_replay_checkpoints AS c
+    WHERE c.company_id='11111111-1111-4111-8111-111111111111'::uuid
+      AND c.employee_id='22222222-2222-4222-8222-222222222222'::uuid
+      AND c.generation=2 AND c.recovery_epoch=1 AND c.baseline_only IS TRUE
+      AND c.cursor_sha256=repeat('f',64) AND c.replay_digest=repeat('9',64)
   ) THEN RAISE EXCEPTION 'Gmail reset cursor/epoch not written'; END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.lola_provider_replay_events

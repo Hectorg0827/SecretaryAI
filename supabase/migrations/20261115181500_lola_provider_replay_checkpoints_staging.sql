@@ -156,11 +156,23 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'Provider mapping revision changed';
         END IF;
+        IF EXISTS (
+            SELECT 1 FROM public.lola_provider_replay_checkpoints
+            WHERE company_id = p_company_id AND employee_id = p_employee_id
+              AND provider = p_provider
+              AND provider_identity_sha256 = p_provider_identity_sha256
+              AND resource_sha256 = p_resource_sha256
+              AND replayed_through > p_replayed_through
+        ) THEN
+            RAISE EXCEPTION 'Provider replay watermark cannot regress';
+        END IF;
         UPDATE public.lola_provider_replay_checkpoints
         SET cursor_ciphertext = p_cursor_ciphertext,
             cursor_sha256 = p_cursor_sha256,
             replay_digest = p_replay_digest,
-            baseline_only = (baseline_only OR p_baseline_only),
+            -- A verified later incremental round can retire baseline-only
+            -- status; once verified, an ordinary replay cannot downgrade it.
+            baseline_only = (baseline_only AND p_baseline_only),
             replayed_through = p_replayed_through,
             committed_at = now(),
             generation = generation + 1

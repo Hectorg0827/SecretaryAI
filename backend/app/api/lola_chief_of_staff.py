@@ -28,8 +28,14 @@ async def executive_briefing(
     response.headers["Cache-Control"] = "private, no-store"
     from app.api.logistics import _load_ledger, _viewer
 
-    # Check permissions before touching the service-role ledger client.
-    _viewer(user)
+    # Chief-of-Staff cross-shipment briefing is restricted to managers and
+    # logistics operators. Sales agents retain their scoped logistics workspace.
+    # The access check must happen before any service-role database read.
+    viewer = _viewer(user)
+    if viewer.tier not in ("full_operations", "logistics"):
+        raise HTTPException(403, "Executive logistics briefing is restricted")
+    if as_of is not None and as_of > date.today():
+        raise HTTPException(422, "A future date cannot establish current operations")
     ledger = _load_ledger(user, db)
     try:
         return build_chief_of_staff_briefing(

@@ -1,5 +1,6 @@
 """Synthetic, no-network Lola review journal security and idempotence tests."""
 from dataclasses import dataclass
+from hashlib import sha256
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -172,6 +173,20 @@ def test_repeated_capture_is_deduplicated_and_has_no_external_side_effects():
     assert first["notifications_sent"] is False
     assert all(name in {"users", j.TABLE} for name, *_ in db.calls)
 
+
+
+def test_source_revision_includes_date_of_time_based_monitor_evaluation():
+    db = FakeDatabase()
+    capture(db)
+    expected = sha256(
+        (COMPANY + "\nshipment-a\n" + date.today().isoformat() + "\nsource-1").encode("utf-8")
+    ).hexdigest()
+    assert db.events[0]["source_revision"] == expected
+    # Yesterday's source version must not suppress today's timed alert.
+    other_day = sha256(
+        (COMPANY + "\nshipment-a\n" + "2020-01-01" + "\nsource-1").encode("utf-8")
+    ).hexdigest()
+    assert expected != other_day
 
 def test_new_source_revision_gets_new_pending_event():
     db = FakeDatabase()

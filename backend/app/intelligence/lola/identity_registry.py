@@ -152,7 +152,11 @@ def resolve_verified_case(
         (("company_id", company), ("employee_id", employee)),
         3, company,
     )
-    if len(grants) != 2 or {row.get("channel") for row in grants} != _CHANNELS:
+    if len(grants) != 2 or any(
+        not isinstance(row.get("channel"), str) for row in grants
+    ):
+        raise IdentityNotVerified("Both employee-authorized provider connections are required")
+    if {row["channel"] for row in grants} != _CHANNELS:
         raise IdentityNotVerified("Both employee-authorized provider connections are required")
     by_channel = {row["channel"]: row for row in grants}
     provider_refs: dict[str, str] = {}

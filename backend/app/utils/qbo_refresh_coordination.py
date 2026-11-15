@@ -3,7 +3,6 @@ import asyncio
 import contextlib
 import secrets
 import time
-from datetime import datetime, timezone
 
 import redis
 import redis.asyncio as async_redis
@@ -163,7 +162,6 @@ async def refresh_qbo_web(cfg: dict, request_tokens, persist_tokens) -> tuple[st
 def refresh_qbo_task(company: dict, cfg: dict, db, token_request) -> bool:
     """Proactive worker path, sharing the exact same generation fence and lock."""
     from app.config import get_settings
-    from datetime import timedelta
 
     settings = get_settings()
     company_id = company["id"]

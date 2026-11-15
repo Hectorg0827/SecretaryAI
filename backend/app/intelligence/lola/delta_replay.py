@@ -277,6 +277,8 @@ async def collect_graph_delta(
         visited.add(current_url)
         try:
             body = await asyncio.wait_for(read_page(current_url), timeout=15)
+        except DeltaCursorExpired:
+            raise
         except Exception:
             raise DeltaUnavailable("Graph delta provider unavailable") from None
         if not isinstance(body, Mapping):

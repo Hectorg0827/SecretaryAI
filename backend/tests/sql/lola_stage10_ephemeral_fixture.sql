@@ -45,7 +45,10 @@ CREATE TABLE public.lola_employee_whatsapp_connections (
   FOREIGN KEY(company_id,user_id) REFERENCES public.users(company_id,id)
 );
 GRANT USAGE ON SCHEMA public,extensions TO service_role;
-GRANT SELECT ON public.companies,public.users,public.employee_integrations,
+-- FOR SHARE requires UPDATE privileges on the locked rows; these are
+-- explicitly present on the corresponding real SecretaryAI-Staging tables.
+GRANT SELECT,UPDATE ON public.users,public.employee_integrations,
   public.lola_private_contacts,public.lola_employee_whatsapp_connections
   TO service_role;
+GRANT SELECT ON public.companies TO service_role;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA extensions TO service_role;

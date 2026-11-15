@@ -8,7 +8,8 @@ cd "$(dirname "$0")/.."
 echo '── checking migration SQL source parity (read-only)'
 python3 scripts/check_migration_source_parity.py
 python3 scripts/check_staging_migration_bundle.py
-echo '✓ V1–V16 manual and Supabase migration copies match.'
+python3 scripts/check_function_search_paths.py
+echo '✓ V1–V16 manual and Supabase migration copies match; function definitions audited.'
 
 # Supabase provides auth.jwt(), used by the RLS policies; shim it so the schema
 # applies on a plain Postgres in CI.
@@ -38,6 +39,8 @@ for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
+# Only the new additive migration follows the legacy V1–V16 mirrored baseline.
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115030000_lock_trigger_function_search_path.sql
 echo "✓ All schema files applied cleanly."
 echo '── testing legacy core RLS and no unsafe client grants'
 psql -v ON_ERROR_STOP=1 -f scripts/test_legacy_core_security.sql
@@ -119,8 +122,12 @@ psql -v ON_ERROR_STOP=1 -f scripts/test_staging_email_allowlist.sql
 echo '✓ Staging email allowlist checks passed.'
 
 echo '── asserting trigger search paths are pinned'
-psql -v ON_ERROR_STOP=1 -Atc "SELECT CASE WHEN count(*) = 3 AND bool_and('search_path=pg_catalog, pg_temp' = ANY(coalesce(p.proconfig, ARRAY[]::text[]))) THEN 'ok' ELSE 'bad' END FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('update_updated_at','reject_stock_movement_rewrite','reject_purchase_evidence_rewrite')" | grep -qx ok
+psql -v ON_ERROR_STOP=1 -Atc "SELECT CASE WHEN count(*) = 3 AND bool_and('search_path=pg_catalog, public, pg_temp' = ANY(coalesce(p.proconfig, ARRAY[]::text[]))) THEN 'ok' ELSE 'bad' END FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('update_updated_at','reject_stock_movement_rewrite','reject_purchase_evidence_rewrite')" | grep -qx ok
 echo '✓ Trigger search paths are pinned.'
+echo '── checking every migration-defined function against disposable pg_proc'
+python3 scripts/check_function_search_paths.py --sql > /tmp/secretaryai-function-search-path-check.sql
+psql -v ON_ERROR_STOP=1 -At -f /tmp/secretaryai-function-search-path-check.sql | grep -qx ok
+echo '✓ All migration-defined functions have a safe runtime search_path.'
 
 echo '── verifying V1–V5 installed baseline without history mutation'
 psql -v ON_ERROR_STOP=1 -f scripts/verify_staging_schema_baseline.sql

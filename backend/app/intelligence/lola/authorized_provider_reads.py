@@ -29,6 +29,10 @@ class AuthorizedReadUnavailable(ReplayUnavailable):
     """A scoped provider operation cannot be verified or completed."""
 
 
+class GraphDeltaExpired(AuthorizedReadUnavailable):
+    """Graph returned a known expired per-folder delta cursor; resync required."""
+
+
 @dataclass(frozen=True)
 class VerifiedEmailConnection:
     provider: str
@@ -133,6 +137,63 @@ class GmailHistoryTransport:
         return await asyncio.to_thread(self._read_sync, start_history_id, page_token)
 
 
+
+
+class GmailBootstrapTransport(GmailHistoryTransport):
+    """Restricted metadata-only Gmail full sync, using employee OAuth identity."""
+
+    def _read_snapshot_sync(
+        self, kind: str, page_token: str | None = None,
+        message_id: str | None = None,
+    ) -> Mapping:
+        _verify_current(self.binding, self.reauthorize)
+        try:
+            service = self.connector._get_service()
+            profile = service.users().getProfile(userId="me").execute()
+            if (not isinstance(profile, Mapping)
+                    or not isinstance(profile.get("emailAddress"), str)
+                    or profile["emailAddress"].casefold()
+                    != self.binding.expected_provider_principal.casefold()):
+                raise AuthorizedReadUnavailable("Authenticated Gmail identity mismatch")
+            if kind == "profile":
+                response = profile
+            elif kind == "list":
+                params = {"userId": "me", "maxResults": 100}
+                if page_token is not None:
+                    params["pageToken"] = page_token
+                response = service.users().messages().list(**params).execute()
+            elif kind == "get":
+                if (not isinstance(message_id, str)
+                        or not message_id or len(message_id) > 256):
+                    raise AuthorizedReadUnavailable("Invalid Gmail metadata identity")
+                response = service.users().messages().get(
+                    userId="me", id=message_id, format="metadata",
+                    fields="id,threadId,historyId",
+                ).execute()
+            else:
+                raise AuthorizedReadUnavailable("Unsupported Gmail bootstrap operation")
+        except AuthorizedReadUnavailable:
+            raise
+        except Exception:
+            # Metadata 404 may be a concurrent message deletion or a revoked
+            # token. Either case invalidates the snapshot; never skip a page.
+            raise AuthorizedReadUnavailable("Gmail bootstrap request unavailable") from None
+        if not isinstance(response, Mapping):
+            raise AuthorizedReadUnavailable("Gmail bootstrap response malformed")
+        _verify_current(self.binding, self.reauthorize)
+        return response
+
+    async def fetch_profile(self) -> Mapping:
+        return await asyncio.to_thread(self._read_snapshot_sync, "profile")
+
+    async def fetch_messages_page(self, page_token: str | None) -> Mapping:
+        return await asyncio.to_thread(self._read_snapshot_sync, "list", page_token)
+
+    async def fetch_message_metadata(self, message_id: str) -> Mapping:
+        return await asyncio.to_thread(
+            self._read_snapshot_sync, "get", None, message_id,
+        )
+
 class GraphFolderDeltaTransport:
     """Verifies Graph /me identity, then reads one folder's delta page."""
 
@@ -176,7 +237,7 @@ class GraphFolderDeltaTransport:
                     raise AuthorizedReadUnavailable("Graph OAuth principal mismatched")
                 response = await client.get(url, headers=headers)
                 if response.status_code == 410:
-                    raise AuthorizedReadUnavailable("Graph delta token expired; full baseline required")
+                    raise GraphDeltaExpired("Graph delta cursor expired; folder bootstrap required")
                 if response.status_code != 200:
                     raise AuthorizedReadUnavailable("Graph mailbox folder read unavailable")
                 data = response.json()

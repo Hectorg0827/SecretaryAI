@@ -251,6 +251,10 @@ async def replay_graph_folder_delta(
         observed_urls.add(cursor)
         try:
             response = await fetch_url(cursor)
+        except ReplayUnavailable:
+            # Preserve typed, sanitized provider-expiry signals so the caller
+            # can request a new folder baseline without advancing a cursor.
+            raise
         except Exception:
             raise ReplayUnavailable("Graph authorized delta request unavailable") from None
         if not isinstance(response, Mapping):

@@ -54,20 +54,38 @@ def call_args(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_gmail_no_baseline_returns_nonactionable_without_touching_connector(monkeypatch):
+async def test_gmail_missing_checkpoint_runs_verified_full_sync_before_atomic_commit(monkeypatch):
+    from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
+    from app.intelligence.lola.incremental_replay import ChangeRef
     monkeypatch.setattr(svc, "resolve_verified_case", lambda **kwargs: case())
     monkeypatch.setattr(svc, "read_checkpoint", lambda **kwargs: None)
-    called = []
-    monkeypatch.setattr(svc, "commit_replay", lambda **kwargs: called.append(kwargs))
+
+    async def evidence(**kwargs):
+        return GmailBootstrapEvidence(
+            next_history_id="1005",
+            changed_records=(ChangeRef("PRIVATE-message", "added"),),
+            page_count=2, message_count=1, history_record_count=0,
+            digest="a" * 64,
+        )
+    monkeypatch.setattr(svc, "collect_gmail_bootstrap", evidence)
+    committed = []
+    def commit(**kwargs):
+        committed.append(kwargs)
+        assert isinstance(kwargs["replay"], GmailBootstrapEvidence)
+        assert kwargs["previously_read"] is None
+        return CheckpointCommit(1, "gmail", 1, "a"*64, NOW.isoformat())
+
+    monkeypatch.setattr(svc, "commit_replay", commit)
     output = await svc.synchronize_verified_case_email(**call_args(
         provider="gmail", verified_resource_id="employee@private.invalid",
         verified_principal="employee@private.invalid", connector=GmailShouldNotRead(),
     ))
-    assert output.state == "requires_full_gmail_bootstrap"
+    assert output.state == "baseline_recorded"
+    assert output.committed_generation == 1
     assert output.follow_up_eligible is False
     assert output.reply_status == "not_assessed"
-    assert output.ingested_metadata_count == 0
-    assert called == []
+    assert output.ingested_metadata_count == 1
+    assert len(committed) == 1
 
 
 @pytest.mark.asyncio
@@ -167,11 +185,12 @@ async def test_graph_provider_410_never_advances_cursor_or_sends_messages(monkey
         if request.url.path == "/v1.0/me":
             return httpx.Response(200, json={"id": "graph-id-verified"})
         return httpx.Response(410, json={"error": {"message": "PRIVATE BODY"}})
-    with pytest.raises(ReplayUnavailable) as error:
-        await svc.synchronize_verified_case_email(**call_args(
-            http_transport=httpx.MockTransport(handler),
-        ))
-    assert "PRIVATE" not in str(error.value)
+    output = await svc.synchronize_verified_case_email(**call_args(
+        http_transport=httpx.MockTransport(handler),
+    ))
+    assert output.state == "requires_graph_folder_resync"
+    assert output.follow_up_eligible is False
+    assert output.ingested_metadata_count == 0
     assert committed == []
 
 
@@ -180,3 +199,41 @@ async def test_user_cannot_supply_unsupported_provider(monkeypatch):
     monkeypatch.setattr(svc, "resolve_verified_case", lambda **kwargs: pytest.fail("must not resolve"))
     with pytest.raises(CheckpointUnavailable):
         await svc.synchronize_verified_case_email(**call_args(provider="unknown-mail-provider"))
+
+
+
+@pytest.mark.asyncio
+async def test_gmail_initial_anchor_404_never_commits_partial_baseline(monkeypatch):
+    from app.intelligence.lola.incremental_replay import GmailHistoryExpired
+    monkeypatch.setattr(svc, "resolve_verified_case", lambda **kwargs: case())
+    monkeypatch.setattr(svc, "read_checkpoint", lambda **kwargs: None)
+    async def expired(**kwargs):
+        raise GmailHistoryExpired("Synthetic initial Gmail history expired")
+    monkeypatch.setattr(svc, "collect_gmail_bootstrap", expired)
+    calls = []
+    monkeypatch.setattr(svc, "commit_replay", lambda **kwargs: calls.append(True))
+    output = await svc.synchronize_verified_case_email(**call_args(
+        provider="gmail", verified_resource_id="employee@private.invalid",
+        verified_principal="employee@private.invalid", connector=GmailShouldNotRead(),
+    ))
+    assert output.state == "requires_full_gmail_bootstrap_retry"
+    assert output.committed_generation is None
+    assert output.follow_up_eligible is False
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_gmail_bounded_bootstrap_failure_never_commits_cursor(monkeypatch):
+    monkeypatch.setattr(svc, "resolve_verified_case", lambda **kwargs: case())
+    monkeypatch.setattr(svc, "read_checkpoint", lambda **kwargs: None)
+    async def invalid(**kwargs):
+        raise ReplayUnavailable("Mailbox snapshot exceeds bounded limit")
+    monkeypatch.setattr(svc, "collect_gmail_bootstrap", invalid)
+    calls = []
+    monkeypatch.setattr(svc, "commit_replay", lambda **kwargs: calls.append(True))
+    with pytest.raises(ReplayUnavailable):
+        await svc.synchronize_verified_case_email(**call_args(
+            provider="gmail", verified_resource_id="employee@private.invalid",
+            verified_principal="employee@private.invalid", connector=GmailShouldNotRead(),
+        ))
+    assert calls == []

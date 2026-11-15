@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.intelligence.lola.identity_registry import ResolvedCrossChannelCase
 from app.intelligence.lola.incremental_replay import GmailReplay, GraphReplay
+from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
 
 _CHECKPOINTS = "lola_provider_replay_checkpoints"
 _EVENTS = "lola_provider_replay_events"
@@ -267,7 +268,7 @@ def read_checkpoint(
 def commit_replay(
     *,
     db: Any, scope: MailboxScope, vault: CursorVault,
-    replay: GmailReplay | GraphReplay,
+    replay: GmailReplay | GraphReplay | GmailBootstrapEvidence,
     previously_read: StoredCheckpoint | None,
     observed_at: datetime,
 ) -> CheckpointCommit:
@@ -280,12 +281,12 @@ def commit_replay(
     """
     filters = _filters(scope, vault)
     now = _utc(observed_at)
-    if (not isinstance(replay, (GmailReplay, GraphReplay))
+    if (not isinstance(replay, (GmailReplay, GraphReplay, GmailBootstrapEvidence))
             or replay.exhausted is not True
             or replay.checkpoint_persisted is not False
             or replay.reply_absence_proven is not False):
         raise CheckpointUnavailable("Invalid or prematurely trusted replay")
-    if (scope.provider == "gmail" and not isinstance(replay, GmailReplay)
+    if (scope.provider == "gmail" and not isinstance(replay, (GmailReplay, GmailBootstrapEvidence))
             or scope.provider == "outlook" and not isinstance(replay, GraphReplay)):
         raise CheckpointUnavailable("Replay provider identity mismatch")
     if replay.page_count < 1 or len(replay.changed_records) > 500:
@@ -293,7 +294,20 @@ def commit_replay(
     if (not isinstance(replay.digest, str) or len(replay.digest) != 64
             or any(x not in "0123456789abcdef" for x in replay.digest)):
         raise CheckpointUnavailable("Invalid replay digest")
-    if isinstance(replay, GmailReplay):
+    if isinstance(replay, GmailBootstrapEvidence):
+        if (previously_read is not None
+                or replay.initial_baseline is not True
+                or replay.complete_mailbox_history is not False
+                or replay.cross_channel_mapping_verified is not False
+                or replay.outbound_action_approved is not False
+                or replay.message_count < 0
+                or replay.history_record_count < 0):
+            raise CheckpointUnavailable("Gmail baseline requires a new, untrusted checkpoint")
+        cursor = replay.next_history_id
+        if not cursor.isascii() or not cursor.isdecimal() or int(cursor) <= 0:
+            raise CheckpointUnavailable("Invalid Gmail bootstrap history cursor")
+        baseline = True
+    elif isinstance(replay, GmailReplay):
         if previously_read is None:
             raise CheckpointUnavailable("Gmail requires a verified full-sync baseline")
         cursor = replay.next_history_id

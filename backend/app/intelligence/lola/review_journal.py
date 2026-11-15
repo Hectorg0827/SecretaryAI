@@ -146,10 +146,15 @@ def build_capture(*, user: dict, ledger, as_of: date) -> dict:
         raise ValueError("Capture only the current calendar day")
     if str(getattr(ledger, "company_id", "")) != company:
         raise ReviewJournalUnavailable("Logistics ledger company mismatch")
-    shipments = ledger.shipments()
-    if any(getattr(shipment, "company_id", None) != company for shipment in shipments):
+    # The canonical ledger retains historical events for cancelled shipments.
+    # Validate their provenance against *all* shipment identities, but never
+    # surface a cancelled shipment as a current actionable alert.
+    all_shipments = ledger.shipments(include_cancelled=True)
+    active_shipments = ledger.shipments()
+    if any(getattr(shipment, "company_id", None) != company for shipment in all_shipments):
         raise ReviewJournalUnavailable("Logistics shipment tenant mismatch")
-    shipment_ids = {str(s.shipment_id) for s in shipments}
+    shipment_ids = {str(s.shipment_id) for s in all_shipments}
+    active_ids = {str(s.shipment_id) for s in active_shipments}
     events = ledger.events()
     keys: dict[str, set[str]] = defaultdict(set)
     for event in events:
@@ -165,7 +170,7 @@ def build_capture(*, user: dict, ledger, as_of: date) -> dict:
     viewer = LogisticsViewer.from_user(user)
     viewer.require_access()
     alerts = LogisticsMonitor(ledger).scan(as_of)
-    permitted = viewer.filter_alerts(alerts, {s.shipment_id: s for s in shipments})
+    permitted = viewer.filter_alerts(alerts, {s.shipment_id: s for s in active_shipments})
     if len(permitted) > MAX_CAPTURE_ALERTS:
         raise ReviewJournalUnavailable("Too many alerts for atomic capture")
     batch = {}
@@ -176,7 +181,7 @@ def build_capture(*, user: dict, ledger, as_of: date) -> dict:
             # Cross-shipment supplier analytics must be modeled separately.
             unscoped += 1
             continue
-        if (not isinstance(shipment, str) or shipment not in shipment_ids
+        if (not isinstance(shipment, str) or shipment not in active_ids
                 or not 1 <= len(shipment) <= 160 or not keys.get(shipment)):
             raise ReviewJournalUnavailable("Alert cannot be tied to a source shipment")
         alert_id, code, severity = alert.get("alert_id"), alert.get("code"), alert.get("severity")

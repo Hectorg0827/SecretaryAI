@@ -414,6 +414,7 @@ interface IntegrationRowProps {
   label: string;
   description: string;
   connected: boolean;
+  needsReconnect?: boolean;
   loading: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
@@ -423,7 +424,7 @@ interface IntegrationRowProps {
 }
 
 export function IntegrationRow({
-  label, description, connected, loading, onConnect, onDisconnect,
+  label, description, connected, needsReconnect = false, loading, onConnect, onDisconnect,
   connectLabel = 'Connect', reconnectLabel, canManage,
 }: IntegrationRowProps) {
   return (
@@ -435,12 +436,12 @@ export function IntegrationRow({
 
       <div className={clsx(
         'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg flex-shrink-0',
-        connected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+        connected ? 'bg-emerald-50 text-emerald-700' : needsReconnect ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500',
       )}>
         {loading
           ? <Loader2 size={11} className="animate-spin" />
           : connected ? <Check size={11} /> : <AlertTriangle size={11} />}
-        {loading ? 'Checking…' : connected ? 'Connected' : 'Not connected'}
+        {loading ? 'Checking…' : connected ? 'Connected' : needsReconnect ? 'Reconnect required' : 'Not connected'}
       </div>
 
       {loading ? null : !canManage ? (
@@ -467,7 +468,7 @@ export function IntegrationRow({
           onClick={onConnect}
           className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium border border-blue-200 rounded-lg px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors flex-shrink-0"
         >
-          {connectLabel} <ExternalLink size={11} />
+          {needsReconnect ? 'Reconnect with Intuit' : connectLabel} <ExternalLink size={11} />
         </button>
       )}
     </div>
@@ -713,6 +714,7 @@ export function Settings() {
                   label="QuickBooks Online"
                   description="Cloud accounting sync — reconnect if saved authorization no longer reads data"
                   connected={integrations?.quickbooks_online.connected ?? false}
+                  needsReconnect={integrations?.quickbooks_online.needs_reconnect ?? false}
                   loading={integLoading || !!actionLoading['qbo']}
                   onConnect={connectQBO}
                   onDisconnect={disconnectQBO}

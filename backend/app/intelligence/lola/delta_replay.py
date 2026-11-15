@@ -306,7 +306,13 @@ async def collect_graph_delta(
             raise DeltaUnavailable("Graph delta must have exactly one continuation or terminal link")
         if terminal_link is not None:
             terminal = _graph_url(terminal_link, scope.folder_id)
-            if terminal in visited:
+            # A no-change incremental delta may repeat the prior cursor.
+            # That is a valid EMPTY completed round, not missing pagination.
+            # A changed round or an intermediate cursor loop stays blocked.
+            if terminal in visited and not (
+                page_num == 1 and previous_delta_link == terminal
+                and not changes
+            ):
                 raise DeltaUnavailable("Graph terminal cursor repeated a request")
             trace.append([current_url, terminal, "delta", serialized])
             return DeltaCandidate(

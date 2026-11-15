@@ -29,7 +29,7 @@ RULE_FIELDS = (
     "authority_title,official_template_url,applicability_note,filing_deadline_rule"
 )
 BOOK_FIELDS = (
-    "id,sku,package_label,market_code,channel,customer_ref,currency,"
+    "id,company_id,sku,package_label,market_code,channel,customer_ref,currency,"
     "list_price_per_case,effective_from,effective_to,revision,status,"
     "cost_snapshot_id,evidence_ref,approved_by,approved_at"
 )
@@ -173,7 +173,7 @@ async def preview_price_posting(
     if len(rows) != len(ids) or len(indexed) != len(ids) or any(i not in indexed for i in ids):
         # No indication which ID belongs to which tenant.
         raise HTTPException(status_code=404, detail="Requested price-book evidence not found")
-    if any(str(indexed[i].get("company_id", company_id)) != company_id for i in ids):
+    if any(str(indexed[i].get("company_id")) != company_id for i in ids):
         raise HTTPException(status_code=503, detail="Price-book tenant scope invalid")
     try:
         draft = compile_price_posting_preview(

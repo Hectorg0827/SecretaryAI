@@ -180,7 +180,10 @@ async def persist_verified_round(
             or after.cursor != candidate.terminal_cursor
             or after.last_round_digest != candidate.source_digest
             or after.changes_applied != candidate.changes_processed
-            or committed_at < observed_at or committed_at > check_at):
+            or committed_at < observed_at
+            # The database commit necessarily occurs after the caller's
+            # pre-write evaluation clock. Allow only bounded transaction lag.
+            or committed_at > check_at + timedelta(seconds=30)):
         raise CheckpointUnavailable("Durable read-back did not match committed event batch")
 
     return CommitOutcome(

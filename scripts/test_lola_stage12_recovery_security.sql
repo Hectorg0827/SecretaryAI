@@ -167,6 +167,33 @@ BEGIN
 END
 $verify$;
 
+-- An ordinary incremental batch AFTER recovery must inherit epoch 1,
+-- never silently insert fresh changes into epoch zero. Roll back that
+-- synthetic follow-on batch so other CAS tests still exercise generation 2.
+SAVEPOINT stage12_follow_on;
+DO $verify$
+DECLARE generation BIGINT;
+BEGIN
+  SELECT public.lola_commit_provider_replay(
+    '11111111-1111-4111-8111-111111111111'::uuid,
+    '22222222-2222-4222-8222-222222222222'::uuid,
+    'gmail',repeat('a',64),repeat('b',64),
+    (SELECT fingerprint FROM stage12_fingerprint),2,
+    'v1:'||repeat('Y',68),repeat('8',64),repeat('7',64),
+    FALSE,now(),jsonb_build_array(jsonb_build_object(
+      'key_sha256',repeat('2',64),'operation','label_changed'
+    ))
+  ) INTO generation;
+  IF generation<>3 THEN RAISE EXCEPTION 'Follow-on replay generation wrong'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.lola_provider_replay_events
+    WHERE event_key_sha256=repeat('2',64)
+      AND recovery_epoch=1 AND replay_digest=repeat('7',64)
+  ) THEN RAISE EXCEPTION 'Ordinary post-recovery event was assigned prior epoch'; END IF;
+END
+$verify$;
+ROLLBACK TO SAVEPOINT stage12_follow_on;
+
 -- Reusing the same expected generation must fail closed.
 DO $verify$
 DECLARE rejected BOOLEAN:=FALSE;

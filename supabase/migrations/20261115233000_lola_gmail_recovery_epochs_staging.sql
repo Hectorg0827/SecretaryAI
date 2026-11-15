@@ -307,4 +307,44 @@ REVOKE ALL ON FUNCTION public.lola_recover_expired_gmail_replay(
 GRANT EXECUTE ON FUNCTION public.lola_recover_expired_gmail_replay(
   UUID,UUID,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,JSONB,TEXT
 ) TO service_role;
+
+-- Stage 8's original ordinary incremental writer does not supply the new
+-- recovery_epoch column. Bind those future events to the checkpoint's CURRENT
+-- epoch in a BEFORE INSERT trigger; old events retain their original epoch.
+CREATE FUNCTION public.lola_bind_replay_event_recovery_epoch()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path=pg_catalog,public
+AS $body$
+DECLARE v_epoch BIGINT;
+BEGIN
+  SELECT c.recovery_epoch INTO v_epoch
+    FROM public.lola_provider_replay_checkpoints c
+    WHERE c.company_id=NEW.company_id AND c.employee_id=NEW.employee_id
+      AND c.provider=NEW.provider
+      AND c.provider_identity_sha256=NEW.provider_identity_sha256
+      AND c.resource_sha256=NEW.resource_sha256
+      AND c.replay_digest=NEW.replay_digest
+    FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Provider event has no current replay epoch';
+  END IF;
+  IF NEW.recovery_epoch=0 AND v_epoch>0 THEN
+    NEW.recovery_epoch:=v_epoch;
+  END IF;
+  IF NEW.recovery_epoch IS DISTINCT FROM v_epoch THEN
+    RAISE EXCEPTION 'Provider event epoch mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$body$;
+REVOKE ALL ON FUNCTION public.lola_bind_replay_event_recovery_epoch()
+  FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.lola_bind_replay_event_recovery_epoch()
+  TO service_role;
+CREATE TRIGGER lola_provider_replay_event_epoch_gate
+  BEFORE INSERT ON public.lola_provider_replay_events
+  FOR EACH ROW EXECUTE FUNCTION public.lola_bind_replay_event_recovery_epoch();
+
 COMMIT;

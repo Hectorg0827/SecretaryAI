@@ -38,6 +38,20 @@ from app.intelligence.wholesale_distribution.logistics.pipeline import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+# Values that reach a log line from requests, emails, documents or exception
+# text (CodeQL py/log-injection). Line breaks and other control characters are
+# replaced so one value cannot forge extra log lines; length is capped.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _sanitize_log_value(value: Any, max_len: int = 256) -> str:
+    if value is None:
+        return ""
+    text = _CONTROL_CHARS_RE.sub(" ", str(value)).strip()[:max_len]
+    # The regex already removed these; the explicit replaces are the form
+    # CodeQL recognises as a log-injection sanitiser, so keep them last.
+    return text.replace("\r", " ").replace("\n", " ")
+
 
 # ─── Module factory (one per request — stateless for API use) ─────────────────
 
@@ -1921,7 +1935,8 @@ def _load_ledger(user: dict, db) -> ShipmentLedger:
     try:
         return ShipmentLedger.load(user["company_id"], SupabaseEventStore(db))
     except Exception as exc:  # noqa: BLE001
-        log.error("logistics ledger load failed for %s: %s", user.get("company_id"), exc)
+        log.error("logistics ledger load failed for %s: %s",
+                  _sanitize_log_value(user.get("company_id")), _sanitize_log_value(exc))
         raise HTTPException(status_code=503, detail="Logistics data temporarily unavailable")
 
 
@@ -1947,7 +1962,7 @@ def _ingest(ledger: ShipmentLedger, event: LogisticsEvent) -> dict:
     except LedgerError as exc:
         raise _ledger_http_error(exc)
     except StoreUnavailableError as exc:
-        log.error("logistics event store write failed: %s", exc)
+        log.error("logistics event store write failed: %s", _sanitize_log_value(exc))
         raise HTTPException(status_code=503, detail="Event not saved — store unavailable; nothing was changed")
 
 
@@ -1964,7 +1979,8 @@ def _record_email_evidence(user: dict, db, shipment_id: str, code: str, occurred
             payload=payload or {},
         )).to_dict()
     except Exception as exc:  # noqa: BLE001
-        log.warning("could not record email evidence on %s: %s", shipment_id, exc)
+        log.warning("could not record email evidence on %s: %s",
+                    _sanitize_log_value(shipment_id), _sanitize_log_value(exc))
         return None
 
 
@@ -1983,7 +1999,8 @@ def ingest_integration_events(db, company_id: str, events: list[LogisticsEvent])
         try:
             out.append(ledger.ingest(ev).to_dict())
         except (LedgerError, StoreUnavailableError) as exc:
-            log.warning("integration event %s rejected: %s", ev.event_id, exc)
+            log.warning("integration event %s rejected: %s",
+                        _sanitize_log_value(ev.event_id), _sanitize_log_value(exc))
             out.append({"applied": False, "message": type(exc).__name__})
     return out
 
@@ -2271,7 +2288,8 @@ async def reconcile_receipt(
         approvals = await submit_for_approval(
             rec.proposals, PolicyEngine(user["company_id"], db), ApprovalQueue(db))
     except Exception as exc:  # noqa: BLE001
-        log.error("approval queue submission failed for %s: %s", rec.reconciliation_id, exc)
+        log.error("approval queue submission failed for %s: %s",
+                  _sanitize_log_value(rec.reconciliation_id), _sanitize_log_value(exc))
         approvals = [{"status": "not_queued", "error": "approval queue unavailable — resubmit"}]
 
     body = rec.to_dict()

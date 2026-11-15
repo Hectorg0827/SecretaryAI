@@ -52,6 +52,9 @@ migration needs independent migration-tool validation before application.
 - Unscoped supplier analytics are excluded from persistence, with count reported.
 - Changed source revisions create new pending reviews; resolved historical
   alerts are not automatically closed.
+- Source revisions also incorporate the monitor's evaluation date, so a
+  time-based SLA, demurrage or detention warning can require fresh review on
+  the next day even if the logistics event ledger is unchanged.
 - Every new ledger event on a shipment changes the revision even when the
   underlying exception text has not materially changed.
 - Some alerts derive from missing verification or unverified reports, labeled

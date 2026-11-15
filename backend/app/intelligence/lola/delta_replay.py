@@ -19,6 +19,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import asyncio
 from typing import Awaitable, Callable, Mapping
 from urllib.parse import quote, urlsplit
 
@@ -106,8 +107,6 @@ def _utc(value: datetime) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise DeltaUnavailable("Provider read requires an aware evaluation clock")
     instant = value.astimezone(timezone.utc)
-    if instant > datetime.now(timezone.utc) + __import__("datetime").timedelta(minutes=5):
-        raise DeltaUnavailable("Provider clock is in the future")
     return instant
 
 
@@ -180,9 +179,10 @@ async def collect_gmail_history(
     trace: list[object] = []
     changes: list[SourceChange] = []
     last_terminal = initial
+    last_watermark = int(initial)
     for page_num in range(1, MAX_PAGES + 1):
         try:
-            body = await read_page(initial, token)
+            body = await asyncio.wait_for(read_page(initial, token), timeout=15)
         except DeltaCursorExpired:
             raise
         except Exception:
@@ -191,8 +191,9 @@ async def collect_gmail_history(
             raise DeltaUnavailable("Gmail history page malformed")
         response_history = _history(body.get("historyId"), "response history ID")
         response_end = int(response_history)
-        if response_end < current:
+        if response_end < current or response_end < last_watermark:
             raise DeltaUnavailable("Gmail history watermark regressed")
+        last_watermark = response_end
         records = body.get("history", [])
         if not isinstance(records, list):
             raise DeltaUnavailable("Gmail history entries malformed")
@@ -240,7 +241,7 @@ async def collect_gmail_history(
                 observed_at=now,
             )
         next_token = _required(next_token, "Gmail page token")
-        if (not records or next_token == token or next_token in cursor_seen):
+        if next_token == token or next_token in cursor_seen:
             raise DeltaUnavailable("Gmail history pagination stalled or repeated a cursor")
         cursor_seen.add(next_token)
         trace.append([token, next_token, response_history, serialized])
@@ -275,7 +276,7 @@ async def collect_graph_delta(
             raise DeltaUnavailable("Graph delta cursor repeated")
         visited.add(current_url)
         try:
-            body = await read_page(current_url)
+            body = await asyncio.wait_for(read_page(current_url), timeout=15)
         except Exception:
             raise DeltaUnavailable("Graph delta provider unavailable") from None
         if not isinstance(body, Mapping):
@@ -315,7 +316,7 @@ async def collect_graph_delta(
                 observed_at=now,
             )
         next_url = _graph_url(next_link, scope.folder_id)
-        if next_url in visited or not refs:
+        if next_url in visited:
             raise DeltaUnavailable("Graph delta pagination stalled")
         trace.append([current_url, next_url, "next", serialized])
         current_url = next_url

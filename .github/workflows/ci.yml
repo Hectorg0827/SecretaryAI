@@ -352,6 +352,10 @@ jobs:
           python-version: "3.11"
       - name: Install pinned PostgreSQL integration driver
         run: python -m pip install asyncpg==0.29.0
+      - name: Verify simultaneous Lola replay commit and employee consent revocation
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+        run: python scripts/test_lola_stage10_revocation_race.py
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"

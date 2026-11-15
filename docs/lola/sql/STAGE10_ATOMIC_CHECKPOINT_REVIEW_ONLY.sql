@@ -117,8 +117,10 @@ REVOKE ALL ON public.lola_channel_authorizations,
   public.lola_delta_event_refs FROM PUBLIC,anon,authenticated,service_role;
 GRANT SELECT,INSERT,UPDATE ON public.lola_channel_authorizations,
   public.lola_verified_case_links TO service_role;
-GRANT SELECT,INSERT,UPDATE ON public.lola_delta_checkpoints,
-  public.lola_delta_event_refs TO service_role;
+GRANT SELECT,INSERT,UPDATE ON public.lola_delta_checkpoints TO service_role;
+-- Event refs are append-only at the application privilege layer.
+-- No UPDATE or DELETE grant to the service_role, authenticated or anon.
+GRANT SELECT,INSERT ON public.lola_delta_event_refs TO service_role;
 
 -- This helper LOCKS current trusted membership, email consent, independent
 -- case identity, and the existing WhatsApp Business Meta ownership record.

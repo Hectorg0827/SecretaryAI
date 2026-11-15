@@ -263,3 +263,15 @@ async def test_graph_terminal_token_is_required():
         await replay_graph_folder_delta(
             verified_folder_id="FOLDER-ABC", fetch_url=reader,
         )
+
+
+@pytest.mark.asyncio
+async def test_gmail_history_rows_must_increase_chronologically_across_pages():
+    async def reader(start, page):
+        if page is None:
+            return {"historyId": "300", "history": [{"id": "290"}],
+                    "nextPageToken": "page2"}
+        # Later page cannot report a distinct but older record.
+        return {"historyId": "330", "history": [{"id": "285"}]}
+    with pytest.raises(ReplayUnavailable):
+        await replay_gmail_history(start_history_id="200", fetch_page=reader)

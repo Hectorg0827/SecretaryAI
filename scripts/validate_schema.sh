@@ -64,6 +64,11 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000008_phase4_cap
 psql -v ON_ERROR_STOP=1 -f scripts/test_phase1_control_plane_security.sql
 echo '✓ Phase1/Phase4 control-plane access checks passed.'
 
+echo '── validating Phase 1 compliance atomic record/audit transaction'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115000000_compliance_atomic_policy_audit.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_compliance_atomic_policy_audit.sql
+echo '✓ Compliance atomic record/audit and cross-tenant rollback checks passed.'
+
 echo '── checking procurement and private morning briefing extensions'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000006_qbo_token_expiry.sql

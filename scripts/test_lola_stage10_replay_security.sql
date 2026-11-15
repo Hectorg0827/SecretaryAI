@@ -10,7 +10,9 @@ AS $$ SELECT current_setting('request.jwt.claim.role', true) $$;
 GRANT USAGE ON SCHEMA public TO service_role;
 -- Managed Supabase grants existing service clients read access to user
 -- membership. Mirror that existing condition only in the throwaway DB.
-GRANT SELECT ON public.users TO service_role;
+-- PostgreSQL SELECT FOR SHARE requires UPDATE privilege on locked rows;
+-- the managed service role already owns this capacity, emulate it in CI.
+GRANT SELECT,UPDATE ON public.users TO service_role;
 
 DO $verify$
 BEGIN

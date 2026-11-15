@@ -68,6 +68,13 @@ class QBOnlineAdapter(QuickBooksAdapter):
     async def _refresh_access_token(self) -> None:
         from app.utils.qbo_token_store import QBOInvalidGrant, QBOReconnectRequired
 
+        cfg = getattr(self, "_qbo_refresh_config", None)
+        if (not self._refresh_token
+                or (cfg and cfg.get("qb_connection_status") == "disconnected")):
+            # A revoked connection must never send null/cleared credentials
+            # to Intuit; the user must complete OAuth again.
+            raise QBOReconnectRequired("QuickBooks needs to be reconnected")
+
         async def request_tokens() -> dict:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.post(
@@ -116,6 +123,10 @@ class QBOnlineAdapter(QuickBooksAdapter):
         self._refresh_token = tokens["refresh_token"]
 
     def _headers(self) -> dict:
+        cfg = getattr(self, "_qbo_refresh_config", None)
+        if (not self._access_token
+                or (cfg and cfg.get("qb_connection_status") == "disconnected")):
+            raise QBOReconnectRequired("QuickBooks needs to be reconnected")
         return {
             "Authorization": f"Bearer {self._access_token}",
             "Accept": "application/json",

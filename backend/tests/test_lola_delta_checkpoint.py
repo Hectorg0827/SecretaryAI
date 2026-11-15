@@ -82,7 +82,7 @@ def test_graph_initial_round_is_committed_as_one_atomic_batch_and_read_back():
     assert result.provider == "outlook"
     assert result.version == 1
     assert result.checkpoint_confirmed_in_store is True
-    assert result.source_history_replay_complete is True
+    assert result.bounded_provider_round_persisted is True
     assert result.cross_channel_case_verified is False
     assert result.no_reply_verified is False
     assert result.follow_up_allowed is False

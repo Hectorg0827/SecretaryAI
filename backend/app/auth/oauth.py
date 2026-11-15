@@ -68,7 +68,9 @@ async def refresh_qbo_token(refresh_token: str) -> dict:
     QBO access tokens expire after 3600 s; refresh tokens last 100 days
     (Intuit rotates them on each use).
     """
-    async with httpx.AsyncClient() as client:
+    from app.utils.qbo_token_store import QBOInvalidGrant
+
+    async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             QBO_TOKEN_URL,
             data={
@@ -78,6 +80,14 @@ async def refresh_qbo_token(refresh_token: str) -> dict:
             auth=(settings.intuit_client_id, settings.intuit_client_secret),
             headers={"Accept": "application/json"},
         )
+        if response.status_code == 400:
+            # Only inspect the stable OAuth code, never log/propagate the body.
+            try:
+                invalid = response.json().get("error") == "invalid_grant"
+            except (ValueError, AttributeError):
+                invalid = False
+            if invalid:
+                raise QBOInvalidGrant("QuickBooks needs to be reconnected")
         response.raise_for_status()
         tokens = response.json()
         return {

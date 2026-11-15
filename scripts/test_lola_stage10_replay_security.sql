@@ -133,6 +133,9 @@ SELECT encode(sha256(convert_to(concat_ws(E'\n',
   'email:email:v1','whatsapp_business:whatsapp:v1'
 ),'UTF8')),'hex');
 
+-- Synthetic fingerprint is test data only; grant its read scope to the
+-- disposable service role before switching the active database role.
+GRANT SELECT ON stage10_fingerprint TO service_role;
 -- Authorize the request as the service role in the isolated database.
 SET LOCAL ROLE service_role;
 SET LOCAL request.jwt.claim.role = 'service_role';

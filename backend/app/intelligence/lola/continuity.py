@@ -97,6 +97,7 @@ class ContinuityDecision:
     supporting_record_ids: tuple[str, ...]
     evidence_fingerprint: str | None
     follow_up_after: str | None
+    checked_through: str | None = None
     requires_human_review: bool = False
     cross_channel_link_verified: bool = False
     messages_sent: bool = False
@@ -235,23 +236,27 @@ def evaluate_follow_up(
         data = (
             scope.company_id, scope.employee_id, scope.contact_id,
             scope.work_item_id, scope.mapping_revision,
-            *(f"{e.channel.value}:{e.source_record_id}:{e.source_revision}" for e in evidence),
+            *(f"{e.channel.value}:{e.source_record_id}:{e.source_revision}:{e.activity.value}:{_utc(e.observed_at).isoformat()}" for e in evidence),
             *(f"{c.channel.value}:{c.source_revision}" for c in sorted(
                 coverage, key=lambda c: c.channel.value)),
         )
         fingerprint = hashlib.sha256("\n".join(data).encode("utf-8")).hexdigest()
         due = _utc(last_sent.observed_at) + cfg.minimum_wait
+        checked_through = min(_utc(x.complete_through) for x in coverage)
         if replies:
             state, reason = ContinuityState.REPLIED, "Reply verified after WhatsApp draft send"
         elif check_at < due:
             state, reason = ContinuityState.NOT_DUE, "Follow-up waiting period not elapsed"
+        elif checked_through < due:
+            return _unavailable(scope, "Both channels have not yet verified the full follow-up interval")
         else:
-            state, reason = ContinuityState.REVIEW_FOLLOW_UP, "No reply in complete authorized channel coverage"
+            state, reason = ContinuityState.REVIEW_FOLLOW_UP, "No reply in authorized records through verified coverage end"
         return ContinuityDecision(
             state=state, reason=reason,
             work_item_id=scope.work_item_id, contact_id=scope.contact_id,
             supporting_record_ids=tuple(e.source_record_id for e in evidence),
             evidence_fingerprint=fingerprint, follow_up_after=due.isoformat(),
+            checked_through=checked_through.isoformat(),
             requires_human_review=state == ContinuityState.REVIEW_FOLLOW_UP,
             cross_channel_link_verified=True,
         )

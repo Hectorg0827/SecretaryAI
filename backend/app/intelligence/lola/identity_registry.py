@@ -79,9 +79,15 @@ def _when(value: object, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _source_rows(query, company: str) -> list[dict]:
+def _source_rows(db, table_name: str, columns: str, filters: tuple[tuple[str, str], ...],
+                 limit: int, company: str) -> list[dict]:
+    # Construction, query and execution may ALL fail (missing migration,
+    # invalid table privileges, broken provider client). Never expose errors.
     try:
-        result = query.execute()
+        query = db.table(table_name).select(columns)
+        for field, value in filters:
+            query = query.eq(field, value)
+        result = query.limit(limit).execute()
     except Exception:
         raise IdentitySourceUnavailable("Trusted registry source unavailable") from None
     data = getattr(result, "data", None)
@@ -142,12 +148,9 @@ def resolve_verified_case(
         raise ValueError("An aware evaluation time is required")
     now = as_of.astimezone(timezone.utc)
     grants = _source_rows(
-        db.table(GRANTS)
-          .select(GRANT_FIELDS)
-          .eq("company_id", company)
-          .eq("employee_id", employee)
-          .limit(3),
-        company,
+        db, GRANTS, GRANT_FIELDS,
+        (("company_id", company), ("employee_id", employee)),
+        3, company,
     )
     if len(grants) != 2 or {row.get("channel") for row in grants} != _CHANNELS:
         raise IdentityNotVerified("Both employee-authorized provider connections are required")
@@ -168,7 +171,9 @@ def resolve_verified_case(
         if consent_at > now or verified_at > now:
             raise IdentityNotVerified("Provider verification or consent has a future timestamp")
         expires = row.get("authorization_expires_at")
-        if expires is not None and _when(expires, "authorization expiry") <= now:
+        if expires is None:
+            raise IdentityNotVerified("Provider authorization expiry must be verified")
+        if _when(expires, "authorization expiry") <= now:
             raise IdentityNotVerified("Provider authorization expired")
         provider_refs[channel] = _nonempty(
             row.get("provider_identity_ref"), "provider identity",
@@ -176,14 +181,10 @@ def resolve_verified_case(
         _nonempty(row.get("source_revision"), "provider authorization revision")
 
     links = _source_rows(
-        db.table(LINKS)
-          .select(LINK_FIELDS)
-          .eq("company_id", company)
-          .eq("employee_id", employee)
-          .eq("contact_id", contact_id)
-          .eq("work_item_id", work_item_id)
-          .limit(2),
-        company,
+        db, LINKS, LINK_FIELDS,
+        (("company_id", company), ("employee_id", employee),
+         ("contact_id", contact_id), ("work_item_id", work_item_id)),
+        2, company,
     )
     if len(links) != 1:
         raise IdentityNotVerified("One independently verified contact/work-item link is required")
@@ -202,7 +203,9 @@ def resolve_verified_case(
             or _when(link["link_verified_at"], "mapping verification") > now):
         raise IdentityNotVerified("Mapping verification is future dated")
     expires = link.get("verification_expires_at")
-    if expires is not None and _when(expires, "mapping expiry") <= now:
+    if expires is None:
+        raise IdentityNotVerified("Work-item verification expiry must be recorded")
+    if _when(expires, "mapping expiry") <= now:
         raise IdentityNotVerified("Work-item mapping has expired")
     email_contact = _nonempty(link.get("email_provider_contact_ref"), "email contact")
     whatsapp_contact = _nonempty(link.get("whatsapp_provider_contact_ref"), "WhatsApp contact")

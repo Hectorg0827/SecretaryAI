@@ -1,0 +1,18 @@
+.lola-comms {
+  margin: 24px 0 10px;
+  padding: clamp(18px,3vw,28px);
+  border: 1px solid rgba(125,138,177,.22);
+  border-radius: 20px;
+  background: linear-gradient(145deg,rgba(115,134,177,.07),rgba(41,48,71,.02));
+}
+.lola-comms__heading h3 { margin: 5px 0 12px; font-size: 1.12rem; }
+.lola-comms__grid {
+  display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,225px),1fr));
+  gap: 14px; margin: 16px 0;
+}
+.lola-comms__grid > div { display: flex; flex-direction: column; gap: 8px;
+  padding: 15px; border-radius: 14px; border: 1px solid rgba(139,149,179,.23);
+  background: rgba(127,140,172,.055); }
+.lola-comms__label { font-size: .72rem; font-weight: 650; letter-spacing: .045em; opacity: .74; }
+.lola-comms__grid strong { font-size: .88rem; line-height: 1.35; font-weight: 650; }
+.lola-comms__disclaimer { margin: 14px 0 0; font-size: .8rem; line-height: 1.5; opacity: .78; }

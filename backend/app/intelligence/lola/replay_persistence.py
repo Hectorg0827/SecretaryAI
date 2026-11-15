@@ -344,7 +344,12 @@ def commit_replay(
     }
     try:
         response = db.rpc(_RPC, args).execute()
-        generation = response.data
+        raw_generation = response.data
+        # PostgREST installations can represent scalar RPC returns as an
+        # integer or a one-item JSON array; reject every other shape.
+        generation = (raw_generation[0]
+                      if isinstance(raw_generation, list) and len(raw_generation) == 1
+                      else raw_generation)
     except Exception:
         raise CheckpointUnavailable("Atomic provider checkpoint commit failed") from None
     if (type(generation) is not int or generation != args["p_expected_generation"] + 1):

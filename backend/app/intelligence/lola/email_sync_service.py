@@ -43,7 +43,7 @@ class SyncResult:
     reply_status: str = "not_assessed"
     follow_up_eligible: bool = False
     external_messages_sent: bool = False
-    external_writes_executed: bool = False
+    outbound_provider_writes_executed: bool = False
 
 
 def _identity_equal(a: ResolvedCrossChannelCase, b: ResolvedCrossChannelCase) -> bool:

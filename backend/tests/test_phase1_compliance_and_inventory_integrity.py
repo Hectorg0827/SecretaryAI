@@ -167,12 +167,34 @@ async def test_setup_status_does_not_treat_unreadable_license_table_as_zero():
 
 
 @pytest.mark.asyncio
-async def test_delete_must_report_missing_row_and_failed_database():
-    for mode, expected in (("ok", 404), ("raise", 503), ("empty", 404)):
-        db = FakeDB(write_mode=mode)
-        with pytest.raises(HTTPException) as error:
-            await api.delete_product("not-here", user=USER, db=db)
-        assert error.value.status_code == expected
+@pytest.mark.parametrize("handler,table", [
+    (api.delete_product, "compliance_products"),
+    (api.delete_license, "compliance_licenses"),
+    (api.delete_brand_registration, "compliance_brand_registrations"),
+    (api.delete_federal_permit, "compliance_federal_permits"),
+    (api.delete_distributor, "compliance_distributors"),
+    (api.delete_cola, "compliance_colas"),
+])
+async def test_compliance_hard_delete_forbidden_even_for_owner(handler, table):
+    db = FakeDB()
+    original = {"id": "existing", "company_id": USER["company_id"]}
+    db.rows[table] = [original.copy()]
+    with pytest.raises(HTTPException) as error:
+        await handler("existing", user=USER, db=db)
+    assert error.value.status_code == 403
+    assert "retained" in error.value.detail.lower()
+    assert db.rows[table] == [original]
+
+
+@pytest.mark.asyncio
+async def test_compliance_delete_rejected_before_database_access():
+    class NoDatabaseAccess:
+        def table(self, _name):
+            raise AssertionError("Rejected delete must not touch database")
+
+    with pytest.raises(HTTPException) as error:
+        await api.delete_product("foreign-or-missing", user=USER, db=NoDatabaseAccess())
+    assert error.value.status_code == 403
 
 
 @pytest.mark.asyncio

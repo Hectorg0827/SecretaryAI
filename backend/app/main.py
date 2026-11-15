@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.api import chat, dashboard, accounts, inventory, settings as settings_router, webhooks, actions, auth, agent, notifications, inbox, workflows, feed, setup, computer_use as computer_use_router, billing
 from app.api import docs as docs_router
 from app.api import briefing as briefing_router
+from app.api import lola_chief_of_staff as lola_chief_of_staff_router
 from app.api import finance_workspace as finance_workspace_router
 from app.api import account_security as account_security_router
 from app.api import outlook_oauth as outlook_oauth_router
@@ -303,6 +304,7 @@ else:
 app.include_router(chat.router,             prefix="/api/chat",          tags=["chat"],          dependencies=_PAID)
 app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"],     dependencies=_PAID)
 app.include_router(briefing_router.router,  prefix="/api/briefing",      tags=["briefing"],      dependencies=_PAID)
+app.include_router(lola_chief_of_staff_router.router, prefix="/api/lola/chief-of-staff", tags=["lola-chief-of-staff"], dependencies=_PAID)
 app.include_router(finance_workspace_router.router, prefix="/api/finance", tags=["finance-workspace"], dependencies=_PAID)
 app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"],      dependencies=_PAID)
 app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"],     dependencies=_PAID)

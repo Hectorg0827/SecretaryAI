@@ -1,0 +1,17 @@
+.lola-journal { margin: 24px 0 10px; padding: clamp(18px,3vw,28px); border: 1px solid rgba(125,138,177,.22); border-radius: 20px; background: linear-gradient(140deg,rgba(95,107,138,.095),rgba(41,48,71,.025)); }
+.lola-journal__heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.lola-journal h3 { margin: 5px 0 10px; font-size: 1.12rem; }
+.lola-journal button { border: 1px solid rgba(139,149,179,.5); border-radius: 12px; padding: 9px 12px; background: rgba(127,140,172,.09); color: inherit; cursor: pointer; font-size: .83rem; font-weight: 650; }
+.lola-journal button:hover:enabled { border-color: rgba(129,149,210,.85); }
+.lola-journal button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.lola-journal button:disabled { cursor: not-allowed; opacity: .58; }
+.lola-journal__explanation, .lola-journal__note, .lola-journal__footer { font-size: .8rem; line-height: 1.5; opacity: .8; }
+.lola-journal__items { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,230px),1fr)); gap: 12px; margin-top: 16px; }
+.lola-journal__item { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid rgba(139,149,179,.25); border-radius: 14px; background: rgba(127,140,172,.06); overflow-wrap: anywhere; }
+.lola-journal__item strong { font-size: .95rem; }
+.lola-journal__item > span { font-size: .83rem; line-height: 1.35; }
+.lola-journal__item .lola-journal__meta { font-size: .73rem; letter-spacing: .045em; font-weight: 700; opacity: .78; }
+.lola-journal__item .lola-journal__source { opacity: .76; }
+.lola-journal__item button { margin-top: auto; }
+.lola-journal__footer { margin-top: 18px; }
+.lola-journal__footer a { color: inherit; text-underline-offset: 2px; }

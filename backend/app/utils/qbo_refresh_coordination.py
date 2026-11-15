@@ -14,7 +14,9 @@ from app.utils.qbo_token_store import (
     mark_qbo_needs_reconnect, persist_rotated_qbo_tokens,
 )
 
-_LOCK_TTL = 30
+# A refresh can spend 10s on the read, 15s at Intuit, and 10s on CAS.
+# Keep the lease above that upper bound so a waiter cannot refresh mid-write.
+_LOCK_TTL = 45
 _LOCK_WAIT = 10
 
 

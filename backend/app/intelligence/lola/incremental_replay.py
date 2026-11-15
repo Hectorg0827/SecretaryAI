@@ -114,6 +114,7 @@ async def replay_gmail_history(
     changes: list[ChangeRef] = []
     page_metadata: list[object] = []
     last_watermark = int(start)
+    last_record_history_id = int(start)
     last_response_watermark = start
 
     for page_number in range(1, PAGE_LIMIT + 1):
@@ -142,10 +143,11 @@ async def replay_gmail_history(
             if not isinstance(row, Mapping):
                 raise ReplayUnavailable("Malformed Gmail change record")
             history_id = _history_id(row.get("id"))
-            if (int(history_id) <= int(start)
+            if (int(history_id) <= last_record_history_id
                     or int(history_id) > int(watermark)
                     or history_id in seen_records):
-                raise ReplayUnavailable("Gmail history record is duplicated or out of scope")
+                raise ReplayUnavailable("Gmail history records out of order or out of scope")
+            last_record_history_id = int(history_id)
             seen_records.add(history_id)
             operations: list[object] = []
             # Use the documented change collections rather than the summary

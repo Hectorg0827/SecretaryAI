@@ -126,6 +126,17 @@ def _unavailable(scope: WorkScope, reason: str) -> ContinuityDecision:
     )
 
 
+
+
+def _opaque_ref(company: str, event: ActivityRecord) -> str:
+    """Non-reversible, tenant-partitioned provenance pointer for responses.
+
+    The authenticated adapter retains the raw provider ID; it must never
+    escape into a response where a Message-ID or provider ref may carry PII.
+    """
+    material = "\n".join((company, event.channel.value, event.source_record_id))
+    return "source-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
 def evaluate_follow_up(
     scope: WorkScope,
     *,
@@ -237,7 +248,7 @@ def evaluate_follow_up(
             scope.company_id, scope.employee_id, scope.contact_id,
             scope.work_item_id, scope.mapping_revision,
             *(f"{e.channel.value}:{e.source_record_id}:{e.source_revision}:{e.activity.value}:{_utc(e.observed_at).isoformat()}" for e in evidence),
-            *(f"{c.channel.value}:{c.source_revision}" for c in sorted(
+            *(f"{c.channel.value}:{c.source_revision}:{_utc(c.complete_through).isoformat()}" for c in sorted(
                 coverage, key=lambda c: c.channel.value)),
         )
         fingerprint = hashlib.sha256("\n".join(data).encode("utf-8")).hexdigest()
@@ -254,7 +265,7 @@ def evaluate_follow_up(
         return ContinuityDecision(
             state=state, reason=reason,
             work_item_id=scope.work_item_id, contact_id=scope.contact_id,
-            supporting_record_ids=tuple(e.source_record_id for e in evidence),
+            supporting_record_ids=tuple(_opaque_ref(scope.company_id, e) for e in evidence),
             evidence_fingerprint=fingerprint, follow_up_after=due.isoformat(),
             checked_through=checked_through.isoformat(),
             requires_human_review=state == ContinuityState.REVIEW_FOLLOW_UP,

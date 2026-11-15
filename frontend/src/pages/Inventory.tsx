@@ -90,7 +90,7 @@ function InventoryRow({ alert, onDraftPO, onForecast, canDraftPO, drafting }: {
           {cfg.label}
         </span>
       </td>
-      <td className="px-5 py-3.5 text-sm font-medium text-slate-700">{alert.total_qty.toLocaleString()} units</td>
+      <td className="px-5 py-3.5 text-sm font-medium text-slate-700">{alert.total_qty.toLocaleString()} {alert.quantity_unit === 'cases' ? 'cases' : alert.quantity_unit === 'unverified' ? 'units (unverified UOM)' : 'units'}</td>
       <td className="px-5 py-3.5 text-sm text-slate-500">
         {alert.weeks_remaining != null ? `~${alert.weeks_remaining.toFixed(1)} wks` : '—'}
       </td>

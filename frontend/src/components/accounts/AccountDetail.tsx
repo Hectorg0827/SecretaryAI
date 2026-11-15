@@ -58,7 +58,7 @@ const fmtMoney = (n?: number | null) =>
   n != null ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
 /** Date-only strings (YYYY-MM-DD) are calendar days, not UTC midnight. */
-function fmtDate(d?: string | null): string {
+export function fmtDate(d?: string | null): string {
   if (!d) return '—';
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
   const parsed = dateOnly

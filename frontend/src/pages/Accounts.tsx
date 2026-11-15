@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { TrendingUp, TrendingDown, AlertTriangle, Clock, Search, Users } from 'lucide-react';
 import { api, Account } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
-import { AccountDetail } from '../components/accounts/AccountDetail';
+import { AccountDetail, fmtDate } from '../components/accounts/AccountDetail';
 
 const HEALTH_CFG = {
   healthy: { label: 'Healthy', icon: TrendingUp,    color: 'text-emerald-600', bg: 'bg-emerald-50' },
@@ -48,9 +48,7 @@ function AccountRow({ account, onClick }: { account: Account; onClick: () => voi
       <td className="px-5 py-3.5 text-sm text-slate-600 font-medium">{fmt(account.current_balance)}</td>
       <td className="px-5 py-3.5 text-sm text-slate-600">{fmt(account.avg_order_value)}</td>
       <td className="px-5 py-3.5 text-sm text-slate-400">
-        {account.last_order_date
-          ? new Date(account.last_order_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-          : '—'}
+        {fmtDate(account.last_order_date)}
       </td>
       <td className="px-5 py-3.5 text-xs text-slate-400">{account.assigned_rep ?? '—'}</td>
     </tr>

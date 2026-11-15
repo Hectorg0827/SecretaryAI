@@ -6,7 +6,7 @@ from fastapi import HTTPException
 import pytest
 
 from app.api import compliance as compliance_api
-from app.api.chat import _verified_compliance_context
+from app.api.chat import _verified_compliance_context, _guard_compliance_answer
 from app.ai.data_summarizer import build_query_context
 
 
@@ -95,3 +95,44 @@ async def test_complete_registry_is_not_misrepresented_as_regulator_certificatio
     assert "not independently verified with regulators" in text
     assert "not proof of current license" in text
     assert "Synthetic permit" in text
+
+
+def test_zero_colas_in_internal_registry_are_not_proof_of_legal_prohibition():
+    data = {"compliance": {
+        "source": "company-scoped Lion BI compliance registry",
+        "is_setup": False, "missing": ["colas"], "overall_status": "unverified",
+        "counts": {**COUNTS, "colas_count": 0}, "alerts_count": 0,
+    }}
+    summary = build_query_context("compliance_check", data)
+    assert "Zero COLAs" in summary
+    assert "does NOT prove" in summary
+    assert "illegal or blocked" in summary
+    assert "legal status is unverified" in summary
+
+
+@pytest.mark.parametrize("unsupported", [
+    "There are no COLAs on file, so you cannot legally import.",
+    "Importation is blocked until you register every COLA.",
+    "The importation and sale of these products would be blocked.",
+    "The business is fully compliant because no alerts were found.",
+    "You are prohibited from selling the product.",
+])
+def test_lola_regulator_claim_is_replaced_before_streaming(unsupported):
+    evidence = {"counts": {"colas_count": 0}, "is_setup": False,
+                "source_quality": "registry_observed_not_regulator_verified"}
+    guarded = _guard_compliance_answer(unsupported, evidence)
+    assert guarded != unsupported
+    assert "0 COLA records are recorded in Lion BI" in guarded
+    assert "UNVERIFIED" in guarded
+    assert "setup is incomplete" in guarded
+    assert "Shipment clearance is unverified" in guarded
+    assert "neither a legal ban nor regulatory clearance" in guarded
+
+
+def test_accurate_registry_uncertainty_is_preserved():
+    evidence = {"counts": {"colas_count": 0}, "is_setup": False}
+    good = (
+        "The internal registry contains zero COLAs on file. That does not "
+        "establish whether external approvals exist, so clearance is unverified."
+    )
+    assert _guard_compliance_answer(good, evidence) == good

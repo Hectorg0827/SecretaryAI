@@ -209,6 +209,7 @@ export interface InventoryAlert {
   item_id: string;
   product_name: string;
   total_qty: number;
+  quantity_unit?: 'units' | 'cases' | 'unverified';
   weeks_remaining: number | null;
   stock_status: 'low' | 'critical' | 'out_of_stock';
   needs_po: boolean;

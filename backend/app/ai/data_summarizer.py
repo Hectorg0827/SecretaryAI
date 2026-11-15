@@ -27,10 +27,13 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
     if not inventory_rows:
         return "No inventory data available."
 
-    terms = _get_terminology(industry_module)
-    unit = terms.get("unit_of_measure", "units")
+    # An industry module's default "cases" is not a verified conversion of
+    # QuickBooks QuantityOnHand. Respect the per-item source measurement.
+    def unit_for(item: dict) -> str:
+        observed = item.get("quantity_unit", "units")
+        return observed if observed in {"units", "cases"} else "unverified inventory units"
 
-    lines = ["Current inventory levels:"]
+    lines = ["Current inventory levels (no inferred case conversion):"]
     critical = [i for i in inventory_rows if i.get("stock_status") in ("critical", "out_of_stock")]
     low = [i for i in inventory_rows if i.get("stock_status") == "low"]
     healthy = [i for i in inventory_rows if i.get("stock_status") == "healthy"]
@@ -40,19 +43,19 @@ def summarize_inventory(inventory_rows: list[dict], industry_module=None) -> str
         weeks = item.get("weeks_remaining")
         wks_str = f"~{float(weeks):.1f} wks" if weeks else "—"
         lines.append(
-            f"  [CRITICAL] {item['product_name']}: {item['total_qty']} {unit}, {wks_str} supply"
+            f"  [CRITICAL] {item['product_name']}: {item['total_qty']} {unit_for(item)}, {wks_str} supply"
         )
 
     for item in low:
         weeks = item.get("weeks_remaining")
         wks_str = f"~{float(weeks):.1f} wks" if weeks else "—"
         lines.append(
-            f"  [LOW] {item['product_name']}: {item['total_qty']} {unit}, {wks_str} supply"
+            f"  [LOW] {item['product_name']}: {item['total_qty']} {unit_for(item)}, {wks_str} supply"
         )
 
     for item in unassessed:
         lines.append(
-            f"  [UNASSESSED] {item['product_name']}: {item['total_qty']} {unit}; "
+            f"  [UNASSESSED] {item['product_name']}: {item['total_qty']} {unit_for(item)}; "
             "weekly sell-through was not verified, so stock coverage is unknown"
         )
     lines.append(f"  {len(healthy)} products at verified healthy stock levels.")
@@ -179,8 +182,12 @@ def build_query_context(intent: str, data: dict, industry_module=None) -> str:
                 f"{alert.get('item_name', '')} ({alert.get('state_code', '')})"
             )
         lines.append(
-            "Do not say the business, its products, or a shipment is licensed, "
-            "approved, or compliant without complete authoritative evidence."
+            "Internal registry counts describe records ON FILE only. Zero COLAs "
+            "recorded here does NOT prove the company lacks valid COLAs elsewhere; "
+            "it cannot establish that importation or sale is illegal or blocked. "
+            "Do not infer legal prohibition OR regulatory clearance from missing "
+            "registry records. Say legal status is unverified, then identify "
+            "the external product-specific TTB/state evidence needed."
         )
         return chr(10).join(lines)
 

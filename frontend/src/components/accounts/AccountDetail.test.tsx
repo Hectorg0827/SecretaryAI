@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type Account } from '../../lib/api';
-import { AccountDetail, type AccountOrdersResponse } from './AccountDetail';
+import { AccountDetail, fmtDate, type AccountOrdersResponse } from './AccountDetail';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -143,5 +143,13 @@ describe('account detail summary', () => {
     const page = await mount(<AccountDetail account={unobserved} onClose={() => {}} />);
     const avg = Array.from(page.querySelectorAll('p')).find((p) => p.textContent === 'Avg Order');
     expect(avg?.previousElementSibling?.textContent).toBe('—');
+  });
+});
+
+describe('QuickBooks calendar-day dates shared by Accounts and AccountDetail', () => {
+  it('never shifts an August 15 invoice into August 14 in New York', () => {
+    expect(fmtDate('2026-08-15')).toBe('Aug 15, 2026');
+    expect(fmtDate('2026-08-14')).toBe('Aug 14, 2026');
+    expect(fmtDate(null)).toBe('—');
   });
 });

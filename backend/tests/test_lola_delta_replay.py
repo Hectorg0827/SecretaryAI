@@ -239,6 +239,20 @@ def test_graph_incremental_round_reuses_exact_saved_delta_token():
     assert candidate.round_complete is True
 
 
+
+def test_graph_same_terminal_token_with_changed_record_is_not_accepted():
+    # A completed empty incremental delta may preserve its token, but a
+    # purportedly changed delta with the same cursor is untrusted.
+    with pytest.raises(DeltaUnavailable):
+        do_graph(
+            pages=({
+                "value": [{"id": "unexpected-changed-message"}],
+                "@odata.deltaLink": GRAPH_DELTA,
+            },),
+            previous=GRAPH_DELTA,
+        )
+
+
 def test_graph_other_folder_is_rejected_before_provider_call():
     wrong_folder = "https://graph.microsoft.com/v1.0/me/mailFolders/other/messages/delta?$deltatoken=X"
     called = []

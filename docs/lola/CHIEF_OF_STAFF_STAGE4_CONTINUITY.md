@@ -12,7 +12,7 @@
 1. The employee receives an actionable *email request* (provider-backed event).
 2. The same employee sends a first draft on WhatsApp Business; the actual provider echo/confirmation is essential. A composed but unsent draft does not count.
 3. The canonical contact and business work-item ID must be linked in an employee-consented, verified identity registry. The engine never links on names, subject similarity or inferred semantic resemblance.
-4. Independent email and WhatsApp coverage attest that all relevant events since the original request were retrieved and the last sync is sufficiently recent.
+4. Independent email and WhatsApp coverage attest that all relevant events since the original request were retrieved and the last sync is sufficiently recent. The result exposes the earlier verified coverage end (`checked_through`) and never claims observation after that point. Both sources must cover the full response deadline before a due recommendation.
 5. Lola evaluates a 24-hour response window. If both channels show no response, the engine returns `REVIEW_FOLLOW_UP`. A reply through either channel returns `REPLIED`; incomplete sync, cross-tenant data, stale data, missing identity evidence or conflicting source revisions returns `EVIDENCE_UNAVAILABLE`.
 6. The result is a proposed internal review only. There is NO permission to send an email, message, push notification or other external action.
 

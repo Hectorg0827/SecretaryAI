@@ -124,6 +124,8 @@ def test_lola_regulator_claim_is_replaced_before_streaming(unsupported):
     assert guarded != unsupported
     assert "0 COLA records are recorded in Lion BI" in guarded
     assert "UNVERIFIED" in guarded
+    assert "setup is incomplete" in guarded
+    assert "Shipment clearance is unverified" in guarded
     assert "neither a legal ban nor regulatory clearance" in guarded
 
 

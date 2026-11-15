@@ -527,14 +527,20 @@ def _guard_compliance_answer(answer: str, evidence: dict) -> str:
         if type(colas) is int and colas >= 0
         else "Lion BI's COLA record count is unavailable"
     )
+    setup = (
+        "incomplete" if evidence.get("is_setup") is False
+        else "not independently regulator-verified"
+    )
     return (
         f"Internal compliance evidence: {observed}. "
+        f"Lion BI compliance setup is {setup}. "
         "This reflects what is on file in the company's registry, not whether "
         "valid approvals exist externally. The company's product-specific "
         "import and sale authorization is UNVERIFIED from these records; "
         "neither a legal ban nor regulatory clearance can be established. "
-        "Before making a shipment or sales decision, verify the applicable "
-        "TTB COLA/permit records and state requirements for the product."
+        "Shipment clearance is unverified. Before making a shipment or sales "
+        "decision, verify applicable TTB COLA/permit records and state "
+        "requirements for the product."
     )
 
 

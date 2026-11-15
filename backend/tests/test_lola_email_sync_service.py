@@ -54,20 +54,38 @@ def call_args(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_gmail_no_baseline_returns_nonactionable_without_touching_connector(monkeypatch):
+async def test_gmail_missing_checkpoint_runs_verified_full_sync_before_atomic_commit(monkeypatch):
+    from app.intelligence.lola.gmail_bootstrap import GmailBootstrapEvidence
+    from app.intelligence.lola.incremental_replay import ChangeRef
     monkeypatch.setattr(svc, "resolve_verified_case", lambda **kwargs: case())
     monkeypatch.setattr(svc, "read_checkpoint", lambda **kwargs: None)
-    called = []
-    monkeypatch.setattr(svc, "commit_replay", lambda **kwargs: called.append(kwargs))
+
+    async def evidence(**kwargs):
+        return GmailBootstrapEvidence(
+            next_history_id="1005",
+            changed_records=(ChangeRef("PRIVATE-message", "added"),),
+            page_count=2, message_count=1, history_record_count=0,
+            digest="a" * 64,
+        )
+    monkeypatch.setattr(svc, "collect_gmail_bootstrap", evidence)
+    committed = []
+    def commit(**kwargs):
+        committed.append(kwargs)
+        assert isinstance(kwargs["replay"], GmailBootstrapEvidence)
+        assert kwargs["previously_read"] is None
+        return CheckpointCommit(1, "gmail", 1, "a"*64, NOW.isoformat())
+
+    monkeypatch.setattr(svc, "commit_replay", commit)
     output = await svc.synchronize_verified_case_email(**call_args(
         provider="gmail", verified_resource_id="employee@private.invalid",
         verified_principal="employee@private.invalid", connector=GmailShouldNotRead(),
     ))
-    assert output.state == "requires_full_gmail_bootstrap"
+    assert output.state == "baseline_recorded"
+    assert output.committed_generation == 1
     assert output.follow_up_eligible is False
     assert output.reply_status == "not_assessed"
-    assert output.ingested_metadata_count == 0
-    assert called == []
+    assert output.ingested_metadata_count == 1
+    assert len(committed) == 1
 
 
 @pytest.mark.asyncio

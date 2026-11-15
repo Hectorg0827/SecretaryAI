@@ -12,7 +12,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.intelligence.lola.identity_registry import (
-    IdentityAccessDenied, IdentitySourceUnavailable, _actor,
+    IdentitySourceUnavailable, _actor,
 )
 
 EMAIL = "employee_integrations"
@@ -50,8 +50,9 @@ def inspect_existing_readiness(*, user: dict, db, contact_id: UUID | None = None
     )
     allowed = {"gmail", "outlook"}
     if any(
-        row.get("provider") not in allowed for row in emails
-    ) or len({row.get("provider") for row in emails}) != len(emails):
+        not isinstance(row.get("provider"), str) or row["provider"] not in allowed
+        for row in emails
+    ) or len({row["provider"] for row in emails}) != len(emails):
         raise IdentitySourceUnavailable("Ambiguous employee email integration")
     valid_emails = [
         row for row in emails

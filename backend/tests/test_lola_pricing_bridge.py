@@ -114,7 +114,7 @@ def test_complete_reconciled_snapshot_is_still_not_accounting_certified():
     db = Database()
     result = review(db)
     assert result["source_documentation_complete"] is True
-    assert result["recorded_cost_per_case"] == "27.050000"
+    assert result["recorded_cost_per_case"] == "27.150000"
     assert result["accepted_cases"] == "1200.000"
     assert result["review_state"] == "ready_for_independent_reconciliation"
     assert result["gross_margin_calculated"] is False

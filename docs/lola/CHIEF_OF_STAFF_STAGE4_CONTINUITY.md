@@ -24,9 +24,9 @@
 - `outbound_delivery_confirmed` is required for any WhatsApp draft-send claim, ideally from the official app-echo and appropriate message webhooks. Locally generated drafts are not considered sent.
 - The absence of a reply is meaningful only if *both* provider sources have complete coverage from the original request to within the allowed sync lag.
 - Events carry provider ID, provider revision and timezone-aware observation time; conflicting IDs and out-of-window records fail closed.
-- The output contains only stable internal work-item/contact IDs and source pointers; no message bodies or personal contact details.
+- The output contains only stable internal work-item/contact IDs and tenant-scoped opaque hashes of provider source IDs; raw provider IDs (which may contain addresses), message bodies and contact details are not returned. Trusted adapters retain the raw IDs for authorized source lookup.
 - No automatic outreach. Lola only proposes an authenticated employee review.
-- The fingerprint changes when relevant evidence or the source sync version changes; it is not an execution idempotency key or permission grant.
+- The fingerprint changes when relevant evidence, source timestamps, sync revision or verified sync watermark changes; it is not an execution idempotency key or permission grant.
 
 ## Not yet implemented
 

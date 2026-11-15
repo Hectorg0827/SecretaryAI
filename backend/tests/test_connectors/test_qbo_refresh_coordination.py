@@ -155,6 +155,11 @@ def _adapter(*, expected="cipher:old-refresh"):
     return adapter, cfg
 
 
+def test_redis_lease_outlives_bounded_token_round_trip():
+    # Re-read + Intuit + CAS must not be able to run past the lease.
+    assert qbo_refresh_coordination._LOCK_TTL > 2 * qbo_token_store._QBO_DB_TIMEOUT_SECONDS + 15
+
+
 @pytest.mark.asyncio
 async def test_two_simultaneous_401s_rotate_once_and_both_queries_succeed(isolated_qbo, caplog):
     http = _HTTP()

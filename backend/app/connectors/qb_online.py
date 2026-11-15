@@ -16,6 +16,7 @@ from app.connectors.base import (
     PurchaseOrder,
     QuickBooksAdapter,
 )
+from app.utils.qbo_token_store import QBOReconnectRequired
 from app.connectors.invoice_integrity import (
     decimal_field,
     invoice_balance,
@@ -205,7 +206,7 @@ class QBOnlineAdapter(QuickBooksAdapter):
             if response.status_code == 401:
                 try:
                     await self._refresh_access_token()
-                except __import__("app.utils.qbo_token_store", fromlist=["QBOReconnectRequired"]).QBOReconnectRequired:
+                except QBOReconnectRequired:
                     raise
                 except Exception:
                     # Report diagnostics must distinguish an OAuth refresh

@@ -659,7 +659,7 @@ async def add_product(
 
     product = AlcoholProduct(**kwargs)
 
-    save_record(db, "compliance_products", {
+    await save_record(db, "compliance_products", {
             "id": product.id,
             "company_id": company_id,
             "sku": product.sku,
@@ -672,7 +672,7 @@ async def add_product(
             "country_of_origin": product.country_of_origin,
             "foreign_producer_id": product.foreign_producer_id,
             "requires_formula_approval": product.requires_formula_approval,
-    })
+    }, user=user)
 
     return _serialize_dataclass(product)
 
@@ -720,7 +720,7 @@ async def add_license(
 
     license_ = StateLicense(**kwargs)
 
-    save_record(db, "compliance_licenses", {
+    await save_record(db, "compliance_licenses", {
             "id": license_.id,
             "company_id": company_id,
             "state_code": license_.state_code,
@@ -733,7 +733,7 @@ async def add_license(
             "annual_fee": license_.annual_fee,
             "status": license_.status.value,
             "notes": license_.notes,
-    })
+    }, user=user)
 
     return _serialize_dataclass(license_)
 
@@ -779,7 +779,7 @@ async def add_brand_registration(
 
     reg = BrandRegistration(**kwargs)
 
-    save_record(db, "compliance_brand_registrations", {
+    await save_record(db, "compliance_brand_registrations", {
             "id": reg.id,
             "company_id": company_id,
             "product_id": reg.product_id,
@@ -790,7 +790,7 @@ async def add_brand_registration(
             "registration_fee": reg.registration_fee,
             "status": reg.status.value,
             "state_label_approval_number": reg.state_label_approval_number,
-    })
+    }, user=user)
 
     return _serialize_dataclass(reg)
 
@@ -834,7 +834,7 @@ async def add_federal_permit(
 
     permit = FederalPermit(**kwargs)
 
-    save_record(db, "compliance_federal_permits", {
+    await save_record(db, "compliance_federal_permits", {
             "id": permit.id,
             "company_id": company_id,
             "permit_type": permit.permit_type.value,
@@ -843,7 +843,7 @@ async def add_federal_permit(
             "expiration_date": _serialize_date(permit.expiration_date),
             "status": permit.status.value,
             "notes": permit.notes,
-    })
+    }, user=user)
 
     return _serialize_dataclass(permit)
 
@@ -892,7 +892,7 @@ async def add_distributor(
 
     dist = DistributorRelationship(**kwargs)
 
-    save_record(db, "compliance_distributors", {
+    await save_record(db, "compliance_distributors", {
             "id": dist.id,
             "company_id": company_id,
             "state_code": dist.state_code,
@@ -906,7 +906,7 @@ async def add_distributor(
             "termination_restriction": dist.termination_restriction.value,
             "contract_document_ref": dist.contract_document_ref,
             "notes": dist.notes,
-    })
+    }, user=user)
 
     return _serialize_dataclass(dist)
 
@@ -952,7 +952,7 @@ async def add_cola(
 
     cola = COLARecord(**kwargs)
 
-    save_record(db, "compliance_colas", {
+    await save_record(db, "compliance_colas", {
             "id": cola.id,
             "company_id": company_id,
             "product_id": cola.product_id,
@@ -963,7 +963,7 @@ async def add_cola(
             "status": cola.status.value,
             "formula_approved": cola.formula_approved,
             "lab_analysis_on_file": cola.lab_analysis_on_file,
-    })
+    }, user=user)
 
     return _serialize_dataclass(cola)
 

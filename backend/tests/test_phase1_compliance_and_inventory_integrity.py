@@ -31,6 +31,46 @@ ENDPOINTS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def allow_compliance_record_policy(monkeypatch):
+    """Existing persistence tests exercise an explicit policy allow decision."""
+    from app.domain.policy import PolicyEngine
+
+    async def allow(_self, _proposal):
+        return SimpleNamespace(effect="allow", rule_id=None)
+    monkeypatch.setattr(PolicyEngine, "evaluate", allow)
+
+
+class AtomicRpc:
+    def __init__(self, db, params):
+        self.db = db
+        self.params = params
+
+    def execute(self):
+        if self.db.write_mode == "raise":
+            raise RuntimeError("synthetic atomic write failure")
+        if self.db.write_mode == "empty":
+            return SimpleNamespace(data={})
+        if self.db.write_mode == "mismatch":
+            return SimpleNamespace(data={
+                "record": {"id": "wrong", "company_id": "wrong"},
+                "audit_event_id": "synthetic-event",
+            })
+        if self.db.audit_failure:
+            raise RuntimeError("synthetic atomic audit failure")
+        table = self.params["p_table"]
+        record = self.params["p_record"]
+        others = [row for row in self.db.rows.get(table, []) if row.get("id") != record["id"]]
+        others.append(dict(record))
+        self.db.rows[table] = others
+        self.db.rows.setdefault("audit_events", []).append({
+            "id": "synthetic-event",
+            "company_id": record["company_id"],
+            "entity_type": table,
+        })
+        return SimpleNamespace(data={"record": dict(record), "audit_event_id": "synthetic-event"})
+
+
 class Query:
     def __init__(self, db, name):
         self.db, self.name = db, name
@@ -51,6 +91,10 @@ class Query:
         self.action, self.record = "upsert", record
         return self
 
+    def insert(self, record):
+        self.action, self.record = "insert", record
+        return self
+
     def delete(self):
         self.action = "delete"
         return self
@@ -67,6 +111,11 @@ class Query:
                 rows = [{"id": "tenant-a", "name": "Synthetic Co",
                          "compliance_active_states": "NY"}]
             return SimpleNamespace(data=rows, count=len(rows))
+        if self.action == "insert":
+            if self.db.audit_failure:
+                raise RuntimeError("synthetic audit unavailable")
+            self.db.rows.setdefault(self.name, []).append(dict(self.record))
+            return SimpleNamespace(data=[dict(self.record)])
         if self.action == "upsert":
             if self.db.write_mode == "raise":
                 raise RuntimeError("synthetic database write outage")
@@ -90,12 +139,18 @@ class Query:
 
 
 class FakeDB:
-    def __init__(self, *, fail_table=None, write_mode="ok"):
+    def __init__(self, *, fail_table=None, write_mode="ok", audit_failure=False):
         self.fail_table, self.write_mode = fail_table, write_mode
+        self.audit_failure = audit_failure
         self.rows = {}
 
     def table(self, name):
         return Query(self, name)
+
+    def rpc(self, name, params):
+        assert name == "compliance_write_record_audited"
+        assert params["p_policy_effect"] == "allow"
+        return AtomicRpc(self, params)
 
 
 @pytest.mark.asyncio
@@ -184,6 +239,89 @@ async def test_compliance_hard_delete_forbidden_even_for_owner(handler, table):
     assert error.value.status_code == 403
     assert "retained" in error.value.detail.lower()
     assert db.rows[table] == [original]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effect,status", [
+    ("require_approval", 409), ("deny", 403),
+])
+async def test_policy_gate_blocks_compliance_mutations_with_durable_audit(monkeypatch, effect, status):
+    from app.domain.policy import PolicyEngine
+
+    async def decide(_self, _proposal):
+        return SimpleNamespace(effect=effect, rule_id=None)
+    monkeypatch.setattr(PolicyEngine, "evaluate", decide)
+    db = FakeDB()
+    with pytest.raises(HTTPException) as error:
+        await api.add_product(
+            api.AddProductRequest(sku="SYN", name="Synthetic wine"),
+            user=USER, db=db,
+        )
+    assert error.value.status_code == status
+    assert db.rows.get("compliance_products", []) == []
+    audits = db.rows["audit_events"]
+    assert len(audits) == 1
+    assert audits[0]["policy_effect"] == effect
+    assert audits[0]["company_id"] == USER["company_id"]
+
+
+@pytest.mark.asyncio
+async def test_failed_denial_audit_is_503_and_never_changes_record(monkeypatch):
+    from app.domain.policy import PolicyEngine
+
+    async def deny(_self, _proposal):
+        return SimpleNamespace(effect="deny", rule_id=None)
+    monkeypatch.setattr(PolicyEngine, "evaluate", deny)
+    db = FakeDB(audit_failure=True)
+    with pytest.raises(HTTPException) as error:
+        await api.add_product(api.AddProductRequest(sku="SYN", name="Synthetic"),
+                              user=USER, db=db)
+    assert error.value.status_code == 503
+    assert db.rows.get("compliance_products", []) == []
+
+
+@pytest.mark.asyncio
+async def test_unavailable_policy_fails_closed_with_audit(monkeypatch):
+    from app.domain.policy import PolicyEngine
+
+    async def unavailable(_self, _proposal):
+        raise RuntimeError("Synthetic policy source failure")
+    monkeypatch.setattr(PolicyEngine, "evaluate", unavailable)
+    db = FakeDB()
+    with pytest.raises(HTTPException) as error:
+        await api.add_product(api.AddProductRequest(sku="SYN", name="Synthetic"),
+                              user=USER, db=db)
+    assert error.value.status_code == 503
+    assert db.rows.get("compliance_products", []) == []
+    assert db.rows["audit_events"][0]["policy_effect"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_atomic_audit_failure_rolls_back_record():
+    db = FakeDB(audit_failure=True)
+    with pytest.raises(HTTPException) as error:
+        await api.add_product(api.AddProductRequest(sku="SYN", name="Synthetic"),
+                              user=USER, db=db)
+    assert error.value.status_code == 503
+    assert db.rows.get("compliance_products", []) == []
+
+
+@pytest.mark.asyncio
+async def test_put_updates_with_record_and_audit_receipt():
+    db = FakeDB()
+    db.rows["compliance_products"] = [{
+        "id": "synthetic-id", "company_id": USER["company_id"],
+        "sku": "OLD", "name": "Original",
+    }]
+    result = await api.update_product(
+        "synthetic-id",
+        api.AddProductRequest(sku="NEW", name="Updated synthetic"),
+        user=USER, db=db,
+    )
+    assert result["name"] == "Updated synthetic"
+    assert len(db.rows["compliance_products"]) == 1
+    assert db.rows["compliance_products"][0]["name"] == "Updated synthetic"
+    assert db.rows["audit_events"][0]["entity_type"] == "compliance_products"
 
 
 @pytest.mark.asyncio

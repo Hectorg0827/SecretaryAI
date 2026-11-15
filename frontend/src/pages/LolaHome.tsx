@@ -5,6 +5,7 @@ import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
 import { ChiefOfStaffInbox } from '../components/lola/ChiefOfStaffInbox';
 import { LolaPricingEvidence } from '../components/lola/LolaPricingEvidence';
+import { LolaReviewJournal } from '../components/lola/LolaReviewJournal';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { LionUIIcon } from '../components/lola/LionUIIcon';
 import { BRAND_LABELS } from '../lib/brand';
@@ -313,6 +314,7 @@ export function LolaHome() {
 
             <ChiefOfStaffInbox enabled={role === 'owner' || role === 'manager' || role === 'back_office'} />
             <LolaPricingEvidence enabled={role === 'owner' || role === 'manager'} />
+            <LolaReviewJournal enabled={role === 'owner' || role === 'manager'} />
 
             <div className="lola-home__action-panel">
               <div className="lola-home__action-icon"><LionUIIcon kind="notification" size={20} /></div>

@@ -15,8 +15,8 @@ from typing import Callable
 import httpx
 
 from app.intelligence.lola.authorized_provider_reads import (
-    GmailHistoryTransport, GraphFolderDeltaTransport,
-    VerifiedEmailConnection, binding_for_resolved_case,
+    GmailHistoryTransport, GmailBootstrapTransport, GraphFolderDeltaTransport,
+    GraphDeltaExpired, VerifiedEmailConnection, binding_for_resolved_case,
 )
 from app.intelligence.lola.identity_registry import (
     ResolvedCrossChannelCase, resolve_verified_case,
@@ -25,6 +25,7 @@ from app.intelligence.lola.incremental_replay import (
     GmailHistoryExpired, ReplayUnavailable,
     replay_gmail_history, replay_graph_folder_delta,
 )
+from app.intelligence.lola.gmail_bootstrap import collect_gmail_bootstrap
 from app.intelligence.lola.replay_persistence import (
     CheckpointUnavailable, CursorVault,
     commit_replay, read_checkpoint, scope_for_verified_case,
@@ -115,31 +116,47 @@ async def synchronize_verified_case_email(
 
     if provider == "gmail":
         if checkpoint is None:
-            # Real Gmail bootstrap requires full mailbox sync and a subsequent
-            # gap-free history pass. Never invent a Gmail history cursor here.
-            return SyncResult("requires_full_gmail_bootstrap", provider, None, 0)
-        fetcher = GmailHistoryTransport(
-            binding=binding, connector=connector, reauthorize=reauthorize,
-        )
-        try:
-            result = await replay_gmail_history(
-                start_history_id=checkpoint.plaintext_cursor,
-                fetch_page=fetcher.fetch_page,
+            fetcher = GmailBootstrapTransport(
+                binding=binding, connector=connector, reauthorize=reauthorize,
             )
-        except GmailHistoryExpired:
-            # Do not delete/advance the existing checkpoint; an approved full
-            # resync must restore coverage independently.
-            return SyncResult("requires_full_gmail_resync", provider, None, 0)
+            try:
+                result = await collect_gmail_bootstrap(
+                    fetch_profile=fetcher.fetch_profile,
+                    fetch_messages_page=fetcher.fetch_messages_page,
+                    fetch_message_metadata=fetcher.fetch_message_metadata,
+                    fetch_history_page=fetcher.fetch_page,
+                )
+            except GmailHistoryExpired:
+                # The initial profile anchor expired while listing messages.
+                # Do not persist any partial snapshot or fabricated cursor.
+                return SyncResult("requires_full_gmail_bootstrap_retry", provider, None, 0)
+        else:
+            fetcher = GmailHistoryTransport(
+                binding=binding, connector=connector, reauthorize=reauthorize,
+            )
+            try:
+                result = await replay_gmail_history(
+                    start_history_id=checkpoint.plaintext_cursor,
+                    fetch_page=fetcher.fetch_page,
+                )
+            except GmailHistoryExpired:
+                # Existing checkpoint must be reset by a separate verified
+                # recovery operation. Never overwrite it with a guessed cursor.
+                return SyncResult("requires_full_gmail_resync", provider, None, 0)
     else:
         fetcher = GraphFolderDeltaTransport(
             binding=binding, connector=connector, reauthorize=reauthorize,
             http_transport=http_transport,
         )
-        result = await replay_graph_folder_delta(
-            verified_folder_id=verified_resource_id,
-            previous_delta_url=checkpoint.plaintext_cursor if checkpoint else None,
-            fetch_url=fetcher.fetch_url,
-        )
+        try:
+            result = await replay_graph_folder_delta(
+                verified_folder_id=verified_resource_id,
+                previous_delta_url=checkpoint.plaintext_cursor if checkpoint else None,
+                fetch_url=fetcher.fetch_url,
+            )
+        except GraphDeltaExpired:
+            # Explicitly signal folder baseline recovery; no cursor commit.
+            return SyncResult("requires_graph_folder_resync", provider, None, 0)
     # Revocation/role/identity changes after last provider page invalidate the
     # entire uncommitted batch. The database is not written on such failures.
     reauthorize()
@@ -148,7 +165,7 @@ async def synchronize_verified_case_email(
         previously_read=checkpoint, observed_at=datetime.now(timezone.utc),
     )
     return SyncResult(
-        "baseline_recorded" if provider == "outlook" and checkpoint is None
+        "baseline_recorded" if checkpoint is None
         else "incremental_metadata_recorded",
         provider, committed.generation, committed.stored_event_count,
     )

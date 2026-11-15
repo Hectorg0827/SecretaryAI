@@ -210,3 +210,40 @@ async def private_communication_readiness(
     except Exception as exc:
         log.warning("Lola private source status unavailable (%s)", type(exc).__name__)
         raise HTTPException(503, "Communication readiness could not be verified") from None
+
+
+
+@router.get("/continuity/cases/{contact_id}/recorded-events")
+async def private_recorded_case_events(
+    contact_id: UUID,
+    response: Response,
+    project_key: str = Query(min_length=1, max_length=160),
+    limit: int = Query(default=20, ge=1, le=50),
+    offset: int = Query(default=0, ge=0, le=5000),
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Private recorded activity metadata; no provider silence claim or PII."""
+    response.headers["Cache-Control"] = "private, no-store"
+    from app.intelligence.lola.private_timeline import (
+        TimelineNotFound, TimelineUnavailable, list_private_case_events,
+    )
+    from app.intelligence.lola.identity_registry import (
+        IdentityAccessDenied, IdentitySourceUnavailable,
+    )
+    try:
+        return list_private_case_events(
+            user=user, db=db, contact_id=contact_id, project_key=project_key,
+            limit=limit, offset=offset,
+        )
+    except IdentityAccessDenied:
+        raise HTTPException(403, "Employee private event access denied") from None
+    except TimelineNotFound:
+        raise HTTPException(404, "Private contact not found") from None
+    except (TimelineUnavailable, IdentitySourceUnavailable):
+        raise HTTPException(503, "Recorded activity evidence unavailable") from None
+    except ValueError:
+        raise HTTPException(422, "Invalid private case request") from None
+    except Exception as exc:
+        log.warning("Lola recorded activity unavailable (%s)", type(exc).__name__)
+        raise HTTPException(503, "Private event verification unavailable") from None

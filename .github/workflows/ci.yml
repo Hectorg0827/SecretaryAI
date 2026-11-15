@@ -52,7 +52,7 @@ jobs:
         working-directory: backend
         run: .venv/bin/python -m pytest -q
       - name: Mutation-test Phase 4 security guards
-        run: python scripts/mutation_phase4.py
+        run: backend/.venv/bin/python scripts/mutation_phase4.py
 
   backend-browser-container:
     name: Backend Chromium container (non-root smoke)

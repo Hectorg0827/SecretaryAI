@@ -5,7 +5,9 @@ apply migrations, deploy Railway, contact a provider or send any message.
 
 ## Implemented
 
-- Review-only, uninstalled SQL at
+- Supabase CLI v2.122.0 generated the migration filename in isolated CI.
+  The unapplied file is `supabase/migrations/20261115050831_lola_delta_atomic_checkpoint_stage10.sql`.
+  Its review source remains at
   `docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql`.
 - It defines the missing Stage 5 employee-consent/channel identity and
   verified-case link tables, an employee-scoped provider checkpoint
@@ -38,8 +40,9 @@ apply migrations, deploy Railway, contact a provider or send any message.
   PostgreSQL 16 in a GitHub Actions service container.
 - `backend/tests/sql/lola_stage10_ephemeral_fixture.sql` supplies only
   synthetic private tables, roles and pgcrypto; no business records.
-- It executes the review-only SQL and then
-  `backend/tests/sql/lola_stage10_ephemeral_acceptance.sql`.
+- It compares the reviewed DDL against the committed CLI-generated migration,
+  executes the **committed migration file** on disposable PostgreSQL, then
+  runs `backend/tests/sql/lola_stage10_ephemeral_acceptance.sql`.
 - Acceptance asserts RLS, browser RPC denial, atomically stored cursor
   and events, stale writer CAS rejection, unique-event rollback,
   tenant isolation, and revocation of employee consent.
@@ -49,13 +52,13 @@ apply migrations, deploy Railway, contact a provider or send any message.
 
 ## Explicit deployment blockers
 
-1. The Supabase CLI is not installed or network-accessible in this
-   execution environment. Per the installed Supabase skill, no migration
-   file was invented. The SQL remains under docs for security review.
-2. After successful ephemeral PostgreSQL tests, a reviewer must obtain
-   the correct Supabase CLI and run `supabase migration new ...`,
-   transfer/validate this SQL into **one** new migration, and check
-   migration ordering with other pending staging migrations.
+1. The local container could not install the Supabase CLI. An isolated
+   GitHub Actions runner DID run `supabase migration new` with pinned CLI
+   v2.122.0 and produced exactly the committed timestamped migration path.
+   No hosted database was connected or changed.
+2. The new migration must pass final ephemeral PostgreSQL validation,
+   full CI, CodeQL, staging DB/security review, and migration-ordering
+   checks against all other pending staging migrations.
 3. Validate the actual target Supabase role privileges, policies and
    encryption-key settings. The SQL authorizations depend on verified
    registry population, which is not implemented by this branch.

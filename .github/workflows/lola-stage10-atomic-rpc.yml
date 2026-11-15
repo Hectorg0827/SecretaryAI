@@ -1,0 +1,52 @@
+name: Lola Stage 10 — ephemeral PostgreSQL atomic checkpoint validation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql'
+      - 'backend/tests/sql/lola_stage10_ephemeral_*.sql'
+      - '.github/workflows/lola-stage10-atomic-rpc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-sql-acceptance:
+    name: Ephemeral Postgres 16 (RLS / CAS / rollback / revocation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres-test-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres-test-only
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure local PostgreSQL client
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+      - name: Create disposable minimal fixture (no hosted database)
+        run: psql -X -v ON_ERROR_STOP=1 -f backend/tests/sql/lola_stage10_ephemeral_fixture.sql
+      - name: Validate exact review-only SQL against disposable DB
+        run: psql -X -v ON_ERROR_STOP=1 -f docs/lola/sql/STAGE10_ATOMIC_CHECKPOINT_REVIEW_ONLY.sql
+      - name: Verify RLS, service-role grants, atomic cursor and events, rollback and revocation
+        run: psql -X -v ON_ERROR_STOP=1 -f backend/tests/sql/lola_stage10_ephemeral_acceptance.sql

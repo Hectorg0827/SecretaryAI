@@ -30,7 +30,7 @@ _RPC = "lola_commit_provider_replay"
 _FIELDS = (
     "company_id,employee_id,provider,provider_identity_sha256,resource_sha256,"
     "mapping_revision,cursor_ciphertext,cursor_sha256,replay_digest,"
-    "baseline_only,replayed_through,generation"
+    "baseline_only,replayed_through,generation,recovery_epoch"
 )
 
 
@@ -56,6 +56,7 @@ class StoredCheckpoint:
     replay_digest: str = field(repr=False)
     baseline_only: bool
     replayed_through: datetime
+    recovery_epoch: int = 0
     # An encrypted durable checkpoint is not full, cross-channel source history.
     complete_mailbox_history: bool = False
     cross_channel_mapping_verified: bool = False
@@ -244,6 +245,11 @@ def read_checkpoint(
         raise CheckpointUnavailable("Invalid provider checkpoint generation")
     if type(row.get("baseline_only")) is not bool:
         raise CheckpointUnavailable("Invalid provider baseline state")
+    # Pre-Stage12 synthetic test rows default to epoch zero; the hosted
+    # staging writer must have the additive epoch column installed.
+    epoch = row.get("recovery_epoch", 0)
+    if type(epoch) is not int or epoch < 0:
+        raise CheckpointUnavailable("Invalid Gmail recovery epoch")
     cipher = _field(row.get("cursor_ciphertext"), "cursor ciphertext", limit=8192)
     cursor = vault.decrypt(scope, cipher)
     if row.get("cursor_sha256") != vault.digest("cursor", cursor):
@@ -261,7 +267,7 @@ def read_checkpoint(
     return StoredCheckpoint(
         generation=generation, plaintext_cursor=cursor,
         replay_digest=digest, baseline_only=row["baseline_only"],
-        replayed_through=_utc(replayed),
+        replayed_through=_utc(replayed), recovery_epoch=epoch,
     )
 
 
@@ -370,6 +376,9 @@ def commit_replay(
         raise CheckpointUnavailable("Checkpoint RPC did not return a valid generation")
     stored = read_checkpoint(db=db, scope=scope, vault=vault)
     if (stored is None or stored.generation != generation
+            or stored.recovery_epoch != (
+                previously_read.recovery_epoch if previously_read else 0
+            )
             or stored.plaintext_cursor != cursor
             or stored.replay_digest != replay.digest
             or stored.baseline_only != (

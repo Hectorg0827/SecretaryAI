@@ -338,6 +338,10 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115181500_lola_provider_replay_checkpoints_staging.sql
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115203000_lola_verified_identity_replay_write_gate_staging.sql
           psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage10_replay_security.sql
+      - name: Execute Stage 12 Gmail cursor recovery and audit acceptance
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115233000_lola_gmail_recovery_epochs_staging.sql
+          psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage12_recovery_security.sql
       - name: Export disposable schema for read-only staging comparison
         run: |
           psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > schema-manifest.json

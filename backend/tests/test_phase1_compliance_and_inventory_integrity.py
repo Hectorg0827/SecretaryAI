@@ -217,3 +217,18 @@ def test_unassessed_product_is_explicit_in_lola_summary():
     assert "[UNASSESSED]" in summary
     assert "could not be assessed" in summary
     assert "0 products at verified healthy stock levels" in summary
+
+
+def test_lola_preserves_inventory_api_units_in_wholesale_distribution():
+    from app.ai.data_summarizer import summarize_inventory
+    class Wholesale:
+        def get_terminology(self):
+            return {"unit_of_measure": "cases"}
+    summary = summarize_inventory([
+        {"product_name": "Test item", "total_qty": 45,
+         "quantity_unit": "units", "stock_status": "unassessed",
+         "weeks_remaining": None},
+    ], Wholesale())
+    assert "45 units" in summary
+    assert "45 cases" not in summary
+    assert "weekly sell-through was not verified" in summary

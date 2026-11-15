@@ -95,3 +95,16 @@ async def test_complete_registry_is_not_misrepresented_as_regulator_certificatio
     assert "not independently verified with regulators" in text
     assert "not proof of current license" in text
     assert "Synthetic permit" in text
+
+
+def test_zero_colas_in_internal_registry_are_not_proof_of_legal_prohibition():
+    data = {"compliance": {
+        "source": "company-scoped Lion BI compliance registry",
+        "is_setup": False, "missing": ["colas"], "overall_status": "unverified",
+        "counts": {**COUNTS, "colas_count": 0}, "alerts_count": 0,
+    }}
+    summary = build_query_context("compliance_check", data)
+    assert "Zero COLAs" in summary
+    assert "does NOT prove" in summary
+    assert "illegal or blocked" in summary
+    assert "legal status is unverified" in summary

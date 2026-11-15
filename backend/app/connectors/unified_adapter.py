@@ -408,6 +408,9 @@ class UnifiedDataAdapter:
                 "qb_qty": float(item.quantity_on_hand),
                 "warehouse_qty": 0,
                 "total_qty": float(item.quantity_on_hand),
+                # QuantityOnHand counts QuickBooks item units; an industry
+                # default of "cases" is not an authorized UOM conversion.
+                "quantity_unit": "units",
                 "reorder_point": float(item.reorder_point) if item.reorder_point else None,
                 "unit_price": float(item.unit_price),
                 "purchase_cost": float(item.purchase_cost),

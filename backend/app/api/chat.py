@@ -323,6 +323,7 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                 {
                     "product_name": i.get("product_name", ""),
                     "total_qty": i.get("total_qty", 0),
+                    "quantity_unit": i.get("quantity_unit", "units"),
                     "stock_status": _qty_to_status(i),
                     "weeks_remaining": _weeks_remaining(i),
                 }
@@ -408,6 +409,7 @@ async def _fetch_data_for_intent(intent: str, message: str, adapter) -> dict:
                             {
                                 "product_name": i.get("product_name", ""),
                                 "total_qty": i.get("total_qty", 0),
+                                "quantity_unit": i.get("quantity_unit", "units"),
                                 "stock_status": _qty_to_status(i),
                                 "weeks_remaining": _weeks_remaining(i),
                             }

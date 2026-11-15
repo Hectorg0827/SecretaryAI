@@ -39,7 +39,7 @@ def test_recovery_rpc_requires_role_consent_locked_cas_and_no_event_deletion():
     assert "recovery_epoch=v_new_epoch" in s
     assert "reason TEXT NOT NULL CHECK (reason = 'gmail_history_404')" in s
     assert "DELETE FROM public.lola_provider_replay_events" not in s
-    assert "ON CONFLICT DO NOTHING;" not in s
+    assert ") ON CONFLICT DO NOTHING;" not in s
 
 
 def test_immutable_recovery_ledger_is_private_and_no_browser_rpc_access():

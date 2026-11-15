@@ -97,7 +97,7 @@ GraphReadPage = Callable[[str], Awaitable[Mapping[str, object]]]
 
 
 def _required(value: object, label: str, maximum: int = MAX_TOKEN_LENGTH) -> str:
-    if (not isinstance(value, str) or not value or len(value) > maximum
+    if (not isinstance(value, str) or not value.strip() or len(value) > maximum
             or any(ord(c) < 32 for c in value)):
         raise DeltaUnavailable(f"Provider {label} invalid")
     return value

@@ -135,31 +135,10 @@ WITH expected(schema_name, function_name) AS (VALUES
 {rows}
 )
 SELECT CASE WHEN bool_and(
-    p.oid IS NOT NULL AND
-    EXISTS (
+    p.oid IS NOT NULL
+    AND EXISTS (
         SELECT 1 FROM unnest(coalesce(p.proconfig, ARRAY[]::text[])) AS setting
-        WHERE setting ~ '^search_path=pg_catalog, *(public, *)?pg_temp
-FROM expected e
-LEFT JOIN pg_namespace n ON n.nspname = e.schema_name
-LEFT JOIN pg_proc p ON p.pronamespace = n.oid AND p.proname = e.function_name;
-"""
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sql", action="store_true", help="emit disposable pg_proc validation SQL")
-    args = parser.parse_args()
-    found = parse_functions()
-    verify(found)
-    if args.sql:
-        print(sql_check(found))
-    else:
-        print(f"OK: {len(found)} migration functions have safe search_path; SECURITY DEFINER grants checked")
-
-
-if __name__ == "__main__":
-    main()
-
+        WHERE setting ~ '^search_path=pg_catalog, *(public, *)?pg_temp$'
     )
     AND (
         NOT p.prosecdef

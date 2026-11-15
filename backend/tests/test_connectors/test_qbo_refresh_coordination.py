@@ -161,6 +161,29 @@ def test_redis_lease_outlives_bounded_token_round_trip():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status,clear_tokens", [
+    ("disconnected", False),
+    ("connected", True),
+])
+async def test_cleared_or_revoked_qbo_never_contacts_provider(
+    isolated_qbo, status, clear_tokens,
+):
+    adapter, cfg = _adapter()
+    cfg["qb_connection_status"] = status
+    if clear_tokens:
+        adapter._access_token = None
+        adapter._refresh_token = None
+    http = _HTTP()
+    with patch("httpx.AsyncClient", side_effect=http.client):
+        with pytest.raises(QBOReconnectRequired, match="QuickBooks needs to be reconnected"):
+            await adapter._query("SELECT * FROM Customer")
+        with pytest.raises(QBOReconnectRequired, match="QuickBooks needs to be reconnected"):
+            await adapter._refresh_access_token()
+    assert http.api_requests == 0
+    assert http.refresh_requests == 0
+
+
+@pytest.mark.asyncio
 async def test_two_simultaneous_401s_rotate_once_and_both_queries_succeed(isolated_qbo, caplog):
     http = _HTTP()
     first, first_cfg = _adapter()

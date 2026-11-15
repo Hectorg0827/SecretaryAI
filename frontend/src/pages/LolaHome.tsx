@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChatInterface } from '../components/chat/ChatInterface';
 import { LolaOrb } from '../components/lola/LolaOrb';
+import { ChiefOfStaffInbox } from '../components/lola/ChiefOfStaffInbox';
 import { LolaGlyph } from '../components/lola/LolaGlyph';
 import { LionUIIcon } from '../components/lola/LionUIIcon';
 import { BRAND_LABELS } from '../lib/brand';
@@ -308,6 +309,8 @@ export function LolaHome() {
                 </Link>
               ))}
             </div>}
+
+            <ChiefOfStaffInbox enabled={role === 'owner' || role === 'manager' || role === 'back_office'} />
 
             <div className="lola-home__action-panel">
               <div className="lola-home__action-icon"><LionUIIcon kind="notification" size={20} /></div>

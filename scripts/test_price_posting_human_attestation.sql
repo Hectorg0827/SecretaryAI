@@ -113,14 +113,14 @@ BEGIN
   IF count_events <> 1 THEN RAISE EXCEPTION 'Duplicate review created extra audit event'; END IF;
 
   -- An audit insert failure must roll back the review record.
-  CREATE FUNCTION pg_temp.reject_price_review_audit()
-  RETURNS trigger LANGUAGE plpgsql AS $failed_audit$
-  BEGIN RAISE EXCEPTION 'Synthetic audit unavailable'; END
-  $failed_audit$;
-  CREATE TRIGGER reject_rule_review_audit_test
-  BEFORE INSERT ON public.audit_events FOR EACH ROW
-  WHEN (NEW.event_type = 'compliance.price_rule_review_recorded')
-  EXECUTE FUNCTION pg_temp.reject_price_review_audit();
+  EXECUTE $ddl$CREATE FUNCTION pg_temp.reject_price_review_audit()
+    RETURNS trigger LANGUAGE plpgsql AS $failed_audit$
+    BEGIN RAISE EXCEPTION 'Synthetic audit unavailable'; END
+    $failed_audit$ $ddl$;
+  EXECUTE $ddl$CREATE TRIGGER reject_rule_review_audit_test
+    BEFORE INSERT ON public.audit_events FOR EACH ROW
+    WHEN (NEW.event_type = 'compliance.price_rule_review_recorded')
+    EXECUTE FUNCTION pg_temp.reject_price_review_audit()$ddl$;
 
   denied := false;
   BEGIN

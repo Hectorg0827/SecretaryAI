@@ -8,19 +8,74 @@ It never dispatches Celery tasks, runs the AI agent, or sends notifications.
 from __future__ import annotations
 
 from contextvars import ContextVar
+import httpx
 import json
 import logging
 import os
 from uuid import UUID
 
 from app.config import get_settings
+from app.scheduler.dashboard_snapshot import SnapshotPersistenceUnavailable, SnapshotSourceUnavailable
 from app.utils.log_safety import configure_safe_transport_logging
 from tasks.base import build_adapter, get_supabase, task_lock
 from tasks.dashboard_refresh import refresh_company_snapshot
 
 log = logging.getLogger(__name__)
-# Fixed stage labels only: never include provider errors or confidential values.
-_FAILURE_STAGE = ContextVar("staging_snapshot_stage", default="initialization")
+_FAILURE_STAGE = ContextVar("staging_snapshot_failure_stage", default="initialization")
+# No provider/account/token content may enter the diagnostic log.
+_SAFE_REFRESH_STAGES = frozenset({
+    "setup_provider_adapter", "attach_inventory_database",
+    "read_required_dashboard_sources", "read_optional_income_comparison",
+    "read_optional_finance_documents", "read_optional_purchasing",
+    "persist_snapshot",
+})
+_SAFE_SOURCES = frozenset({"account_health", "inventory", "sales_30d"})
+
+
+def _safe_failure_code(exc: Exception) -> str:
+    """Only stable, credential-free failure categories are logged."""
+    if isinstance(exc, SnapshotSourceUnavailable):
+        return ("required_source_" + exc.source if exc.source in _SAFE_SOURCES
+                else "required_source_unavailable")
+    if isinstance(exc, SnapshotPersistenceUnavailable):
+        return "snapshot_persistence_unavailable"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return {401: "provider_auth_failed", 403: "provider_forbidden",
+                429: "provider_rate_limited"}.get(
+                    status, "provider_server_error" if status >= 500 else "provider_http_error"
+                )
+    if isinstance(exc, httpx.RequestError):
+        return "provider_transport_error"
+    if type(exc).__name__ in {"InvalidToken", "InvalidTag"}:
+        return "credential_decryption_failed"
+    if isinstance(exc, ValueError):
+        return "source_validation_failed"
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return "dependency_unreachable"
+    if isinstance(exc, RuntimeError):
+        # This is the fixed, sanitized error text from tasks.base; never log
+        # or classify raw provider messages or their chained exceptions.
+        if str(exc) == "QBO proactive token refresh failed":
+            # Only inspect the exception type / numeric HTTP status, never the
+            # provider body, URL or message, which may contain credentials.
+            cause = exc.__cause__
+            if isinstance(cause, httpx.HTTPStatusError):
+                status = cause.response.status_code
+                if status in (400, 401, 403):
+                    return "qbo_refresh_rejected"
+                if status == 429:
+                    return "qbo_refresh_rate_limited"
+                return "qbo_refresh_upstream_error" if status >= 500 else "qbo_refresh_http_error"
+            if isinstance(cause, httpx.RequestError):
+                return "qbo_refresh_transport_error"
+            if (isinstance(cause, RuntimeError)
+                    and str(cause) == "QBO token persistence matched no current connected company"):
+                return "qbo_refresh_version_conflict"
+            return "qbo_token_refresh_failed"
+        return "dependency_or_configuration_failed"
+    return "unexpected_failure"
+
 
 # This pilot is deliberately bound to the existing SecretaryAI staging stack.
 STAGING_PROJECT_ID = "77513c77-44df-485e-a927-d57d6a80b2c1"
@@ -88,14 +143,27 @@ def run_once(*, settings=None, environ=None, db_factory=None,
             raise RuntimeError("Approved company does not have one connected sandbox source")
 
         _FAILURE_STAGE.set("read_and_refresh_dashboard")
-        refreshed = refresh_company_snapshot(
+        last_refresh_stage = ["read_and_refresh_dashboard"]
+
+        def track_stage(stage: str) -> None:
+            if stage in _SAFE_REFRESH_STAGES:
+                # Shared list survives asyncio.run context isolation.
+                last_refresh_stage[0] = stage
+                log.info("Staging read-only snapshot stage=%s", stage)
+
+        try:
+            refreshed = refresh_company_snapshot(
             company_id, db=db, companies=companies,
             adapter_factory=adapter_factory,
             generated_by="staging_readonly_cron",
             include_finance_comparison=True,
             include_purchasing_coverage=True,
             include_finance_document_coverage=True,
-        )
+            stage_hook=track_stage,
+            )
+        except Exception:
+            _FAILURE_STAGE.set(last_refresh_stage[0])
+            raise
         _FAILURE_STAGE.set("completed")
         # Never log fetched customer, financial, inventory, or credential values.
         return {
@@ -110,9 +178,10 @@ def main() -> int:
     configure_safe_transport_logging()
     try:
         outcome = run_once()
-    except Exception:
-        # Keep exception chains (e.g. provider requests) out of persisted logs.
-        log.error("Staging read-only snapshot refresh failed at stage=%s", _FAILURE_STAGE.get())
+    except Exception as exc:
+        # Keep exception chains, provider URLs, record values and tokens out of logs.
+        log.error("Staging read-only snapshot refresh failed at stage=%s code=%s",
+                  _FAILURE_STAGE.get(), _safe_failure_code(exc))
         return 1
     print(json.dumps(outcome, sort_keys=True))
     return 0

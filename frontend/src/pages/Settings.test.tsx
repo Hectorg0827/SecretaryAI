@@ -19,6 +19,25 @@ describe('customer onboarding consent redirect safety', () => {
 });
 
 describe('QuickBooks reauthorization entrypoint', () => {
+  it('shows an explicit reconnect state after an OAuth invalid_grant', () => {
+    const markup = renderToStaticMarkup(
+      <IntegrationRow
+        label="QuickBooks Online"
+        description="Cloud accounting"
+        connected={false}
+        needsReconnect
+        loading={false}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        canManage
+      />,
+    );
+    expect(markup).toContain('Reconnect required');
+    expect(markup).toContain('Reconnect with Intuit');
+    expect(markup).not.toContain('Disconnect');
+    expect(markup).not.toContain('Not connected');
+  });
+
   it('shows reconnect without forcing a disconnect when credentials are saved', () => {
     const markup = renderToStaticMarkup(
       <IntegrationRow

@@ -16,6 +16,7 @@ from app.connectors.base import (
     PurchaseOrder,
     QuickBooksAdapter,
 )
+from app.utils.qbo_token_store import QBOReconnectRequired
 from app.connectors.invoice_integrity import (
     decimal_field,
     invoice_balance,
@@ -65,28 +66,67 @@ class QBOnlineAdapter(QuickBooksAdapter):
     # ------------------------------------------------------------------
 
     async def _refresh_access_token(self) -> None:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                QBO_OAUTH_TOKEN_URL,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self._refresh_token,
-                },
-                auth=(self._client_id, self._client_secret),
-                headers={"Accept": "application/json"},
-            )
-            response.raise_for_status()
-            tokens = response.json()
+        from app.utils.qbo_token_store import QBOInvalidGrant, QBOReconnectRequired
+
+        cfg = getattr(self, "_qbo_refresh_config", None)
+        if (not self._refresh_token
+                or (cfg and cfg.get("qb_connection_status") == "disconnected")):
+            # A revoked connection must never send null/cleared credentials
+            # to Intuit; the user must complete OAuth again.
+            raise QBOReconnectRequired("QuickBooks needs to be reconnected")
+
+        async def request_tokens() -> dict:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.post(
+                    QBO_OAUTH_TOKEN_URL,
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": self._refresh_token,
+                    },
+                    auth=(self._client_id, self._client_secret),
+                    headers={"Accept": "application/json"},
+                )
+                if response.status_code == 400:
+                    # Never include the Intuit response in an exception or log.
+                    try:
+                        invalid = response.json().get("error") == "invalid_grant"
+                    except (ValueError, AttributeError):
+                        invalid = False
+                    if invalid:
+                        raise QBOInvalidGrant("QuickBooks needs to be reconnected")
+                response.raise_for_status()
+                return response.json()
+
+        async def persist_tokens(tokens: dict) -> None:
             if self._on_token_refresh:
                 await self._on_token_refresh(
                     access_token=tokens["access_token"],
                     refresh_token=tokens["refresh_token"],
                     expires_in=tokens.get("expires_in", 3600),
                 )
-            self._access_token = tokens["access_token"]
-            self._refresh_token = tokens["refresh_token"]
+
+        cfg = getattr(self, "_qbo_refresh_config", None)
+        if cfg and cfg.get("id") and cfg.get("_qbo_expected_refresh_ciphertext"):
+            from app.utils.qbo_refresh_coordination import refresh_qbo_web
+            access, refresh = await refresh_qbo_web(cfg, request_tokens, persist_tokens)
+            self._access_token, self._refresh_token = access, refresh
+            return
+
+        # Direct standalone adapters have no company row to coordinate. Keep
+        # the existing callback-before-in-memory contract, failing closed.
+        try:
+            tokens = await request_tokens()
+        except QBOInvalidGrant:
+            raise QBOReconnectRequired("QuickBooks needs to be reconnected") from None
+        await persist_tokens(tokens)
+        self._access_token = tokens["access_token"]
+        self._refresh_token = tokens["refresh_token"]
 
     def _headers(self) -> dict:
+        cfg = getattr(self, "_qbo_refresh_config", None)
+        if (not self._access_token
+                or (cfg and cfg.get("qb_connection_status") == "disconnected")):
+            raise QBOReconnectRequired("QuickBooks needs to be reconnected")
         return {
             "Authorization": f"Bearer {self._access_token}",
             "Accept": "application/json",
@@ -177,6 +217,8 @@ class QBOnlineAdapter(QuickBooksAdapter):
             if response.status_code == 401:
                 try:
                     await self._refresh_access_token()
+                except QBOReconnectRequired:
+                    raise
                 except Exception:
                     # Report diagnostics must distinguish an OAuth refresh
                     # failure from a bad P&L query without exposing token data.

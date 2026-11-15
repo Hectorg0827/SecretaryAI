@@ -48,7 +48,8 @@ def refresh_expiring_tokens(self):
     summary = {"checked": len(companies), "refreshed": 0, "errors": 0, "skipped": 0}
 
     from app.utils.encryption import decrypt
-    from app.utils.qbo_token_store import persist_rotated_qbo_tokens
+    from app.utils.qbo_refresh_coordination import refresh_qbo_task
+    from app.utils.qbo_token_store import QBOReconnectRequired
     from app.auth.oauth import refresh_qbo_token
     from app.config import get_settings
 
@@ -68,32 +69,22 @@ def refresh_expiring_tokens(self):
             summary["skipped"] += 1
             continue  # Token is fine — no refresh needed
 
-        # Token expires soon — refresh it
+        # Token expires soon — acquire the same per-company lease as web reads.
         try:
-            raw_refresh = decrypt(company["qbo_refresh_token"], settings.secret_key)
-            new_tokens = asyncio.run(refresh_qbo_token(raw_refresh))
-
-            persist_rotated_qbo_tokens(
-                db,
-                company_id=company["id"],
-                expected_refresh_ciphertext=company["qbo_refresh_token"],
-                realm_id=company.get("qbo_realm_id"),
-                access_token=new_tokens["access_token"],
-                refresh_token=new_tokens["refresh_token"],
-                expires_in=new_tokens.get("expires_in", 3600),
-                secret_key=settings.secret_key,
-            )
-
-            summary["refreshed"] += 1
-            log.info(
-                "QBO token refreshed for company %s (was expiring at %s)",
-                company["id"],
-                expires_at_str,
-            )
-
-        except Exception as exc:
+            cfg = {"qbo_refresh_token": decrypt(company["qbo_refresh_token"], settings.secret_key)}
+            rotated = refresh_qbo_task(company, cfg, db, refresh_qbo_token)
+            if rotated:
+                summary["refreshed"] += 1
+                log.info("QBO token refreshed for company %s", company["id"])
+            else:
+                summary["skipped"] += 1
+        except QBOReconnectRequired:
             summary["errors"] += 1
-            log.error("QBO token refresh failed for company %s: %s", company["id"], exc)
+            log.warning("QBO needs reconnect for company %s", company["id"])
+        except Exception:
+            summary["errors"] += 1
+            # Fixed diagnostic only; no token, provider body or exception text.
+            log.error("QBO token refresh failed for company %s", company["id"])
 
     log.info(
         "QBO token refresh complete: %d checked, %d refreshed, %d errors, %d skipped",

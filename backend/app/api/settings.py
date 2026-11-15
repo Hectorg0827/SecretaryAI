@@ -96,6 +96,13 @@ async def get_integrations(
         and row.get("qb_connection_status") == "connected"
         and bool(row.get("qbo_realm_id"))
     )
+    # Revoked-token path deliberately retains realm_id but clears credentials;
+    # an ordinary explicit disconnect clears realm_id as well.
+    qbo_needs_reconnect = (
+        row.get("qb_type") == "online"
+        and row.get("qb_connection_status") == "disconnected"
+        and bool(row.get("qbo_realm_id"))
+    )
     qbd_connected = bool(row.get("conductor_end_user_id"))
     google_connected = bool(row.get("google_access_token"))
     outlook_connected = bool(row.get("ms_access_token") and row.get("ms_refresh_token"))
@@ -103,6 +110,7 @@ async def get_integrations(
     return {
         "quickbooks_online": {
             "connected": qbo_connected,
+            "needs_reconnect": qbo_needs_reconnect,
             "connected_at": row.get("qbo_connected_at"),
             "realm_id": row.get("qbo_realm_id") if qbo_connected else None,
         },

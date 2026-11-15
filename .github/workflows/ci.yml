@@ -39,16 +39,20 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install deps
+      - name: Install deps in fresh virtualenv
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-test.txt
-      - name: Run tests
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt -r requirements-test.txt
+      - name: Run QBO refresh regression tests first
         working-directory: backend
-        run: python -m pytest -q
+        run: .venv/bin/python -m pytest -q tests/test_connectors/test_qbo_refresh_coordination.py tests/test_connectors/test_qbo_refresh_persistence.py
+      - name: Run full backend suite
+        working-directory: backend
+        run: .venv/bin/python -m pytest -q
       - name: Mutation-test Phase 4 security guards
-        run: python scripts/mutation_phase4.py
+        run: backend/.venv/bin/python scripts/mutation_phase4.py
 
   backend-browser-container:
     name: Backend Chromium container (non-root smoke)

@@ -114,7 +114,8 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
     """
     import asyncio
     from datetime import datetime, timezone, timedelta
-    from app.utils.qbo_token_store import persist_rotated_qbo_tokens
+    from app.utils.qbo_refresh_coordination import refresh_qbo_task
+    from app.utils.qbo_token_store import QBOReconnectRequired
 
     expires_at_str = company.get("qbo_token_expires_at")
     if not expires_at_str:
@@ -136,27 +137,16 @@ def _refresh_qbo_if_needed(company: dict, cfg: dict, db) -> None:
 
     try:
         from app.auth.oauth import refresh_qbo_token
-        new_tokens = asyncio.run(refresh_qbo_token(refresh_token))
-
-        new_ciphertext = persist_rotated_qbo_tokens(
-            db,
-            company_id=company["id"],
-            expected_refresh_ciphertext=company["qbo_refresh_token"],
-            realm_id=company.get("qbo_realm_id"),
-            access_token=new_tokens["access_token"],
-            refresh_token=new_tokens["refresh_token"],
-            expires_in=new_tokens.get("expires_in", 3600),
-            secret_key=settings.secret_key,
-        )
-        # Only expose the new credentials to this task after durable storage.
-        cfg["qbo_access_token"] = new_tokens["access_token"]
-        cfg["qbo_refresh_token"] = new_tokens["refresh_token"]
-        cfg["_qbo_expected_refresh_ciphertext"] = new_ciphertext
-
-        log.info("QBO access token refreshed for company %s", company["id"])
-    except Exception as exc:
-        log.warning("QBO token refresh failed for company %s: %s", company["id"], exc)
-        raise RuntimeError("QBO proactive token refresh failed") from exc
+        rotated = refresh_qbo_task(company, cfg, db, refresh_qbo_token)
+        if rotated:
+            log.info("QBO access token refreshed for company %s", company["id"])
+    except QBOReconnectRequired:
+        log.warning("QBO needs reconnect for company %s", company["id"])
+        raise
+    except Exception:
+        # Never log provider messages: HTTP exceptions can contain credentials.
+        log.warning("QBO token refresh failed for company %s", company["id"])
+        raise RuntimeError("QBO proactive token refresh failed") from None
 
 
 def build_adapter(company: dict) -> UnifiedDataAdapter:

@@ -291,6 +291,7 @@ export interface FollowUpNote {
 
 export interface IntegrationStatus {
   connected: boolean;
+  needs_reconnect?: boolean;
   connected_at?: string | null;
   realm_id?: string | null;
   end_user_id?: string | null;

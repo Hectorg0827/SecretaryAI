@@ -98,7 +98,9 @@ def test_single_tenant_refresh_cannot_enqueue_outbound_tasks():
         include_finance_comparison=True,
         include_purchasing_coverage=True,
         include_finance_document_coverage=True,
+        stage_hook=refresh.call_args.kwargs["stage_hook"],
     )
+    assert callable(refresh.call_args.kwargs["stage_hook"])
 
 
 def test_disconnected_or_wrong_company_fails_without_refresh():

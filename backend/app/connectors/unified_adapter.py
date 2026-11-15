@@ -64,6 +64,9 @@ class UnifiedDataAdapter:
                 realm_id=cfg["qbo_realm_id"],
                 on_token_refresh=self._persist_qbo_tokens,
             )
+            # Share the ciphertext generation with this request's connector.
+            # The connector re-reads the row only while holding the Redis lease.
+            self._qb._qbo_refresh_config = cfg
 
         # Gmail
         if cfg.get("gmail_credentials"):

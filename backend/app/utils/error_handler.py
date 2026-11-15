@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
+from app.utils.qbo_token_store import QBOReconnectRequired
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +160,18 @@ def register_error_handlers(app: FastAPI) -> None:
                 "error": "internal_error",
                 "message": "An unexpected error occurred. Our team has been notified.",
             },
+        )
+
+    @app.exception_handler(QBOReconnectRequired)
+    async def qbo_reconnect_required_handler(request: Request, exc: QBOReconnectRequired):
+        # Fixed literal only: never reflect provider errors, tokens or ciphertext.
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "error": "qbo_reconnect_required",
+                "message": "QuickBooks needs to be reconnected",
+            },
+            headers={"Cache-Control": "no-store"},
         )
 
     @app.exception_handler(ValueError)

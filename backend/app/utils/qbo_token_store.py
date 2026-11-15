@@ -9,6 +9,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.utils.encryption import encrypt
 
+
+class QBOInvalidGrant(RuntimeError):
+    """Intuit rejected the rotating credential; never include its response."""
+
+
+class QBOReconnectRequired(RuntimeError):
+    """User must reconnect QuickBooks before further accounting reads."""
+
 _QBO_DB_TIMEOUT_SECONDS = 10
 
 
@@ -70,3 +78,35 @@ def persist_rotated_qbo_tokens(
     if not getattr(result, "data", None):
         raise RuntimeError("QBO token persistence matched no current connected company")
     return encrypted_refresh
+
+
+def mark_qbo_needs_reconnect(
+    db, *, company_id: str, expected_refresh_ciphertext: str,
+    realm_id: str | None = None,
+) -> None:
+    """CAS transition to the already-supported disconnected status.
+
+    Clear rejected credentials and fence a concurrent OAuth callback. A newer
+    reconnect or successful rotation may never be overwritten by this path.
+    """
+    if not company_id or not expected_refresh_ciphertext:
+        raise RuntimeError("QBO reconnect transition requires an original credential")
+    query = (
+        db.table("companies")
+        .update({
+            "qb_connection_status": "disconnected",
+            "qbo_access_token": None,
+            "qbo_refresh_token": None,
+            "qbo_token_expires_at": None,
+            "qbo_token_refreshed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        .eq("id", company_id)
+        .eq("qbo_refresh_token", expected_refresh_ciphertext)
+        .eq("qb_connection_status", "connected")
+        .eq("qb_type", "online")
+    )
+    if realm_id:
+        query = query.eq("qbo_realm_id", realm_id)
+    result = query.execute()
+    if len(getattr(result, "data", None) or []) != 1:
+        raise RuntimeError("QBO reconnect transition did not match the expected connection")

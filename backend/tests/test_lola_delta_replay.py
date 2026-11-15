@@ -295,6 +295,20 @@ def test_graph_cursor_cycle_prevents_checkpoint():
         ))
 
 
+
+def test_graph_expired_token_propagates_and_requires_a_fresh_folder_baseline():
+    called = []
+    async def expired(_url):
+        called.append("attempt")
+        raise DeltaCursorExpired("Graph 410")
+    with pytest.raises(DeltaCursorExpired):
+        asyncio.run(collect_graph_delta(
+            scope=GRAPH_SCOPE, previous_delta_link=GRAPH_DELTA,
+            read_page=expired, as_of=NOW,
+        ))
+    assert called == ["attempt"]
+
+
 def test_graph_provider_error_is_sanitized():
     async def fail(_url):
         raise RuntimeError("PROVIDER GRAPH EMAIL BODY EXCEPTION")

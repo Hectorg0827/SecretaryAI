@@ -39,6 +39,9 @@ for f in database/schema.sql database/schema_v2_additions.sql database/schema_v3
   echo "── applying $f"
   psql -v ON_ERROR_STOP=1 -f "$f"
 done
+# Apply the additional function-bearing finance migration on the scratch DB
+# before auditing all functions defined by supabase/migrations.
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261108034956_provisional_purchasing_cost_assessments.sql
 # Only the new additive migration follows the legacy V1–V16 mirrored baseline.
 psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115030000_lock_trigger_function_search_path.sql
 echo "✓ All schema files applied cleanly."

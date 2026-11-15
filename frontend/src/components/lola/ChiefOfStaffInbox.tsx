@@ -19,6 +19,20 @@ type Briefing = {
   cards: LolaReviewCard[];
 };
 
+function verifiedBriefing(value: unknown): value is Briefing {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<Briefing>;
+  const validStates = ['needs_attention', 'no_visible_shipments', 'no_visible_logistics_exceptions'];
+  return validStates.includes(candidate.state ?? '') &&
+    typeof candidate.visible_alert_count === 'number' &&
+    Number.isFinite(candidate.visible_alert_count) &&
+    Array.isArray(candidate.cards) &&
+    candidate.cards.every((card) =>
+      !!card && typeof card.id === 'string' && typeof card.title === 'string' &&
+      typeof card.summary === 'string' && typeof card.severity === 'string' &&
+      typeof card.evidence_status === 'string');
+}
+
 /** Passive source-backed review only: never speaks, sends, or approves. */
 export function ChiefOfStaffInbox({ enabled }: { enabled: boolean }) {
   const [data, setData] = useState<Briefing | null>(null);
@@ -30,8 +44,10 @@ export function ChiefOfStaffInbox({ enabled }: { enabled: boolean }) {
     let cancelled = false;
     setLoading(true);
     setUnavailable(false);
-    void api.get<Briefing>('/api/lola/chief-of-staff/briefing?limit=3').then((result) => {
-      if (!cancelled) setData(result);
+    void api.get<unknown>('/api/lola/chief-of-staff/briefing?limit=3').then((result) => {
+      if (cancelled) return;
+      if (verifiedBriefing(result)) setData(result);
+      else { setData(null); setUnavailable(true); }
     }).catch(() => {
       if (!cancelled) { setData(null); setUnavailable(true); }
     }).finally(() => { if (!cancelled) setLoading(false); });

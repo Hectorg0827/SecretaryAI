@@ -102,7 +102,7 @@ BEGIN
     IF NOT blocked THEN RAISE EXCEPTION 'Foreign company policy accepted'; END IF;
 
     IF EXISTS(SELECT 1 FROM public.compliance_price_posting_rule_reviews
-              WHERE company_id=tenant_a AND rule_id=rule_id) THEN
+              WHERE company_id=tenant_a) THEN
         RAISE EXCEPTION 'Review persisted after blocked audit';
     END IF;
 
@@ -178,7 +178,7 @@ BEGIN
     END;
     IF NOT blocked THEN RAISE EXCEPTION 'Revoked policy allowed external reference'; END IF;
     IF (SELECT count(*) FROM public.compliance_price_posting_external_references
-        WHERE company_id=tenant_a AND preparation_id=preparation_id)<>1 THEN
+        WHERE company_id=tenant_a)<>1 THEN
         RAISE EXCEPTION 'Blocked reference survived audit rollback';
     END IF;
     IF (SELECT count(*) FROM public.audit_events

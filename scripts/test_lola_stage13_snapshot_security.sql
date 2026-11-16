@@ -113,20 +113,20 @@ BEGIN
     repeat('a',64),repeat('b',64),
     (SELECT fingerprint FROM stage13_fingerprint),
     0,NULL,
-    'v1:'||repeat('H',68),repeat('h',64),
-    'v1:'||repeat('T',68),repeat('t',64),
+    'v1:'||repeat('H',68),repeat('a',64),
+    'v1:'||repeat('T',68),repeat('b',64),
     repeat('1',64),
     jsonb_build_array(jsonb_build_object(
-      'message_key_sha256',repeat('m',64),
-      'thread_key_sha256',repeat('n',64),
-      'metadata_history_key_sha256',repeat('q',64)
+      'message_key_sha256',repeat('c',64),
+      'thread_key_sha256',repeat('d',64),
+      'metadata_history_key_sha256',repeat('e',64)
     )),FALSE
   ) INTO n;
   IF n<>1 THEN RAISE EXCEPTION 'First Gmail snapshot page not recorded'; END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.lola_gmail_snapshot_jobs
     WHERE pages_staged=1 AND messages_staged=1 AND state='collecting'
-      AND next_page_sha256=repeat('t',64)
+      AND next_page_sha256=repeat('b',64)
   ) THEN RAISE EXCEPTION 'No durable encrypted Gmail continuation'; END IF;
 END
 $verify$;
@@ -142,7 +142,7 @@ BEGIN
       repeat('a',64),repeat('b',64),
       (SELECT fingerprint FROM stage13_fingerprint),
       0,NULL,
-      'v1:'||repeat('H',68),repeat('h',64),
+      'v1:'||repeat('H',68),repeat('a',64),
       NULL,NULL,repeat('2',64),'[]'::jsonb,TRUE
     );
   EXCEPTION WHEN OTHERS THEN
@@ -162,13 +162,13 @@ BEGIN
       '22222222-2222-4222-8222-222222222222'::uuid,
       repeat('a',64),repeat('b',64),
       (SELECT fingerprint FROM stage13_fingerprint),
-      1,repeat('t',64),
-      'v1:'||repeat('H',68),repeat('h',64),
+      1,repeat('b',64),
+      'v1:'||repeat('H',68),repeat('a',64),
       NULL,NULL,repeat('2',64),
       jsonb_build_array(jsonb_build_object(
-        'message_key_sha256',repeat('m',64),
-        'thread_key_sha256',repeat('n',64),
-        'metadata_history_key_sha256',repeat('q',64)
+        'message_key_sha256',repeat('c',64),
+        'thread_key_sha256',repeat('d',64),
+        'metadata_history_key_sha256',repeat('e',64)
       )),TRUE
     );
   EXCEPTION WHEN unique_violation THEN rejected:=TRUE; END;
@@ -188,13 +188,13 @@ BEGIN
     '22222222-2222-4222-8222-222222222222'::uuid,
     repeat('a',64),repeat('b',64),
     (SELECT fingerprint FROM stage13_fingerprint),
-    1,repeat('t',64),
-    'v1:'||repeat('H',68),repeat('h',64),
+    1,repeat('b',64),
+    'v1:'||repeat('H',68),repeat('a',64),
     NULL,NULL,repeat('2',64),
     jsonb_build_array(jsonb_build_object(
-      'message_key_sha256',repeat('z',64),
+      'message_key_sha256',repeat('f',64),
       'thread_key_sha256',NULL,
-      'metadata_history_key_sha256',repeat('q',64)
+      'metadata_history_key_sha256',repeat('e',64)
     )),TRUE
   ) INTO n;
   IF n<>2 THEN RAISE EXCEPTION 'Gmail snapshot final page lost'; END IF;

@@ -114,6 +114,9 @@ echo '✓ Direct service-role DELETE denied; append/read preserved; company eras
 echo '── detecting service-role company-delete cascade bypass in disposable PostgreSQL'
 psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_parent_cascade_bypass.sql
 echo '::warning::Logistics release NO-GO: service-role parent company deletion can still erase the ledger by FK cascade.'
+echo '── testing REVIEW-ONLY parent DELETE revocation mitigation in disposable PostgreSQL'
+psql -v ON_ERROR_STOP=1 -f scripts/test_company_delete_revoke_proposal.sql
+echo '::warning::Parent grant-only mitigation is NOT deployable until service-role registration cleanup and lawful-erasure workflow are refactored.'
 
 
 

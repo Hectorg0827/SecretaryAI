@@ -137,7 +137,8 @@ class FakeDB:
 
 @pytest.fixture
 def policy(monkeypatch):
-    state = {"effect": "allow", "failure": False}
+    state = {"effect": "allow", "failure": False,
+             "rule_id": "00000000-0000-4000-8000-000000000055"}
 
     async def evaluate(_self, proposal):
         assert proposal.company_id == TENANT
@@ -146,7 +147,7 @@ def policy(monkeypatch):
         assert proposal.action_class.value == "commit"
         if state["failure"]:
             raise RuntimeError("Synthetic policy outage")
-        return SimpleNamespace(effect=state["effect"], rule_id=None)
+        return SimpleNamespace(effect=state["effect"], rule_id=state["rule_id"])
 
     monkeypatch.setattr(api.PolicyEngine, "evaluate", evaluate)
     monkeypatch.setattr(api, "_latest_rule", lambda _db, _program: dict(RULE))
@@ -324,3 +325,29 @@ def test_route_discovery_works_without_manually_editing_shared_router():
     paths={r.path for r in api.router.routes}
     assert "/{case_id}/references" in paths
     assert "" in paths
+
+
+@pytest.mark.asyncio
+async def test_implicit_allow_without_named_tenant_policy_rule_is_rejected(policy):
+    policy["rule_id"] = None
+    db = FakeDB()
+    with pytest.raises(HTTPException) as exc:
+        await api.create_internal_preparation(prep(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert len(db.audits) == 1
+    assert db.audits[0]["policy_effect"] == "deny"
+    assert not any(call.startswith("rpc:") for call in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_external_reference_never_accepts_policy_default_allow(policy):
+    policy["rule_id"] = None
+    db = FakeDB()
+    with pytest.raises(HTTPException) as exc:
+        await api.add_human_external_reference(
+            UUID(CASE_ID), external(), user=USER, db=db,
+        )
+    assert exc.value.status_code == 403
+    assert len(db.audits) == 1
+    assert db.audits[0]["policy_effect"] == "deny"
+    assert not any(call.startswith("rpc:") for call in db.calls)

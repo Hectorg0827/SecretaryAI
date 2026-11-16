@@ -20,6 +20,7 @@
 | 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
 | 10 | #182 | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
 | 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
+| 12 | #TBD | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -187,6 +188,8 @@ In GitHub Actions for the **same final head SHA**:
 - No unresolved high-priority static or PR review findings.
 - Verify production and staging deployments were **not modified**.
 - Record the exact head SHA and CI/CodeQL run IDs in release review notes.
+- Inspect `compliance-release-preflight.json` explicitly. A `NO_GO`
+  status is a deployment blocker even when CI and CodeQL both pass.
 
 Synthetic acceptance must include a happy path and each negative path:
 - Role mismatch, inactive user, cross-tenant IDs and changed policy.
@@ -202,6 +205,40 @@ Synthetic acceptance must include a happy path and each negative path:
   foreign-tenant rules and revoked rules are all rejected at the DB audit boundary.
 - Direct client table UPDATE/DELETE/INSERT denied; audit and histories are append-only.
 - No official filing action, exported template or price writes under any path.
+
+### Deployment migration-source blocker (Patch 12)
+
+**Observed in repository review:** the standard CLI root is
+`supabase/migrations`, while the Phase 1 Compliance SQL created in Patches
+3–10 is stored under `backend/supabase/migrations` and separately applied
+by `scripts/validate_schema.sh` to **disposable PostgreSQL**. The special
+`staging_supabase/supabase/migrations` tree has an existing pinned bundle
+and manifest for a previously audited staging history, not an authorized
+bundle of these new Compliance patches. Neither a full CI pass nor a byte
+parity check of legacy migrations establishes that the current staging
+CLI would apply these new changes.
+
+`scripts/compliance_migration_release_preflight.py` therefore produces
+a read-only, exact-file SHA256 report for the eight ordered Phase 1 cost/
+compliance migrations, comparing the canonical source, default CLI root,
+staging bundle and staging manifest. CI runs synthetic filesystem regressions
+and uploads `compliance-release-preflight.json` as an artifact alongside
+the disposable schema manifest.
+
+**The report always returns `status=NO_GO`**, including when local files
+match, because actual remote migration history, DB dependencies and RLS
+state, operator deployment authorization, authenticated staging acceptance,
+and independent finance/legal approvals cannot be established by local
+source files. `--require-ready` exits nonzero deliberately.
+Never treat the non-strict preflight's CI pass as permission to run
+`supabase db push`, use `migration repair`, modify migration history,
+or deploy a migration in either staging or production.
+
+The safe next operator-reviewed workflow is to reconcile exact remote
+migration versions and dependencies **read-only**, create an explicitly
+reviewed staging-only bundle or approved additive migration plan, test
+it on a disposable clone and obtain separate deployment approval.
+Production authorization and current agency requirements are later gates.
 
 ## 5. Actual staging acceptance (not yet performed for this patch stack)
 

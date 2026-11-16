@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timedelta, timezone
@@ -133,6 +134,25 @@ def _signing_message(evidence: SignedEvidence) -> bytes:
     return _PREFIX + serialized
 
 
+def evidence_commitment_digest(packet: SignedReviewPacket) -> str:
+    """Commit to the exact signed request/evidence, excluding receipt itself.
+
+    The independently controlled archive must attest that it durably stored
+    this exact SHA-256 content hash. This function does not write to an archive.
+    """
+    evidence = [
+        packet.request, packet.retention, packet.legal_hold,
+        *packet.approvals, packet.scope,
+    ]
+    digest = hashlib.sha256()
+    digest.update(b"lionbi-erasure-review-archive-commitment-v1\\n")
+    for item in evidence:
+        message = _signing_message(item)
+        digest.update(len(message).to_bytes(4, "big"))
+        digest.update(message)
+    return digest.hexdigest()
+
+
 def _verify_trust_roots(
     roots: Mapping[str, Mapping[str, bytes]],
 ) -> dict[str, dict[str, Ed25519PublicKey]]:
@@ -238,6 +258,8 @@ def evaluate_signed_review_packet(
         approvals = tuple(verified(record, "approval") for record in packet.approvals)
         scope = verified(packet.scope, "scope")
         receipt = verified(packet.external_receipt, "external_receipt")
+        if receipt.digest_sha256 != evidence_commitment_digest(packet):
+            raise ValueError("External archive receipt has incorrect evidence digest")
         return evaluate_erasure_packet(
             ReviewPacket(req, retention, hold, approvals, scope, receipt),
             now=now,

@@ -469,6 +469,7 @@ def test_missing_unapplied_split_invoice_allocations_must_exhaust_total():
     {"UnappliedAmt": None, "TotalAmt": 55.0},
     {"UnappliedAmt": None, "sparse": True},
     {"UnappliedAmt": None, "sparse": "false"},
+    {"UnappliedAmt": None, "sparse": None},
     {"UnappliedAmt": None, "Line": [
         {"Amount": 60, "LinkedTxn": [
             {"TxnId": "credit-1", "TxnType": "CreditMemo"},

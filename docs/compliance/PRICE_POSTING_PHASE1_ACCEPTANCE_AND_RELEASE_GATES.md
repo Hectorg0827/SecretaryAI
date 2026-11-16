@@ -22,6 +22,7 @@
 | 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
 | 12 | #187 | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
 | 13 | #193 | Live staging read-only migration audit, 9/12 exact historical Git blob checks, 3 provenance gaps and seven-source NO-GO handoff |
+| 14 | #TBD | Historical DDL forensics: prove staging Logistics ledger DELETE exposure, audit Lola receipt/conversation guards, provide reviewed-only remediation fixture |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -271,6 +272,28 @@ pricing foundation has not been applied.
 **NO-GO remains unchanged.** A separate, explicitly approved migration
 bundle, disposable-clone dry-run, human/technical sign-off and authenticated
 staging tests remain prerequisites. No remote SQL was modified.
+
+### Three historical SQL bodies — security forensics (Patch 14)
+
+Read-only analysis on 2026-11-16 of the **recorded SQL and currently installed
+catalog objects** found a **high-priority release blocker** in the existing
+Logistics Journey ledger: `service_role` has `DELETE` on
+`public.logistics_events`, but its supposedly append-only migration
+only blocks `UPDATE`; there is no `BEFORE DELETE` trigger. No events
+were accessed or changed. The recorded Lola Core action-receipt DELETE
+controls are present. Conversation Owner RLS requires both the JWT
+`company_id` claim and `auth.uid()` and has one owner-scoped policy;
+the **JWT claim's trust provenance remains unverified**.
+
+The complete findings, measured grants, installed function definition hashes
+and remaining three Git provenance gaps are in
+`docs/compliance/STAGING_HISTORICAL_DDL_SECURITY_REVIEW_20261116.md`
+and `docs/compliance/staging_historical_ddl_security_audit_20261116.json`.
+The SQL under `docs/compliance/sql-proposals/` is **not a migration**;
+its delete-blocking strategy is tested only in rolled-back disposable
+PostgreSQL. Resolve legal retention requirements and generate a **new**
+canonical migration with the installed Supabase CLI after independent approval.
+The present production/staging database remains unchanged and **NO-GO**.
 
 ## 5. Actual staging acceptance (not yet performed for this patch stack)
 

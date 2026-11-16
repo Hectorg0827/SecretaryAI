@@ -55,7 +55,7 @@ async def test_preview_disabled_before_db_role_or_adapter_access(env, enabled):
     with patch("app.api.finance_ar_preview.get_settings",
                return_value=settings(env, enabled)), \
          patch("app.api.finance_ar_preview._current_role") as verify_role, \
-         patch("app.api.finance_ar_preview.get_adapter") as adapter:
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter") as adapter:
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(response, user=user(), db=MagicMock())
     assert failure.value.status_code == 404
@@ -73,7 +73,7 @@ async def test_preview_refuses_nonowner_after_current_db_role_check(role):
                return_value=settings()), \
          patch("app.api.finance_ar_preview._current_role",
                return_value=role) as verify_role, \
-         patch("app.api.finance_ar_preview.get_adapter") as adapter:
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter") as adapter:
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(response, user=user(role), db=MagicMock())
     assert failure.value.status_code == 403
@@ -87,7 +87,7 @@ async def test_stale_or_revoked_owner_role_blocks_provider_before_construction()
     with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \
          patch("app.api.finance_ar_preview._current_role",
                side_effect=HTTPException(status_code=403)), \
-         patch("app.api.finance_ar_preview.get_adapter") as adapter:
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter") as adapter:
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(
                 Response(), user=user(), db=MagicMock(),
@@ -108,7 +108,7 @@ async def test_owner_preview_returns_aggregate_only_and_explicit_noncertificatio
     with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \
          patch("app.api.finance_ar_preview._current_role",
                return_value="owner") as role_check, \
-         patch("app.api.finance_ar_preview.get_adapter", return_value=qb) as adapter:
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter", return_value=qb) as adapter:
         result = await get_ar_payment_preview(response, user=user(), db=db)
     assert response.headers["Cache-Control"] == "private, no-store"
     role_check.assert_called_once_with(db, user())
@@ -137,7 +137,7 @@ async def test_payment_source_failure_returns_generic_503_and_never_zero():
     )
     with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \
          patch("app.api.finance_ar_preview._current_role", return_value="owner"), \
-         patch("app.api.finance_ar_preview.get_adapter", return_value=qb):
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter", return_value=qb):
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(
                 Response(), user=user(), db=MagicMock(),
@@ -157,7 +157,7 @@ async def test_response_schema_rejects_provider_identity_or_money_injection():
     )
     with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \
          patch("app.api.finance_ar_preview._current_role", return_value="owner"), \
-         patch("app.api.finance_ar_preview.get_adapter", return_value=qb):
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter", return_value=qb):
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(
                 Response(), user=user(), db=MagicMock(),

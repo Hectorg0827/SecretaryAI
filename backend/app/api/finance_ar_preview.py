@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import get_adapter, get_db
+from app.api.deps import get_qbo_ar_preview_adapter, get_db
 from app.api.finance_workspace import _current_role
 from app.auth.rbac import require_permission
 from app.config import get_settings
@@ -79,7 +79,7 @@ async def get_ar_payment_preview(
     try:
         # Built from the already authenticated tenant's company row, not a
         # client-supplied realm ID or company ID.
-        adapter = get_adapter(user=user, db=db)
+        adapter = get_qbo_ar_preview_adapter(user=user, db=db)
         result = await adapter.get_qbo_ar_payment_match_preview_read_only(
             company_id=user["company_id"], as_of=as_of,
         )

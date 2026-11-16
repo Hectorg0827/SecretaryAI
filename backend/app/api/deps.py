@@ -112,3 +112,63 @@ def get_adapter(
     adapter = UnifiedDataAdapter(cfg)
     adapter.set_db(db)
     return adapter
+
+
+def get_qbo_ar_preview_adapter(*, user: dict, db):
+    """Build only the tenant's verified QBO connector for staging AR acceptance.
+
+    Unlike the general-purpose adapter dependency, this deliberately skips
+    Gmail OAuth refresh and omits all email, messaging, and other employees'
+    connector credentials. QBO OAuth token rotation can still persist as
+    necessary to execute a read-only provider query.
+    """
+    from app.connectors.unified_adapter import UnifiedDataAdapter
+
+    company_id = user.get("company_id") if isinstance(user, dict) else None
+    if not isinstance(company_id, str) or not company_id:
+        raise PermissionError("AR preview company identity not verified")
+    settings = get_settings()
+    if (settings.secretaryai_deployment_env.strip().lower() != "staging"
+            or settings.intuit_environment != "sandbox"):
+        raise PermissionError("AR preview QBO connection requires staging sandbox")
+    company = _load_company(company_id, db)
+    if (not isinstance(company, dict) or company.get("id") != company_id
+            or company.get("qb_type") != "online"):
+        raise PermissionError("AR preview QBO connection not verified")
+
+    access_ciphertext = company.get("qbo_access_token")
+    refresh_ciphertext = company.get("qbo_refresh_token")
+    realm_id = company.get("qbo_realm_id")
+    client_id = company.get("qbo_client_id") or settings.intuit_client_id
+    client_secret = company.get("qbo_client_secret") or settings.intuit_client_secret
+    if any(not isinstance(value, str) or not value.strip()
+           for value in (
+               access_ciphertext, refresh_ciphertext, realm_id,
+               client_id, client_secret,
+           )):
+        raise PermissionError("AR preview QBO credentials not verified")
+
+    access_token = decrypt(access_ciphertext, settings.secret_key)
+    refresh_token = decrypt(refresh_ciphertext, settings.secret_key)
+    if (not isinstance(access_token, str) or not access_token
+            or not isinstance(refresh_token, str) or not refresh_token):
+        raise PermissionError("AR preview QBO credentials could not be decoded")
+
+    # Only these QBO keys cross into UnifiedDataAdapter. In particular no
+    # gmail_credentials, ms_access_token or other unrelated integration token
+    # can trigger work as a side effect of AR finance acceptance.
+    qb_only_config = {
+        "id": company_id,
+        "company_id": company_id,
+        "qb_type": "online",
+        "_qbo_only": True,
+        "qbo_client_id": client_id,
+        "qbo_client_secret": client_secret,
+        "qbo_access_token": access_token,
+        "qbo_refresh_token": refresh_token,
+        "_qbo_expected_refresh_ciphertext": refresh_ciphertext,
+        "qbo_realm_id": realm_id,
+    }
+    # This preview uses QBO's direct GET reader. Do not attach AccessRouter,
+    # which would retain a DB handle and enable unrelated data access paths.
+    return UnifiedDataAdapter(qb_only_config)

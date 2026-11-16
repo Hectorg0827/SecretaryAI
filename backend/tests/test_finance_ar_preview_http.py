@@ -103,7 +103,7 @@ def http_route():
             with patch("app.auth.jwt.is_token_revoked", return_value=False), \
                  patch("app.api.finance_ar_preview.get_settings",
                        return_value=mock_settings(enabled, environment)), \
-                 patch("app.api.finance_ar_preview.get_adapter",
+                 patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter",
                        return_value=adapter) as make_adapter:
                 with TestClient(app) as client:
                     response = client.get(
@@ -183,7 +183,7 @@ def test_http_invalid_unsigned_token_never_exposes_financial_evidence():
     )
     with patch("app.api.finance_ar_preview.get_settings",
                return_value=mock_settings()), \
-         patch("app.api.finance_ar_preview.get_adapter",
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter",
                return_value=adapter):
         with TestClient(app) as client:
             r = client.get(PATH, headers={"Authorization": "Bearer forged.jwt.token"})

@@ -128,11 +128,14 @@ def verify_snapshot_ledger(
         row = receipts.get(index)
         if row is None:
             raise CheckpointUnavailable("Missing Gmail snapshot page receipt")
-        chain = _chain(
-            "lola-gmail-snapshot-chain-v1" if index == 0 else chain,
-            progress.initial_history_sha256 if index == 0 else row["page_digest_sha256"],
-            row["page_digest_sha256"],
-        ) if index == 0 else _chain(chain, row["page_digest_sha256"])
+        if index == 0:
+            chain = _chain(
+                "lola-gmail-snapshot-chain-v1",
+                progress.initial_history_sha256,
+                row["page_digest_sha256"],
+            )
+        else:
+            chain = _chain(chain, row["page_digest_sha256"])
         if chain != row["chain_digest_sha256"]:
             raise CheckpointUnavailable("Broken Gmail snapshot receipt chain")
         total += row["entry_count"]
@@ -189,9 +192,22 @@ async def reconcile_gmail_snapshot_preview(
     proven = verify_snapshot_ledger(
         scope=scope, vault=vault, progress=progress, pages=pages, refs=refs
     )
+    async def authorized_page(start: str, cursor: str | None):
+        # Do not trust a fetcher to perform its own authorization checks.
+        try:
+            reauthorize()
+        except Exception:
+            raise CheckpointUnavailable("Gmail history authorization unavailable") from None
+        response = await fetch_history_page(start, cursor)
+        try:
+            reauthorize()
+        except Exception:
+            raise CheckpointUnavailable("Gmail history authorization changed") from None
+        return response
+
     replay = await replay_gmail_history(
         start_history_id=progress.initial_history_id,
-        fetch_page=fetch_history_page,
+        fetch_page=authorized_page,
     )
     try:
         reauthorize()

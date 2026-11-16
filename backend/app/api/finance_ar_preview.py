@@ -17,7 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import (
-    get_qbo_ar_preview_adapter, get_db, verify_qbo_ar_preview_connection,
+    claim_qbo_ar_preview_window,
+    get_qbo_ar_preview_adapter,
+    get_db,
+    verify_qbo_ar_preview_connection,
 )
 from app.api.finance_workspace import _current_role
 from app.auth.rbac import require_permission
@@ -76,6 +79,27 @@ async def get_ar_payment_preview(
         raise HTTPException(
             status_code=403, detail="Finance preview not authorized",
             headers=NO_STORE,
+        )
+
+    # An authorized staging preview may trigger many provider GETs due to
+    # pagination and stability checks. Enforce a cross-replica tenant cooldown
+    # before constructing QBO, while failing closed if Redis is unavailable.
+    try:
+        allowed = await asyncio.wait_for(
+            asyncio.to_thread(
+                claim_qbo_ar_preview_window, company_id=user["company_id"],
+            ),
+            timeout=3,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503, detail="AR preview cooldown unavailable",
+            headers=NO_STORE,
+        ) from None
+    if not allowed:
+        raise HTTPException(
+            status_code=429, detail="AR preview cooldown active",
+            headers={**NO_STORE, "Retry-After": "60"},
         )
 
     as_of = datetime.now(timezone.utc).date()

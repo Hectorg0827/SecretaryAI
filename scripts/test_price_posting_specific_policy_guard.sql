@@ -48,7 +48,7 @@ BEGIN
     INSERT INTO public.policy_rules(
         company_id,rule_name,action_class,effect,paths_match,capabilities_match,priority)
     VALUES(tenant_a,'specific human reference','commit','allow',
-        ARRAY['api'],ARRAY['compliance.price_external_reference'],3)
+        ARRAY['api'],ARRAY['compliance.price_reference'],3)
         RETURNING id INTO reference_policy;
     INSERT INTO public.policy_rules(
         company_id,rule_name,action_class,effect,priority)

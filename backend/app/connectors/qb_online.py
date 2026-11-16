@@ -429,6 +429,28 @@ class QBOnlineAdapter(QuickBooksAdapter):
         raw = await self._query_all("Invoice", record_limit=5000)
         return [self._normalize_invoice_summary(item) for item in raw]
 
+    async def get_ar_invoice_evidence_read_only(self) -> list[dict]:
+        """Complete bounded QBO sandbox invoice headers for AR payment evidence.
+
+        This intentionally uses the payment-evidence normalizer, not the
+        operational Invoice model (which has no verified currency field).
+        """
+        from app.config import get_settings
+        from app.connectors.qbo_ar_payment_evidence import normalize_invoice_for_ar
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("AR invoice evidence requires QuickBooks sandbox")
+        rows = await self._query_all("Invoice", record_limit=5000)
+        return [normalize_invoice_for_ar(row) for row in rows]
+
+    async def get_ar_payment_evidence_read_only(self) -> list[dict]:
+        """GET and normalize all bounded QBO sandbox Payments, never post."""
+        from app.config import get_settings
+        from app.connectors.qbo_ar_payment_evidence import normalize_payment_for_ar
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("AR payment evidence requires QuickBooks sandbox")
+        rows = await self._query_all("Payment", record_limit=5000)
+        return [normalize_payment_for_ar(row) for row in rows]
+
     async def get_bill_headers_read_only(self) -> list[dict]:
         """Bounded QBO sandbox bill headers; never fetch details or issue writes."""
         raw = await self._query_all("Bill", record_limit=5000)

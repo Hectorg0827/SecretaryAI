@@ -331,6 +331,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Compliance migration source preflight (read only, NO-GO)
+        run: |
+          python3 -m unittest discover -s scripts -p test_compliance_migration_release_preflight.py -v
+          python3 scripts/compliance_migration_release_preflight.py --report compliance-release-preflight.json
+          echo "::warning::Compliance Phase 1 is not cleared for staging; see compliance-release-preflight.json. A green CI run is not migration authorization."
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
       - name: Export disposable schema for read-only staging comparison
@@ -340,7 +345,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: disposable-schema-manifest
-          path: schema-manifest.json
+          path: |
+            schema-manifest.json
+            compliance-release-preflight.json
           retention-days: 14
       - uses: actions/setup-python@v5
         with:

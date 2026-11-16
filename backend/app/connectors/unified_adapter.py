@@ -9,7 +9,7 @@ Decision logic:
   Google Sheets   → Sheets connector
   Portals/files   → AccessRouter selects least-fragile path automatically
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from app.connectors.base import Customer, Invoice, InventoryItem, Payment, PurchaseOrder, QuickBooksAdapter

@@ -196,3 +196,20 @@ def test_evaluator_has_no_execution_surface():
     assert "DELETE FROM " not in source
     assert "drop table " not in source.lower()
     assert not hasattr(gate, "execute_erasure")
+
+
+@pytest.mark.parametrize("bad_field", ["receipt_digest_type", "policy_reference_type",
+                                        "missing_request", "approval_timestamp_type"])
+def test_malformed_untrusted_field_types_fail_closed(bad_field):
+    p = packet()
+    if bad_field == "receipt_digest_type":
+        p = replace(p, external_receipt=replace(p.external_receipt, digest_sha256=1))
+    elif bad_field == "policy_reference_type":
+        p = replace(p, legal_hold=replace(p.legal_hold, policy_reference=None))
+    elif bad_field == "missing_request":
+        p = replace(p, request=None)
+    else:
+        p = replace(p, approvals=(replace(p.approvals[0], recorded_at=None), p.approvals[1]))
+    result = evaluate_erasure_packet(p, now=NOW)
+    assert result.status == "BLOCKED"
+    assert result.permits_deletion is False

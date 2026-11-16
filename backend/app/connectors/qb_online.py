@@ -476,6 +476,28 @@ class QBOnlineAdapter(QuickBooksAdapter):
         return [normalize_payment_for_ar(row, currency_context=currency_context)
                 for row in rows]
 
+    async def get_ar_source_count_read_only(self, entity: str) -> int:
+        """GET-only QBO COUNT check for bounded AR sandbox comparison.
+
+        A page's QueryResponse.totalCount means page count, not the number of
+        all records. The separate SELECT COUNT(*) query supplies that bound.
+        """
+        from app.config import get_settings
+        from app.connectors.qbo_ar_payment_evidence import QBOARSourceInvalid
+
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("AR source count requires QuickBooks sandbox")
+        if entity not in {"Invoice", "Payment"}:
+            raise QBOARSourceInvalid("Unsupported AR count entity")
+        data = await self._query(f"SELECT COUNT(*) FROM {entity}")
+        if not isinstance(data, dict) or "Fault" in data:
+            raise QBOARSourceInvalid("QBO AR source count unavailable")
+        envelope = data.get("QueryResponse")
+        count = envelope.get("totalCount") if isinstance(envelope, dict) else None
+        if type(count) is not int or not 0 <= count <= 5000:
+            raise QBOARSourceInvalid("QBO AR source count invalid or unbounded")
+        return count
+
     async def get_bill_headers_read_only(self) -> list[dict]:
         """Bounded QBO sandbox bill headers; never fetch details or issue writes."""
         raw = await self._query_all("Bill", record_limit=5000)

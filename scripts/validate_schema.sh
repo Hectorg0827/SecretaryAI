@@ -100,9 +100,17 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115060000_price_post
 psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_capture_bindings.sql
 echo '✓ Unverified QB candidate identities, tenant scope and immutable read-only grants passed.'
 
-echo '── validating proposed Logistics DELETE guard on disposable synthetic ledger only'
+echo '── diagnostic-only check of incompatible blanket DELETE guard proposal'
 psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_delete_guard_proposal.sql
-echo '✓ Review-only proposal blocks DELETE for service role and table owner; UPDATE guard preserved.'
+echo '✓ Synthetic blanket-guard fixture checked only; NOT a migration release candidate.'
+
+echo '── validating erasure-safe additive Logistics privilege migration in disposable PostgreSQL'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261109000011_logistics_journey.sql
+# Reproduce the effective Supabase staging grant before the hardening candidate.
+psql -v ON_ERROR_STOP=1 -c "GRANT SELECT, INSERT, DELETE ON TABLE public.logistics_events TO service_role"
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261114230000_logistics_events_service_delete_revoke.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_events_delete_privileges.sql
+echo '✓ Direct service-role DELETE denied; append/read preserved; company erasure cascade preserved.'
 
 
 

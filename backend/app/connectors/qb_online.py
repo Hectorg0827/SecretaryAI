@@ -429,7 +429,28 @@ class QBOnlineAdapter(QuickBooksAdapter):
         raw = await self._query_all("Invoice", record_limit=5000)
         return [self._normalize_invoice_summary(item) for item in raw]
 
-    async def get_ar_invoice_evidence_read_only(self) -> list[dict]:
+    async def get_ar_currency_context_read_only(self) -> dict:
+        """GET one verified sandbox Preferences currency context; never assume USD."""
+        from app.config import get_settings
+        from app.connectors.qbo_ar_payment_evidence import (
+            QBOARSourceInvalid, normalize_currency_preferences,
+        )
+        if get_settings().intuit_environment != "sandbox":
+            raise RuntimeError("AR currency evidence requires QuickBooks sandbox")
+        # Intuit Preferences supports a read-only query; pagination does not
+        # apply to this singleton resource.
+        response = await self._query("select * from Preferences")
+        if not isinstance(response, dict) or "Fault" in response:
+            raise QBOARSourceInvalid("QBO preferences response unverified")
+        envelope = response.get("QueryResponse")
+        records = envelope.get("Preferences") if isinstance(envelope, dict) else None
+        if not isinstance(records, list) or len(records) != 1:
+            raise QBOARSourceInvalid("QBO preferences source incomplete")
+        return normalize_currency_preferences(records[0])
+
+    async def get_ar_invoice_evidence_read_only(
+        self, *, currency_context: dict | None = None,
+    ) -> list[dict]:
         """Complete bounded QBO sandbox invoice headers for AR payment evidence.
 
         This intentionally uses the payment-evidence normalizer, not the
@@ -440,16 +461,20 @@ class QBOnlineAdapter(QuickBooksAdapter):
         if get_settings().intuit_environment != "sandbox":
             raise RuntimeError("AR invoice evidence requires QuickBooks sandbox")
         rows = await self._query_all("Invoice", record_limit=5000)
-        return [normalize_invoice_for_ar(row) for row in rows]
+        return [normalize_invoice_for_ar(row, currency_context=currency_context)
+                for row in rows]
 
-    async def get_ar_payment_evidence_read_only(self) -> list[dict]:
+    async def get_ar_payment_evidence_read_only(
+        self, *, currency_context: dict | None = None,
+    ) -> list[dict]:
         """GET and normalize all bounded QBO sandbox Payments, never post."""
         from app.config import get_settings
         from app.connectors.qbo_ar_payment_evidence import normalize_payment_for_ar
         if get_settings().intuit_environment != "sandbox":
             raise RuntimeError("AR payment evidence requires QuickBooks sandbox")
         rows = await self._query_all("Payment", record_limit=5000)
-        return [normalize_payment_for_ar(row) for row in rows]
+        return [normalize_payment_for_ar(row, currency_context=currency_context)
+                for row in rows]
 
     async def get_bill_headers_read_only(self) -> list[dict]:
         """Bounded QBO sandbox bill headers; never fetch details or issue writes."""

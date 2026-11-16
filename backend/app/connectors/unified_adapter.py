@@ -292,8 +292,15 @@ class UnifiedDataAdapter:
         if not isinstance(as_of, date) or isinstance(as_of, datetime):
             raise ValueError("AR payment preview requires an as-of date")
 
-        invoices = await self._qb.get_ar_invoice_evidence_read_only()
-        payments = await self._qb.get_ar_payment_evidence_read_only()
+        # Read Preferences once for this preview, before interpreting omitted
+        # transaction CurrencyRef values. No currency guessed from locale.
+        currency_context = await self._qb.get_ar_currency_context_read_only()
+        invoices = await self._qb.get_ar_invoice_evidence_read_only(
+            currency_context=currency_context,
+        )
+        payments = await self._qb.get_ar_payment_evidence_read_only(
+            currency_context=currency_context,
+        )
         # Stamp the tenant only *after* validating the adapter's configuration,
         # not from client-supplied provider rows.
         return compare_ar_payment_allocations(

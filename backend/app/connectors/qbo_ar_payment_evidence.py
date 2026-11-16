@@ -5,8 +5,9 @@ contract, without persisting data or executing any financial action. QBO JSON
 numbers are parsed through Decimal(str(...)) and validated to cents; this is
 a bounded comparison, not an audited or immutable accounting snapshot.
 
-A missing CurrencyRef, unsupported payment link (including CreditMemo), or
-unknown allocation amount is NOT automatically USD or an invoice payment.
+A missing CurrencyRef can inherit a verified company HomeCurrency only when
+the provider confirms multicurrency is disabled. Unsupported payment links
+(including CreditMemo) and missing amounts still fail closed.
 """
 from __future__ import annotations
 
@@ -34,11 +35,46 @@ def _reference(raw: object, field: str) -> str:
     return _identifier(raw.get("value"), field)
 
 
-def _currency(raw: object) -> str:
-    value = _reference(raw, "currency reference")
-    if (len(value) != 3 or not value.isascii()
-            or not value.isupper() or not value.isalpha()):
+def _currency_code(value: object) -> str:
+    if (not isinstance(value, str) or len(value) != 3
+            or not value.isascii() or not value.isupper() or not value.isalpha()):
         raise QBOARSourceInvalid("QBO currency is not verified")
+    return value
+
+
+def normalize_currency_preferences(raw: dict) -> dict:
+    """Accept only provider-evidenced company currency settings, never USD by default."""
+    if not isinstance(raw, dict):
+        raise QBOARSourceInvalid("QBO preferences not verified")
+    prefs = raw.get("CurrencyPrefs")
+    if not isinstance(prefs, dict):
+        raise QBOARSourceInvalid("QBO currency preferences missing")
+    enabled = prefs.get("MultiCurrencyEnabled")
+    if isinstance(enabled, bool):
+        pass
+    elif enabled in ("true", "false"):
+        enabled = enabled == "true"
+    else:
+        raise QBOARSourceInvalid("QBO multicurrency state not verified")
+    home = _currency_code(_reference(prefs.get("HomeCurrency"), "home currency"))
+    return {"multicurrency_enabled": enabled, "home_currency": home}
+
+
+def _currency(raw: object, currency_context: dict | None = None) -> str:
+    if currency_context is not None:
+        if (not isinstance(currency_context, dict)
+                or type(currency_context.get("multicurrency_enabled")) is not bool):
+            raise QBOARSourceInvalid("QBO currency context invalid")
+        home = _currency_code(currency_context.get("home_currency"))
+    if raw is None:
+        if currency_context is not None and not currency_context["multicurrency_enabled"]:
+            return home
+        raise QBOARSourceInvalid("QBO missing transaction currency")
+    value = _currency_code(_reference(raw, "currency reference"))
+    if (currency_context is not None
+            and not currency_context["multicurrency_enabled"]
+            and value != home):
+        raise QBOARSourceInvalid("QBO single-currency transaction mismatch")
     return value
 
 
@@ -67,13 +103,15 @@ def _date(raw: object) -> date:
     return d
 
 
-def normalize_invoice_for_ar(raw: dict) -> dict:
-    """Require explicit invoice amounts, date, customer and source currency."""
+def normalize_invoice_for_ar(
+    raw: dict, *, currency_context: dict | None = None,
+) -> dict:
+    """Require source invoice evidence and verified currency provenance."""
     if not isinstance(raw, dict):
         raise QBOARSourceInvalid("QBO invoice record invalid")
     invoice_id = _identifier(raw.get("Id"), "invoice ID")
     customer_id = _reference(raw.get("CustomerRef"), "invoice customer")
-    currency = _currency(raw.get("CurrencyRef"))
+    currency = _currency(raw.get("CurrencyRef"), currency_context)
     total = _amount(raw.get("TotalAmt"), "invoice total")
     balance = _amount(raw.get("Balance"), "invoice balance")
     if Decimal(balance) > Decimal(total):
@@ -85,13 +123,15 @@ def normalize_invoice_for_ar(raw: dict) -> dict:
     }
 
 
-def normalize_payment_for_ar(raw: dict) -> dict:
+def normalize_payment_for_ar(
+    raw: dict, *, currency_context: dict | None = None,
+) -> dict:
     """Accept only unambiguous Invoice lines; never infer credit-memo cash."""
     if not isinstance(raw, dict):
         raise QBOARSourceInvalid("QBO payment record invalid")
     payment_id = _identifier(raw.get("Id"), "payment ID")
     customer_id = _reference(raw.get("CustomerRef"), "payment customer")
-    currency = _currency(raw.get("CurrencyRef"))
+    currency = _currency(raw.get("CurrencyRef"), currency_context)
     total = _amount(raw.get("TotalAmt"), "payment total")
     unapplied = _amount(raw.get("UnappliedAmt"), "unapplied amount")
     when = _date(raw.get("TxnDate"))

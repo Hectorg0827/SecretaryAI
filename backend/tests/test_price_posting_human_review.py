@@ -20,6 +20,7 @@ RULE = {
     "authority_title": "Synthetic source", "official_template_url": None,
     "applicability_note": "Human review required", "filing_deadline_rule": None,
 }
+POLICY_ID = "00000000-0000-4000-8000-000000000055"
 REVIEW_NOTE = "I checked the official source and applicable tenant license scope for this synthetic rule."
 
 
@@ -73,6 +74,8 @@ class Query:
             rows = [dict(self.db.rule)]
         elif self.table == "compliance_price_posting_rule_reviews":
             rows = [dict(self.db.review)] if self.db.review else []
+        elif self.table == "policy_rules":
+            rows = [dict(self.db.policy_record)]
         else:
             raise AssertionError("unexpected table " + self.table)
         return SimpleNamespace(data=[
@@ -102,6 +105,12 @@ class AtomicReview:
 class FakeDB:
     def __init__(self):
         self.rule = dict(RULE)
+        self.policy_record = {
+            "id": POLICY_ID, "company_id": TENANT, "is_active": True,
+            "action_class": "commit", "effect": "allow",
+            "capabilities_match": ["compliance.rule_review"],
+            "paths_match": ["api"],
+        }
         self.review = None
         self.calls = []
         self.audits = []
@@ -123,7 +132,7 @@ class FakeDB:
 
 @pytest.fixture
 def policy(monkeypatch):
-    effect = {"value": "allow", "rule_id": "00000000-0000-4000-8000-000000000055"}
+    effect = {"value": "allow", "rule_id": POLICY_ID}
 
     async def decide(_self, proposal):
         assert proposal.capability == "compliance.rule_review"
@@ -252,3 +261,46 @@ async def test_default_allow_without_explicit_tenant_policy_rule_cannot_review(p
     assert len(db.audits) == 1
     assert db.audits[0]["policy_effect"] == "deny"
     assert not any(call.startswith("rpc:") for call in db.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [
+    {"capabilities_match": None},
+    {"capabilities_match": []},
+    {"capabilities_match": ["compliance.price_preparation"]},
+    {"paths_match": None},
+    {"paths_match": []},
+    {"paths_match": ["browser"]},
+    {"effect": "require_approval"},
+    {"is_active": False},
+    {"action_class": "draft"},
+])
+async def test_named_but_unscoped_policy_cannot_attest_rule(policy, override):
+    db = FakeDB()
+    db.policy_record.update(override)
+    with pytest.raises(HTTPException) as exc:
+        await api.record_rule_human_review("NJ_ECPL", req(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert len(db.audits) == 1
+    assert db.audits[0]["policy_effect"] == "deny"
+    assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_cross_tenant_policy_rule_does_not_authorize_review(policy):
+    db = FakeDB()
+    db.policy_record["company_id"] = "00000000-0000-4000-8000-000000000099"
+    with pytest.raises(HTTPException) as exc:
+        await api.record_rule_human_review("NJ_ECPL", req(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_policy_scope_source_outage_fails_closed(policy):
+    db = FakeDB()
+    db.fail_source = "policy_rules"
+    with pytest.raises(HTTPException) as exc:
+        await api.record_rule_human_review("NJ_ECPL", req(), user=USER, db=db)
+    assert exc.value.status_code == 503
+    assert not any(x.startswith("rpc:") for x in db.calls)

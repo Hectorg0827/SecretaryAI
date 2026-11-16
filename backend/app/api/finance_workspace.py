@@ -5,7 +5,7 @@ execution. A finance employee cannot ask this endpoint for another department.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -100,6 +100,13 @@ def build_finance_workspace(*, role: str, snapshot: dict, now: datetime | None =
                 raw = validate_finance_document_coverage(raw)
             except FinanceDocumentCoverageInvalid as exc:
                 raise ValueError("Invalid finance document evidence") from exc
+            # A fresh wrapper snapshot cannot make old or future-dated
+            # document headers current. Allow the immediately preceding UTC
+            # day only for source reads that cross midnight during refresh.
+            source_day = datetime.fromisoformat(raw["as_of"]).date()
+            snapshot_day = observed.astimezone(timezone.utc).date()
+            if source_day > snapshot_day or source_day < snapshot_day - timedelta(days=1):
+                raise ValueError("Finance document evidence date does not match snapshot")
         for kind in ("ar", "ap"):
             if kind not in scopes:
                 continue

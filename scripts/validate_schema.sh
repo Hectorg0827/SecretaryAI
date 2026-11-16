@@ -90,6 +90,12 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115040000_price_post
 psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_specific_policy_guard.sql
 echo '✓ Generic allow, wrong path, cross-tenant policy and revoked rules fail atomic regulated audit.'
 
+echo '── validating append-only unverified accounting price observation sources'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115050000_price_posting_accounting_observations.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_accounting_observations.sql
+echo '✓ Accounting evidence ownership, unit basis, immutable history and read-only grants passed.'
+
+
 
 
 echo '── checking procurement and private morning briefing extensions'

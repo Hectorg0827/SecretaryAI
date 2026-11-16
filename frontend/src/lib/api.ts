@@ -408,6 +408,32 @@ export interface PricePostingSourceEvidence {
   license_authority_verified_by_regulator: false;
   warehouse_cost_coverage_certified: false;
 }
+export interface PricePostingAccountingComparisonResult {
+  status: 'internal_numeric_comparison_only';
+  checks: Array<{
+    price_book_id: string;
+    sku: string;
+    accounting_observation_id: string | null;
+    provider: 'qbo' | 'qbd' | null;
+    observed_amount_per_case: string | null;
+    book_amount_per_case: string;
+    numeric_comparison:
+      | 'numeric_match_unverified' | 'numeric_difference' | 'not_comparable';
+    blockers: string[];
+  }>;
+  numeric_matches_unverified: number;
+  numeric_differences: number;
+  uncomparable: number;
+  independent_qbo_qbd_reconciliation_confirmed: false;
+  warehouse_cost_coverage_verified: false;
+  regulatory_requirements_verified: false;
+  qbo_qbd_live_data_accessed: false;
+  ready_to_file: false;
+  submission_permitted: false;
+  agency_template_generated: false;
+  live_price_changed: false;
+}
+
 export interface PricePostingReadinessResult {
   program_key: string;
   region_code: string;
@@ -733,6 +759,10 @@ export const api = {
       api.get<PriceBookSourceList>('/api/insights/price-book?limit=100'),
     previewReadiness: (body: PricePostingReadinessRequest) =>
       api.post<PricePostingReadinessResult>('/api/insights/price-posting/readiness', body),
+    compareAccounting: (body: { price_book_ids: string[] }) =>
+      api.post<PricePostingAccountingComparisonResult>(
+        '/api/insights/price-posting-accounting/compare', body,
+      ),
     recordHumanReview: (programKey: string, body: PricePostingHumanReviewInput) =>
       api.post<PricePostingRuleReviewReceipt>(
         `/api/insights/price-posting/programs/${encodeURIComponent(programKey)}/review`, body,

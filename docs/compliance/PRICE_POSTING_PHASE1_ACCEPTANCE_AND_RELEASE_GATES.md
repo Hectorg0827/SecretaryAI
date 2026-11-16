@@ -16,7 +16,8 @@
 | 5 | #169 | Owner/manager source attestation, tenant audit and UI |
 | 6 | #170 | Tenant-scoped read-only price/cost/product/license reconciliation |
 | 7 | #171 | Immutable internal preparation and human-reported unverified reference ledger |
-| 8 | #172 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
+| 8 | #173 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
+| 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -46,6 +47,36 @@ The three capabilities are distinct:
 - Keep **agency_submission_enabled=false**, `submission_permitted=false`,
   `ready_to_file=false` and `price_publication_permitted=false`.
 - Never call a QBO/QBD API or generate an agency-ready template in Phase 1.
+
+### Unverified accounting observation comparisons (Patch 9)
+The read-only endpoint `/api/insights/price-posting-accounting/compare`
+accepts only existing price-book UUIDs, never caller-supplied accounting prices.
+Its source is `pricing_accounting_price_observations`, an append-only
+**unverified observation** table with service-role SELECT only.
+There is intentionally **no insertion API, sync job or live QuickBooks call**
+in this phase. Test data may be inserted only in disposable PostgreSQL CI.
+In staging, the source should be unpopulated until a separately approved
+read-only adapter capture produces a verifiable tenant-scoped source revision.
+
+A QuickBooks InventoryItem.unit_price is not automatically per case, not
+guaranteed current, and not necessarily jurisdiction/customer/channel-specific.
+For `single_unit` records the comparator requires an explicit
+`units_per_case`, and it still marks case-pack conversion **unverified**;
+`case` records compare directly, `unknown` cannot be compared.
+It uses `Decimal` arithmetic, no guessed currency exchange rate,
+no matching by SKU alone, no auto-selection of multiple observations,
+and no implied matching of QBO/QBD rates to an agency price schedule.
+A numerically equal price is marked **numeric_match_unverified**,
+*not* an independently reconciled accounting amount.
+The blockers remain visible even with a numeric match.
+
+Before this can become a verified accounting gate, a separately approved
+connector-read-only capture process must record immutable provider item ID,
+tenant, adapter identity, source revision, observed time and source document
+without logging secrets or creating any price/accounting write. An independent
+accountant must verify item identity, units/case, currency, effective pricing
+period, distribution scope and associated freight/warehouse cost coverage.
+No user or automation can convert these observations to filing clearance.
 
 ## 3. Mandatory human regulatory verification BEFORE operational activation
 
@@ -102,6 +133,9 @@ Synthetic acceptance must include a happy path and each negative path:
 - Wrong state, wrong effective date, missing cost line, provisional costs,
   mismatched SKU/currency, customer-specific price, unapproved price book.
 - Missing/duplicate IDs, oversized pages, source outages and inconsistent reads.
+- Unit-of-measure ambiguity, per-unit to per-case conversion, mismatched or
+  missing accounting record, one-cent difference, unverified provenance,
+  future observation and foreign-tenant accounting source.
 - Audit unavailable: case/review/reference and audit must **roll back together**.
 - Named but broad `COMMIT allow`, missing `capabilities_match`, wrong `paths_match`,
   foreign-tenant rules and revoked rules are all rejected at the DB audit boundary.

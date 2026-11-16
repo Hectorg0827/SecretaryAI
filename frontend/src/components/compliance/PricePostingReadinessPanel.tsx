@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type PriceBookSourceItem, type PricePostingReadinessResult, type PricePostingRuleProgram } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
+import { PricePostingAccountingComparisonPanel } from './PricePostingAccountingComparisonPanel';
 
 function readableReason(reason: string): string {
   return reason.replace(/_/g, ' ').replace(/:/g, ': ');
@@ -211,6 +212,7 @@ export function PricePostingReadinessPanel({ programs }: { programs: PricePostin
               </article>
             ))}
           </div>
+          <PricePostingAccountingComparisonPanel selectedIds={selectedIds} />
         </div>
       )}
     </section>

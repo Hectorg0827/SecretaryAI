@@ -14,6 +14,7 @@ from app.api import chat, dashboard, accounts, inventory, settings as settings_r
 from app.api import docs as docs_router
 from app.api import briefing as briefing_router
 from app.api import finance_workspace as finance_workspace_router
+from app.api import finance_ar_preview as finance_ar_preview_router
 from app.api import account_security as account_security_router
 from app.api import outlook_oauth as outlook_oauth_router
 from app.utils.error_handler import register_error_handlers
@@ -304,6 +305,7 @@ app.include_router(chat.router,             prefix="/api/chat",          tags=["
 app.include_router(dashboard.router,        prefix="/api/dashboard",     tags=["dashboard"],     dependencies=_PAID)
 app.include_router(briefing_router.router,  prefix="/api/briefing",      tags=["briefing"],      dependencies=_PAID)
 app.include_router(finance_workspace_router.router, prefix="/api/finance", tags=["finance-workspace"], dependencies=_PAID)
+app.include_router(finance_ar_preview_router.router, prefix="/api/finance", tags=["finance-ar-acceptance"], dependencies=_PAID)
 app.include_router(accounts.router,         prefix="/api/accounts",      tags=["accounts"],      dependencies=_PAID)
 app.include_router(inventory.router,        prefix="/api/inventory",     tags=["inventory"],     dependencies=_PAID)
 app.include_router(actions.router,          prefix="/api/actions",       tags=["actions"],       dependencies=_PAID)

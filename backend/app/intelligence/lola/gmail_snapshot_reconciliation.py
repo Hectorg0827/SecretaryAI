@@ -225,8 +225,17 @@ async def reconcile_gmail_snapshot_preview(
         scope.company_id, scope.employee_id,
         scope.provider_identity_ref, scope.resource_id,
     )
+    transitions: dict[str, str] = {}
     for event in replay.changed_records:
         key = vault.digest("snapshot-message-v1", *prefix, event.source_id)
+        if event.operation in ("added", "deleted"):
+            previous = transitions.get(key)
+            # The replay API flattens operations within a history record.
+            # Conflicting transitions cannot be ordered safely without the
+            # original event grouping, so do not infer final membership.
+            if previous is not None and previous != event.operation:
+                raise ReplayUnavailable("Ambiguous Gmail message transitions")
+            transitions[key] = event.operation
         if event.operation == "added":
             members.add(key)
         elif event.operation == "deleted":

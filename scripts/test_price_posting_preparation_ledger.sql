@@ -4,7 +4,7 @@ BEGIN;
 DO $case_test$
 DECLARE
  tenant_a uuid;tenant_b uuid;owner_a uuid;owner_b uuid;rule_id uuid;
- book_a uuid;book_b uuid;packet jsonb;receipt jsonb;case_id uuid;
+ book_a uuid;book_b uuid;book_wrong uuid;packet jsonb;receipt jsonb;case_id uuid;
  blocked boolean;note text:='Synthetic supporting reference, not independently authenticated by an agency';
 BEGIN
  IF has_function_privilege('anon',
@@ -36,6 +36,11 @@ BEGIN
   revision,status,created_by)
  VALUES(tenant_b,'PREP-B','12x750mL','NJ','retail',72.00,'2026-12-01',1,'draft',owner_b)
  RETURNING id INTO book_b;
+ INSERT INTO public.pricing_price_book(
+  company_id,sku,package_label,market_code,channel,list_price_per_case,effective_from,
+  revision,status,created_by)
+ VALUES(tenant_a,'PREP-WRONG','12x750mL','NY','retail',72.00,'2026-12-01',1,'draft',owner_a)
+ RETURNING id INTO book_wrong;
 
  blocked:=false;
  BEGIN
@@ -73,6 +78,22 @@ BEGIN
  EXCEPTION WHEN insufficient_privilege THEN blocked:=true;
  END;
  IF NOT blocked THEN RAISE EXCEPTION 'Foreign tenant price was captured'; END IF;
+
+ blocked:=false;
+ BEGIN
+  PERFORM public.create_price_posting_preparation(
+   tenant_a,rule_id,1,owner_a,'2026-12-01',ARRAY[book_wrong],'allow',NULL);
+ EXCEPTION WHEN insufficient_privilege THEN blocked:=true;
+ END;
+ IF NOT blocked THEN RAISE EXCEPTION 'Wrong-state price book accepted'; END IF;
+
+ blocked:=false;
+ BEGIN
+  PERFORM public.create_price_posting_preparation(
+   tenant_a,rule_id,1,owner_a,'2026-11-01',ARRAY[book_a],'allow',NULL);
+ EXCEPTION WHEN insufficient_privilege THEN blocked:=true;
+ END;
+ IF NOT blocked THEN RAISE EXCEPTION 'Premature price effective date accepted'; END IF;
 
  blocked:=false;
  BEGIN

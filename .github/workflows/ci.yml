@@ -346,6 +346,10 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261116021500_lola_gmail_paged_snapshot_staging.sql
           psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage13_snapshot_security.sql
+      - name: Execute Stage 14B private consistent snapshot and atomic finalizer tests
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261116162500_lola_gmail_checkpoint_finalization_staging.sql
+          psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage14b_finalization_security.sql
       - name: Export disposable schema for read-only staging comparison
         run: |
           psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > schema-manifest.json

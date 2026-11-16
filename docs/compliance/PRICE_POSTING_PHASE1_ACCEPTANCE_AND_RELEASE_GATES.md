@@ -16,11 +16,19 @@
 | 5 | #169 | Owner/manager source attestation, tenant audit and UI |
 | 6 | #170 | Tenant-scoped read-only price/cost/product/license reconciliation |
 | 7 | #171 | Immutable internal preparation and human-reported unverified reference ledger |
+| 8 | #172 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
 security fix exists only on a descendant. Explicit-allow hardening in #171
 requires a **named matching tenant policy rule**, not a default or missing rule ID.
+Patch 8 additionally requires `action_class=commit`, `effect=allow`,
+`is_active=true`, `capabilities_match` including the exact regulated capability
+and `paths_match` including `api`. The database rechecks the same criteria
+at atomic audit insertion; a general `allow commits` rule is insufficient.
+The three capabilities are distinct:
+`compliance.rule_review`, `compliance.price_preparation`, and
+`compliance.price_external_reference`. No automatic policy change is made.
 
 ## 2. Features supported by the synthetic pilot
 
@@ -95,6 +103,8 @@ Synthetic acceptance must include a happy path and each negative path:
   mismatched SKU/currency, customer-specific price, unapproved price book.
 - Missing/duplicate IDs, oversized pages, source outages and inconsistent reads.
 - Audit unavailable: case/review/reference and audit must **roll back together**.
+- Named but broad `COMMIT allow`, missing `capabilities_match`, wrong `paths_match`,
+  foreign-tenant rules and revoked rules are all rejected at the DB audit boundary.
 - Direct client table UPDATE/DELETE/INSERT denied; audit and histories are append-only.
 - No official filing action, exported template or price writes under any path.
 

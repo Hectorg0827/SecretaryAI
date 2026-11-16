@@ -148,7 +148,19 @@ def compile_source_readiness(
             "sku": sku,
             "cost_snapshot_id": snapshot_id or None,
             "cost_basis_recorded_as_reconciled": bool(
-                snapshot and snapshot.get("evidence_status") == "reconciled"
+                snapshot
+                and snapshot.get("evidence_status") == "reconciled"
+                and snapshot.get("sku") == sku
+                and snapshot.get("currency") == book.get("currency")
+                and (_source_date(snapshot.get("cost_as_of")) is not None)
+                and _source_date(snapshot.get("cost_as_of")) <= effective_date
+                and cost_lines_by_snapshot.get(snapshot_id)
+                and all(
+                    line.get("observation_status") == "verified"
+                    and bool(line.get("source_document_ref"))
+                    and bool(line.get("source_revision"))
+                    for line in cost_lines_by_snapshot[snapshot_id]
+                )
             ),
             "matching_license_record_count": len(candidates),
             "product_type_from_internal_registry": (

@@ -31,3 +31,7 @@ This fixture is compatible with the repo's disposable PostgreSQL 17 CI database.
 ## Non-actions
 
 This audit does **not** authorize a company DELETE in staging, a production migration, `db push`, `migration repair`, a Supabase plan upgrade, QuickBooks access, filing, notifications, or PR merging. No legitimate retention duration is set without jurisdiction-specific review.
+
+## Grant-revocation mitigation spike (not a migration)
+
+`scripts/test_company_delete_revoke_proposal.sql` additionally tests a **rollback-only** countermeasure: revoking `DELETE` on `public.companies` from `service_role`, `anon`, `authenticated` and `PUBLIC` denies a direct service-role parent deletion, keeps Logistics SELECT/INSERT available, and leaves an authorized database-owner company cascade operational. This does **not** satisfy the production retention/erasure architecture: the existing API registration-failure cleanup still depends on direct `service_role` DELETE, and there is no approved erasure role, human/legal gate, durable out-of-band receipt or rollback-safe onboarding replacement. No SQL from this spike may be applied remotely.

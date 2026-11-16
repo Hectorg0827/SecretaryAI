@@ -391,3 +391,25 @@ async def test_preference_read_failure_blocks_both_transaction_feeds():
             )
     u._qb.get_ar_invoice_evidence_read_only.assert_not_awaited()
     u._qb.get_ar_payment_evidence_read_only.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_real_sandbox_get_readers_forward_verified_single_currency_context():
+    qb = _qbo()
+    ctx = {"multicurrency_enabled": False, "home_currency": "DOP"}
+    qb._query = AsyncMock(side_effect=[
+        {"QueryResponse": {"Invoice": [_invoice(CurrencyRef=None)]},
+         "time": "2026-11-15T13:00:00Z"},
+        {"QueryResponse": {"Payment": [_payment(CurrencyRef=None)]},
+         "time": "2026-11-15T13:00:01Z"},
+    ])
+    qb._post = AsyncMock()
+    with patch("app.config.get_settings", return_value=_settings()):
+        invoices = await qb.get_ar_invoice_evidence_read_only(currency_context=ctx)
+        payments = await qb.get_ar_payment_evidence_read_only(currency_context=ctx)
+    assert invoices[0]["currency"] == "DOP"
+    assert payments[0]["currency"] == "DOP"
+    assert [x.args[0].split(" STARTPOSITION")[0] for x in qb._query.await_args_list] == [
+        "SELECT * FROM Invoice", "SELECT * FROM Payment",
+    ]
+    qb._post.assert_not_awaited()

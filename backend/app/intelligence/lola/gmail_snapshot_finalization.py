@@ -7,6 +7,7 @@ request. A checkpoint is only an incremental baseline, never no-reply proof.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
@@ -122,7 +123,8 @@ def _receipt_matches(
         "company_id,employee_id,provider,provider_identity_sha256,resource_sha256,"
         "mapping_revision,initial_history_sha256,snapshot_chain_sha256,"
         "snapshot_membership_sha256,history_digest_sha256,"
-        "reconciled_membership_sha256,cursor_sha256,replay_digest,checkpoint_generation"
+        "reconciled_membership_sha256,cursor_sha256,replay_digest,"
+        "event_batch_digest_sha256,checkpoint_generation"
     )
     try:
         query = db.table(_RECEIPTS).select(fields)
@@ -144,6 +146,10 @@ def _receipt_matches(
         "reconciled_membership_sha256": preview.membership_digest,
         "cursor_sha256": cursor_sha,
         "replay_digest": replay_digest,
+        "event_batch_digest_sha256": hashlib.sha256("|".join(sorted(
+            f"{event['key_sha256']}:{event['operation']}"
+            for event in preview.event_rows
+        )).encode("utf-8")).hexdigest(),
         "checkpoint_generation": generation,
     }
     if any(row.get(k) != v for k, v in expected.items()):

@@ -18,7 +18,7 @@
 | 7 | #171 | Immutable internal preparation and human-reported unverified reference ledger |
 | 8 | #173 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
 | 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
-| 10 | #TBD | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
+| 10 | #182 | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a

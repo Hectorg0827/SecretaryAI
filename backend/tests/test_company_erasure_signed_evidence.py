@@ -19,7 +19,7 @@ from app.company_erasure.preflight import (
 )
 from app.company_erasure.signed_evidence import (
     SignedEvidence, SignedReviewPacket, _signing_message,
-    evaluate_signed_review_packet,
+    evidence_commitment_digest, evaluate_signed_review_packet,
 )
 
 NOW = datetime(2026, 11, 16, 23, 0, tzinfo=timezone.utc)
@@ -123,6 +123,9 @@ def signed_fixture():
         scope=sign("scope", scope, keys),
         external_receipt=sign("external_receipt", receipt, keys),
     )
+    bound_digest = evidence_commitment_digest(packet)
+    bound_receipt = replace(packet.external_receipt.record, digest_sha256=bound_digest)
+    packet = replace(packet, external_receipt=sign("external_receipt", bound_receipt, keys))
     return keys, roots, packet
 
 
@@ -177,6 +180,18 @@ def test_forged_signature_and_tampered_claims_deny():
             record=replace(packet.approvals[1].record, revoked=True),
         ),
     )), roots)
+
+
+def test_independently_signed_receipt_for_wrong_evidence_fails():
+    keys, roots, packet = signed_fixture()
+    # A real archive issuer's signature alone is insufficient: the receipt
+    # must attest to the *exact* case evidence in this reviewed packet.
+    different_receipt = sign(
+        "external_receipt",
+        replace(packet.external_receipt.record, digest_sha256="f"*64),
+        keys,
+    )
+    check_blocked(replace(packet, external_receipt=different_receipt), roots)
 
 
 def test_tenant_and_request_swap_fail_even_for_valid_signature():

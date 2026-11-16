@@ -79,6 +79,13 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115020000_price_post
 psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_human_attestation.sql
 echo '✓ Review authorization, tenant isolation and atomic audit rollback passed.'
 
+echo '── validating internal price preparation and unverified reference ledger'
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261114162323_pricing_pricebook_cost_basis_staging_20261114.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115030000_price_posting_preparation_ledger.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_preparation_ledger.sql
+echo '✓ Internal case source tenant isolation, immutability, audit rollback and unverified receipt checks passed.'
+
+
 echo '── checking procurement and private morning briefing extensions'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000006_qbo_token_expiry.sql

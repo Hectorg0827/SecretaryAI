@@ -123,14 +123,14 @@ class FakeDB:
 
 @pytest.fixture
 def policy(monkeypatch):
-    effect = {"value": "allow"}
+    effect = {"value": "allow", "rule_id": "00000000-0000-4000-8000-000000000055"}
 
     async def decide(_self, proposal):
         assert proposal.capability == "compliance.rule_review"
         assert proposal.company_id == TENANT
         assert proposal.requested_by == ACTOR
         assert proposal.action_class.value == "commit"
-        return SimpleNamespace(effect=effect["value"], rule_id=None)
+        return SimpleNamespace(effect=effect["value"], rule_id=effect["rule_id"])
     monkeypatch.setattr(api.PolicyEngine, "evaluate", decide)
     return effect
 
@@ -240,3 +240,15 @@ async def test_policy_rejection_unavailable_audit_blocks_without_write(policy):
         await api.record_rule_human_review("NJ_ECPL", req(), user=USER, db=db)
     assert exc.value.status_code == 503
     assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_default_allow_without_explicit_tenant_policy_rule_cannot_review(policy):
+    policy["rule_id"] = None
+    db = FakeDB()
+    with pytest.raises(HTTPException) as exc:
+        await api.record_rule_human_review("NJ_ECPL", req(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert len(db.audits) == 1
+    assert db.audits[0]["policy_effect"] == "deny"
+    assert not any(call.startswith("rpc:") for call in db.calls)

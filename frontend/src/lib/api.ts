@@ -430,6 +430,82 @@ export interface PricePostingReadinessResult {
   qbo_qbd_live_data_accessed: false;
 }
 
+export interface InternalPricePostingCase {
+  id: string;
+  company_id: string;
+  rule_id: string;
+  rule_version: number;
+  created_by: string;
+  effective_date: string;
+  price_book_snapshot: Array<{
+    price_book_id: string;
+    sku: string;
+    list_price_per_case: string;
+    status: string;
+    revision: number;
+    market_code: string;
+  }>;
+  source_fingerprint: string;
+  state: 'internal_preparation_only';
+  created_at: string;
+}
+export interface InternalPricePostingCaseList {
+  items: InternalPricePostingCase[];
+  next_offset: number | null;
+  submission_permitted: false;
+  agency_confirmation: false;
+}
+export interface InternalPreparationInput {
+  program_key: string;
+  rule_id: string;
+  version: number;
+  effective_date: string;
+  price_book_ids: string[];
+  acknowledged_no_filing_authority: boolean;
+}
+export interface InternalPreparationReceipt {
+  preparation_id: string;
+  audit_event_id: string;
+  source_fingerprint: string;
+  source_count: number;
+  state: 'internal_preparation_only';
+  submission_permitted: false;
+  agency_confirmation: false;
+  price_publication_permitted: false;
+}
+export type ExternalReferenceKind =
+  | 'external_document_reference'
+  | 'agency_message_reference'
+  | 'rejection_reference';
+export interface HumanExternalReferenceInput {
+  kind: ExternalReferenceKind;
+  external_reference: string;
+  claimed_event_date: string | null;
+  note: string;
+  acknowledged_unverified: boolean;
+}
+export interface HumanExternalReference {
+  id: string;
+  preparation_id: string;
+  reference_kind: ExternalReferenceKind;
+  external_reference: string;
+  claimed_event_date: string | null;
+  note: string;
+  provenance_status: 'human_reported_unverified';
+}
+export interface HumanExternalReferenceList {
+  items: HumanExternalReference[];
+  agency_confirmation: false;
+  submission_permitted: false;
+}
+export interface HumanExternalReferenceReceipt {
+  reference_id: string;
+  audit_event_id: string;
+  provenance_status: 'human_reported_unverified';
+  agency_confirmation: false;
+  submission_permitted: false;
+}
+
 export interface PricePostingRuleReviewReceipt {
   rule_id: string;
   version: number;
@@ -633,6 +709,21 @@ export const api = {
 
     // Import
     importRows: (body: {entity_type: string; rows: object[]}) => api.post<{imported: number; errors: object[]; total_rows: number}>('/api/compliance/import', body),
+  },
+
+  pricePreparations: {
+    list: () =>
+      api.get<InternalPricePostingCaseList>('/api/insights/price-preparations?limit=50'),
+    create: (body: InternalPreparationInput) =>
+      api.post<InternalPreparationReceipt>('/api/insights/price-preparations', body),
+    listReferences: (id: string) =>
+      api.get<HumanExternalReferenceList>(
+        `/api/insights/price-preparations/${encodeURIComponent(id)}/references`,
+      ),
+    addReference: (id: string, body: HumanExternalReferenceInput) =>
+      api.post<HumanExternalReferenceReceipt>(
+        `/api/insights/price-preparations/${encodeURIComponent(id)}/references`, body,
+      ),
   },
 
   pricePosting: {

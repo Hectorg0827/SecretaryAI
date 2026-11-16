@@ -371,6 +371,20 @@ async def record_rule_human_review(
             )
         raise HTTPException(status_code=403, detail="Tenant policy rejected rule review")
 
+    # A default allow without a named tenant rule is not explicit consent.
+    # This also prevents future changes to generic policy defaults from
+    # silently authorizing regulated attestation writes.
+    if not decision.rule_id:
+        _audit_blocked_write(
+            db, table="compliance_price_posting_rule_reviews",
+            record={"id": str(request.rule_id), "company_id": company_id},
+            actor=actor_id, effect="deny", rule_id=None,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="An explicit tenant policy rule must authorize documentary review",
+        )
+
     try:
         result = db.rpc("record_price_posting_rule_review", {
             "p_company_id": company_id,

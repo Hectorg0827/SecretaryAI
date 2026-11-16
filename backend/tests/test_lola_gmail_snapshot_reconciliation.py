@@ -248,3 +248,28 @@ def test_same_message_in_two_employees_cannot_match_hmac():
         verify_snapshot_ledger(
             scope=other, vault=vault, progress=progress, pages=pages, refs=refs,
         )
+
+
+@pytest.mark.asyncio
+async def test_contradictory_added_deleted_transitions_are_not_guessed():
+    scope, vault, progress, pages, refs = fixture()
+
+    async def ambiguous(start, page):
+        return {
+            "historyId": "116",
+            "history": [
+                {"id": "110", "messagesAdded": [
+                    {"message": {"id": "message-7", "threadId": "thread-7"}}
+                ]},
+                {"id": "115", "messagesDeleted": [
+                    {"message": {"id": "message-7", "threadId": "thread-7"}}
+                ]},
+            ],
+        }
+
+    with pytest.raises(ReplayUnavailable, match="Ambiguous Gmail"):
+        await reconcile_gmail_snapshot_preview(
+            scope=scope, vault=vault, progress=progress,
+            pages=pages, refs=refs, fetch_history_page=ambiguous,
+            reauthorize=lambda: None,
+        )

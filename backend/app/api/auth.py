@@ -686,98 +686,45 @@ class RegisterRequest(BaseModel):
 
 @router.post("/register", status_code=201)
 async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_limiter))):
+    """Atomically create company, security defaults and owner or create nothing.
+
+    Unlike the previous multi-request Supabase path, this flow never needs a
+    service-role company DELETE for partial-registration cleanup.  Duplicate
+    email races are resolved by the database's users_email_key constraint.
     """
-    Create a new company and owner user, then return a JWT so the user is
-    immediately logged in.
-    """
-    from supabase import create_client
-    db = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    import asyncpg
+    from app.auth.registration import create_company_owner_transactionally
+    from app.domain.policy import _default_rules
 
-    # Check email uniqueness
-    try:
-        existing = (
-            db.table("users")
-            .select("id")
-            .eq("email", body.email)
-            .execute()
-        )
-    except Exception as exc:
-        log.error("Register email-check DB query failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
-
-    if existing.data:
-        raise HTTPException(status_code=409, detail="Email already registered")
-
-    # Hash before any insert: a hashing failure must not orphan a company.
+    # Hash before opening a DB transaction; failures never create a company.
     try:
         password_hash = hash_password(body.password)
     except Exception:
         log.error("Registration password hashing unavailable")
         raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
 
-    # Create company
     try:
-        company_result = (
-            db.table("companies")
-            .insert({"name": body.company_name})
-            .execute()
+        user = await create_company_owner_transactionally(
+            database_url=settings.database_url,
+            company_name=body.company_name,
+            email=body.email,
+            hashed_password=password_hash,
+            full_name=body.full_name,
+            policy_rules_factory=_default_rules,
         )
+    except asyncpg.UniqueViolationError as exc:
+        # Only a verified email uniqueness violation means a duplicate user.
+        # Other constraints must fail closed instead of masking schema drift.
+        if exc.constraint_name == "users_email_key":
+            raise HTTPException(status_code=409, detail="Email already registered") from None
+        log.error("Atomic registration uniqueness failure (%s)", exc.constraint_name)
+        raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
     except Exception as exc:
-        log.error("Register company insert failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
+        # Never log passwords, SQL parameters, hashed_password, or tokens.
+        log.error("Atomic registration unavailable (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
 
-    if not company_result.data:
-        log.error("Register company insert returned no data")
-        raise HTTPException(status_code=500, detail="Failed to create company")
-
-    company_id = company_result.data[0]["id"]
-
-    # A user account must never become active with partial safety defaults.
-    # Seed before the owner record; if setup fails, clean up the orphan company.
-    try:
-        await _seed_company_defaults(company_id, db)
-    except Exception:
-        log.error("Registration safety defaults could not be initialized")
-        try:
-            db.table("companies").delete().eq("id", company_id).execute()
-        except Exception:
-            log.error("Registration orphan company cleanup failed")
-        raise HTTPException(
-            status_code=503, detail="Account safety setup unavailable; please try again"
-        ) from None
-
-    # Create user
-    user_payload: dict = {
-        "email": body.email,
-        "hashed_password": password_hash,
-        "role": "owner",
-        "company_id": company_id,
-        "is_active": True,
-    }
-    if body.full_name:
-        user_payload["full_name"] = body.full_name
-
-    try:
-        user_result = (
-            db.table("users")
-            .insert(user_payload)
-            .execute()
-        )
-    except Exception as exc:
-        log.error("Register user insert failed: %s", exc)
-        # Attempt to clean up orphaned company row
-        try:
-            db.table("companies").delete().eq("id", company_id).execute()
-        except Exception:
-            pass
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
-
-    if not user_result.data:
-        log.error("Register user insert returned no data")
-        raise HTTPException(status_code=500, detail="Failed to create user")
-
-    user = user_result.data[0]
-
+    company_id = user["company_id"]
     token = create_access_token({
         "sub": user["id"],
         "company_id": company_id,
@@ -786,9 +733,12 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
     })
     log.info("New owner registered: user=%s company=%s", user["id"], company_id)
 
-    # Audit registration (non-fatal)
+    # Preserve best-effort auditing after the committed transaction.  No
+    # audit failure may revert the now-complete usable registration.
     try:
+        from supabase import create_client
         from app.utils.audit import write_audit_event
+        db = create_client(settings.supabase_url, settings.supabase_service_role_key)
         write_audit_event(
             db,
             company_id=company_id,

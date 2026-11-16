@@ -360,6 +360,11 @@ jobs:
           python-version: "3.11"
       - name: Install pinned PostgreSQL integration driver
         run: python -m pip install asyncpg==0.29.0
+      - name: Verify atomic owner registration in disposable PostgreSQL
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: python scripts/test_atomic_owner_registration_integration.py
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"

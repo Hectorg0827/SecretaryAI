@@ -18,34 +18,40 @@ def test_registration_rejects_unsupported_password_before_database(password):
 
 @pytest.mark.asyncio
 async def test_registration_hashes_and_verifies_the_actual_submitted_password():
-    db = MagicMock()
-    users = MagicMock()
-    companies = MagicMock()
-    db.table.side_effect = lambda name: users if name == 'users' else companies
-    users.select.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[])
-    companies.insert.return_value.execute.return_value = SimpleNamespace(data=[{'id': 'company-test'}])
-    users.insert.return_value.execute.return_value = SimpleNamespace(data=[{'id': 'user-test'}])
-    body = RegisterRequest(company_name='Staging Test', email='test@example.invalid', password='Strong-password17!')
-    with patch('supabase.create_client', return_value=db), \
-         patch('app.api.auth._seed_company_defaults', new_callable=AsyncMock), \
-         patch('app.utils.audit.write_audit_event'):
+    captured = {}
+
+    async def atomic_writer(**kwargs):
+        captured.update(kwargs)
+        return {"id": "user-test", "company_id": "company-test"}
+
+    body = RegisterRequest(company_name='Staging Test', email='test@example.invalid',
+                           password='Strong-password17!')
+    with (patch('app.auth.registration.create_company_owner_transactionally',
+                new=atomic_writer),
+          patch('supabase.create_client', return_value=MagicMock()),
+          patch('app.utils.audit.write_audit_event')):
         result = await register(body, _=None)
+
     assert result['role'] == 'owner'
     assert result['access_token']
-    stored = users.insert.call_args.args[0]['hashed_password']
-    assert 'password_hash' not in users.insert.call_args.args[0]
+    stored = captured['hashed_password']
+    assert 'password_hash' not in captured
     assert verify_password(body.password, stored)
     assert not verify_password('Wrong-password17!', stored)
 
 
 @pytest.mark.asyncio
 async def test_hasher_failure_cannot_leave_an_orphan_company():
-    db = MagicMock()
-    db.table.return_value.select.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[])
-    body = RegisterRequest(company_name='Test', email='test@example.invalid', password='Strong-password17!')
-    with patch('supabase.create_client', return_value=db), \
-         patch('app.api.auth.hash_password', side_effect=RuntimeError('broken backend')):
+    body = RegisterRequest(company_name='Test', email='test@example.invalid',
+                           password='Strong-password17!')
+    with (patch('app.auth.registration.create_company_owner_transactionally',
+                new_callable=AsyncMock) as atomic_writer,
+          patch('app.api.auth.hash_password',
+                side_effect=RuntimeError('broken backend')),
+          patch('supabase.create_client') as client):
         with pytest.raises(HTTPException) as err:
             await register(body, _=None)
+
     assert err.value.status_code == 503
-    db.table.return_value.insert.assert_not_called()
+    atomic_writer.assert_not_awaited()
+    client.assert_not_called()

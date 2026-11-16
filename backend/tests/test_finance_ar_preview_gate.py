@@ -59,6 +59,7 @@ async def test_preview_disabled_before_db_role_or_adapter_access(env, enabled):
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(response, user=user(), db=MagicMock())
     assert failure.value.status_code == 404
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
     assert response.headers["Cache-Control"] == "private, no-store"
     verify_role.assert_not_called()
     adapter.assert_not_called()
@@ -76,6 +77,7 @@ async def test_preview_refuses_nonowner_after_current_db_role_check(role):
         with pytest.raises(HTTPException) as failure:
             await get_ar_payment_preview(response, user=user(role), db=MagicMock())
     assert failure.value.status_code == 403
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
     verify_role.assert_called_once()
     adapter.assert_not_called()
 
@@ -91,6 +93,7 @@ async def test_stale_or_revoked_owner_role_blocks_provider_before_construction()
                 Response(), user=user(), db=MagicMock(),
             )
     assert failure.value.status_code == 403
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
     adapter.assert_not_called()
 
 
@@ -140,6 +143,7 @@ async def test_payment_source_failure_returns_generic_503_and_never_zero():
                 Response(), user=user(), db=MagicMock(),
             )
     assert failure.value.status_code == 503
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
     assert "SENSITIVE" not in failure.value.detail
     assert "0" not in failure.value.detail
 
@@ -159,4 +163,5 @@ async def test_response_schema_rejects_provider_identity_or_money_injection():
                 Response(), user=user(), db=MagicMock(),
             )
     assert failure.value.status_code == 503
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
     assert "PRIVATE" not in failure.value.detail

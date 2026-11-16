@@ -21,6 +21,7 @@
 | 10 | #182 | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
 | 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
 | 12 | #187 | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
+| 13 | #TBD | Live staging read-only migration audit, 9/12 exact historical Git blob checks, 3 provenance gaps and seven-source NO-GO handoff |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -239,6 +240,37 @@ migration versions and dependencies **read-only**, create an explicitly
 reviewed staging-only bundle or approved additive migration plan, test
 it on a disposable clone and obtain separate deployment approval.
 Production authorization and current agency requirements are later gates.
+
+### Live staging read-only reconciliation (Patch 13)
+
+**Verified on 2026-11-16** against Supabase project
+`SecretaryAI-Staging` (`xerktvdgjvjozvckjyfp`): **45** recorded
+migration versions; all 33 prior pinned baseline version/name pairs match,
+plus 12 newer recorded migrations. The two pricing foundation and FK/index
+migrations (`20261114162323`, `20261114163243`) are **recorded and
+present** and must not be reapplied. **Seven Compliance migration versions
+(`20261115000000`–`20261115060000`) remain unrecorded.**
+
+Read-only hashing of remotely stored migration SQL statements against the
+repository's Git object database found **9/12 exact statement Git blobs**;
+Logistics Journey, Lola Core, and Conversation Owner RLS were **not found
+as exact Git blobs**, although their principal live schema objects were
+identified. These three remain source-provenance exceptions until an
+independent review examines their recorded SQL and catalog definitions.
+
+The evidence is retained at
+`docs/compliance/staging_migration_snapshot_20261116.json`
+and detailed in
+`docs/compliance/STAGING_READ_ONLY_RECONCILIATION_AND_HANDOFF_20261116.md`.
+A new offline CI checker validates the seven pending candidate SQL blob
+hashes and snapshot integrity but **does not refresh the live database**.
+The historical preflight's bundle-missing warnings must be interpreted in
+light of this actual remote history; they do not mean the existing
+pricing foundation has not been applied.
+
+**NO-GO remains unchanged.** A separate, explicitly approved migration
+bundle, disposable-clone dry-run, human/technical sign-off and authenticated
+staging tests remain prerequisites. No remote SQL was modified.
 
 ## 5. Actual staging acceptance (not yet performed for this patch stack)
 

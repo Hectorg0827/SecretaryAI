@@ -11,7 +11,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_db
@@ -20,6 +20,7 @@ from app.api.compliance_integrity import _audit_blocked_write
 from app.domain.contracts import ActionClass, ActionProposal, DataPath
 from app.domain.policy import PolicyEngine
 from app.intelligence.compliance.price_posting_preview import compile_price_posting_preview
+from app.intelligence.compliance.price_posting_readiness import compile_source_readiness
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -191,6 +192,108 @@ async def preview_price_posting(
         raise HTTPException(status_code=503, detail="Price-posting source cannot be validated") from exc
     draft["read_consistency"] = "separate_tenant_scoped_queries_not_atomic_snapshot"
     return draft
+
+
+class PricePostingReadinessRequest(BaseModel):
+    """Choose existing pricebook records, never user-provided prices or costs."""
+    program_key: str = Field(min_length=3, max_length=80, pattern=r"^[A-Z][A-Z0-9_]+$")
+    price_book_ids: list[UUID] = Field(min_length=1, max_length=50)
+    effective_date: date
+
+
+@router.post("/readiness")
+async def preview_price_posting_source_readiness(
+    request: PricePostingReadinessRequest,
+    response: Response,
+    user: dict = Depends(get_pricing_user),
+    db=Depends(get_db),
+):
+    """Read-only evidence check; never an agency filing or regulatory clearance."""
+    response.headers["Cache-Control"] = "private, no-store"
+    company_id = str(user["company_id"])
+    ids = [str(item) for item in request.price_book_ids]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail="Duplicate price-book IDs")
+
+    rule = _latest_rule(db, request.program_key)
+    human_reviewed = _human_reviewed(db, company_id, str(rule["id"]))
+
+    def read(table: str, fields: str, query_fn, limit: int) -> list[dict]:
+        try:
+            rows = _rows(query_fn(db.table(table).select(fields)).limit(limit).execute(), table)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("Price posting readiness source unavailable table=%s", table)
+            raise HTTPException(
+                status_code=503,
+                detail="Price posting evidence unavailable; no determination made",
+            ) from exc
+        if len(rows) >= limit:
+            raise HTTPException(status_code=503, detail="Price posting evidence exceeds checked scope")
+        if any(str(row.get("company_id")) != company_id for row in rows):
+            raise HTTPException(status_code=503, detail="Price posting tenant scope invalid")
+        return rows
+
+    books = read(
+        "pricing_price_book", BOOK_FIELDS + ",created_by",
+        lambda q: q.eq("company_id", company_id).in_("id", ids),
+        len(ids) + 1,
+    )
+    indexed = {str(row.get("id")): row for row in books}
+    if len(books) != len(ids) or len(indexed) != len(ids) or any(i not in indexed for i in ids):
+        raise HTTPException(status_code=404, detail="Requested price-book evidence not found")
+    ordered_books = [indexed[i] for i in ids]
+
+    snapshot_ids = sorted({
+        str(row["cost_snapshot_id"]) for row in ordered_books
+        if row.get("cost_snapshot_id")
+    })
+    snapshots = (
+        read(
+            "pricing_cost_snapshots",
+            "id,company_id,sku,currency,cost_as_of,evidence_status,source_revision",
+            lambda q: q.eq("company_id", company_id).in_("id", snapshot_ids),
+            len(snapshot_ids) + 1,
+        ) if snapshot_ids else []
+    )
+    cost_lines = (
+        read(
+            "pricing_cost_lines",
+            "company_id,cost_snapshot_id,expense_line_ref,component,source_document_ref,source_revision,observation_status",
+            lambda q: q.eq("company_id", company_id).in_("cost_snapshot_id", snapshot_ids),
+            501,
+        ) if snapshot_ids else []
+    )
+    skus = sorted({str(row["sku"]) for row in ordered_books})
+    products = read(
+        "compliance_products",
+        "id,company_id,sku,product_type",
+        lambda q: q.eq("company_id", company_id).in_("sku", skus),
+        501,
+    )
+    licenses = read(
+        "compliance_licenses",
+        "id,company_id,state_code,license_number,product_types,status",
+        lambda q: q.eq("company_id", company_id).eq("state_code", rule["region_code"]),
+        101,
+    )
+    try:
+        preview = compile_source_readiness(
+            rule=rule,
+            company_id=company_id,
+            human_reviewed=human_reviewed,
+            books=ordered_books,
+            snapshots=snapshots,
+            cost_lines=cost_lines,
+            products=products,
+            licenses=licenses,
+            effective_date=request.effective_date,
+        )
+    except (KeyError, ValueError, TypeError) as exc:
+        log.warning("Price posting source evidence malformed")
+        raise HTTPException(status_code=503, detail="Source evidence invalid; no determination made") from exc
+    return preview
 
 
 class RuleHumanReviewRequest(BaseModel):

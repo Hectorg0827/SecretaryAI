@@ -5,6 +5,7 @@ import {
   type PricePostingHumanReviewInput,
 } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
+import { PricePostingReadinessPanel } from './PricePostingReadinessPanel';
 
 const blankChecks = {
   source: false,
@@ -24,6 +25,7 @@ export function PricePostingReviewPanel() {
   const [checks, setChecks] = useState(blankChecks);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const [showReadiness, setShowReadiness] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -210,6 +212,18 @@ export function PricePostingReviewPanel() {
         <p className="text-xs text-slate-500">
           Read-only access. Only an authorized owner or manager may record documentary verification.
         </p>
+      )}
+      {!loading && !failure && programs.length > 0 && (
+        <div className="border-t border-slate-200 pt-4">
+          <button type="button" aria-expanded={showReadiness}
+            onClick={() => setShowReadiness((value) => !value)}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900">
+            {showReadiness ? 'Close internal evidence checker' : 'Open internal price evidence checker'}
+          </button>
+        </div>
+      )}
+      {showReadiness && !loading && !failure && programs.length > 0 && (
+        <PricePostingReadinessPanel programs={programs} />
       )}
     </section>
   );

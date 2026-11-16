@@ -161,6 +161,7 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
         "id": company_id,
         "company_id": company_id,
         "qb_type": "online",
+        "_qbo_only": True,
         "qbo_client_id": client_id,
         "qbo_client_secret": client_secret,
         "qbo_access_token": access_token,
@@ -168,6 +169,6 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
         "_qbo_expected_refresh_ciphertext": refresh_ciphertext,
         "qbo_realm_id": realm_id,
     }
-    adapter = UnifiedDataAdapter(qb_only_config)
-    adapter.set_db(db)
-    return adapter
+    # This preview uses QBO's direct GET reader. Do not attach AccessRouter,
+    # which would retain a DB handle and enable unrelated data access paths.
+    return UnifiedDataAdapter(qb_only_config)

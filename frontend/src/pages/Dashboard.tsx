@@ -72,7 +72,8 @@ export function Dashboard() {
 
   // Build stat tiles based on what this role can see
   const statItems = summary ? [
-    ...(showEmailInbox    ? [{ label: 'Unread Emails',    value: summary.unread_emails ?? 'Unavailable',     accent: 'blue'    as const }] : []),
+    ...(showEmailInbox    ? [{ label: 'Unread Emails',    value: summary.unread_emails === null || summary.unread_emails_capped === null
+      ? 'Unverified' : summary.unread_emails_capped ? `${summary.unread_emails}+` : summary.unread_emails, accent: 'blue' as const }] : []),
     ...(showApprovals     ? [{ label: 'Pending Approvals',value: summary.pending_actions ?? 'Unavailable',   accent: 'amber'   as const }] : []),
     ...(showAccountHealth && accounts ? [{ label: 'Accounts At Risk', value: accounts.at_risk + accounts.dormant, accent: 'red' as const }] : []),
     ...(showInventory     ? [{ label: 'Inventory Alerts', value: alerts.length,                            accent: 'amber'   as const }] : []),

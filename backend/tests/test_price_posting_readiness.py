@@ -210,9 +210,20 @@ async def test_provisional_costs_and_unverified_documents_are_blocked():
 async def test_missing_cost_snapshot_is_a_blocker_not_verified_zero():
     db = FakeDB()
     db.tables["pricing_cost_snapshots"] = []
+    db.tables["pricing_cost_lines"] = []
     result = await invoke(db)
     assert "cost_snapshot_missing" in result["source_evidence"][0]["source_blockers"]
     assert result["ready_to_file"] is False
+
+
+@pytest.mark.asyncio
+async def test_orphaned_cost_line_is_invalid_source_not_confirmed_absence():
+    db = FakeDB()
+    db.tables["pricing_cost_snapshots"] = []
+    # A retained line pointing to a missing cost snapshot is not a safe blank.
+    with pytest.raises(HTTPException) as error:
+        await invoke(db)
+    assert error.value.status_code == 503
 
 
 @pytest.mark.asyncio

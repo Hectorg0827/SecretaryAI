@@ -214,6 +214,29 @@ def test_invalid_negative_or_nonfinite_provider_sale_price_rejected(amount):
         preview(items=[qbo_item(UnitPrice=amount)])
 
 
+def test_same_provider_item_id_reused_across_selected_books_is_not_a_verified_match():
+    other_id = "00000000-0000-4000-8000-000000000031"
+    second_book = dict(BOOK, id=other_id, sku="SYN-NJ-002")
+    second_binding = dict(
+        BINDING, id="00000000-0000-4000-8000-000000000032",
+        price_book_id=other_id, source_sku_hint="SYN-NJ-002",
+    )
+    result = preview(
+        books=[dict(BOOK), second_book],
+        bindings=[dict(BINDING), second_binding],
+    )
+    assert len(result["lines"]) == 2
+    assert all(row["numeric_comparison"] == "not_comparable"
+               for row in result["lines"])
+    assert all("provider_item_id_reused_across_selected_pricebooks" in row["blockers"]
+               for row in result["lines"])
+
+
+def test_zero_internal_case_price_is_invalid_source_not_verified_match():
+    with pytest.raises(ValueError, match="must be positive"):
+        preview(books=[dict(BOOK, list_price_per_case="0.00")])
+
+
 def test_customer_specific_price_and_unapproved_book_never_match():
     result = preview(books=[
         dict(BOOK, customer_ref="special-customer", status="draft")

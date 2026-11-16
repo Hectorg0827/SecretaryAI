@@ -325,10 +325,12 @@ BEGIN
     ),''),'UTF8')),'hex')
     INTO v_events_digest FROM jsonb_array_elements(p_events) e;
 
+  -- Receipt rows are immutable (SELECT+INSERT only). The snapshot job
+  -- FOR UPDATE lock above already serializes every first-finalizer retry.
   SELECT * INTO v_prior FROM public.lola_gmail_snapshot_finalizations
   WHERE company_id=p_company_id AND employee_id=p_employee_id AND provider='gmail'
     AND provider_identity_sha256=p_provider_identity_sha256
-    AND resource_sha256=p_resource_sha256 FOR UPDATE;
+    AND resource_sha256=p_resource_sha256 FOR SHARE;
   IF FOUND THEN
     IF v_prior.mapping_revision IS DISTINCT FROM p_mapping_revision
       OR v_prior.initial_history_sha256 IS DISTINCT FROM p_initial_history_sha256

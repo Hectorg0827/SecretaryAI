@@ -164,6 +164,7 @@ def _adapter(*, company="tenant-a"):
     u._qb.get_ar_currency_context_read_only = AsyncMock(return_value={
         "multicurrency_enabled": False, "home_currency": "USD",
     })
+    u._qb.get_ar_source_count_read_only = AsyncMock(return_value=1)
     u._qb.get_ar_invoice_evidence_read_only = AsyncMock(return_value=[
         normalize_invoice_for_ar(_invoice()),
     ])
@@ -188,6 +189,10 @@ async def test_staging_sandbox_preview_reads_both_complete_feeds_without_write()
     assert "tenant-a" not in str(result)
     assert "inv-1" not in str(result)
     assert u._qb.get_ar_currency_context_read_only.await_count == 2
+    assert [x.args[0] for x in
+            u._qb.get_ar_source_count_read_only.await_args_list] == [
+        "Invoice", "Payment", "Invoice", "Payment",
+    ]
     assert u._qb.get_ar_invoice_evidence_read_only.await_count == 2
     assert all(
         item.kwargs == {"currency_context": {
@@ -219,6 +224,7 @@ async def test_preview_blocks_production_and_cross_tenant_before_provider_reads(
                     company_id=cid, as_of=DAY,
                 )
         u._qb.get_ar_currency_context_read_only.assert_not_awaited()
+        u._qb.get_ar_source_count_read_only.assert_not_awaited()
         u._qb.get_ar_invoice_evidence_read_only.assert_not_awaited()
         u._qb.get_ar_payment_evidence_read_only.assert_not_awaited()
 
@@ -543,3 +549,54 @@ def test_zero_cash_creditmemo_cannot_resolve_missing_unapplied_amount():
     )
     with pytest.raises(QBOARSourceInvalid):
         normalize_payment_for_ar(link_only)
+
+
+@pytest.mark.asyncio
+async def test_qbo_count_query_is_read_only_not_page_total_and_restricted_to_ar():
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={"QueryResponse": {"totalCount": 3}})
+    qb._post = AsyncMock()
+    with patch("app.config.get_settings", return_value=_settings()):
+        assert await qb.get_ar_source_count_read_only("Invoice") == 3
+        assert await qb.get_ar_source_count_read_only("Payment") == 3
+        with pytest.raises(QBOARSourceInvalid):
+            await qb.get_ar_source_count_read_only("Customer")
+    assert [x.args[0] for x in qb._query.await_args_list] == [
+        "SELECT COUNT(*) FROM Invoice",
+        "SELECT COUNT(*) FROM Payment",
+    ]
+    qb._post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [
+    None,
+    "0",
+    True,
+    -1,
+    5001,
+    2.0,
+])
+async def test_qbo_count_missing_malformed_or_outside_safe_bound_is_rejected(invalid):
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={"QueryResponse": {"totalCount": invalid}})
+    with patch("app.config.get_settings", return_value=_settings()):
+        with pytest.raises(QBOARSourceInvalid):
+            await qb.get_ar_source_count_read_only("Invoice")
+
+
+@pytest.mark.asyncio
+async def test_qbo_count_rejects_faults_and_production_before_provider_read():
+    qb = _qbo()
+    qb._query = AsyncMock(return_value={"Fault": {"Error": [
+        {"Message": "CANARY_SECRET"},
+    ]}})
+    with patch("app.config.get_settings", return_value=_settings()):
+        with pytest.raises(QBOARSourceInvalid) as err:
+            await qb.get_ar_source_count_read_only("Payment")
+    assert "CANARY" not in str(err.value)
+    qb._query.reset_mock()
+    with patch("app.config.get_settings", return_value=_settings(intuit="production")):
+        with pytest.raises(RuntimeError, match="sandbox"):
+            await qb.get_ar_source_count_read_only("Payment")
+    qb._query.assert_not_awaited()

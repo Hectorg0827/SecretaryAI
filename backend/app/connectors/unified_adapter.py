@@ -301,6 +301,8 @@ class UnifiedDataAdapter:
         # complete, bounded source reads can at least detect observed drift.
         # This remains a manual staging-only, non-certified preview.
         currency_context = await self._qb.get_ar_currency_context_read_only()
+        invoice_count_before = await self._qb.get_ar_source_count_read_only("Invoice")
+        payment_count_before = await self._qb.get_ar_source_count_read_only("Payment")
         invoices = await self._qb.get_ar_invoice_evidence_read_only(
             currency_context=currency_context,
         )
@@ -315,9 +317,25 @@ class UnifiedDataAdapter:
             currency_context=currency_context,
         )
         currency_context_check = await self._qb.get_ar_currency_context_read_only()
+        invoice_count_after = await self._qb.get_ar_source_count_read_only("Invoice")
+        payment_count_after = await self._qb.get_ar_source_count_read_only("Payment")
         if (not isinstance(currency_context, dict)
                 or currency_context_check != currency_context):
             raise ARPaymentEvidenceInvalid("AR currency preferences changed during comparison")
+        # Pagination may end cleanly but silently miss a moving page. Compare
+        # both passes against QBO's independent entity COUNT query; a
+        # QueryResponse.totalCount on SELECT * only counts that page.
+        if (type(invoice_count_before) is not int
+                or type(invoice_count_after) is not int
+                or type(payment_count_before) is not int
+                or type(payment_count_after) is not int
+                or invoice_count_before != invoice_count_after
+                or payment_count_before != payment_count_after
+                or len(invoices) != invoice_count_before
+                or len(invoices_check) != invoice_count_after
+                or len(payments) != payment_count_before
+                or len(payments_check) != payment_count_after):
+            raise ARPaymentEvidenceInvalid("AR provider document count changed or incomplete")
         assert_stable_ar_source_view(invoices, invoices_check, source="invoice")
         assert_stable_ar_source_view(payments, payments_check, source="payment")
         # Stamp the tenant only *after* validating the adapter's configuration,

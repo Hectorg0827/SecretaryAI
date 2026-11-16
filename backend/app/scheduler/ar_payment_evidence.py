@@ -226,7 +226,9 @@ def compare_ar_payment_allocations(
     differences = 0
     partial = 0
     for invoice_id, (_, _, total, balance) in invoice_by_id.items():
-        if total > balance > 0:
+        # A credit memo or write-off can reduce the balance without any
+        # cash allocation. Only count an actual partially applied payment.
+        if total > balance > 0 and allocations[invoice_id] > 0:
             partial += 1
         # Multiple distinct payment IDs can still overapply a single invoice.
         # A duplicate/replayed allocation must not become a soft variance.

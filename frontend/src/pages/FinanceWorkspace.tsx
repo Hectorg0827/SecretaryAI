@@ -8,6 +8,7 @@ type Summary = {
   overdue_count: number | null;
   due_date_missing_count: number | null;
   variance_detected: boolean | null;
+  source_as_of?: string | null;
   note: string;
 };
 type FinanceWorkspaceData = {
@@ -23,6 +24,13 @@ const titles: Record<string, string> = {
   ar: 'Accounts Receivable', ap: 'Accounts Payable',
   ledger: 'Financial Reporting', pricing: 'Pricing & Billbacks',
 };
+
+// A coverage calculation day is not a provider retrieval timestamp.
+// Older or malformed API responses must never invent a verified date.
+function displayedCoverageDay(value: unknown): string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value : 'Not verified';
+}
 
 export function FinanceWorkspace() {
   const [data, setData] = useState<FinanceWorkspaceData | null>(null);
@@ -62,6 +70,9 @@ export function FinanceWorkspace() {
                 <div><dt className="text-[#a7b6cf]">Missing due date</dt><dd className="text-xl font-semibold text-white">{summary.due_date_missing_count}</dd></div>
                 <div><dt className="text-[#a7b6cf]">Examined</dt><dd className="text-xl font-semibold text-white">{summary.headers_examined}</dd></div>
               </dl>}
+              {summary.status === 'observed' && (scope === 'ar' || scope === 'ap') && <p className="mt-3 text-xs text-[#a6b4cf]">
+                Counts assessed for UTC date: {displayedCoverageDay(summary.source_as_of)}
+              </p>}
               {summary.status === 'observed' && scope === 'ledger' && <p className="mt-4 text-sm text-[#d3deef]">{summary.variance_detected ? 'Unreconciled variance detected' : 'No variance detected in this limited comparison'}</p>}
               <p className="mt-4 text-sm leading-6 text-[#aab9d1]">{summary.note}</p>
             </section>;

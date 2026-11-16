@@ -5,7 +5,7 @@ execution. A finance employee cannot ask this endpoint for another department.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -36,6 +36,8 @@ class DepartmentSummary(BaseModel):
     overdue_count: int | None = None
     due_date_missing_count: int | None = None
     variance_detected: bool | None = None
+    # UTC accounting coverage day, not a certified provider capture timestamp.
+    source_as_of: str | None = None
     note: str
 
 
@@ -100,6 +102,17 @@ def build_finance_workspace(*, role: str, snapshot: dict, now: datetime | None =
                 raw = validate_finance_document_coverage(raw)
             except FinanceDocumentCoverageInvalid as exc:
                 raise ValueError("Invalid finance document evidence") from exc
+            # A fresh wrapper snapshot cannot make old or future-dated
+            # document headers current. A previous UTC day is permissible
+            # only in the first hour after midnight when refresh crosses days.
+            snapshot_utc = observed.astimezone(timezone.utc)
+            source_day = datetime.fromisoformat(raw["as_of"]).date()
+            snapshot_day = snapshot_utc.date()
+            if source_day != snapshot_day and not (
+                source_day == snapshot_day - timedelta(days=1)
+                and snapshot_utc.hour == 0
+            ):
+                raise ValueError("Finance document evidence date does not match snapshot")
         for kind in ("ar", "ap"):
             if kind not in scopes:
                 continue
@@ -109,6 +122,7 @@ def build_finance_workspace(*, role: str, snapshot: dict, now: datetime | None =
                     "status": "observed", "headers_examined": source["headers_examined"],
                     "open_count": source["open_count"], "overdue_count": source["overdue_count"],
                     "due_date_missing_count": source["due_date_missing_count"],
+                    "source_as_of": raw["as_of"],
                     "note": "QuickBooks sandbox document counts only; balances not reconciled",
                 }
             else:

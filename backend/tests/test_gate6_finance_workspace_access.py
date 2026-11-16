@@ -52,6 +52,16 @@ def test_exact_role_areas_and_no_sensitive_data(role, scopes):
     assert "10999999" not in str(result)
     assert result["currency_verified"] is False
     assert result["ledger_reconciled"] is False
+    # The only timestamp attached to observed AR/AP counts is the
+    # calculation UTC day, not the wrapper refresh timestamp.
+    if "ar" in scopes:
+        assert result["sections"]["ar"]["source_as_of"] == "2026-11-10"
+    if "ap" in scopes:
+        assert result["sections"]["ap"]["source_as_of"] == "2026-11-10"
+    if "ar" not in scopes:
+        assert "ar" not in result["sections"]
+    if "ap" not in scopes:
+        assert "ap" not in result["sections"]
 
 
 @pytest.mark.parametrize("role", ["back_office", "sales_rep", "viewer", "unknown", ""])
@@ -81,6 +91,7 @@ def test_missing_and_unavailable_sources_remain_unknown_not_zero():
     result = build_finance_workspace(role="finance_controller", snapshot=data, now=OBSERVED)
     assert result["sections"]["ar"]["status"] == "not_assessed"
     assert result["sections"]["ar"]["open_count"] is None
+    assert result["sections"]["ar"]["source_as_of"] is None
     assert result["sections"]["ap"]["status"] == "not_assessed"
     assert result["sections"]["ledger"]["status"] == "not_assessed"
     assert result["sections"].get("pricing") is None
@@ -108,6 +119,53 @@ def test_stale_finance_snapshot_fails_closed():
     with pytest.raises(ValueError, match="stale"):
         build_finance_workspace(role="manager", snapshot=snapshot(),
                                 now=datetime(2026, 11, 12, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize("source_day", ["2026-11-08", "2026-11-11"])
+def test_fresh_snapshot_cannot_launder_stale_or_future_finance_document_counts(source_day):
+    data = snapshot()
+    data["payload"]["finance_document_coverage"]["as_of"] = source_day
+    with pytest.raises(ValueError, match="evidence date"):
+        build_finance_workspace(role="ar_specialist", snapshot=data, now=OBSERVED)
+
+
+def test_previous_utc_day_source_can_be_saved_during_midnight_boundary():
+    data = snapshot()
+    data["generated_at"] = "2026-11-11T00:00:15+00:00"
+    data["payload"]["finance_document_coverage"]["as_of"] = "2026-11-10"
+    result = build_finance_workspace(
+        role="ap_specialist", snapshot=data,
+        now=datetime(2026, 11, 11, 0, 2, tzinfo=timezone.utc),
+    )
+    assert result["sections"]["ap"]["status"] == "observed"
+    assert result["sections"]["ap"]["overdue_count"] == 2
+    assert result["sections"]["ap"]["source_as_of"] == "2026-11-10"
+
+
+def test_previous_utc_day_source_rejected_after_midnight_rollover_window():
+    data = snapshot()
+    data["generated_at"] = "2026-11-11T01:00:00+00:00"
+    data["payload"]["finance_document_coverage"]["as_of"] = "2026-11-10"
+    with pytest.raises(ValueError, match="evidence date"):
+        build_finance_workspace(
+            role="ar_specialist", snapshot=data,
+            now=datetime(2026, 11, 11, 1, 1, tzinfo=timezone.utc),
+        )
+
+
+def test_unavailable_document_status_never_exposes_unverified_source_day():
+    data = snapshot()
+    data["payload"]["finance_document_coverage"]["ar"] = {
+        "status": "unavailable", "source_quality": "unavailable",
+        "reason": "ar_source_unavailable", "headers_examined": None,
+        "open_count": None, "overdue_count": None,
+        "due_date_missing_count": None,
+    }
+    result = build_finance_workspace(
+        role="ar_specialist", snapshot=data, now=OBSERVED,
+    )
+    assert result["sections"]["ar"]["status"] == "unavailable"
+    assert result["sections"]["ar"]["source_as_of"] is None
 
 
 class _Query:

@@ -36,15 +36,32 @@ describe('finance workspace server-scoped rendering', () => {
       currency_verified: false, ledger_reconciled: false,
       sections: { ar: { status: 'observed', headers_examined: 7, open_count: 2,
         overdue_count: 1, due_date_missing_count: 0, variance_detected: null,
-        note: 'Sandbox counts only' } },
+        source_as_of: '2026-11-10', note: 'Sandbox counts only' } },
     });
     const node = await render();
     expect(mocks.get).toHaveBeenCalledWith('/finance/workspace');
     expect(node.textContent).toContain('Accounts Receivable');
     expect(node.textContent).toContain('Open');
+    expect(node.textContent).toContain('Counts assessed for UTC date: 2026-11-10');
     expect(node.textContent).not.toContain('Accounts Payable');
     expect(node.textContent).not.toContain('Pricing & Billbacks');
     expect(node.textContent).not.toContain('Customer');
+  });
+
+  it('never invents source coverage date when an older response lacks it', async () => {
+    mocks.get.mockResolvedValue({
+      role: 'ar_specialist', authorized_scopes: ['ar'],
+      snapshot_generated_at: '2026-11-10T05:00:00Z', source_quality: 'partial',
+      currency_verified: false, ledger_reconciled: false,
+      sections: { ar: {
+        status: 'observed', headers_examined: 2, open_count: 1,
+        overdue_count: 0, due_date_missing_count: 0, variance_detected: null,
+        note: 'Synthetic count without source-date evidence',
+      } },
+    });
+    const node = await render();
+    expect(node.textContent).toContain('Counts assessed for UTC date: Not verified');
+    expect(node.textContent).not.toContain('Accounts Payable');
   });
 
   it('shows unavailable, never a zero balance, on a denied or failed read', async () => {

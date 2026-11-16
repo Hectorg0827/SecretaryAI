@@ -18,6 +18,7 @@
 | 7 | #171 | Immutable internal preparation and human-reported unverified reference ledger |
 | 8 | #173 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
 | 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
+| 10 | #TBD | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -77,6 +78,37 @@ without logging secrets or creating any price/accounting write. An independent
 accountant must verify item identity, units/case, currency, effective pricing
 period, distribution scope and associated freight/warehouse cost coverage.
 No user or automation can convert these observations to filing clearance.
+
+### QBO/QBD capture prerequisite review (Patch 10)
+The owner/manager endpoint `POST /api/insights/price-posting-capture/readiness`
+only reads selected tenant-owned price-book rows and tentative item-ID binding
+records. `pricing_accounting_capture_bindings` is an immutable, RLS-protected,
+**candidate-unverified** source mapping table; only service-role SELECT is
+granted. There is **no source-item insertion API** and no automatic capture
+job. With no bindings, the UI shows missing source item IDs, not a clean check.
+
+The operator must explicitly select QBO or QBD. This is a provider **request**
+for a future capture plan, not verified connection identity or realm. No live
+token access, connector construction, refresh, inventory query, writes or
+accounting observation persistence occurs.
+
+**Critical QBD identity distinction:** The existing QuickBooks Desktop
+Conductor adapter currently maps `salesDescription` to the normalized
+`InventoryItem.sku`. Sales descriptions are NOT trusted SKU identifiers.
+Both providers must use independently reviewed, provider-specific immutable
+item IDs and a source revision to establish identity. QBO's `Sku` is
+useful as a secondary hint but can also be duplicated or renamed.
+
+`candidate_unit_basis` and `candidate_units_per_case` are only a
+mapping proposal. A single-unit case conversion requires independent
+pack/UPC documentation. Provider item unit prices do not automatically
+represent customer-specific or state-posted prices.
+
+Before enabling real read-only inventory capture: require separate express
+authorization for the tenant, read-only adapter credentials and token refresh
+handling, approved item-ID to SKU/case-pack map, bounded immutable source
+observations, role and audit tests, and independent finance sign-off.
+Current status remains **capture unavailable / no filing**.
 
 ## 3. Mandatory human regulatory verification BEFORE operational activation
 

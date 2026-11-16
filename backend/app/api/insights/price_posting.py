@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_db
 from app.api.insights._pricing_access import get_pricing_user
 from app.api.compliance_integrity import _audit_blocked_write
+from app.api.insights._compliance_policy_gate import require_scoped_regulated_allow
 from app.domain.contracts import ActionClass, ActionProposal, DataPath
 from app.domain.policy import PolicyEngine
 from app.intelligence.compliance.price_posting_preview import compile_price_posting_preview
@@ -371,19 +372,12 @@ async def record_rule_human_review(
             )
         raise HTTPException(status_code=403, detail="Tenant policy rejected rule review")
 
-    # A default allow without a named tenant rule is not explicit consent.
-    # This also prevents future changes to generic policy defaults from
-    # silently authorizing regulated attestation writes.
-    if not decision.rule_id:
-        _audit_blocked_write(
-            db, table="compliance_price_posting_rule_reviews",
-            record={"id": str(request.rule_id), "company_id": company_id},
-            actor=actor_id, effect="deny", rule_id=None,
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="An explicit tenant policy rule must authorize documentary review",
-        )
+    policy_rule_id = require_scoped_regulated_allow(
+        db, company_id=company_id, actor=actor_id,
+        rule_id=decision.rule_id, capability="compliance.rule_review",
+        entity_type="compliance_price_posting_rule_reviews",
+        entity_id=str(request.rule_id),
+    )
 
     try:
         result = db.rpc("record_price_posting_rule_review", {
@@ -395,7 +389,7 @@ async def record_rule_human_review(
             "p_review_note": request.review_note.strip(),
             "p_acknowledged": True,
             "p_policy_effect": "allow",
-            "p_policy_rule_id": decision.rule_id,
+            "p_policy_rule_id": policy_rule_id,
         }).execute()
         receipt = getattr(result, "data", None)
         if (not isinstance(receipt, dict)

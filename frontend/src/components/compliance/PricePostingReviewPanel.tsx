@@ -6,6 +6,7 @@ import {
 } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
 import { PricePostingReadinessPanel } from './PricePostingReadinessPanel';
+import { PricePostingPreparationLedger } from './PricePostingPreparationLedger';
 
 const blankChecks = {
   source: false,
@@ -26,6 +27,7 @@ export function PricePostingReviewPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [showReadiness, setShowReadiness] = useState(false);
+  const [showPreparations, setShowPreparations] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -224,6 +226,18 @@ export function PricePostingReviewPanel() {
       )}
       {showReadiness && !loading && !failure && programs.length > 0 && (
         <PricePostingReadinessPanel programs={programs} />
+      )}
+      {!loading && !failure && programs.length > 0 && (
+        <div className="border-t border-slate-200 pt-4">
+          <button type="button" aria-expanded={showPreparations}
+            onClick={() => setShowPreparations((value) => !value)}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900">
+            {showPreparations ? 'Close internal preparation register' : 'Open internal preparation register'}
+          </button>
+        </div>
+      )}
+      {showPreparations && !loading && !failure && programs.length > 0 && (
+        <PricePostingPreparationLedger programs={programs} />
       )}
     </section>
   );

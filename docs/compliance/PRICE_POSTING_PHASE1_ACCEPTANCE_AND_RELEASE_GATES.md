@@ -22,7 +22,7 @@
 | 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
 | 12 | #187 | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
 | 13 | #193 | Live staging read-only migration audit, 9/12 exact historical Git blob checks, 3 provenance gaps and seven-source NO-GO handoff |
-| 14 | #TBD | Historical DDL forensics: prove staging Logistics ledger DELETE exposure, audit Lola receipt/conversation guards, provide reviewed-only remediation fixture |
+| 14 | #194 | Historical DDL forensics: prove staging Logistics ledger DELETE exposure, audit Lola receipt/conversation guards, provide reviewed-only remediation fixture |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a

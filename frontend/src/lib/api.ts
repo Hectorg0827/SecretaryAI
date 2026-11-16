@@ -117,6 +117,8 @@ export interface DashboardSummary {
   inventory_unassessed: number | null;
   pending_actions: number | null;
   unread_emails: number | null;
+  /** True means the limited 50-message preview is a lower bound, not an exact count. */
+  unread_emails_capped: boolean | null;
   /** ISO timestamp of when the QB-derived data was last computed by the scheduler */
   generated_at: string | null;
   /** true when data came from the shared snapshot cache (not recomputed live) */

@@ -127,12 +127,15 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
     company_id = user.get("company_id") if isinstance(user, dict) else None
     if not isinstance(company_id, str) or not company_id:
         raise PermissionError("AR preview company identity not verified")
+    settings = get_settings()
+    if (settings.secretaryai_deployment_env.strip().lower() != "staging"
+            or settings.intuit_environment != "sandbox"):
+        raise PermissionError("AR preview QBO connection requires staging sandbox")
     company = _load_company(company_id, db)
     if (not isinstance(company, dict) or company.get("id") != company_id
             or company.get("qb_type") != "online"):
         raise PermissionError("AR preview QBO connection not verified")
 
-    settings = get_settings()
     access_ciphertext = company.get("qbo_access_token")
     refresh_ciphertext = company.get("qbo_refresh_token")
     realm_id = company.get("qbo_realm_id")

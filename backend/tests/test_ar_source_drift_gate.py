@@ -76,7 +76,11 @@ async def _preview(adapter):
 
 def test_same_records_in_different_page_order_do_not_raise_false_drift():
     first = [_invoice("a"), _invoice("b", total="50.00", balance="50.00")]
-    assert_stable_ar_source_view(first, list(reversed(first)), source="invoice")
+    assert_stable_ar_source_view(
+        first,
+        [_invoice("b", total="50.00", balance="50.00"), _invoice("a")],
+        source="invoice",
+    )
 
 
 def test_stability_guard_detects_modified_balance_and_added_or_missing_records():
@@ -97,7 +101,7 @@ def test_stability_guard_rejects_duplicate_ids_and_unbounded_or_malformed_views(
         [_payment(), _payment()],
         [None],
         None,
-        [_payment()] * 5001,
+        [_payment(f"unique-payment-{i}") for i in range(5001)],
     ):
         with pytest.raises(ARPaymentEvidenceInvalid):
             assert_stable_ar_source_view([_payment()], changed, source="payment")
@@ -179,7 +183,8 @@ async def test_second_source_read_unavailable_never_returns_partial_counts():
 async def test_cross_page_order_changes_do_not_invalidate_stable_ar_source():
     unlinked = _invoice("invoice-2", total="20.00", balance="20.00")
     initial = [_invoice(), unlinked]
-    adapter, qb = _adapter(invoices=[initial, list(reversed(initial))])
+    second = [_invoice("invoice-2", total="20.00", balance="20.00"), _invoice()]
+    adapter, qb = _adapter(invoices=[initial, second])
     result = await _preview(adapter)
     assert result["status"] == "aligned_not_certified"
     assert result["invoice_count"] == 2
@@ -235,3 +240,36 @@ async def test_invalid_provider_count_flag_cannot_establish_source_completeness(
     with pytest.raises(ARPaymentEvidenceInvalid, match="count changed or incomplete"):
         await _preview(adapter)
     qb.create_payment.assert_not_awaited()
+
+
+def test_reordered_independently_normalized_payment_allocations_are_not_drift():
+    first = _payment()
+    first["total"] = "60.00"
+    first["allocations"] = [
+        {"invoice_id": "invoice-1", "amount": "40.00"},
+        {"invoice_id": "invoice-2", "amount": "20.00"},
+    ]
+    second = _payment()
+    second["total"] = "60.00"
+    second["allocations"] = [
+        {"invoice_id": "invoice-2", "amount": "20.00"},
+        {"invoice_id": "invoice-1", "amount": "40.00"},
+    ]
+    assert first is not second
+    assert first["allocations"][0] is not second["allocations"][1]
+    assert_stable_ar_source_view([first], [second], source="payment")
+
+
+def test_reordered_payment_allocations_with_changed_amount_are_still_drift():
+    first = _payment()
+    first["allocations"] = [
+        {"invoice_id": "invoice-1", "amount": "40.00"},
+        {"invoice_id": "invoice-2", "amount": "20.00"},
+    ]
+    second = _payment()
+    second["allocations"] = [
+        {"invoice_id": "invoice-2", "amount": "19.00"},
+        {"invoice_id": "invoice-1", "amount": "41.00"},
+    ]
+    with pytest.raises(ARPaymentEvidenceInvalid, match="changed"):
+        assert_stable_ar_source_view([first], [second], source="payment")

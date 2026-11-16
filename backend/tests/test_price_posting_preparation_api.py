@@ -305,7 +305,7 @@ async def test_case_list_fails_closed_on_source_outage(policy):
     db=FakeDB()
     db.fail_source="compliance_price_posting_preparations"
     with pytest.raises(HTTPException) as err:
-        await api.list_internal_preparations(Response(),user=USER,db=db)
+        await api.list_internal_preparations(Response(),offset=0,limit=50,user=USER,db=db)
     assert err.value.status_code==503
 
 

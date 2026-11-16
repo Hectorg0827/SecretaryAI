@@ -114,6 +114,32 @@ def get_adapter(
     return adapter
 
 
+def verify_qbo_ar_preview_unique_realm(
+    *, db, company_id: str, realm_id: str,
+) -> None:
+    """Fail closed if the same QBO realm is mapped to another tenant.
+
+    Database is queried by service-role only after the authenticated Owner
+    and staging checks. Return no other company's identity or ledger data.
+    """
+    if (not isinstance(company_id, str) or not company_id
+            or not isinstance(realm_id, str) or not realm_id.strip()):
+        raise PermissionError("AR preview realm identity not verified")
+    rows = (
+        db.table("companies")
+        .select("id")
+        .eq("qb_type", "online")
+        .eq("qbo_realm_id", realm_id)
+        .limit(2)
+        .execute()
+    )
+    result = getattr(rows, "data", None)
+    if (not isinstance(result, list) or len(result) != 1
+            or not isinstance(result[0], dict)
+            or result[0].get("id") != company_id):
+        raise PermissionError("AR preview realm mapping is not exclusive")
+
+
 def get_qbo_ar_preview_adapter(*, user: dict, db):
     """Build only the tenant's verified QBO connector for staging AR acceptance.
 
@@ -133,8 +159,13 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
         raise PermissionError("AR preview QBO connection requires staging sandbox")
     company = _load_company(company_id, db)
     if (not isinstance(company, dict) or company.get("id") != company_id
-            or company.get("qb_type") != "online"):
+            or company.get("qb_type") != "online"
+            or company.get("qb_connection_status") != "connected"):
         raise PermissionError("AR preview QBO connection not verified")
+
+    verify_qbo_ar_preview_unique_realm(
+        db=db, company_id=company_id, realm_id=company["qbo_realm_id"],
+    )
 
     access_ciphertext = company.get("qbo_access_token")
     refresh_ciphertext = company.get("qbo_refresh_token")
@@ -150,8 +181,8 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
 
     access_token = decrypt(access_ciphertext, settings.secret_key)
     refresh_token = decrypt(refresh_ciphertext, settings.secret_key)
-    if (not isinstance(access_token, str) or not access_token
-            or not isinstance(refresh_token, str) or not refresh_token):
+    if (not isinstance(access_token, str) or not access_token.strip()
+            or not isinstance(refresh_token, str) or not refresh_token.strip()):
         raise PermissionError("AR preview QBO credentials could not be decoded")
 
     # Only these QBO keys cross into UnifiedDataAdapter. In particular no
@@ -172,3 +203,47 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
     # This preview uses QBO's direct GET reader. Do not attach AccessRouter,
     # which would retain a DB handle and enable unrelated data access paths.
     return UnifiedDataAdapter(qb_only_config)
+
+
+def verify_qbo_ar_preview_connection(*, db, company_id: str, expected_realm: str):
+    """Recheck the authoritative tenant's QBO realm after provider reads.
+
+    An owner's QBO connection can be replaced mid-request; never return
+    aggregates from the old realm as if they belong to the new connection.
+    This is a synchronous DB read intended to be offloaded from the route.
+    """
+    if (not isinstance(company_id, str) or not company_id
+            or not isinstance(expected_realm, str) or not expected_realm):
+        raise PermissionError("AR preview connection identity not verified")
+    company = _load_company(company_id, db)
+    if (not isinstance(company, dict) or company.get("id") != company_id
+            or company.get("qb_type") != "online"
+            or company.get("qb_connection_status") != "connected"
+            or company.get("qbo_realm_id") != expected_realm):
+        raise PermissionError("AR preview QBO connection changed")
+    verify_qbo_ar_preview_unique_realm(
+        db=db, company_id=company_id, realm_id=expected_realm,
+    )
+
+
+def claim_qbo_ar_preview_window(*, company_id: str, seconds: int = 60) -> bool:
+    """Cross-replica, fail-closed cooldown for expensive QBO sandbox GET passes.
+
+    Redis keys contain only a SHA-256 company fingerprint, never a realm ID,
+    token, customer identity, or financial result. Redis unavailability blocks
+    the preview rather than bypassing the per-tenant throttle.
+    """
+    import hashlib
+    import redis
+
+    if (not isinstance(company_id, str) or not company_id
+            or not isinstance(seconds, int) or not 1 <= seconds <= 3600):
+        raise PermissionError("AR preview cooldown identity not verified")
+    key = "lionbi:staging:ar-preview:" + hashlib.sha256(
+        company_id.encode("utf-8")
+    ).hexdigest()
+    try:
+        client = redis.from_url(get_settings().redis_url, decode_responses=True)
+        return client.set(key, "1", nx=True, ex=seconds) is True
+    except Exception:
+        raise RuntimeError("AR preview cooldown unavailable") from None

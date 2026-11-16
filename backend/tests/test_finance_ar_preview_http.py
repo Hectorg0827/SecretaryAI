@@ -83,7 +83,8 @@ def http_route():
     # The ordinary test subscription override from conftest remains intact.
     # Only get_db is replaced; real RBAC and JWT dependency resolution run.
     def call(*, role="owner", db_role=None, company=COMPANY, stored_company=None,
-             active=True, enabled=True, environment="staging", source=None):
+             active=True, enabled=True, environment="staging", source=None,
+             cooldown=True, realm_changed=False):
         record = {
             "id": IDENTITY,
             "company_id": stored_company or COMPANY,
@@ -91,11 +92,14 @@ def http_route():
             "is_active": active,
         }
         db = ScopedDB(record)
+        reader = AsyncMock()
+        if isinstance(source, BaseException):
+            reader.side_effect = source
+        else:
+            reader.return_value = sample_result() if source is None else source
         adapter = SimpleNamespace(
-            get_qbo_ar_payment_match_preview_read_only=AsyncMock(
-                return_value=sample_result()
-                if source is None else source
-            ),
+            _config={"qbo_realm_id": "fixture-sandbox-realm"},
+            get_qbo_ar_payment_match_preview_read_only=reader,
             create_payment=AsyncMock(),
         )
         app.dependency_overrides[get_db] = lambda: db
@@ -104,7 +108,12 @@ def http_route():
                  patch("app.api.finance_ar_preview.get_settings",
                        return_value=mock_settings(enabled, environment)), \
                  patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter",
-                       return_value=adapter) as make_adapter:
+                       return_value=adapter) as make_adapter, \
+                 patch("app.api.finance_ar_preview.claim_qbo_ar_preview_window",
+                       return_value=cooldown) as throttle, \
+                 patch("app.api.finance_ar_preview.verify_qbo_ar_preview_connection",
+                       side_effect=(PermissionError("SENSITIVE_REALM_CHANGED")
+                                    if realm_changed else None)) as verify_realm:
                 with TestClient(app) as client:
                     response = client.get(
                         PATH, headers={"Authorization": f"Bearer {token(role, company)}"},
@@ -192,12 +201,30 @@ def test_http_invalid_unsigned_token_never_exposes_financial_evidence():
 
 
 def test_http_provider_outage_is_generic_503_not_zero_balance(http_route):
-    # The in-memory fixture returns data with a forbidden field to exercise
-    # the same validation failure path as a malformed QBO projection.
-    data = {**sample_result(), "customer_name": "SECRET-CUSTOMER"}
-    r, adapter, _, _ = http_route(source=data)
+    # Exercise an actual provider exception, not just response validation.
+    r, adapter, _, _ = http_route(
+        source=RuntimeError("SECRET_PROVIDER_RESPONSE_CANARY")
+    )
     assert r.status_code == 503
     assert r.headers.get("cache-control") == "private, no-store"
-    assert "SECRET-CUSTOMER" not in r.text
+    assert "SECRET_PROVIDER_RESPONSE_CANARY" not in r.text
     assert "0 balance" not in r.text
+    adapter.get_qbo_ar_payment_match_preview_read_only.assert_awaited_once()
+    adapter.create_payment.assert_not_awaited()
+
+
+def test_http_tenant_cooldown_blocks_provider_reads(http_route):
+    r, adapter, build, _ = http_route(cooldown=False)
+    assert r.status_code == 429
+    assert r.headers.get("retry-after") == "60"
+    assert r.headers.get("cache-control") == "private, no-store"
+    build.assert_not_called()
+    adapter.get_qbo_ar_payment_match_preview_read_only.assert_not_awaited()
+
+
+def test_http_postread_realm_change_returns_redacted_503(http_route):
+    r, adapter, _, _ = http_route(realm_changed=True)
+    assert r.status_code == 503
+    assert "SENSITIVE_REALM_CHANGED" not in r.text
+    assert r.headers.get("cache-control") == "private, no-store"
     adapter.create_payment.assert_not_awaited()

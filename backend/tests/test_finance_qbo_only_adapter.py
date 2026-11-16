@@ -9,16 +9,32 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.api.deps import get_qbo_ar_preview_adapter
+from app.api.deps import (
+    claim_qbo_ar_preview_window,
+    get_qbo_ar_preview_adapter,
+    verify_qbo_ar_preview_connection,
+    verify_qbo_ar_preview_unique_realm,
+)
 
 COMPANY = "synthetic-company"
 OWNER = {"sub": "synthetic-owner", "company_id": COMPANY}
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_unique_realm(monkeypatch):
+    # Existing adapter unit tests isolate unrelated behavior. The real
+    # cross-tenant database query is covered in dedicated tests below.
+    monkeypatch.setattr(
+        "app.api.deps.verify_qbo_ar_preview_unique_realm",
+        lambda **kwargs: None,
+    )
 
 
 def company(**updates):
     payload = {
         "id": COMPANY,
         "qb_type": "online",
+        "qb_connection_status": "connected",
         "qbo_realm_id": "sandbox-realm-1",
         "qbo_access_token": "ENCRYPTED_ACCESS",
         "qbo_refresh_token": "ENCRYPTED_REFRESH",
@@ -42,6 +58,7 @@ def settings():
         secret_key="SYNTHETIC_DECRYPT_KEY",
         secretaryai_deployment_env="staging",
         intuit_environment="sandbox",
+        redis_url="redis://synthetic-redis:6379/0",
     )
 
 
@@ -89,6 +106,8 @@ def test_owner_ar_preview_loads_only_company_scoped_qbo_credentials():
     {"id": "another-tenant"},
     {"qb_type": "desktop"},
     {"qb_type": None},
+    {"qb_connection_status": "disconnected"},
+    {"qb_connection_status": None},
     {"qbo_realm_id": ""},
     {"qbo_access_token": None},
     {"qbo_refresh_token": None},
@@ -197,3 +216,99 @@ def test_real_adapter_constructor_never_builds_unrelated_connectors():
     computer.assert_not_called()
     # Nothing outside the QBO-only config reached any auxiliary adapter.
     assert all("CANARY" not in repr(x) for x in adapter._config.values())
+
+
+@pytest.mark.parametrize("changed", [
+    {"qb_connection_status": "disconnected"},
+    {"qb_connection_status": None},
+    {"qbo_realm_id": "different-sandbox-realm"},
+    {"qb_type": "desktop"},
+    {"id": "another-tenant"},
+])
+def test_postread_realm_or_connection_change_fails_closed(changed):
+    with patch("app.api.deps._load_company", return_value=company(**changed)):
+        with pytest.raises(PermissionError):
+            verify_qbo_ar_preview_connection(
+                db=MagicMock(), company_id=COMPANY,
+                expected_realm="sandbox-realm-1",
+            )
+
+
+def test_postread_company_connection_still_matches():
+    db = MagicMock()
+    with patch("app.api.deps._load_company", return_value=company()) as load:
+        verify_qbo_ar_preview_connection(
+            db=db, company_id=COMPANY,
+            expected_realm="sandbox-realm-1",
+        )
+    load.assert_called_once_with(COMPANY, db)
+
+
+@pytest.mark.parametrize("token", ["", " ", "  \t "])
+def test_qbo_whitespace_only_decrypted_token_is_denied(token):
+    with patch("app.api.deps._load_company", return_value=company()), \
+         patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("app.api.deps.decrypt", return_value=token), \
+         patch("app.connectors.unified_adapter.UnifiedDataAdapter") as factory:
+        with pytest.raises(PermissionError):
+            get_qbo_ar_preview_adapter(user=OWNER, db=MagicMock())
+    factory.assert_not_called()
+
+
+def test_qbo_preview_cooldown_uses_hashed_tenant_no_raw_ids():
+    with patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("redis.from_url") as connect:
+        connect.return_value.set.return_value = True
+        assert claim_qbo_ar_preview_window(company_id=COMPANY) is True
+    connect.assert_called_once()
+    args, kwargs = connect.return_value.set.call_args
+    assert args[1] == "1"
+    assert kwargs == {"nx": True, "ex": 60}
+    assert args[0].startswith("lionbi:staging:ar-preview:")
+    assert COMPANY not in args[0]
+
+
+def test_qbo_preview_cooldown_rejects_duplicate_and_redis_failure():
+    with patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("redis.from_url") as connect:
+        connect.return_value.set.return_value = None
+        assert claim_qbo_ar_preview_window(company_id=COMPANY) is False
+        connect.return_value.set.side_effect = RuntimeError("SECRET_CANARY")
+        with pytest.raises(RuntimeError) as failure:
+            claim_qbo_ar_preview_window(company_id=COMPANY)
+        assert "SECRET_CANARY" not in str(failure.value)
+
+
+@pytest.mark.parametrize("ids,expected_success", [
+    ([COMPANY], True),
+    ([COMPANY, "another-company"], False),
+    ([], False),
+    (["another-company"], False),
+])
+def test_unique_qbo_realm_requires_exactly_one_authorized_company(
+    ids, expected_success,
+):
+    db = MagicMock()
+    result = db.table.return_value.select.return_value
+    result = result.eq.return_value.eq.return_value.limit.return_value.execute.return_value
+    result.data = [{"id": row_id} for row_id in ids]
+    if expected_success:
+        verify_qbo_ar_preview_unique_realm(
+            db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+        )
+    else:
+        with pytest.raises(PermissionError, match="not exclusive"):
+            verify_qbo_ar_preview_unique_realm(
+                db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+            )
+    db.table.assert_called_once_with("companies")
+
+
+def test_realm_mapping_malformed_provider_result_fails_closed():
+    db = MagicMock()
+    result = db.table.return_value.select.return_value
+    result.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = None
+    with pytest.raises(PermissionError, match="not exclusive"):
+        verify_qbo_ar_preview_unique_realm(
+            db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+        )

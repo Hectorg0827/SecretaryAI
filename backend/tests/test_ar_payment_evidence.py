@@ -107,6 +107,30 @@ def test_writeoff_or_credit_without_payment_link_is_a_variance_not_a_fake_paymen
     assert result["variance_invoice_count"] == 1
     assert result["accounting_reconciled"] is False
 
+def test_adjustment_only_balance_reduction_is_not_a_partial_cash_payment():
+    docs = [
+        invoice("inv-a", balance="30.00"),
+        invoice("inv-b", balance="25.00", total="50.00"),
+    ]
+    # Payment only applies to invoice A; B has a reduced balance for an
+    # unknown adjustment and cannot be called partially cash-paid.
+    cash = [payment()]
+    result = compare(docs, cash)
+    assert result["status"] == "variance_detected"
+    assert result["partially_paid_invoice_count"] == 1
+    assert result["variance_invoice_count"] == 2
+    assert result["linked_invoice_count"] == 1
+
+
+def test_adjustment_only_invoice_without_payments_is_not_partially_paid():
+    result = compare(
+        [invoice(balance="25.00", total="100.00")], [],
+    )
+    assert result["status"] == "variance_detected"
+    assert result["partially_paid_invoice_count"] == 0
+    assert result["linked_invoice_count"] == 0
+    assert result["accounting_reconciled"] is False
+
 
 @pytest.mark.parametrize("bad_documents", [
     [invoice(), invoice()],  # duplicate invoice ID

@@ -20,7 +20,7 @@
 | 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
 | 10 | #182 | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
 | 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
-| 12 | #TBD | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
+| 12 | #187 | Automated read-only deployment preflight: verify source migration hashes, CLI root, staging manifest, and require remote/human release sign-off |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a

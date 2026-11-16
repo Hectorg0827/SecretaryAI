@@ -10,6 +10,8 @@ export function PricePostingPreparationLedger({ programs }: { programs: PricePos
   const canRecord = role === 'owner' || role === 'manager';
   const [cases, setCases] = useState<InternalPricePostingCase[]>([]);
   const [prices, setPrices] = useState<PriceBookSourceItem[]>([]);
+  const [partialPrices, setPartialPrices] = useState(false);
+  const [partialCases, setPartialCases] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRule, setSelectedRule] = useState('');
@@ -43,9 +45,13 @@ export function PricePostingPreparationLedger({ programs }: { programs: PricePos
       }
       setCases(prepared.items);
       setPrices(pricebook.items);
+      setPartialCases(prepared.next_offset !== null);
+      setPartialPrices(pricebook.next_offset !== null);
     } catch (error) {
       setCases([]);
       setPrices([]);
+      setPartialCases(false);
+      setPartialPrices(false);
       setSourceError(error instanceof Error ? error.message : 'Preparation register unavailable');
     } finally {
       setLoading(false);
@@ -177,6 +183,9 @@ export function PricePostingPreparationLedger({ programs }: { programs: PricePos
       {!loading && !sourceError && (
         <div className="space-y-3">
           <h4 className="text-sm font-semibold">Recorded internal cases ({cases.length})</h4>
+          {partialCases && <p role="note" className="text-xs text-amber-800">
+            Only the first 50 internal cases were checked; later pages were not assessed.
+          </p>}
           {cases.length === 0 && <p className="text-sm text-slate-600">No internal preparations returned; no filing determination made.</p>}
           {cases.map((item) => (
             <article key={item.id} className="rounded-md border border-slate-200 bg-white p-3 text-xs">
@@ -212,6 +221,9 @@ export function PricePostingPreparationLedger({ programs }: { programs: PricePos
             <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)}
               className="mt-1 block rounded-md border border-slate-300 p-2" />
           </label>
+          {partialPrices && <p role="note" className="text-xs text-amber-800">
+            Only the first 100 source prices are shown. Further pages were not assessed.
+          </p>}
           <fieldset className="max-h-48 overflow-y-auto rounded-md bg-white p-3">
             <legend className="text-sm font-medium">Stored price-book revisions (max 50)</legend>
             {prices.map((item) => (

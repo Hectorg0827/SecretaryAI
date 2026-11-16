@@ -203,6 +203,7 @@ async def test_provisional_costs_and_unverified_documents_are_blocked():
     blocks = result["source_evidence"][0]["source_blockers"]
     assert "cost_snapshot_not_reconciled" in blocks
     assert "cost_document_lines_not_verified" in blocks
+    assert result["source_evidence"][0]["cost_basis_recorded_as_reconciled"] is False
     assert result["ready_to_file"] is False
 
 
@@ -253,6 +254,7 @@ async def test_matching_snapshot_must_reconcile_currency_and_sku():
     codes = result["source_evidence"][0]["source_blockers"]
     assert "cost_snapshot_sku_mismatch" in codes
     assert "cost_snapshot_currency_mismatch" in codes
+    assert result["source_evidence"][0]["cost_basis_recorded_as_reconciled"] is False
 
 
 @pytest.mark.asyncio

@@ -13,10 +13,21 @@ from app.api.deps import (
     claim_qbo_ar_preview_window,
     get_qbo_ar_preview_adapter,
     verify_qbo_ar_preview_connection,
+    verify_qbo_ar_preview_unique_realm,
 )
 
 COMPANY = "synthetic-company"
 OWNER = {"sub": "synthetic-owner", "company_id": COMPANY}
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_unique_realm(monkeypatch):
+    # Existing adapter unit tests isolate unrelated behavior. The real
+    # cross-tenant database query is covered in dedicated tests below.
+    monkeypatch.setattr(
+        "app.api.deps.verify_qbo_ar_preview_unique_realm",
+        lambda **kwargs: None,
+    )
 
 
 def company(**updates):
@@ -266,3 +277,38 @@ def test_qbo_preview_cooldown_rejects_duplicate_and_redis_failure():
         with pytest.raises(RuntimeError) as failure:
             claim_qbo_ar_preview_window(company_id=COMPANY)
         assert "SECRET_CANARY" not in str(failure.value)
+
+
+@pytest.mark.parametrize("ids,expected_success", [
+    ([COMPANY], True),
+    ([COMPANY, "another-company"], False),
+    ([], False),
+    (["another-company"], False),
+])
+def test_unique_qbo_realm_requires_exactly_one_authorized_company(
+    ids, expected_success,
+):
+    db = MagicMock()
+    result = db.table.return_value.select.return_value
+    result = result.eq.return_value.eq.return_value.limit.return_value.execute.return_value
+    result.data = [{"id": row_id} for row_id in ids]
+    if expected_success:
+        verify_qbo_ar_preview_unique_realm(
+            db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+        )
+    else:
+        with pytest.raises(PermissionError, match="not exclusive"):
+            verify_qbo_ar_preview_unique_realm(
+                db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+            )
+    db.table.assert_called_once_with("companies")
+
+
+def test_realm_mapping_malformed_provider_result_fails_closed():
+    db = MagicMock()
+    result = db.table.return_value.select.return_value
+    result.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = None
+    with pytest.raises(PermissionError, match="not exclusive"):
+        verify_qbo_ar_preview_unique_realm(
+            db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
+        )

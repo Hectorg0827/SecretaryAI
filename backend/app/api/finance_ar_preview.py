@@ -21,6 +21,7 @@ from app.auth.rbac import require_permission
 from app.config import get_settings
 
 router = APIRouter()
+NO_STORE = {"Cache-Control": "private, no-store"}
 
 
 class ARPaymentPreviewResponse(BaseModel):
@@ -50,17 +51,29 @@ async def get_ar_payment_preview(
     db=Depends(get_db),
 ):
     """On-demand owner acceptance, without exporting invoice/payment details."""
-    response.headers["Cache-Control"] = "private, no-store"
+    response.headers.update(NO_STORE)
 
     config = get_settings()
     if (config.secretaryai_deployment_env.strip().lower() != "staging"
             or config.secretaryai_ar_payment_preview_enabled is not True):
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Not found", headers=NO_STORE)
 
     # A valid JWT alone does not prove the current DB role is still Owner.
     # Authorization must happen before constructing any provider adapters.
-    if _current_role(db, user) != "owner":
-        raise HTTPException(status_code=403, detail="Finance preview not authorized")
+    try:
+        current_role = _current_role(db, user)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=("Finance preview authorization unavailable"
+                    if exc.status_code == 503 else "Finance preview not authorized"),
+            headers=NO_STORE,
+        ) from None
+    if current_role != "owner":
+        raise HTTPException(
+            status_code=403, detail="Finance preview not authorized",
+            headers=NO_STORE,
+        )
 
     as_of = datetime.now(timezone.utc).date()
     try:
@@ -80,5 +93,6 @@ async def get_ar_payment_preview(
         # Never leak raw provider bodies, OAuth failures, source IDs or amounts
         # in responses (or emit the exception body into application logs).
         raise HTTPException(
-            status_code=503, detail="AR payment evidence unavailable or unverified"
+            status_code=503, detail="AR payment evidence unavailable or unverified",
+            headers=NO_STORE,
         ) from None

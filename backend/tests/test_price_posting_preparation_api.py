@@ -110,7 +110,7 @@ class FakeDB:
                 "action_class": "commit", "effect": "allow",
                 "capabilities_match": [
                     "compliance.price_preparation",
-                    "compliance.price_external_reference",
+                    "compliance.price_reference",
                 ],
                 "paths_match": ["api"],
             }],
@@ -154,7 +154,7 @@ def policy(monkeypatch):
         assert proposal.company_id == TENANT
         assert proposal.requested_by == ACTOR
         assert proposal.capability in (
-            "compliance.price_preparation", "compliance.price_external_reference",
+            "compliance.price_preparation", "compliance.price_reference",
         )
         assert proposal.action_class.value == "commit"
         if state["failure"]:

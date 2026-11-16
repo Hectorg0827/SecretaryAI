@@ -22,6 +22,9 @@ BEGIN
       'EXECUTE')
   THEN RAISE EXCEPTION 'Stage14B source/cursor metadata exposed to browser roles'; END IF;
 END $security$;
+-- Disposable Postgres CI grants; rolled back with this entire fixture.
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT,UPDATE ON public.users TO service_role;
 
 INSERT INTO public.companies(id,name)
 VALUES ('11111111-1111-4111-8111-111111111111','Stage 14B synthetic fixture');

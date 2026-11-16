@@ -137,7 +137,7 @@ async def test_replays_from_original_anchor_and_never_authorizes_followup():
         reauthorize=lambda: authorizations.append(True),
     )
     assert fetch_calls == [("100", None)]
-    assert len(authorizations) == 2
+    assert len(authorizations) == 4
     assert preview.message_count == 2
     assert preview.history_record_count == 2
     assert preview.next_history_id == "115"
@@ -194,16 +194,16 @@ async def test_revocation_after_provider_read_rejects_preview():
 
     def check():
         checks[0] += 1
-        if checks[0] == 2:
+        if checks[0] == 3:
             raise RuntimeError("revoked after read")
 
-    with pytest.raises(CheckpointUnavailable):
+    with pytest.raises(ReplayUnavailable):
         await reconcile_gmail_snapshot_preview(
             scope=scope, vault=vault, progress=progress,
             pages=pages, refs=refs, fetch_history_page=history,
             reauthorize=check,
         )
-    assert checks == [2]
+    assert checks == [3]
 
 
 @pytest.mark.asyncio

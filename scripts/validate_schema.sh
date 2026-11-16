@@ -85,6 +85,12 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115030000_price_post
 psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_preparation_ledger.sql
 echo '✓ Internal case source tenant isolation, immutability, audit rollback and unverified receipt checks passed.'
 
+echo '── validating exact-capability tenant policy scope on regulated audit transactions'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115040000_price_posting_specific_policy_guard.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_specific_policy_guard.sql
+echo '✓ Generic allow, wrong path, cross-tenant policy and revoked rules fail atomic regulated audit.'
+
+
 
 echo '── checking procurement and private morning briefing extensions'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql

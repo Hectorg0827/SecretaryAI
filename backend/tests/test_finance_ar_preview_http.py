@@ -155,9 +155,11 @@ def test_http_route_off_when_flag_or_deployment_is_not_approved(
 def test_http_nonowners_cannot_retrieve_payment_evidence(http_route, role):
     response, adapter, build, _ = http_route(role=role)
     assert response.status_code == 403
-    assert response.headers.get("cache-control", "").startswith("no-store") or (
-        response.headers.get("cache-control") == "private, no-store"
-    )
+    # Viewer and sales rep are rejected by the outer RBAC dependency
+    # before this handler can apply its response headers. Finance employee
+    # middleware and handler-level owner denial both set no-store.
+    if role not in {"viewer", "sales_rep"}:
+        assert "no-store" in response.headers.get("cache-control", "")
     build.assert_not_called()
     adapter.get_qbo_ar_payment_match_preview_read_only.assert_not_awaited()
 

@@ -172,6 +172,10 @@ def compare_ar_payment_allocations(
     for invoice_id, (_, _, total, balance) in invoice_by_id.items():
         if total > balance > 0:
             partial += 1
+        # Multiple distinct payment IDs can still overapply a single invoice.
+        # A duplicate/replayed allocation must not become a soft variance.
+        if allocations[invoice_id] > total:
+            raise ARPaymentEvidenceInvalid("Invoice allocations exceed total")
         if total - balance != allocations[invoice_id]:
             differences += 1
 

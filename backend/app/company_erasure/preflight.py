@@ -117,11 +117,21 @@ def _valid_uuid(value: str) -> bool:
 def evaluate_erasure_packet(
     packet: ReviewPacket, *, now: datetime
 ) -> ReviewAssessment:
-    """Validate completeness, never authorize deletion or trust caller booleans.
+    """Fail closed even if untrusted callers supply malformed field types."""
+    try:
+        return _evaluate_erasure_packet(packet, now=now)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        # No exception path can ever be interpreted as approval or deletion.
+        return ReviewAssessment("BLOCKED", ("malformed_evidence",))
 
-    The input must be assembled from separate verified systems. Even then the
-    verdict only permits a human/independent service to *review*, never erase.
-    Dates must be timezone-aware. Missing or malformed evidence fails closed.
+
+def _evaluate_erasure_packet(
+    packet: ReviewPacket, *, now: datetime
+) -> ReviewAssessment:
+    """Validate packet completeness only, never authorize actual erasure.
+
+    This is not a trusted identity, retention, or signature-verification
+    service: those integrations must supply independently verified evidence.
     """
     if not _aware(now):
         return ReviewAssessment("BLOCKED", ("clock_not_trusted",))

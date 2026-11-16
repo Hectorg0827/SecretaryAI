@@ -95,6 +95,15 @@ def preview_synthetic_qb_inventory_snapshot(
         seen_binding_ids.add(binding_id)
         selected_bindings[book_id].append(binding)
 
+    # The same QB item reused for different selected price-book identities is
+    # not automatically a global/state/customer price-list equivalence.
+    books_per_provider_id: dict[str, set[str]] = defaultdict(set)
+    for book_id, rows in selected_bindings.items():
+        for binding in rows:
+            source_item_id = binding.get("source_item_id")
+            if isinstance(source_item_id, str) and source_item_id.strip():
+                books_per_provider_id[source_item_id].add(book_id)
+
     by_source_id: dict[str, InventoryItem] = {}
     for item in items:
         if not isinstance(item, InventoryItem):
@@ -117,6 +126,8 @@ def preview_synthetic_qb_inventory_snapshot(
         if not isinstance(sku, str) or not sku.strip():
             raise ValueError("Price-book SKU missing")
         list_price = _money(book.get("list_price_per_case"))
+        if list_price == 0:
+            raise ValueError("Price-book case amount must be positive")
         row = {
             "price_book_id": book_id,
             "sku": sku,
@@ -151,6 +162,9 @@ def preview_synthetic_qb_inventory_snapshot(
             if not isinstance(provider_id, str) or not provider_id.strip():
                 blockers.append("explicit_provider_item_id_missing")
                 provider_id = None
+            if (provider_id is not None
+                    and len(books_per_provider_id[provider_id]) > 1):
+                blockers.append("provider_item_id_reused_across_selected_pricebooks")
             if not str(candidate.get("source_revision") or "").strip():
                 blockers.append("candidate_source_revision_missing")
             if not str(candidate.get("candidate_document_ref") or "").strip():
@@ -200,6 +214,7 @@ def preview_synthetic_qb_inventory_snapshot(
                             "candidate_currency_mismatch_no_fx_inference",
                             "candidate_source_revision_missing",
                             "candidate_item_mapping_document_missing",
+                            "provider_item_id_reused_across_selected_pricebooks",
                             "price_book_approval_pending",
                             "price_book_not_effective_for_fixture_date",
                             "customer_specific_price_scope_not_confirmed",

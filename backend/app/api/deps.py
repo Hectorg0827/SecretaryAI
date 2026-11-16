@@ -191,3 +191,26 @@ def verify_qbo_ar_preview_connection(*, db, company_id: str, expected_realm: str
             or company.get("qb_connection_status") != "connected"
             or company.get("qbo_realm_id") != expected_realm):
         raise PermissionError("AR preview QBO connection changed")
+
+
+def claim_qbo_ar_preview_window(*, company_id: str, seconds: int = 60) -> bool:
+    """Cross-replica, fail-closed cooldown for expensive QBO sandbox GET passes.
+
+    Redis keys contain only a SHA-256 company fingerprint, never a realm ID,
+    token, customer identity, or financial result. Redis unavailability blocks
+    the preview rather than bypassing the per-tenant throttle.
+    """
+    import hashlib
+    import redis
+
+    if (not isinstance(company_id, str) or not company_id
+            or not isinstance(seconds, int) or not 1 <= seconds <= 3600):
+        raise PermissionError("AR preview cooldown identity not verified")
+    key = "lionbi:staging:ar-preview:" + hashlib.sha256(
+        company_id.encode("utf-8")
+    ).hexdigest()
+    try:
+        client = redis.from_url(get_settings().redis_url, decode_responses=True)
+        return client.set(key, "1", nx=True, ex=seconds) is True
+    except Exception:
+        raise RuntimeError("AR preview cooldown unavailable") from None

@@ -336,6 +336,11 @@ jobs:
           python3 -m unittest discover -s scripts -p test_compliance_migration_release_preflight.py -v
           python3 scripts/compliance_migration_release_preflight.py --report compliance-release-preflight.json
           echo "::warning::Compliance Phase 1 is not cleared for staging; see compliance-release-preflight.json. A green CI run is not migration authorization."
+      - name: Verify staging history snapshot and pending SQL sources (read only)
+        run: |
+          python3 -m unittest discover -s scripts -p test_verify_compliance_staging_snapshot.py -v
+          python3 scripts/verify_compliance_staging_snapshot.py --report compliance-staging-snapshot-check.json
+          echo "::warning::Staging Compliance release remains NO-GO. Historical evidence is a point-in-time read-only snapshot, not a live clearance."
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
       - name: Export disposable schema for read-only staging comparison
@@ -348,6 +353,7 @@ jobs:
           path: |
             schema-manifest.json
             compliance-release-preflight.json
+            compliance-staging-snapshot-check.json
           retention-days: 14
       - uses: actions/setup-python@v5
         with:

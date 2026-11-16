@@ -172,8 +172,7 @@ def normalize_payment_for_ar(
     if missing_unapplied:
         if (not allocations or Decimal(total) == 0
                 or applied_total != Decimal(total)
-                or (raw.get("sparse") is not None
-                    and raw.get("sparse") is not False)):
+                or ("sparse" in raw and raw["sparse"] is not False)):
             raise QBOARSourceInvalid("QBO unapplied amount cannot be verified")
         # Derived only from a complete, exactly balanced explicit application:
         # no fabricated unapplied cash or duplicate payment recognition.

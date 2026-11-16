@@ -73,7 +73,7 @@ export function FinanceWorkspace() {
               {summary.status === 'observed' && (scope === 'ar' || scope === 'ap') && <p className="mt-3 text-xs text-[#a6b4cf]">
                 Counts assessed for UTC date: {displayedCoverageDay(summary.source_as_of)}
               </p>}
-              {summary.status === 'observed' && scope === 'ledger' && <p className="mt-4 text-sm text-[#d3deef]">{summary.variance_detected ? 'Unreconciled variance detected' : 'No variance detected in this limited comparison'}</p>
+              {summary.status === 'observed' && scope === 'ledger' && <p className="mt-4 text-sm text-[#d3deef]">{summary.variance_detected ? 'Unreconciled variance detected' : 'No variance detected in this limited comparison'}</p>}
               <p className="mt-4 text-sm leading-6 text-[#aab9d1]">{summary.note}</p>
             </section>;
           })}

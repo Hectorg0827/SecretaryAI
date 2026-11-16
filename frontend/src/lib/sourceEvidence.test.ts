@@ -12,6 +12,7 @@ const validSummary = () => ({
   inventory_unassessed: 4,
   pending_actions: 2,
   unread_emails: 1,
+  unread_emails_capped: false,
   generated_at: '2026-10-26T12:00:00Z',
   cached: true,
 });
@@ -29,6 +30,14 @@ describe('presentation source-evidence guards (synthetic fixtures only)', () => 
     expect(verifiedDashboardSummary({ ...validSummary(), snapshot_stale: false })?.snapshot_stale).toBe(false);
     expect(verifiedDashboardSummary(validSummary())?.snapshot_stale).toBeNull();
     expect(verifiedDashboardSummary({ ...validSummary(), snapshot_stale: 'false' })?.snapshot_stale).toBeNull();
+  });
+
+  it('never displays a capped or unverified unread preview as an exact mailbox total', () => {
+    expect(verifiedDashboardSummary({ ...validSummary(), unread_emails: 50, unread_emails_capped: true }))
+      .toMatchObject({ unread_emails: 50, unread_emails_capped: true });
+    expect(verifiedDashboardSummary({ ...validSummary(), unread_emails_capped: undefined })?.unread_emails_capped).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), unread_emails_capped: 'false' })?.unread_emails_capped).toBeNull();
+    expect(verifiedDashboardSummary({ ...validSummary(), unread_emails: undefined })?.unread_emails_capped).toBeNull();
   });
 
   it('rejects incomplete account counts and malformed inventory instead of inventing zeros', () => {

@@ -99,7 +99,7 @@ def test_corrupt_invoice_source_fails_closed(changes):
 
 @pytest.mark.parametrize("changes", [
     {"CurrencyRef": None},
-    {"UnappliedAmt": None},
+    {"UnappliedAmt": None, "TotalAmt": 65},  # $5 unknown remainder
     {"TotalAmt": "NaN"},
     {"TotalAmt": "0.001"},
     {"TxnDate": "yesterday"},
@@ -412,4 +412,90 @@ async def test_real_sandbox_get_readers_forward_verified_single_currency_context
     assert [x.args[0].split(" STARTPOSITION")[0] for x in qb._query.await_args_list] == [
         "SELECT * FROM Invoice", "SELECT * FROM Payment",
     ]
+    qb._post.assert_not_awaited()
+
+
+def test_missing_unapplied_amount_allowed_only_if_all_invoice_lines_exactly_exhaust_total():
+    for omit_key in (True, False):
+        raw = _payment(UnappliedAmt=None)
+        if omit_key:
+            del raw["UnappliedAmt"]
+        observed = normalize_payment_for_ar(raw)
+        assert observed["unapplied"] == "0.00"
+        assert observed["total"] == "60.00"
+        assert observed["allocations"] == [
+            {"invoice_id": "inv-1", "amount": "60.00"},
+        ]
+
+
+def test_missing_unapplied_split_invoice_allocations_must_exhaust_total():
+    raw = _payment(
+        UnappliedAmt=None,
+        Line=[
+            {"Amount": "40.00", "LinkedTxn": [
+                {"TxnId": "inv-1", "TxnType": "Invoice"},
+            ]},
+            {"Amount": "20.00", "LinkedTxn": [
+                {"TxnId": "inv-2", "TxnType": "Invoice"},
+            ]},
+        ],
+    )
+    observed = normalize_payment_for_ar(raw)
+    assert observed["unapplied"] == "0.00"
+    assert observed["allocations"] == [
+        {"invoice_id": "inv-1", "amount": "40.00"},
+        {"invoice_id": "inv-2", "amount": "20.00"},
+    ]
+
+
+@pytest.mark.parametrize("updates", [
+    {"UnappliedAmt": None, "Line": None},
+    {"UnappliedAmt": None, "Line": []},
+    {"UnappliedAmt": None, "TotalAmt": 75.0},
+    {"UnappliedAmt": None, "TotalAmt": 55.0},
+    {"UnappliedAmt": None, "sparse": True},
+    {"UnappliedAmt": None, "sparse": "false"},
+    {"UnappliedAmt": None, "Line": [
+        {"Amount": 60, "LinkedTxn": [
+            {"TxnId": "credit-1", "TxnType": "CreditMemo"},
+        ]},
+    ]},
+    {"UnappliedAmt": None, "Line": [
+        {"Amount": 60, "LinkedTxn": [
+            {"TxnId": "inv-1", "TxnType": "Invoice"},
+            {"TxnId": "credit-1", "TxnType": "CreditMemo"},
+        ]},
+    ]},
+    {"UnappliedAmt": None, "Line": [
+        {"Amount": 60, "LinkedTxn": [
+            {"TxnId": "", "TxnType": "Invoice"},
+        ]},
+    ]},
+])
+def test_optional_unapplied_ambiguous_or_unsupported_values_stay_unverified(updates):
+    with pytest.raises(QBOARSourceInvalid):
+        normalize_payment_for_ar(_payment(**updates))
+
+
+def test_optional_unapplied_does_not_change_fully_unapplied_provided_balance():
+    raw = _payment(TotalAmt="55.00", UnappliedAmt="55.00", Line=None)
+    result = normalize_payment_for_ar(raw)
+    assert result["unapplied"] == "55.00"
+    assert result["allocations"] == []
+
+
+@pytest.mark.asyncio
+async def test_qbo_get_payment_reader_normalizes_optional_unapplied_without_financial_post():
+    qb = _qbo()
+    raw = _payment(UnappliedAmt=None)
+    del raw["UnappliedAmt"]
+    qb._query = AsyncMock(return_value={
+        "QueryResponse": {"Payment": [raw]},
+        "time": "2026-11-15T13:00:00Z",
+    })
+    qb._post = AsyncMock()
+    with patch("app.config.get_settings", return_value=_settings()):
+        rows = await qb.get_ar_payment_evidence_read_only()
+    assert len(rows) == 1
+    assert rows[0]["unapplied"] == "0.00"
     qb._post.assert_not_awaited()

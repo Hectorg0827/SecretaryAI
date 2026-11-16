@@ -110,6 +110,14 @@ BEGIN
  IF v_count IS DISTINCT FROM array_length(p_book_ids,1) THEN
   RAISE EXCEPTION 'Source price-book rows missing or foreign' USING ERRCODE='42501';
  END IF;
+ IF EXISTS(SELECT 1 FROM public.pricing_price_book b
+    WHERE b.company_id=p_company_id AND b.id=ANY(p_book_ids)
+      AND (b.market_code IS DISTINCT FROM v_region
+       OR b.effective_from>p_effective_date
+       OR (b.effective_to IS NOT NULL AND b.effective_to<p_effective_date))) THEN
+  RAISE EXCEPTION 'Price book source market or effective date mismatch'
+      USING ERRCODE='42501';
+ END IF;
  -- MD5 is only a deterministic change fingerprint, NOT an integrity signature.
  v_digest:=md5(v_snapshot::text);
  INSERT INTO public.compliance_price_posting_preparations(

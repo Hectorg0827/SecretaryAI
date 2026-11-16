@@ -335,6 +335,245 @@ export interface StateLicense { id: string; state_code: string; license_type: st
 export interface BrandRegistration { id: string; product_id: string; state_code: string; registration_number: string; expiration_date: string; status: string }
 export interface FederalPermit { id: string; permit_type: string; permit_number: string; expiration_date: string; status: string }
 
+export interface PricePostingRuleProgram {
+  id: string;
+  program_key: string;
+  version: number;
+  country_code: string;
+  region_code: string;
+  program_name: string;
+  authority_title: string;
+  authority_url: string;
+  applicability_note: string;
+  official_template_url: string | null;
+  filing_deadline_rule: Record<string, unknown> | null;
+  human_verified_for_tenant: boolean;
+  submission_permitted: false;
+}
+export interface PricePostingRuleProgramsResponse {
+  programs: PricePostingRuleProgram[];
+  count: number;
+  notice: string;
+  agency_submission_enabled: false;
+}
+export interface PricePostingHumanReviewInput {
+  rule_id: string;
+  version: number;
+  evidence_ref: string;
+  review_note: string;
+  checked_current_official_source: boolean;
+  checked_tenant_license_applicability: boolean;
+  acknowledged_no_filing_authority: boolean;
+}
+export interface PriceBookSourceItem {
+  id: string;
+  sku: string;
+  package_label: string;
+  market_code: string;
+  channel: string;
+  currency: string;
+  list_price_per_case: string;
+  effective_from: string;
+  effective_to: string | null;
+  revision: number;
+  status: string;
+  cost_snapshot_id: string | null;
+  evidence_ref: string;
+  approved_at: string | null;
+}
+export interface PriceBookSourceList {
+  company_id: string;
+  items: PriceBookSourceItem[];
+  count_returned: number;
+  next_offset: number | null;
+  status: 'analysis_only';
+  source: 'connected_data';
+  price_changes_allowed: false;
+  cost_source_certified: false;
+}
+export interface PricePostingReadinessRequest {
+  program_key: string;
+  price_book_ids: string[];
+  effective_date: string;
+}
+export interface PricePostingSourceEvidence {
+  price_book_id: string;
+  sku: string;
+  cost_snapshot_id: string | null;
+  cost_basis_recorded_as_reconciled: boolean;
+  matching_license_record_count: number;
+  product_type_from_internal_registry: string | null;
+  source_blockers: string[];
+  independent_qbo_qbd_reconciliation_confirmed: false;
+  license_authority_verified_by_regulator: false;
+  warehouse_cost_coverage_certified: false;
+}
+export interface PricePostingCaptureReadinessResult {
+  status: 'capture_prerequisites_only';
+  provider_requested: 'qbo' | 'qbd';
+  effective_date: string;
+  items: Array<{
+    price_book_id: string;
+    sku: string;
+    provider: 'qbo' | 'qbd';
+    candidate_binding_count: number;
+    candidate_provider_item_id_present: boolean;
+    candidate_unit_basis: 'case' | 'single_unit' | 'unknown' | null;
+    candidate_units_per_case: number | null;
+    state: 'needs_human_source_mapping';
+    blockers: string[];
+  }>;
+  not_mapped: number;
+  ambiguous: number;
+  real_provider_connection_verified: false;
+  source_items_observed_live: false;
+  provider_api_called: false;
+  item_identity_certified: false;
+  case_pack_verified: false;
+  accounting_reconciled: false;
+  safe_to_capture_live: false;
+  observation_saved: false;
+  ready_to_file: false;
+  submission_permitted: false;
+  price_published: false;
+}
+
+export interface PricePostingAccountingComparisonResult {
+  status: 'internal_numeric_comparison_only';
+  checks: Array<{
+    price_book_id: string;
+    sku: string;
+    accounting_observation_id: string | null;
+    provider: 'qbo' | 'qbd' | null;
+    observed_amount_per_case: string | null;
+    book_amount_per_case: string;
+    numeric_comparison:
+      | 'numeric_match_unverified' | 'numeric_difference' | 'not_comparable';
+    blockers: string[];
+  }>;
+  numeric_matches_unverified: number;
+  numeric_differences: number;
+  uncomparable: number;
+  independent_qbo_qbd_reconciliation_confirmed: false;
+  warehouse_cost_coverage_verified: false;
+  regulatory_requirements_verified: false;
+  qbo_qbd_live_data_accessed: false;
+  ready_to_file: false;
+  submission_permitted: false;
+  agency_template_generated: false;
+  live_price_changed: false;
+}
+
+export interface PricePostingReadinessResult {
+  program_key: string;
+  region_code: string;
+  human_rule_review_recorded: boolean;
+  preliminary_state: 'blocked_for_review';
+  blockers: string[];
+  lines: Array<{
+    price_book_id: string;
+    sku: string;
+    list_price_per_case: string | null;
+    package_label: string | null;
+    blockers: string[];
+  }>;
+  source_evidence: PricePostingSourceEvidence[];
+  source_consistency: string;
+  ready_to_file: false;
+  submission_permitted: false;
+  agency_template_generated: false;
+  live_price_changed: false;
+  qbo_qbd_live_data_accessed: false;
+}
+
+export interface InternalPricePostingCase {
+  id: string;
+  company_id: string;
+  rule_id: string;
+  rule_version: number;
+  created_by: string;
+  effective_date: string;
+  price_book_snapshot: Array<{
+    price_book_id: string;
+    sku: string;
+    list_price_per_case: string;
+    status: string;
+    revision: number;
+    market_code: string;
+  }>;
+  source_fingerprint: string;
+  state: 'internal_preparation_only';
+  created_at: string;
+}
+export interface InternalPricePostingCaseList {
+  items: InternalPricePostingCase[];
+  next_offset: number | null;
+  submission_permitted: false;
+  agency_confirmation: false;
+}
+export interface InternalPreparationInput {
+  program_key: string;
+  rule_id: string;
+  version: number;
+  effective_date: string;
+  price_book_ids: string[];
+  acknowledged_no_filing_authority: boolean;
+}
+export interface InternalPreparationReceipt {
+  preparation_id: string;
+  audit_event_id: string;
+  source_fingerprint: string;
+  source_count: number;
+  state: 'internal_preparation_only';
+  submission_permitted: false;
+  agency_confirmation: false;
+  price_publication_permitted: false;
+}
+export type ExternalReferenceKind =
+  | 'external_document_reference'
+  | 'agency_message_reference'
+  | 'rejection_reference';
+export interface HumanExternalReferenceInput {
+  kind: ExternalReferenceKind;
+  external_reference: string;
+  claimed_event_date: string | null;
+  note: string;
+  acknowledged_unverified: boolean;
+}
+export interface HumanExternalReference {
+  id: string;
+  preparation_id: string;
+  reference_kind: ExternalReferenceKind;
+  external_reference: string;
+  claimed_event_date: string | null;
+  note: string;
+  provenance_status: 'human_reported_unverified';
+}
+export interface HumanExternalReferenceList {
+  items: HumanExternalReference[];
+  agency_confirmation: false;
+  submission_permitted: false;
+}
+export interface HumanExternalReferenceReceipt {
+  reference_id: string;
+  audit_event_id: string;
+  provenance_status: 'human_reported_unverified';
+  agency_confirmation: false;
+  submission_permitted: false;
+}
+
+export interface PricePostingRuleReviewReceipt {
+  rule_id: string;
+  version: number;
+  review_id: string;
+  audit_event_id: string;
+  state: 'documentary_review_recorded';
+  submission_permitted: false;
+  price_publication_permitted: false;
+  regulatory_deadlines_verified_by_this_action: false;
+}
+
+
 // ─── API surface ──────────────────────────────────────────────────────────────
 
 export interface ConnectorRegistration {
@@ -526,6 +765,43 @@ export const api = {
 
     // Import
     importRows: (body: {entity_type: string; rows: object[]}) => api.post<{imported: number; errors: object[]; total_rows: number}>('/api/compliance/import', body),
+  },
+
+  pricePreparations: {
+    list: () =>
+      api.get<InternalPricePostingCaseList>('/api/insights/price-preparations?limit=50'),
+    create: (body: InternalPreparationInput) =>
+      api.post<InternalPreparationReceipt>('/api/insights/price-preparations', body),
+    listReferences: (id: string) =>
+      api.get<HumanExternalReferenceList>(
+        `/api/insights/price-preparations/${encodeURIComponent(id)}/references`,
+      ),
+    addReference: (id: string, body: HumanExternalReferenceInput) =>
+      api.post<HumanExternalReferenceReceipt>(
+        `/api/insights/price-preparations/${encodeURIComponent(id)}/references`, body,
+      ),
+  },
+
+  pricePosting: {
+    listPrograms: () =>
+      api.get<PricePostingRuleProgramsResponse>('/api/insights/price-posting/programs'),
+    listSourcePrices: () =>
+      api.get<PriceBookSourceList>('/api/insights/price-book?limit=100'),
+    previewReadiness: (body: PricePostingReadinessRequest) =>
+      api.post<PricePostingReadinessResult>('/api/insights/price-posting/readiness', body),
+    compareAccounting: (body: { price_book_ids: string[] }) =>
+      api.post<PricePostingAccountingComparisonResult>(
+        '/api/insights/price-posting-accounting/compare', body,
+      ),
+    previewCaptureReadiness: (body: {
+      provider: 'qbo' | 'qbd'; effective_date: string; price_book_ids: string[];
+    }) => api.post<PricePostingCaptureReadinessResult>(
+      '/api/insights/price-posting-capture/readiness', body,
+    ),
+    recordHumanReview: (programKey: string, body: PricePostingHumanReviewInput) =>
+      api.post<PricePostingRuleReviewReceipt>(
+        `/api/insights/price-posting/programs/${encodeURIComponent(programKey)}/review`, body,
+      ),
   },
 
   logistics: {

@@ -62,19 +62,22 @@ def check_all(self):
                     db=db,
                 )
             )
+            # Failed or unconfirmed snapshot writes cannot trigger notifications.
+            # An error after counting alerts must never be reported as a success.
+            if result.get("error") or result.get("stored") is not True:
+                summary["errors"] += 1
+                log.warning(
+                    "Compliance check incomplete for %s: %s",
+                    company["id"],
+                    result.get("error") or "snapshot persistence unconfirmed",
+                )
+                continue
+
             summary["processed"] += 1
             critical = result.get("critical", 0)
             warning = result.get("warning", 0)
             summary["total_critical"] += critical
             summary["total_warning"] += warning
-
-            if result.get("error"):
-                summary["errors"] += 1
-                log.warning(
-                    "Compliance check partial error for %s: %s",
-                    company["id"],
-                    result["error"],
-                )
 
             # Push notifications for companies with actionable alerts
             if critical > 0 or warning > 0:

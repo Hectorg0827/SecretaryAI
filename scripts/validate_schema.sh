@@ -64,6 +64,46 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250331000008_phase4_cap
 psql -v ON_ERROR_STOP=1 -f scripts/test_phase1_control_plane_security.sql
 echo '✓ Phase1/Phase4 control-plane access checks passed.'
 
+echo '── validating Phase 1 compliance atomic record/audit transaction'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115000000_compliance_atomic_policy_audit.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_compliance_atomic_policy_audit.sql
+echo '✓ Compliance atomic record/audit and cross-tenant rollback checks passed.'
+
+echo '── validating candidate price-posting rulebook and tenant human-review safeguards'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115010000_compliance_price_posting_rulebook.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_compliance_price_posting_rulebook.sql
+echo '✓ Regulatory candidate rules, per-tenant human review, and immutability checks passed.'
+
+echo '── validating owner-authorized, audited human rule attestation'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115020000_price_posting_human_attestation.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_human_attestation.sql
+echo '✓ Review authorization, tenant isolation and atomic audit rollback passed.'
+
+echo '── validating internal price preparation and unverified reference ledger'
+psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261114162323_pricing_pricebook_cost_basis_staging_20261114.sql
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115030000_price_posting_preparation_ledger.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_preparation_ledger.sql
+echo '✓ Internal case source tenant isolation, immutability, audit rollback and unverified receipt checks passed.'
+
+echo '── validating exact-capability tenant policy scope on regulated audit transactions'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115040000_price_posting_specific_policy_guard.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_specific_policy_guard.sql
+echo '✓ Generic allow, wrong path, cross-tenant policy and revoked rules fail atomic regulated audit.'
+
+echo '── validating append-only unverified accounting price observation sources'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115050000_price_posting_accounting_observations.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_accounting_observations.sql
+echo '✓ Accounting evidence ownership, unit basis, immutable history and read-only grants passed.'
+
+echo '── validating owner-only read-mode QB candidate item identity bindings'
+psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115060000_price_posting_capture_bindings.sql
+psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_capture_bindings.sql
+echo '✓ Unverified QB candidate identities, tenant scope and immutable read-only grants passed.'
+
+
+
+
+
 echo '── checking procurement and private morning briefing extensions'
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000005_procurement_cycles.sql
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20250327000006_qbo_token_expiry.sql

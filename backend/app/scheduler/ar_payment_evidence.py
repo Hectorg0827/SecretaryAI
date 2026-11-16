@@ -126,6 +126,7 @@ def compare_ar_payment_allocations(
     linked_ids: set[str] = set()
     seen_payments: set[str] = set()
     unapplied_payment_count = 0
+    links_examined = 0
     for payment in payments:
         if not isinstance(payment, dict):
             raise ARPaymentEvidenceInvalid("Payment header malformed")
@@ -142,6 +143,9 @@ def compare_ar_payment_allocations(
         raw_links = payment.get("allocations")
         if not isinstance(raw_links, list):
             raise ARPaymentEvidenceInvalid("Payment allocations unobserved")
+        links_examined += len(raw_links)
+        if len(raw_links) > MAX_DOCUMENTS or links_examined > MAX_DOCUMENTS:
+            raise ARPaymentEvidenceInvalid("Payment allocation feed unbounded")
         allocated = Decimal("0")
         seen_links: set[str] = set()
         for link in raw_links:

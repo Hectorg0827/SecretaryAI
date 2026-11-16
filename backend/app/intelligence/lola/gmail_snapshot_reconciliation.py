@@ -69,6 +69,7 @@ class SnapshotReconciliationPreview:
     cross_channel_mapping_verified: bool = False
     follow_up_eligible: bool = False
     outbound_action_approved: bool = False
+    event_rows: tuple[dict[str, str], ...] = field(default=(), repr=False)
 
 
 def verify_snapshot_ledger(
@@ -226,8 +227,16 @@ async def reconcile_gmail_snapshot_preview(
         scope.provider_identity_ref, scope.resource_id,
     )
     transitions: dict[str, str] = {}
-    for event in replay.changed_records:
+    event_rows: list[dict[str, str]] = []
+    for index, event in enumerate(replay.changed_records):
         key = vault.digest("snapshot-message-v1", *prefix, event.source_id)
+        event_rows.append({
+            "key_sha256": vault.digest(
+                "gmail-stage14-event-v1", *prefix, replay.digest,
+                str(index), event.source_id, event.operation,
+            ),
+            "operation": event.operation,
+        })
         if event.operation in ("added", "deleted"):
             previous = transitions.get(key)
             # The replay API flattens operations within a history record.
@@ -251,4 +260,5 @@ async def reconcile_gmail_snapshot_preview(
         membership_digest=membership,
         initial_history_id=progress.initial_history_id,
         next_history_id=replay.next_history_id,
+        event_rows=tuple(event_rows),
     )

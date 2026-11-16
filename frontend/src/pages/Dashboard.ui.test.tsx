@@ -30,6 +30,7 @@ let container: HTMLDivElement | undefined;
 const validSummary = (unreadEmails: unknown = 3) => ({
   accounts: { healthy: 1, slowing: 0, at_risk: 0, dormant: 0, unknown: 0 },
   inventory_alerts: [], pending_actions: 0, unread_emails: unreadEmails,
+  unread_emails_capped: false,
   generated_at: '2026-10-26T12:00:00Z',
 });
 
@@ -66,6 +67,19 @@ describe('dashboard summary source and reload sequence (synthetic only)', () => 
     const node = await render();
     expect(node.textContent).toContain('Unread Emails: Unavailable');
     expect(node.textContent).not.toContain('Unread Emails: 0');
+  });
+
+  it('labels a full 50-message preview as a lower bound', async () => {
+    mocks.summary.mockResolvedValue({ ...validSummary(50), unread_emails_capped: true });
+    const node = await render();
+    expect(node.textContent).toContain('Unread Emails: 50+');
+  });
+
+  it('does not trust an unread preview without coverage metadata', async () => {
+    const { unread_emails_capped: _unused, ...legacy } = validSummary(3);
+    mocks.summary.mockResolvedValue(legacy);
+    const node = await render();
+    expect(node.textContent).toContain('Unread Emails: Unverified');
   });
 
   it('uses a read-only summary GET when manually reloading', async () => {

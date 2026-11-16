@@ -272,7 +272,11 @@ class UnifiedDataAdapter:
         declared. Comparison never certifies books or authorizes payment.
         """
         from app.config import get_settings
-        from app.scheduler.ar_payment_evidence import compare_ar_payment_allocations
+        from app.scheduler.ar_payment_evidence import (
+            ARPaymentEvidenceInvalid,
+            assert_stable_ar_source_view,
+            compare_ar_payment_allocations,
+        )
 
         settings = get_settings()
         if (settings.secretaryai_deployment_env.strip().lower() != "staging"
@@ -292,8 +296,10 @@ class UnifiedDataAdapter:
         if not isinstance(as_of, date) or isinstance(as_of, datetime):
             raise ValueError("AR payment preview requires an as-of date")
 
-        # Read Preferences once for this preview, before interpreting omitted
-        # transaction CurrencyRef values. No currency guessed from locale.
+        # QBO query pagination and successive Invoice/Payment reads do NOT
+        # provide a transactionally consistent snapshot. Two independently
+        # complete, bounded source reads can at least detect observed drift.
+        # This remains a manual staging-only, non-certified preview.
         currency_context = await self._qb.get_ar_currency_context_read_only()
         invoices = await self._qb.get_ar_invoice_evidence_read_only(
             currency_context=currency_context,
@@ -301,6 +307,19 @@ class UnifiedDataAdapter:
         payments = await self._qb.get_ar_payment_evidence_read_only(
             currency_context=currency_context,
         )
+        # Reverse read order to bracket the cross-source reconciliation.
+        payments_check = await self._qb.get_ar_payment_evidence_read_only(
+            currency_context=currency_context,
+        )
+        invoices_check = await self._qb.get_ar_invoice_evidence_read_only(
+            currency_context=currency_context,
+        )
+        currency_context_check = await self._qb.get_ar_currency_context_read_only()
+        if (not isinstance(currency_context, dict)
+                or currency_context_check != currency_context):
+            raise ARPaymentEvidenceInvalid("AR currency preferences changed during comparison")
+        assert_stable_ar_source_view(invoices, invoices_check, source="invoice")
+        assert_stable_ar_source_view(payments, payments_check, source="payment")
         # Stamp the tenant only *after* validating the adapter's configuration,
         # not from client-supplied provider rows.
         return compare_ar_payment_allocations(

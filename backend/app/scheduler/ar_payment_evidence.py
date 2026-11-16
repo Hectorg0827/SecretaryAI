@@ -74,6 +74,38 @@ def _unassessed() -> dict:
     }
 
 
+
+def assert_stable_ar_source_view(
+    earlier: list[dict], later: list[dict], *, source: str,
+) -> None:
+    """Fail closed when two complete bounded provider reads disagree.
+
+    This is best-effort source-drift detection, NOT an atomic QBO snapshot.
+    Compare normalized records by unique ID, ignoring harmless page order.
+    Never print provider identifiers, customer data or financial amounts.
+    """
+    if source not in {"invoice", "payment"}:
+        raise ARPaymentEvidenceInvalid("Unsupported AR source comparison")
+
+    def index(rows: list[dict]) -> dict[str, dict]:
+        if not isinstance(rows, list) or len(rows) > MAX_DOCUMENTS:
+            raise ARPaymentEvidenceInvalid("AR source comparison unbounded")
+        keyed: dict[str, dict] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ARPaymentEvidenceInvalid("AR source comparison malformed")
+            record_id = _identifier(row.get("id"), "AR source ID")
+            if record_id in keyed:
+                raise ARPaymentEvidenceInvalid("AR source comparison duplicate ID")
+            keyed[record_id] = row
+        return keyed
+
+    first = index(earlier)
+    second = index(later)
+    if first != second:
+        raise ARPaymentEvidenceInvalid("AR source changed during comparison")
+
+
 def compare_ar_payment_allocations(
     invoices: list[dict],
     payments: list[dict],

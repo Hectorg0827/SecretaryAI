@@ -499,3 +499,39 @@ async def test_qbo_get_payment_reader_normalizes_optional_unapplied_without_fina
     assert len(rows) == 1
     assert rows[0]["unapplied"] == "0.00"
     qb._post.assert_not_awaited()
+
+
+def test_qbo_zero_cash_creditmemo_invoice_link_is_not_recognized_as_payment():
+    # Intuit Payment examples include TotalAmt=0 while the line array
+    # links a $300 Invoice and a $300 CreditMemo. The line amounts are not
+    # $600 of collected cash; classification requires credit memo evidence.
+    link_only = _payment(
+        TotalAmt=0,
+        UnappliedAmt=0,
+        Line=[
+            {"Amount": 300, "LinkedTxn": [
+                {"TxnId": "inv-1", "TxnType": "Invoice"},
+            ]},
+            {"Amount": 300, "LinkedTxn": [
+                {"TxnId": "credit-1", "TxnType": "CreditMemo"},
+            ]},
+        ],
+    )
+    with pytest.raises(QBOARSourceInvalid, match="adjustment unsupported"):
+        normalize_payment_for_ar(link_only)
+
+
+def test_zero_cash_creditmemo_cannot_resolve_missing_unapplied_amount():
+    link_only = _payment(
+        TotalAmt=0, UnappliedAmt=None,
+        Line=[
+            {"Amount": 300, "LinkedTxn": [
+                {"TxnId": "inv-1", "TxnType": "Invoice"},
+            ]},
+            {"Amount": 300, "LinkedTxn": [
+                {"TxnId": "credit-1", "TxnType": "CreditMemo"},
+            ]},
+        ],
+    )
+    with pytest.raises(QBOARSourceInvalid):
+        normalize_payment_for_ar(link_only)

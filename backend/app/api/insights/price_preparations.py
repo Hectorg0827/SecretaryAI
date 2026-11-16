@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.api.compliance_integrity import _audit_blocked_write
+from app.api.insights._compliance_policy_gate import require_scoped_regulated_allow
 from app.api.deps import get_db
 from app.api.insights._pricing_access import get_pricing_user
 from app.api.insights.price_posting import _human_reviewed, _latest_rule, _rows
@@ -67,13 +68,20 @@ async def _allow_audited_action(
 ) -> str | None:
     company_id = str(user["company_id"])
     actor = str(user["sub"])
+    capability_by_action = {
+        "compliance.price_preparation_record": "compliance.price_preparation",
+        "compliance.price_external_reference_record": "compliance.price_external_reference",
+    }
+    if action not in capability_by_action:
+        raise HTTPException(status_code=403, detail="Unsupported regulated evidence action")
+    capability = capability_by_action[action]
     proposal = ActionProposal(
         action_type=action,
         action_class=ActionClass.COMMIT,
         description="Record internal price-posting evidence, not a government filing",
         company_id=company_id,
         requested_by=actor,
-        capability="compliance.price_preparation",
+        capability=capability,
         path=DataPath.API,
         entity_type=entity_type,
         entity_id=entity_id,
@@ -103,19 +111,11 @@ async def _allow_audited_action(
                 detail="Tenant policy approval is required; no record was created")
         raise HTTPException(status_code=403,
             detail="Tenant policy blocked internal evidence recording")
-    # No implicit/default allow: regulated case recording requires a matching
-    # tenant policy rule ID, even if future defaults are made permissive.
-    if not decision.rule_id:
-        _audit_blocked_write(
-            db, table=entity_type,
-            record={"id": entity_id, "company_id": company_id},
-            actor=actor, effect="deny", rule_id=None,
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="A named tenant policy rule must authorize regulated evidence recording",
-        )
-    return decision.rule_id
+    return require_scoped_regulated_allow(
+        db, company_id=company_id, actor=actor,
+        rule_id=decision.rule_id, capability=capability,
+        entity_type=entity_type, entity_id=entity_id,
+    )
 
 
 def _read_case(db, company_id: str, case_id: UUID) -> dict:

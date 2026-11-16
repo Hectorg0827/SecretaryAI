@@ -136,9 +136,14 @@ def test_zero_or_missing_unit_price_is_not_evidence_of_zero_list_price():
     result = preview(items=[qbo_item(UnitPrice="0")])
     assert result["lines"][0]["numeric_comparison"] == "not_comparable"
     assert "provider_price_zero_or_unavailable" in result["lines"][0]["blockers"]
-    # Existing normalizer defaults missing UnitPrice to 0; gate blocks it.
-    result = preview(items=[qbo_item(UnitPrice=None)])
-    assert result["lines"][0]["numeric_comparison"] == "not_comparable"
+    # Existing QBO normalizer defaults an absent UnitPrice to zero.
+    raw = {"Id": "QBO-ITEM-42", "Name": "Sample Item",
+           "Sku": "SYN-NJ-001", "QtyOnHand": "42"}
+    item = QBOnlineAdapter._normalize_inventory_item(
+        object.__new__(QBOnlineAdapter), raw,
+    )
+    assert item.unit_price == Decimal("0")
+    assert preview(items=[item])["lines"][0]["numeric_comparison"] == "not_comparable"
 
 
 @pytest.mark.parametrize("change,blocker", [

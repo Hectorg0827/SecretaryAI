@@ -103,6 +103,18 @@ async def _allow_audited_action(
                 detail="Tenant policy approval is required; no record was created")
         raise HTTPException(status_code=403,
             detail="Tenant policy blocked internal evidence recording")
+    # No implicit/default allow: regulated case recording requires a matching
+    # tenant policy rule ID, even if future defaults are made permissive.
+    if not decision.rule_id:
+        _audit_blocked_write(
+            db, table=entity_type,
+            record={"id": entity_id, "company_id": company_id},
+            actor=actor, effect="deny", rule_id=None,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="A named tenant policy rule must authorize regulated evidence recording",
+        )
     return decision.rule_id
 
 

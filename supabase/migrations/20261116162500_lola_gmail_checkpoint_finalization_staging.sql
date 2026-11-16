@@ -318,7 +318,7 @@ BEGIN
   END LOOP;
 
   SELECT encode(sha256(convert_to(COALESCE(string_agg(
-      e->>'key_sha256' || ':' || e->>'operation','|' ORDER BY e->>'key_sha256',e->>'operation'
+      (e->>'key_sha256') || ':' || (e->>'operation'),'|' ORDER BY e->>'key_sha256',e->>'operation'
     ),''),'UTF8')),'hex')
     INTO v_events_digest FROM jsonb_array_elements(p_events) e;
 

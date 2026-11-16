@@ -152,6 +152,8 @@ export function verifiedDashboardSummary(value: unknown): DashboardSummary | nul
     inventory_unassessed: count(value.inventory_unassessed) ? value.inventory_unassessed : null,
     pending_actions: pendingActions,
     unread_emails: unreadEmails,
+    unread_emails_capped: unreadEmails === null ? null
+      : typeof value.unread_emails_capped === "boolean" ? value.unread_emails_capped : null,
     generated_at: generatedAt,
     cached: value.cached === true,
     // Do not discard the backend's freshness verdict: an old but otherwise

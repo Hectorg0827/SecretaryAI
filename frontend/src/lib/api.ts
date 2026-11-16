@@ -365,6 +365,71 @@ export interface PricePostingHumanReviewInput {
   checked_tenant_license_applicability: boolean;
   acknowledged_no_filing_authority: boolean;
 }
+export interface PriceBookSourceItem {
+  id: string;
+  sku: string;
+  package_label: string;
+  market_code: string;
+  channel: string;
+  currency: string;
+  list_price_per_case: string;
+  effective_from: string;
+  effective_to: string | null;
+  revision: number;
+  status: string;
+  cost_snapshot_id: string | null;
+  evidence_ref: string;
+  approved_at: string | null;
+}
+export interface PriceBookSourceList {
+  company_id: string;
+  items: PriceBookSourceItem[];
+  count_returned: number;
+  next_offset: number | null;
+  status: 'analysis_only';
+  source: 'connected_data';
+  price_changes_allowed: false;
+  cost_source_certified: false;
+}
+export interface PricePostingReadinessRequest {
+  program_key: string;
+  price_book_ids: string[];
+  effective_date: string;
+}
+export interface PricePostingSourceEvidence {
+  price_book_id: string;
+  sku: string;
+  cost_snapshot_id: string | null;
+  cost_basis_recorded_as_reconciled: boolean;
+  matching_license_record_count: number;
+  product_type_from_internal_registry: string | null;
+  source_blockers: string[];
+  independent_qbo_qbd_reconciliation_confirmed: false;
+  license_authority_verified_by_regulator: false;
+  warehouse_cost_coverage_certified: false;
+}
+export interface PricePostingReadinessResult {
+  program_key: string;
+  region_code: string;
+  human_rule_review_recorded: boolean;
+  preliminary_state: 'blocked_for_review';
+  blockers: string[];
+  lines: Array<{
+    price_book_id: string;
+    sku: string;
+    list_price_per_case: string | null;
+    package_label: string | null;
+    blockers: string[];
+  }>;
+  source_evidence: PricePostingSourceEvidence[];
+  source_consistency: string;
+  ready_to_file: false;
+  submission_permitted: false;
+  agency_template_generated: false;
+  live_price_changed: false;
+  qbo_qbd_live_data_accessed: false;
+}
+
 export interface PricePostingRuleReviewReceipt {
   rule_id: string;
   version: number;
@@ -573,6 +638,10 @@ export const api = {
   pricePosting: {
     listPrograms: () =>
       api.get<PricePostingRuleProgramsResponse>('/api/insights/price-posting/programs'),
+    listSourcePrices: () =>
+      api.get<PriceBookSourceList>('/api/insights/price-book?limit=100'),
+    previewReadiness: (body: PricePostingReadinessRequest) =>
+      api.post<PricePostingReadinessResult>('/api/insights/price-posting/readiness', body),
     recordHumanReview: (programKey: string, body: PricePostingHumanReviewInput) =>
       api.post<PricePostingRuleReviewReceipt>(
         `/api/insights/price-posting/programs/${encodeURIComponent(programKey)}/review`, body,

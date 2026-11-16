@@ -124,6 +124,10 @@ class RPC:
             "reconciled_membership_sha256": a["p_reconciled_membership_sha256"],
             "cursor_sha256": a["p_cursor_sha256"],
             "replay_digest": a["p_replay_digest"],
+            "event_batch_digest_sha256": hashlib.sha256("|".join(sorted(
+                f"{event['key_sha256']}:{event['operation']}"
+                for event in a["p_events"]
+            )).encode("utf-8")).hexdigest(),
             "checkpoint_generation": 1,
         }
         return SimpleNamespace(data=1)

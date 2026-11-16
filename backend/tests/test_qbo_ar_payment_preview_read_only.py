@@ -187,12 +187,20 @@ async def test_staging_sandbox_preview_reads_both_complete_feeds_without_write()
     assert result["financial_write_authorized"] is False
     assert "tenant-a" not in str(result)
     assert "inv-1" not in str(result)
-    u._qb.get_ar_currency_context_read_only.assert_awaited_once()
-    u._qb.get_ar_invoice_evidence_read_only.assert_awaited_once_with(
-        currency_context={"multicurrency_enabled": False, "home_currency": "USD"},
+    assert u._qb.get_ar_currency_context_read_only.await_count == 2
+    assert u._qb.get_ar_invoice_evidence_read_only.await_count == 2
+    assert all(
+        item.kwargs == {"currency_context": {
+            "multicurrency_enabled": False, "home_currency": "USD",
+        }}
+        for item in u._qb.get_ar_invoice_evidence_read_only.await_args_list
     )
-    u._qb.get_ar_payment_evidence_read_only.assert_awaited_once_with(
-        currency_context={"multicurrency_enabled": False, "home_currency": "USD"},
+    assert u._qb.get_ar_payment_evidence_read_only.await_count == 2
+    assert all(
+        item.kwargs == {"currency_context": {
+            "multicurrency_enabled": False, "home_currency": "USD",
+        }}
+        for item in u._qb.get_ar_payment_evidence_read_only.await_args_list
     )
     u._qb.create_payment.assert_not_awaited()
 
@@ -370,12 +378,12 @@ async def test_missing_currency_is_resolved_by_shared_verified_context_in_previe
         )
     assert result["status"] == "aligned_not_certified"
     assert result["accounting_reconciled"] is False
-    u._qb.get_ar_invoice_evidence_read_only.assert_awaited_once_with(
-        currency_context=context,
-    )
-    u._qb.get_ar_payment_evidence_read_only.assert_awaited_once_with(
-        currency_context=context,
-    )
+    assert u._qb.get_ar_invoice_evidence_read_only.await_count == 2
+    assert all(x.kwargs == {"currency_context": context}
+               for x in u._qb.get_ar_invoice_evidence_read_only.await_args_list)
+    assert u._qb.get_ar_payment_evidence_read_only.await_count == 2
+    assert all(x.kwargs == {"currency_context": context}
+               for x in u._qb.get_ar_payment_evidence_read_only.await_args_list)
 
 
 @pytest.mark.asyncio

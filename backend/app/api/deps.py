@@ -133,7 +133,8 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
         raise PermissionError("AR preview QBO connection requires staging sandbox")
     company = _load_company(company_id, db)
     if (not isinstance(company, dict) or company.get("id") != company_id
-            or company.get("qb_type") != "online"):
+            or company.get("qb_type") != "online"
+            or company.get("qb_connection_status") != "connected"):
         raise PermissionError("AR preview QBO connection not verified")
 
     access_ciphertext = company.get("qbo_access_token")
@@ -150,8 +151,8 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
 
     access_token = decrypt(access_ciphertext, settings.secret_key)
     refresh_token = decrypt(refresh_ciphertext, settings.secret_key)
-    if (not isinstance(access_token, str) or not access_token
-            or not isinstance(refresh_token, str) or not refresh_token):
+    if (not isinstance(access_token, str) or not access_token.strip()
+            or not isinstance(refresh_token, str) or not refresh_token.strip()):
         raise PermissionError("AR preview QBO credentials could not be decoded")
 
     # Only these QBO keys cross into UnifiedDataAdapter. In particular no
@@ -172,3 +173,21 @@ def get_qbo_ar_preview_adapter(*, user: dict, db):
     # This preview uses QBO's direct GET reader. Do not attach AccessRouter,
     # which would retain a DB handle and enable unrelated data access paths.
     return UnifiedDataAdapter(qb_only_config)
+
+
+def verify_qbo_ar_preview_connection(*, db, company_id: str, expected_realm: str):
+    """Recheck the authoritative tenant's QBO realm after provider reads.
+
+    An owner's QBO connection can be replaced mid-request; never return
+    aggregates from the old realm as if they belong to the new connection.
+    This is a synchronous DB read intended to be offloaded from the route.
+    """
+    if (not isinstance(company_id, str) or not company_id
+            or not isinstance(expected_realm, str) or not expected_realm):
+        raise PermissionError("AR preview connection identity not verified")
+    company = _load_company(company_id, db)
+    if (not isinstance(company, dict) or company.get("id") != company_id
+            or company.get("qb_type") != "online"
+            or company.get("qb_connection_status") != "connected"
+            or company.get("qbo_realm_id") != expected_realm):
+        raise PermissionError("AR preview QBO connection changed")

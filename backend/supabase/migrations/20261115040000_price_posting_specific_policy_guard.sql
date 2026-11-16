@@ -20,7 +20,7 @@ BEGIN
         v_capability := 'compliance.price_preparation';
         v_entity_type := 'compliance_price_posting_preparations';
       WHEN 'compliance.price_external_reference_recorded' THEN
-        v_capability := 'compliance.price_external_reference';
+        v_capability := 'compliance.price_reference';
         v_entity_type := 'compliance_price_posting_external_references';
       ELSE
         RETURN NEW;

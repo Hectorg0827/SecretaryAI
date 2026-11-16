@@ -9,6 +9,9 @@
 --
 -- Provision a separate password/secret out of band ONLY after staging review.
 -- No secrets or LOGIN changes are included in this proposal.
+-- All role/function/grant changes commit together; no transient PUBLIC EXECUTE.
+BEGIN;
+
 DO $role$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'secretary_registrar') THEN
@@ -102,6 +105,8 @@ REVOKE ALL ON FUNCTION secretary_internal.register_owner_atomic(text,text,text,t
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION secretary_internal.register_owner_atomic(text,text,text,text)
   TO secretary_registrar;
+
+COMMIT;
 
 -- No direct company DELETE is revoked by this proposal. That permission will
 -- be removed through a separate reviewed migration ONLY after an independent

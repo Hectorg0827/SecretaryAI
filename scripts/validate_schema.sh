@@ -111,6 +111,12 @@ psql -v ON_ERROR_STOP=1 -c "GRANT SELECT, INSERT, DELETE ON TABLE public.logisti
 psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261114230000_logistics_events_service_delete_revoke.sql
 psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_events_delete_privileges.sql
 echo '✓ Direct service-role DELETE denied; append/read preserved; company erasure cascade preserved.'
+echo '── detecting service-role company-delete cascade bypass in disposable PostgreSQL'
+psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_parent_cascade_bypass.sql
+echo '::warning::Logistics release NO-GO: service-role parent company deletion can still erase the ledger by FK cascade.'
+echo '── testing REVIEW-ONLY parent DELETE revocation mitigation in disposable PostgreSQL'
+psql -v ON_ERROR_STOP=1 -f scripts/test_company_delete_revoke_proposal.sql
+echo '::warning::Parent grant-only mitigation is NOT deployable until service-role registration cleanup and lawful-erasure workflow are refactored.'
 
 
 

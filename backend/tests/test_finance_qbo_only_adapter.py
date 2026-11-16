@@ -195,6 +195,5 @@ def test_real_adapter_constructor_never_builds_unrelated_connectors():
     sheets.assert_not_called()
     shipping.assert_not_called()
     computer.assert_not_called()
-    # Optional support classes receive no other provider credentials.
-    assert all("CANARY" not in repr(x) for x in
-               computer.call_args.kwargs["company_config"].values())
+    # Nothing outside the QBO-only config reached any auxiliary adapter.
+    assert all("CANARY" not in repr(x) for x in adapter._config.values())

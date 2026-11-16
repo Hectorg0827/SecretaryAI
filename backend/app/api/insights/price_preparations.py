@@ -70,7 +70,7 @@ async def _allow_audited_action(
     actor = str(user["sub"])
     capability_by_action = {
         "compliance.price_preparation_record": "compliance.price_preparation",
-        "compliance.price_external_reference_record": "compliance.price_external_reference",
+        "compliance.price_external_reference_record": "compliance.price_reference",
     }
     if action not in capability_by_action:
         raise HTTPException(status_code=403, detail="Unsupported regulated evidence action")

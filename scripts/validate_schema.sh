@@ -100,6 +100,11 @@ psql -v ON_ERROR_STOP=1 -f backend/supabase/migrations/20261115060000_price_post
 psql -v ON_ERROR_STOP=1 -f scripts/test_price_posting_capture_bindings.sql
 echo '✓ Unverified QB candidate identities, tenant scope and immutable read-only grants passed.'
 
+echo '── validating proposed Logistics DELETE guard on disposable synthetic ledger only'
+psql -v ON_ERROR_STOP=1 -f scripts/test_logistics_delete_guard_proposal.sql
+echo '✓ Review-only proposal blocks DELETE for service role and table owner; UPDATE guard preserved.'
+
+
 
 
 

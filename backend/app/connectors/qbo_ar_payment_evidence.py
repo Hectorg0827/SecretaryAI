@@ -133,10 +133,19 @@ def normalize_payment_for_ar(
     customer_id = _reference(raw.get("CustomerRef"), "payment customer")
     currency = _currency(raw.get("CurrencyRef"), currency_context)
     total = _amount(raw.get("TotalAmt"), "payment total")
-    unapplied = _amount(raw.get("UnappliedAmt"), "unapplied amount")
+    # Intuit makes UnappliedAmt optional. It is safe to establish a zero
+    # remainder only for a non-sparse, nonempty, invoice-only allocation set
+    # whose verified line amounts exactly exhaust TotalAmt. All other
+    # missing-field cases remain unassessed, not zero.
+    missing_unapplied = raw.get("UnappliedAmt") is None
+    unapplied = (
+        None if missing_unapplied
+        else _amount(raw["UnappliedAmt"], "unapplied amount")
+    )
     when = _date(raw.get("TxnDate"))
     lines = raw.get("Line")
-    if lines is None and Decimal(total) == Decimal(unapplied):
+    if (lines is None and unapplied is not None
+            and Decimal(total) == Decimal(unapplied)):
         lines = []
     if not isinstance(lines, list) or len(lines) > MAX_RECORDS:
         raise QBOARSourceInvalid("QBO payment lines incomplete or unbounded")
@@ -160,6 +169,15 @@ def normalize_payment_for_ar(
         allocations.append({"invoice_id": invoice_id, "amount": line_amount})
 
     applied_total = sum((Decimal(x["amount"]) for x in allocations), Decimal("0"))
+    if missing_unapplied:
+        if (not allocations or Decimal(total) == 0
+                or applied_total != Decimal(total)
+                or (raw.get("sparse") is not None
+                    and raw.get("sparse") is not False)):
+            raise QBOARSourceInvalid("QBO unapplied amount cannot be verified")
+        # Derived only from a complete, exactly balanced explicit application:
+        # no fabricated unapplied cash or duplicate payment recognition.
+        unapplied = "0.00"
     if applied_total + Decimal(unapplied) != Decimal(total):
         raise QBOARSourceInvalid("QBO payment line totals do not balance")
     return {

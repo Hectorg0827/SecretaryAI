@@ -40,6 +40,8 @@ def settings():
         intuit_client_id="sandbox-intuit-client",
         intuit_client_secret="sandbox-intuit-secret",
         secret_key="SYNTHETIC_DECRYPT_KEY",
+        secretaryai_deployment_env="staging",
+        intuit_environment="sandbox",
     )
 
 
@@ -135,3 +137,62 @@ def test_invalid_decrypted_qbo_credentials_never_build_adapter():
         with pytest.raises(PermissionError):
             get_qbo_ar_preview_adapter(user=OWNER, db=MagicMock())
     factory.assert_not_called()
+
+
+@pytest.mark.parametrize("environment,intuit", [
+    ("production", "sandbox"), ("local", "sandbox"),
+    ("staging", "production"),
+])
+def test_qbo_only_adapter_cannot_touch_company_outside_staging_sandbox(
+    environment, intuit,
+):
+    disallowed = settings()
+    disallowed.secretaryai_deployment_env = environment
+    disallowed.intuit_environment = intuit
+    with patch("app.api.deps.get_settings", return_value=disallowed), \
+         patch("app.api.deps._load_company") as load, \
+         patch("app.api.deps.decrypt") as decrypt, \
+         patch("app.connectors.unified_adapter.UnifiedDataAdapter") as factory:
+        with pytest.raises(PermissionError, match="staging sandbox"):
+            get_qbo_ar_preview_adapter(user=OWNER, db=MagicMock())
+    load.assert_not_called()
+    decrypt.assert_not_called()
+    factory.assert_not_called()
+
+
+def test_real_adapter_constructor_never_builds_unrelated_connectors():
+    # Execute the real UnifiedDataAdapter constructor, mocking each actual
+    # connector class (rather than mocking the complete adapter factory).
+    # No Gmail/Outlook/Shopify or Computer Use provider network calls occur.
+    db = MagicMock()
+    with patch("app.api.deps._load_company", return_value=company()), \
+         patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("app.api.deps.decrypt", side_effect=_decrypt), \
+         patch("app.connectors.unified_adapter.QBOnlineAdapter") as online, \
+         patch("app.connectors.unified_adapter.GmailConnector") as gmail, \
+         patch("app.connectors.unified_adapter.OutlookConnector") as outlook, \
+         patch("app.connectors.unified_adapter.ShopifyConnector") as shopify, \
+         patch("app.connectors.unified_adapter.GoogleSheetsConnector") as sheets, \
+         patch("app.connectors.unified_adapter.ShipTrackConnector") as shipping, \
+         patch("app.connectors.unified_adapter.ComputerUseEngine") as computer:
+        adapter = get_qbo_ar_preview_adapter(user=OWNER, db=db)
+    assert online.call_count == 1
+    assert online.call_args.kwargs["realm_id"] == "sandbox-realm-1"
+    assert online.call_args.kwargs["access_token"] == "SYNTHETIC_QBO_ACCESS"
+    assert online.call_args.kwargs["refresh_token"] == "SYNTHETIC_QBO_REFRESH"
+    assert callable(online.call_args.kwargs["on_token_refresh"])
+    assert adapter._qb is online.return_value
+    assert adapter._db is db
+    assert adapter._gmail is None
+    assert adapter._outlook is None
+    assert adapter._shopify is None
+    assert adapter._sheets is None
+    gmail.assert_not_called()
+    outlook.assert_not_called()
+    shopify.assert_not_called()
+    sheets.assert_not_called()
+    assert shipping.call_count == 1
+    assert computer.call_count == 1
+    # Optional support classes receive no other provider credentials.
+    assert all("CANARY" not in repr(x) for x in
+               computer.call_args.kwargs["company_config"].values())

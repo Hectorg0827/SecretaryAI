@@ -17,6 +17,7 @@ RULE_ID = "00000000-0000-4000-8000-000000000013"
 BOOK_ID = "00000000-0000-4000-8000-000000000014"
 CASE_ID = "00000000-0000-4000-8000-000000000015"
 USER = {"company_id": TENANT, "sub": ACTOR, "role": "owner"}
+POLICY_ID = "00000000-0000-4000-8000-000000000055"
 RULE = {"id": RULE_ID, "version": 1, "program_key": "NJ_ECPL",
         "country_code": "US", "region_code": "NJ"}
 
@@ -104,6 +105,15 @@ class FakeDB:
         self.rpc_unavailable = False
         self.unconfirmed_receipt = False
         self.tables = {
+            "policy_rules": [{
+                "id": POLICY_ID, "company_id": TENANT, "is_active": True,
+                "action_class": "commit", "effect": "allow",
+                "capabilities_match": [
+                    "compliance.price_preparation",
+                    "compliance.price_external_reference",
+                ],
+                "paths_match": ["api"],
+            }],
             "compliance_price_posting_preparations": [{
                 "id": CASE_ID, "company_id": TENANT,
                 "rule_id": RULE_ID, "rule_version": 1,
@@ -138,12 +148,14 @@ class FakeDB:
 @pytest.fixture
 def policy(monkeypatch):
     state = {"effect": "allow", "failure": False,
-             "rule_id": "00000000-0000-4000-8000-000000000055"}
+             "rule_id": POLICY_ID}
 
     async def evaluate(_self, proposal):
         assert proposal.company_id == TENANT
         assert proposal.requested_by == ACTOR
-        assert proposal.capability == "compliance.price_preparation"
+        assert proposal.capability in (
+            "compliance.price_preparation", "compliance.price_external_reference",
+        )
         assert proposal.action_class.value == "commit"
         if state["failure"]:
             raise RuntimeError("Synthetic policy outage")
@@ -351,3 +363,59 @@ async def test_external_reference_never_accepts_policy_default_allow(policy):
     assert len(db.audits) == 1
     assert db.audits[0]["policy_effect"] == "deny"
     assert not any(call.startswith("rpc:") for call in db.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [
+    {"capabilities_match": []},
+    {"capabilities_match": None},
+    {"capabilities_match": ["other.capability"]},
+    {"paths_match": ["browser"]},
+    {"paths_match": []},
+    {"is_active": False},
+    {"effect": "require_approval"},
+    {"action_class": "draft"},
+])
+async def test_internal_case_rejects_generic_or_inactive_policy_rule(policy, override):
+    db = FakeDB()
+    db.tables["policy_rules"][0].update(override)
+    with pytest.raises(HTTPException) as exc:
+        await api.create_internal_preparation(prep(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert len(db.audits) == 1
+    assert db.audits[0]["policy_effect"] == "deny"
+    assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_external_reference_requires_own_capability_not_case_authority(policy):
+    db = FakeDB()
+    db.tables["policy_rules"][0]["capabilities_match"] = [
+        "compliance.price_preparation"
+    ]
+    with pytest.raises(HTTPException) as exc:
+        await api.add_human_external_reference(
+            UUID(CASE_ID), external(), user=USER, db=db,
+        )
+    assert exc.value.status_code == 403
+    assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_policy_recheck_fails_closed_if_source_is_unavailable(policy):
+    db = FakeDB()
+    db.fail_source = "policy_rules"
+    with pytest.raises(HTTPException) as exc:
+        await api.create_internal_preparation(prep(), user=USER, db=db)
+    assert exc.value.status_code == 503
+    assert not any(x.startswith("rpc:") for x in db.calls)
+
+
+@pytest.mark.asyncio
+async def test_foreign_tenant_policy_rule_not_accepted(policy):
+    db = FakeDB()
+    db.tables["policy_rules"][0]["company_id"] = FOREIGN
+    with pytest.raises(HTTPException) as exc:
+        await api.create_internal_preparation(prep(), user=USER, db=db)
+    assert exc.value.status_code == 403
+    assert not any(x.startswith("rpc:") for x in db.calls)

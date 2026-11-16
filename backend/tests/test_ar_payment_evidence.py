@@ -173,6 +173,12 @@ def test_unbounded_or_missing_source_fails_closed(docs, cash):
         )
 
 
+def test_unbounded_nested_payment_links_fail_closed_before_allocating():
+    oversized = [{"invoice_id": "inv-a", "amount": "0.01"}] * 5001
+    with pytest.raises(ARPaymentEvidenceInvalid, match="unbounded"):
+        compare([invoice()], [payment(links=oversized)])
+
+
 def test_unverified_sources_do_not_resolve_a_partial_ledger_without_evidence():
     # A provider outage is neither zero cash nor an accurately matched balance.
     result = compare([invoice()], [], payments_complete=False)

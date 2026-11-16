@@ -9,13 +9,16 @@ READ request; this is credential housekeeping, not a financial transaction.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import get_qbo_ar_preview_adapter, get_db
+from app.api.deps import (
+    get_qbo_ar_preview_adapter, get_db, verify_qbo_ar_preview_connection,
+)
 from app.api.finance_workspace import _current_role
 from app.auth.rbac import require_permission
 from app.config import get_settings
@@ -61,7 +64,7 @@ async def get_ar_payment_preview(
     # A valid JWT alone does not prove the current DB role is still Owner.
     # Authorization must happen before constructing any provider adapters.
     try:
-        current_role = _current_role(db, user)
+        current_role = await asyncio.to_thread(_current_role, db, user)
     except HTTPException as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -79,10 +82,23 @@ async def get_ar_payment_preview(
     try:
         # Built from the already authenticated tenant's company row, not a
         # client-supplied realm ID or company ID.
-        adapter = get_qbo_ar_preview_adapter(user=user, db=db)
-        result = await adapter.get_qbo_ar_payment_match_preview_read_only(
-            company_id=user["company_id"], as_of=as_of,
-        )
+        # Bound the entire staging acceptance read, including blocking
+        # company lookups, both provider passes and post-read role/realm
+        # verification. A timeout must never produce partial counts.
+        async with asyncio.timeout(30):
+            adapter = await asyncio.to_thread(
+                get_qbo_ar_preview_adapter, user=user, db=db,
+            )
+            result = await adapter.get_qbo_ar_payment_match_preview_read_only(
+                company_id=user["company_id"], as_of=as_of,
+            )
+            await asyncio.to_thread(
+                verify_qbo_ar_preview_connection,
+                db=db, company_id=user["company_id"],
+                expected_realm=adapter._config["qbo_realm_id"],
+            )
+            if await asyncio.to_thread(_current_role, db, user) != "owner":
+                raise PermissionError("AR preview owner authorization changed")
         return ARPaymentPreviewResponse.model_validate({
             **result,
             "source_system": "qbo_sandbox",

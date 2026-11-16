@@ -146,10 +146,9 @@ def compare_accounting_observations(
                 count = obs.get("units_per_case")
                 if (isinstance(count, bool) or not isinstance(count, int)
                         or not 1 <= count <= 1000):
-                    blockers.append("explicit_units_per_case_missing")
-                else:
-                    observed_per_case = unit_price * Decimal(count)
-                    blockers.append("case_pack_conversion_not_independently_verified")
+                    raise ValueError("Explicit accounting unit-count evidence invalid")
+                observed_per_case = unit_price * Decimal(count)
+                blockers.append("case_pack_conversion_not_independently_verified")
             else:
                 blockers.append("accounting_unit_basis_unknown")
                 if obs.get("units_per_case") is not None:

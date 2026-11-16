@@ -38,9 +38,15 @@ class SupabaseEventStore:
             self._db.table(TABLE).upsert(
                 row, on_conflict="company_id,idempotency_key", ignore_duplicates=True,
             ).execute()
-        except TypeError:
-            # Older supabase-py without ignore_duplicates
-            self._db.table(TABLE).upsert(row, on_conflict="company_id,idempotency_key").execute()
+        except TypeError as exc:
+            # A client without ignore_duplicates might turn a retry into
+            # ON CONFLICT DO UPDATE, rewriting immutable provenance data.
+            # Never retry with default upsert semantics: fail closed and
+            # require an SDK that supports insertion-on-conflict DO NOTHING.
+            log.warning("Logistics append client lacks safe conflict-ignore support")
+            raise StoreUnavailableError(
+                "Append-only logistics write unavailable: safe client upgrade required"
+            ) from exc
 
     def load(self, company_id: str) -> list[LogisticsEvent]:
         """Load *every* event or fail; Supabase's default 1,000-row cap is unsafe.

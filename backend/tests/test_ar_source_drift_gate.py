@@ -45,15 +45,19 @@ def _payment(identifier="payment-1", *, allocated="60.00"):
 
 def _adapter(*, invoices=None, payments=None, prefs=None):
     qb = QBOnlineAdapter.__new__(QBOnlineAdapter)
+    invoice_passes = [[_invoice()], [_invoice()]] if invoices is None else invoices
+    payment_passes = [[_payment()], [_payment()]] if payments is None else payments
     qb.get_ar_currency_context_read_only = AsyncMock(side_effect=(
         [CURRENCY, CURRENCY] if prefs is None else prefs
     ))
-    qb.get_ar_invoice_evidence_read_only = AsyncMock(side_effect=(
-        [[_invoice()], [_invoice()]] if invoices is None else invoices
-    ))
-    qb.get_ar_payment_evidence_read_only = AsyncMock(side_effect=(
-        [[_payment()], [_payment()]] if payments is None else payments
-    ))
+    qb.get_ar_source_count_read_only = AsyncMock(
+        side_effect=lambda source: (
+            len(invoice_passes[0]) if source == "Invoice"
+            else len(payment_passes[0])
+        )
+    )
+    qb.get_ar_invoice_evidence_read_only = AsyncMock(side_effect=invoice_passes)
+    qb.get_ar_payment_evidence_read_only = AsyncMock(side_effect=payment_passes)
     qb.create_payment = AsyncMock()
     adapter = UnifiedDataAdapter.__new__(UnifiedDataAdapter)
     adapter._qb = qb
@@ -107,6 +111,10 @@ async def test_two_stable_source_reads_allow_only_noncertified_result():
     assert result["accounting_reconciled"] is False
     assert result["financial_write_authorized"] is False
     assert qb.get_ar_currency_context_read_only.await_count == 2
+    assert [item.args[0] for item in
+            qb.get_ar_source_count_read_only.await_args_list] == [
+        "Invoice", "Payment", "Invoice", "Payment",
+    ]
     assert qb.get_ar_invoice_evidence_read_only.await_count == 2
     assert qb.get_ar_payment_evidence_read_only.await_count == 2
     qb.create_payment.assert_not_awaited()
@@ -176,4 +184,54 @@ async def test_cross_page_order_changes_do_not_invalidate_stable_ar_source():
     assert result["status"] == "aligned_not_certified"
     assert result["invoice_count"] == 2
     assert result["accounting_reconciled"] is False
+    qb.create_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_count_disagreement_blocks_partial_invoices_even_if_two_reads_match():
+    adapter, qb = _adapter()
+    qb.get_ar_source_count_read_only.side_effect = [2, 1, 2, 1]
+    with pytest.raises(ARPaymentEvidenceInvalid, match="count changed or incomplete"):
+        await _preview(adapter)
+    qb.create_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_source_count_mutates_even_when_records_returned_are_stable():
+    adapter, qb = _adapter()
+    qb.get_ar_source_count_read_only.side_effect = [1, 1, 2, 1]
+    with pytest.raises(ARPaymentEvidenceInvalid, match="count changed or incomplete"):
+        await _preview(adapter)
+    qb.create_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wrong_provider_payment_count_never_treated_as_zero_receipts():
+    adapter, qb = _adapter()
+    qb.get_ar_source_count_read_only.side_effect = [1, 0, 1, 0]
+    with pytest.raises(ARPaymentEvidenceInvalid, match="count changed or incomplete"):
+        await _preview(adapter)
+    qb.create_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_count_query_failure_stops_before_invoice_payment_reads():
+    adapter, qb = _adapter()
+    qb.get_ar_source_count_read_only.side_effect = OSError(
+        "SENSITIVE_PROVIDER_COUNT_CANARY"
+    )
+    with pytest.raises(OSError):
+        await _preview(adapter)
+    qb.get_ar_invoice_evidence_read_only.assert_not_awaited()
+    qb.get_ar_payment_evidence_read_only.assert_not_awaited()
+    qb.create_payment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalid_provider_count_flag_cannot_establish_source_completeness():
+    adapter, qb = _adapter()
+    qb.get_ar_source_count_read_only.return_value = True
+    qb.get_ar_source_count_read_only.side_effect = None
+    with pytest.raises(ARPaymentEvidenceInvalid, match="count changed or incomplete"):
+        await _preview(adapter)
     qb.create_payment.assert_not_awaited()

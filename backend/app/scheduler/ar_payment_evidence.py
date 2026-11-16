@@ -97,7 +97,27 @@ def assert_stable_ar_source_view(
             record_id = _identifier(row.get("id"), "AR source ID")
             if record_id in keyed:
                 raise ARPaymentEvidenceInvalid("AR source comparison duplicate ID")
-            keyed[record_id] = row
+            if source == "payment":
+                links = row.get("allocations")
+                if not isinstance(links, list) or len(links) > MAX_DOCUMENTS:
+                    raise ARPaymentEvidenceInvalid("AR source allocations invalid")
+                canonical = []
+                for link in links:
+                    if (not isinstance(link, dict)
+                            or set(link) != {"invoice_id", "amount"}):
+                        raise ARPaymentEvidenceInvalid("AR source allocation malformed")
+                    canonical.append((
+                        _identifier(link["invoice_id"], "linked invoice ID"),
+                        _money(link["amount"], "linked allocation"),
+                    ))
+                # QBO does not guarantee Line order across independent reads;
+                # changed amounts/IDs must still be detected, but permutation
+                # of the same linked payments is not source drift.
+                keyed[record_id] = {
+                    **row, "allocations": tuple(sorted(canonical)),
+                }
+            else:
+                keyed[record_id] = row
         return keyed
 
     first = index(earlier)

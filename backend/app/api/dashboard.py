@@ -179,10 +179,15 @@ async def get_dashboard_summary(
             log.warning("Dashboard summary: pending count unavailable")
 
     unread_count: int | None = None
+    unread_count_capped: bool | None = None
     if "trigger_actions" in perms or has_view_all:
         try:
-            emails = await adapter.get_emails(query="is:unread", max_results=50)
+            # The provider fetch is bounded. A full page proves only a lower
+            # bound, not an exact mailbox-wide unread total.
+            unread_limit = 50
+            emails = await adapter.get_emails(query="is:unread", max_results=unread_limit)
             unread_count = len(emails)
+            unread_count_capped = unread_count >= unread_limit
         except Exception:
             log.warning("Dashboard summary: unread inbox unavailable")
 
@@ -205,6 +210,8 @@ async def get_dashboard_summary(
         "pending_actions":  pending_count if ("approve_actions" in perms or has_view_all) else None,
         # Email count visible to roles with trigger_actions only
         "unread_emails":    unread_count if ("trigger_actions" in perms or has_view_all) else None,
+        # Null indicates unavailable or masked, never a proven exact count.
+        "unread_emails_capped": unread_count_capped if ("trigger_actions" in perms or has_view_all) else None,
         # Cache metadata — frontend uses this to show "Data as of X"
         "generated_at":     generated_at,
         "cached":           cached,

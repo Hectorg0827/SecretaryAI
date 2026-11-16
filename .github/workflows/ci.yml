@@ -342,6 +342,10 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261115233000_lola_gmail_recovery_epochs_staging.sql
           psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage12_recovery_security.sql
+      - name: Execute Stage 13 scoped, resumable Gmail snapshot acceptance
+        run: |
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261116021500_lola_gmail_paged_snapshot_staging.sql
+          psql -v ON_ERROR_STOP=1 -f scripts/test_lola_stage13_snapshot_security.sql
       - name: Export disposable schema for read-only staging comparison
         run: |
           psql -X -A -t -v ON_ERROR_STOP=1 -f scripts/staging_schema_manifest.sql > schema-manifest.json

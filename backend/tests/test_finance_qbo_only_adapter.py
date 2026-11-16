@@ -69,10 +69,11 @@ def test_owner_ar_preview_loads_only_company_scoped_qbo_credentials():
     ]
     cfg = create.call_args.args[0]
     assert set(cfg) == {
-        "id", "company_id", "qb_type", "qbo_client_id",
+        "id", "company_id", "qb_type", "_qbo_only", "qbo_client_id",
         "qbo_client_secret", "qbo_access_token", "qbo_refresh_token",
         "_qbo_expected_refresh_ciphertext", "qbo_realm_id",
     }
+    assert cfg["_qbo_only"] is True
     assert cfg["id"] == COMPANY
     assert cfg["company_id"] == COMPANY
     assert cfg["qbo_realm_id"] == "sandbox-realm-1"
@@ -81,7 +82,7 @@ def test_owner_ar_preview_loads_only_company_scoped_qbo_credentials():
     assert cfg["_qbo_expected_refresh_ciphertext"] == "ENCRYPTED_REFRESH"
     assert all("CANARY" not in repr(x) for x in cfg.values())
     gmail_refresh.assert_not_called()
-    fake_adapter.set_db.assert_called_once_with(db)
+    fake_adapter.set_db.assert_not_called()
 
 
 @pytest.mark.parametrize("broken", [
@@ -182,7 +183,8 @@ def test_real_adapter_constructor_never_builds_unrelated_connectors():
     assert online.call_args.kwargs["refresh_token"] == "SYNTHETIC_QBO_REFRESH"
     assert callable(online.call_args.kwargs["on_token_refresh"])
     assert adapter._qb is online.return_value
-    assert adapter._db is db
+    assert adapter._db is None
+    assert adapter._router is None
     assert adapter._gmail is None
     assert adapter._outlook is None
     assert adapter._shopify is None
@@ -191,8 +193,8 @@ def test_real_adapter_constructor_never_builds_unrelated_connectors():
     outlook.assert_not_called()
     shopify.assert_not_called()
     sheets.assert_not_called()
-    assert shipping.call_count == 1
-    assert computer.call_count == 1
+    shipping.assert_not_called()
+    computer.assert_not_called()
     # Optional support classes receive no other provider credentials.
     assert all("CANARY" not in repr(x) for x in
                computer.call_args.kwargs["company_config"].values())

@@ -65,6 +65,15 @@ class UnifiedDataAdapter:
                 on_token_refresh=self._persist_qbo_tokens,
             )
 
+        # An internal staging acceptance fixture may be limited to QBO only.
+        # Do not initialize Anthropic Computer Use, carrier tracking, email,
+        # other connectors, or the AccessRouter on this restricted path.
+        # All normal application adapters keep their original setup behavior.
+        if cfg.get("_qbo_only") is True:
+            self._router = None
+            self._db = None
+            return
+
         # Gmail
         if cfg.get("gmail_credentials"):
             self._gmail = GmailConnector(credentials=cfg["gmail_credentials"])

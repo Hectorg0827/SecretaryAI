@@ -28,7 +28,7 @@ and `paths_match` including `api`. The database rechecks the same criteria
 at atomic audit insertion; a general `allow commits` rule is insufficient.
 The three capabilities are distinct:
 `compliance.rule_review`, `compliance.price_preparation`, and
-`compliance.price_external_reference`. No automatic policy change is made.
+`compliance.price_reference`. No automatic policy change is made.
 
 ## 2. Features supported by the synthetic pilot
 

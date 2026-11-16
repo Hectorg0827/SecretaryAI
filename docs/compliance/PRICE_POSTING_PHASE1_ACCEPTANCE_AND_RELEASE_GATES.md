@@ -19,6 +19,7 @@
 | 8 | #173 | Exact API capability and path verification, enforced again by atomic PostgreSQL audit trigger |
 | 9 | #179 | Unverified, stored QBO/QBD item price observation comparison using exact decimal and explicit unit basis; no connector calls |
 | 10 | #182 | Owner-only explicit QBO/QBD item-ID and pack-candidate capture planning; no connector reads or persistence |
+| 11 | #184 | Offline synthetic normalized QB inventory fixture verification; exact item ID and Decimal case-price checks, no real connector I/O |
 
 The PRs are **stacked**. Merge order, schema migration order and final commit SHAs must
 be reviewed together. Do not describe an ancestor PR as production-ready while a
@@ -109,6 +110,34 @@ authorization for the tenant, read-only adapter credentials and token refresh
 handling, approved item-ID to SKU/case-pack map, bounded immutable source
 observations, role and audit tests, and independent finance sign-off.
 Current status remains **capture unavailable / no filing**.
+
+### Offline normalized QBO/QBD inventory fixture gate (Patch 11)
+`backend/app/intelligence/compliance/qb_inventory_snapshot_fixture.py`
+accepts **pre-normalized synthetic** `InventoryItem` objects and explicitly
+provided, tenant-scoped fixture metadata. It has **no API route**, provider
+adapter call, database client, credential access, item write, observation
+persistence or external connection. It is a pure deterministic test fixture
+for a future separately approved read-only capture implementation.
+
+A fixture may compare a stored, approved price-book revision with a normalized
+QB item only when an *explicit* tenant-owned, provider-specific candidate
+binding maps a provider item ID to the selected price-book ID. A SKU hint or
+QBD `salesDescription` cannot substitute for exact ID matching. The compiler
+fails closed on repeated provider IDs, reused source item ID across distinct
+selected books, missing/ambiguous bindings, wrong tenant/connection reference,
+incomplete or future-dated fixture snapshots, unapproved or ineffective book
+rows, missing source item prices, currency disagreement or missing per-case
+conversion information. Arithmetic is exact `Decimal`; price differences
+are not rounded away. A numeric match remains `numeric_match_unverified`.
+
+The normalizers currently do not carry independently authenticated source
+revision, provider currency, legal pricing scope or an agency effective date.
+Even a full synthetic fixture **cannot certify** an accounting reconciliation.
+Every result preserves `live_provider_called=false`,
+`live_connection_authenticated=false`, `observation_saved=false`,
+`independent_accounting_reconciled=false`, `ready_to_file=false`,
+and `submission_permitted=false`. Full provider and warehouse reconciliation,
+licensed-filer approval, and current legal filing requirements remain open.
 
 ## 3. Mandatory human regulatory verification BEFORE operational activation
 

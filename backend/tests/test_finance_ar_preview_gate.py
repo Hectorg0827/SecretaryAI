@@ -14,6 +14,20 @@ from app.api.finance_ar_preview import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_staging_support(monkeypatch):
+    # Only this route-handler test module skips real Redis/companies DB;
+    # the real helpers are verified in test_finance_qbo_only_adapter.py.
+    monkeypatch.setattr(
+        "app.api.finance_ar_preview.claim_qbo_ar_preview_window",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "app.api.finance_ar_preview.verify_qbo_ar_preview_connection",
+        lambda **kwargs: None,
+    )
+
+
 def settings(environment="staging", enabled=True):
     return SimpleNamespace(
         secretaryai_deployment_env=environment,
@@ -102,6 +116,7 @@ async def test_owner_preview_returns_aggregate_only_and_explicit_noncertificatio
     response = Response()
     db = MagicMock()
     qb = SimpleNamespace(
+        _config={"qbo_realm_id": "fixture-sandbox-realm"},
         get_qbo_ar_payment_match_preview_read_only=AsyncMock(return_value=evidence()),
         create_payment=AsyncMock(),
     )
@@ -111,7 +126,8 @@ async def test_owner_preview_returns_aggregate_only_and_explicit_noncertificatio
          patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter", return_value=qb) as adapter:
         result = await get_ar_payment_preview(response, user=user(), db=db)
     assert response.headers["Cache-Control"] == "private, no-store"
-    role_check.assert_called_once_with(db, user())
+    assert role_check.call_count == 2
+    role_check.assert_any_call(db, user())
     adapter.assert_called_once_with(user=user(), db=db)
     qb.get_qbo_ar_payment_match_preview_read_only.assert_awaited_once()
     args = qb.get_qbo_ar_payment_match_preview_read_only.await_args.kwargs
@@ -131,6 +147,7 @@ async def test_owner_preview_returns_aggregate_only_and_explicit_noncertificatio
 @pytest.mark.asyncio
 async def test_payment_source_failure_returns_generic_503_and_never_zero():
     qb = SimpleNamespace(
+        _config={"qbo_realm_id": "fixture-sandbox-realm"},
         get_qbo_ar_payment_match_preview_read_only=AsyncMock(
             side_effect=RuntimeError("SENSITIVE_PROVIDER_RESPONSE_CANARY")
         ),
@@ -153,6 +170,7 @@ async def test_response_schema_rejects_provider_identity_or_money_injection():
     data = dict(evidence())
     data.update(customer_name="PRIVATE", receipt_amount="5000000")
     qb = SimpleNamespace(
+        _config={"qbo_realm_id": "fixture-sandbox-realm"},
         get_qbo_ar_payment_match_preview_read_only=AsyncMock(return_value=data),
     )
     with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \

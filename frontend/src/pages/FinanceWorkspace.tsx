@@ -25,6 +25,13 @@ const titles: Record<string, string> = {
   ledger: 'Financial Reporting', pricing: 'Pricing & Billbacks',
 };
 
+// A coverage calculation day is not a provider retrieval timestamp.
+// Older or malformed API responses must never invent a verified date.
+function displayedCoverageDay(value: unknown): string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value : 'Not verified';
+}
+
 export function FinanceWorkspace() {
   const [data, setData] = useState<FinanceWorkspaceData | null>(null);
   const [error, setError] = useState(false);
@@ -64,8 +71,7 @@ export function FinanceWorkspace() {
                 <div><dt className="text-[#a7b6cf]">Examined</dt><dd className="text-xl font-semibold text-white">{summary.headers_examined}</dd></div>
               </dl>}
               {summary.status === 'observed' && (scope === 'ar' || scope === 'ap') && <p className="mt-3 text-xs text-[#a6b4cf]">
-                Counts assessed for UTC date: {typeof summary.source_as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(summary.source_as_of)
-                  ? summary.source_as_of : 'Not verified'}
+                Counts assessed for UTC date: {displayedCoverageDay(summary.source_as_of)}
               </p>}
               {summary.status === 'observed' && scope === 'ledger' && <p className="mt-4 text-sm text-[#d3deef]">{summary.variance_detected ? 'Unreconciled variance detected' : 'No variance detected in this limited comparison'}</p>
               <p className="mt-4 text-sm leading-6 text-[#aab9d1]">{summary.note}</p>

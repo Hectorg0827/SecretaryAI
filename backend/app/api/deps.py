@@ -243,7 +243,21 @@ def claim_qbo_ar_preview_window(*, company_id: str, seconds: int = 60) -> bool:
         company_id.encode("utf-8")
     ).hexdigest()
     try:
-        client = redis.from_url(get_settings().redis_url, decode_responses=True)
-        return client.set(key, "1", nx=True, ex=seconds) is True
+        # This method is offloaded to a thread by FastAPI. asyncio.wait_for
+        # cannot cancel an already-running blocking Redis socket operation;
+        # enforce the deadline *in the socket client* as well. Redis 6.1
+        # otherwise defaults to no connect/read socket timeout.
+        client = redis.from_url(
+            get_settings().redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.75,
+            socket_timeout=1.0,
+            retry_on_timeout=False,
+        )
+        try:
+            return client.set(key, "1", nx=True, ex=seconds) is True
+        finally:
+            client.close()
     except Exception:
+        # Fail closed; never expose Redis URLs, passwords, or connection errors.
         raise RuntimeError("AR preview cooldown unavailable") from None

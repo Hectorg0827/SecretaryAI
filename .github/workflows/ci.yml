@@ -374,6 +374,17 @@ jobs:
         run: |
           python scripts/test_registrar_rpc_integration.py
           python scripts/test_atomic_owner_registration_integration.py
+      - name: Exercise parent-company cascade revocation in isolated PostgreSQL
+        run: |
+          # Applies ONLY to the GitHub Actions disposable PostgreSQL 17.
+          # No Supabase staging or production connection is available here.
+          psql -v ON_ERROR_STOP=1 -f docs/compliance/sql-proposals/parent_company_runtime_revoke_REVIEW_ONLY.sql
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE service_role LOGIN PASSWORD 'CI_local_service_role_only_20261116'"
+      - name: Verify registrar + ordinary-service principal against live CI privileges
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: python scripts/test_registrar_and_runtime_parent_delete_integration.py
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"

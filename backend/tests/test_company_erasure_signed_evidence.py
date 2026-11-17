@@ -277,3 +277,233 @@ def test_no_execution_or_private_key_issuer_code_in_verifier():
     assert "import asyncpg" not in src
     assert "DELETE FROM " not in src
     assert not hasattr(verifier, "execute_erasure")
+
+
+# Phase 3: injected read-only provider contracts. The fakes below DO NOT
+# represent verified external legal/IdP/archive integrations in any deployment.
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+from app.company_erasure.provider_recheck import (
+    SourceBundle, CaseStatus, LegalStatus, WorkforceStatus,
+    CurrentScope, ArchiveStatus, evaluate_current_source_review,
+)
+
+
+def synthetic_current_sources(packet):
+    request = packet.request.record
+    retention = packet.retention.record
+    hold = packet.legal_hold.record
+    scope = packet.scope.record
+    receipt = packet.external_receipt.record
+
+    async def current_identity(person_id, company_id, capacity):
+        return WorkforceStatus(
+            company_id=company_id, person_id=person_id,
+            capacity=capacity, active=True,
+            permission_revoked=False, observed_at=NOW,
+        )
+
+    return SourceBundle(
+        cases=SimpleNamespace(current_case=AsyncMock(return_value=CaseStatus(
+            request_id=request.request_id, company_id=request.company_id,
+            requester_id=request.requester_id, state="submitted",
+            observed_at=NOW,
+        ))),
+        legal=SimpleNamespace(
+            current_retention=AsyncMock(return_value=LegalStatus(
+                company_id=COMPANY, outcome="clear",
+                jurisdictions=retention.jurisdictions,
+                policy_reference=retention.policy_reference,
+                observed_at=NOW,
+            )),
+            current_hold=AsyncMock(return_value=LegalStatus(
+                company_id=COMPANY, outcome="clear",
+                jurisdictions=hold.jurisdictions,
+                policy_reference=hold.policy_reference,
+                observed_at=NOW,
+            )),
+        ),
+        workforce=SimpleNamespace(current_identity=AsyncMock(
+            side_effect=current_identity
+        )),
+        inventory=SimpleNamespace(current_scope=AsyncMock(return_value=CurrentScope(
+            company_id=COMPANY,
+            approved_systems=scope.approved_systems,
+            vendor_and_backup_disposition=scope.vendor_and_backup_disposition,
+            observed_at=NOW,
+        ))),
+        archive=SimpleNamespace(readback=AsyncMock(return_value=ArchiveStatus(
+            request_id=REQUEST, company_id=COMPANY,
+            evidence_id=receipt.evidence_id,
+            digest_sha256=receipt.digest_sha256,
+            independent_store=receipt.external_store,
+            durable=True, immutable=True, observed_at=NOW,
+        ))),
+    )
+
+
+async def review_with(providers, packet, roots, *, now=NOW):
+    return await evaluate_current_source_review(
+        packet, trusted_public_keys=roots,
+        providers=providers, now=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_current_sources_missing_blocks_even_valid_signature():
+    _, roots, packet = signed_fixture()
+    result = await review_with(None, packet, roots)
+    assert result.status == "BLOCKED"
+    assert "independent_providers_not_configured" in result.reasons
+    assert result.permits_deletion is False
+
+
+@pytest.mark.asyncio
+async def test_valid_current_sources_only_support_human_review():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    result = await review_with(providers, packet, roots)
+    assert result.status == "REVIEW_PACKET_COMPLETE_NOT_AUTHORIZED"
+    assert not result.permits_deletion
+    assert providers.archive.readback.await_count == 1
+    assert providers.workforce.current_identity.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_invalid_signature_prevents_all_provider_io():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    packet = replace(packet, scope=replace(packet.scope, signature_b64="invalid"))
+    result = await review_with(providers, packet, roots)
+    assert result.status == "BLOCKED"
+    providers.cases.current_case.assert_not_awaited()
+    providers.archive.readback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_current_case_cancelled_denies_even_when_old_evidence_signed():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    providers.cases.current_case.return_value = replace(
+        providers.cases.current_case.return_value, state="cancelled",
+    )
+    result = await review_with(providers, packet, roots)
+    assert result.status == "BLOCKED"
+    assert "case_current_state_unverified" in result.reasons
+    providers.archive.readback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_late_legal_hold_and_stale_legal_source_denied():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    providers.legal.current_hold.return_value = replace(
+        providers.legal.current_hold.return_value, outcome="hold",
+    )
+    result = await review_with(providers, packet, roots)
+    assert "legal_or_hold_current_state_unverified" in result.reasons
+    providers.legal.current_hold.return_value = replace(
+        providers.legal.current_hold.return_value,
+        outcome="clear", observed_at=NOW-timedelta(minutes=6),
+    )
+    result = await review_with(providers, packet, roots)
+    assert "legal_or_hold_current_state_unverified" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_revoked_or_wrong_tenant_current_identity_denied():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+
+    async def revoked_identity(person_id, company_id, capacity):
+        return WorkforceStatus(
+            company_id=company_id, person_id=person_id,
+            capacity=capacity, active=True,
+            permission_revoked=person_id == SECURITY,
+            observed_at=NOW,
+        )
+
+    providers.workforce.current_identity.side_effect = revoked_identity
+    result = await review_with(providers, packet, roots)
+    assert "approver_current_identity_unverified" in result.reasons
+
+    async def wrong_tenant(person_id, company_id, capacity):
+        return WorkforceStatus(
+            company_id=str(uuid4()), person_id=person_id,
+            capacity=capacity, active=True,
+            permission_revoked=False, observed_at=NOW,
+        )
+
+    providers.workforce.current_identity.side_effect = wrong_tenant
+    result = await review_with(providers, packet, roots)
+    assert "requester_current_identity_unverified" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_vendor_backup_scope_drift_denied():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    providers.inventory.current_scope.return_value = replace(
+        providers.inventory.current_scope.return_value,
+        approved_systems=("database",),
+    )
+    result = await review_with(providers, packet, roots)
+    assert "vendor_backup_scope_unverified" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_archive_readback_requires_durable_current_exact_receipt():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    providers.archive.readback.return_value = replace(
+        providers.archive.readback.return_value,
+        durable=False,
+    )
+    result = await review_with(providers, packet, roots)
+    assert "independent_archive_readback_unverified" in result.reasons
+    providers.archive.readback.return_value = replace(
+        providers.archive.readback.return_value,
+        durable=True, digest_sha256="f"*64,
+    )
+    result = await review_with(providers, packet, roots)
+    assert "independent_archive_readback_unverified" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_provider_outage_or_malformed_reply_is_never_review_complete():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    providers.legal.current_hold.side_effect = RuntimeError("synthetic outage")
+    result = await review_with(providers, packet, roots)
+    assert result.status == "BLOCKED"
+    assert "independent_provider_unavailable" in result.reasons
+
+    providers = synthetic_current_sources(packet)
+    providers.archive.readback.return_value = {"claimed": True}
+    result = await review_with(providers, packet, roots)
+    assert result.status == "BLOCKED"
+    assert "independent_archive_readback_unverified" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_untrusted_clock_blocks_without_io():
+    _, roots, packet = signed_fixture()
+    providers = synthetic_current_sources(packet)
+    result = await review_with(
+        providers, packet, roots,
+        now=datetime(2026, 11, 16, 23, 0),
+    )
+    assert result.status == "BLOCKED"
+    providers.cases.current_case.assert_not_awaited()
+
+
+def test_current_source_coordinator_does_not_execute_deletion():
+    import inspect
+    import app.company_erasure.provider_recheck as coordinator
+
+    code = inspect.getsource(coordinator)
+    assert "import asyncpg" not in code
+    assert "import supabase" not in code
+    assert "DELETE FROM " not in code
+    assert not hasattr(coordinator, "execute_erasure")

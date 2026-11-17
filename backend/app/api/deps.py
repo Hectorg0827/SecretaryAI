@@ -235,6 +235,8 @@ def claim_qbo_ar_preview_window(*, company_id: str, seconds: int = 60) -> bool:
     """
     import hashlib
     import redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
 
     if (not isinstance(company_id, str) or not company_id
             or not isinstance(seconds, int) or not 1 <= seconds <= 3600):
@@ -243,7 +245,25 @@ def claim_qbo_ar_preview_window(*, company_id: str, seconds: int = 60) -> bool:
         company_id.encode("utf-8")
     ).hexdigest()
     try:
-        client = redis.from_url(get_settings().redis_url, decode_responses=True)
-        return client.set(key, "1", nx=True, ex=seconds) is True
+        # This method is offloaded to a thread by FastAPI. asyncio.wait_for
+        # cannot cancel an already-running blocking Redis socket operation;
+        # enforce the deadline *in the socket client* as well. Redis 6.1
+        # otherwise defaults to no connect/read socket timeout.
+        client = redis.from_url(
+            get_settings().redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.75,
+            socket_timeout=1.0,
+            retry_on_timeout=False,
+            # redis-py 6.1 defaults to retrying failed commands with
+            # backoff; explicitly disable all retries to keep this call
+            # within the 3-second FastAPI thread-await deadline.
+            retry=Retry(NoBackoff(), 0),
+        )
+        try:
+            return client.set(key, "1", nx=True, ex=seconds) is True
+        finally:
+            client.close()
     except Exception:
+        # Fail closed; never expose Redis URLs, passwords, or connection errors.
         raise RuntimeError("AR preview cooldown unavailable") from None

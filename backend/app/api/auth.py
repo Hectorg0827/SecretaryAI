@@ -704,14 +704,30 @@ async def register(body: RegisterRequest, _=Depends(require_rate_limit(login_lim
         raise HTTPException(status_code=503, detail="Registration temporarily unavailable") from None
 
     try:
-        user = await create_company_owner_transactionally(
-            database_url=settings.database_url,
-            company_name=body.company_name,
-            email=body.email,
-            hashed_password=password_hash,
-            full_name=body.full_name,
-            policy_rules_factory=_default_rules,
-        )
+        if settings.secretaryai_restricted_registrar_enabled:
+            # Staging pilot: isolated, least-privilege DB identity. If its
+            # credentials or private RPC are missing, fail CLOSED. Never
+            # downgrade to the ordinary privileged DATABASE_URL.
+            from app.auth.registrar_rpc import create_owner_using_registrar
+            user = await create_owner_using_registrar(
+                database_url=settings.secretaryai_registrar_database_url,
+                expected_project_ref=settings.secretaryai_expected_supabase_project_ref,
+                company_name=body.company_name,
+                email=body.email,
+                hashed_password=password_hash,
+                full_name=body.full_name,
+            )
+        else:
+            # Compatibility path retained until dedicated staging registrar
+            # and independent legal erasure service are actually provisioned.
+            user = await create_company_owner_transactionally(
+                database_url=settings.database_url,
+                company_name=body.company_name,
+                email=body.email,
+                hashed_password=password_hash,
+                full_name=body.full_name,
+                policy_rules_factory=_default_rules,
+            )
     except asyncpg.UniqueViolationError as exc:
         # Only a verified email uniqueness violation means a duplicate user.
         # Other constraints must fail closed instead of masking schema drift.

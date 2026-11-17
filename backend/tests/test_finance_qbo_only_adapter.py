@@ -260,7 +260,14 @@ def test_qbo_preview_cooldown_uses_hashed_tenant_no_raw_ids():
          patch("redis.from_url") as connect:
         connect.return_value.set.return_value = True
         assert claim_qbo_ar_preview_window(company_id=COMPANY) is True
-    connect.assert_called_once()
+    connect.assert_called_once_with(
+        settings().redis_url,
+        decode_responses=True,
+        socket_connect_timeout=0.75,
+        socket_timeout=1.0,
+        retry_on_timeout=False,
+    )
+    connect.return_value.close.assert_called_once()
     args, kwargs = connect.return_value.set.call_args
     assert args[1] == "1"
     assert kwargs == {"nx": True, "ex": 60}
@@ -277,6 +284,7 @@ def test_qbo_preview_cooldown_rejects_duplicate_and_redis_failure():
         with pytest.raises(RuntimeError) as failure:
             claim_qbo_ar_preview_window(company_id=COMPANY)
         assert "SECRET_CANARY" not in str(failure.value)
+    assert connect.return_value.close.call_count == 2
 
 
 @pytest.mark.parametrize("ids,expected_success", [
@@ -312,3 +320,36 @@ def test_realm_mapping_malformed_provider_result_fails_closed():
         verify_qbo_ar_preview_unique_realm(
             db=db, company_id=COMPANY, realm_id="sandbox-realm-1",
         )
+
+
+@pytest.mark.parametrize("redis_error", [
+    TimeoutError("REDIS_SECRET_SOCKET_CANARY"),
+    ConnectionError("REDIS_SECRET_CONNECTION_CANARY"),
+])
+def test_qbo_preview_redis_socket_failure_closes_client_and_redacts(redis_error):
+    with patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("redis.from_url") as connect:
+        connect.return_value.set.side_effect = redis_error
+        with pytest.raises(RuntimeError, match="AR preview cooldown unavailable") as exc:
+            claim_qbo_ar_preview_window(company_id=COMPANY)
+    connect.return_value.close.assert_called_once()
+    assert "CANARY" not in str(exc.value)
+    assert COMPANY not in str(exc.value)
+
+
+def test_qbo_preview_redis_constructor_failure_remains_fail_closed():
+    with patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("redis.from_url", side_effect=OSError("REDIS_SECRET_CANARY")):
+        with pytest.raises(RuntimeError, match="AR preview cooldown unavailable") as exc:
+            claim_qbo_ar_preview_window(company_id=COMPANY)
+    assert "CANARY" not in str(exc.value)
+
+
+def test_qbo_preview_redis_cleanup_failure_never_returns_success():
+    with patch("app.api.deps.get_settings", return_value=settings()), \
+         patch("redis.from_url") as connect:
+        connect.return_value.set.return_value = True
+        connect.return_value.close.side_effect = OSError("REDIS_CLEANUP_CANARY")
+        with pytest.raises(RuntimeError, match="AR preview cooldown unavailable") as exc:
+            claim_qbo_ar_preview_window(company_id=COMPANY)
+    assert "CANARY" not in str(exc.value)

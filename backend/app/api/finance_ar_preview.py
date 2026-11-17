@@ -10,7 +10,9 @@ READ request; this is credential housekeeping, not a financial transaction.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import BoundedSemaphore
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -28,6 +30,32 @@ from app.config import get_settings
 
 router = APIRouter()
 NO_STORE = {"Cache-Control": "private, no-store"}
+
+# Redis hostname resolution occurs before the socket connection deadline.
+# Timed-out asyncio.to_thread calls therefore may keep blocking default-pool
+# workers. Use a separate, small executor with capacity held until each
+# underlying thread genuinely completes (not until the await is canceled).
+_AR_REDIS_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="finance-ar-redis",
+)
+_AR_REDIS_CAPACITY = BoundedSemaphore(2)
+
+
+def _submit_ar_preview_cooldown(*, company_id: str):
+    """Bound in-flight Redis work even if DNS ignores request cancellation."""
+    if not _AR_REDIS_CAPACITY.acquire(blocking=False):
+        raise RuntimeError("AR preview cooldown capacity unavailable")
+    try:
+        future = _AR_REDIS_EXECUTOR.submit(
+            claim_qbo_ar_preview_window, company_id=company_id,
+        )
+    except BaseException:
+        _AR_REDIS_CAPACITY.release()
+        raise
+    # Completion callbacks also run if a queued future gets canceled.
+    # Do not release capacity merely because asyncio.wait_for timed out.
+    future.add_done_callback(lambda _finished: _AR_REDIS_CAPACITY.release())
+    return future
 
 
 class ARPaymentPreviewResponse(BaseModel):
@@ -86,8 +114,8 @@ async def get_ar_payment_preview(
     # before constructing QBO, while failing closed if Redis is unavailable.
     try:
         allowed = await asyncio.wait_for(
-            asyncio.to_thread(
-                claim_qbo_ar_preview_window, company_id=user["company_id"],
+            asyncio.wrap_future(
+                _submit_ar_preview_cooldown(company_id=user["company_id"]),
             ),
             timeout=3,
         )

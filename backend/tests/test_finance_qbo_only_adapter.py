@@ -260,13 +260,16 @@ def test_qbo_preview_cooldown_uses_hashed_tenant_no_raw_ids():
          patch("redis.from_url") as connect:
         connect.return_value.set.return_value = True
         assert claim_qbo_ar_preview_window(company_id=COMPANY) is True
-    connect.assert_called_once_with(
-        settings().redis_url,
-        decode_responses=True,
-        socket_connect_timeout=0.75,
-        socket_timeout=1.0,
-        retry_on_timeout=False,
-    )
+    connect.assert_called_once()
+    config_args, config_kwargs = connect.call_args
+    assert config_args == (settings().redis_url,)
+    assert config_kwargs["decode_responses"] is True
+    assert config_kwargs["socket_connect_timeout"] == 0.75
+    assert config_kwargs["socket_timeout"] == 1.0
+    assert config_kwargs["retry_on_timeout"] is False
+    # redis-py 6.1 has a default multi-attempt retry policy; an explicit
+    # zero-retry Retry instance prevents stalled worker threads.
+    assert config_kwargs["retry"].get_retries() == 0
     connect.return_value.close.assert_called_once()
     args, kwargs = connect.return_value.set.call_args
     assert args[1] == "1"

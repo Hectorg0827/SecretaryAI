@@ -385,6 +385,11 @@ jobs:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"
           PYTHONPATH: backend
         run: python scripts/test_registrar_and_runtime_parent_delete_integration.py
+      - name: Prove authenticated runtime DB identity lacks destructive/elevated grants
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: python scripts/test_runtime_db_role_audit_integration.py
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"

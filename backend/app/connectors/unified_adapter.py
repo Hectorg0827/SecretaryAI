@@ -9,7 +9,7 @@ Decision logic:
   Google Sheets   → Sheets connector
   Portals/files   → AccessRouter selects least-fragile path automatically
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from app.connectors.base import Customer, Invoice, InventoryItem, Payment, PurchaseOrder, QuickBooksAdapter
@@ -64,6 +64,15 @@ class UnifiedDataAdapter:
                 realm_id=cfg["qbo_realm_id"],
                 on_token_refresh=self._persist_qbo_tokens,
             )
+
+        # An internal staging acceptance fixture may be limited to QBO only.
+        # Do not initialize Anthropic Computer Use, carrier tracking, email,
+        # other connectors, or the AccessRouter on this restricted path.
+        # All normal application adapters keep their original setup behavior.
+        if cfg.get("_qbo_only") is True:
+            self._router = None
+            self._db = None
+            return
 
         # Gmail
         if cfg.get("gmail_credentials"):
@@ -261,6 +270,91 @@ class UnifiedDataAdapter:
         if entity == "ap":
             return await self._qb.get_bill_headers_read_only()
         raise ValueError("Unsupported finance document source")
+
+    async def get_qbo_ar_payment_match_preview_read_only(
+        self, *, company_id: str, as_of: date,
+    ) -> dict:
+        """Read-only staging cash application preview; no payment writes.
+
+        This is deliberately not an API route or a Lola business-data tool.
+        Both provider feeds must finish completely before source coverage is
+        declared. Comparison never certifies books or authorizes payment.
+        """
+        from app.config import get_settings
+        from app.scheduler.ar_payment_evidence import (
+            ARPaymentEvidenceInvalid,
+            assert_stable_ar_source_view,
+            compare_ar_payment_allocations,
+        )
+
+        settings = get_settings()
+        if (settings.secretaryai_deployment_env.strip().lower() != "staging"
+                or settings.intuit_environment != "sandbox"):
+            raise RuntimeError("AR payment preview is staging sandbox only")
+        config = getattr(self, "_config", None)
+        if not isinstance(config, dict):
+            raise PermissionError("AR payment preview tenant not verified")
+        configured = config.get("company_id", config.get("id"))
+        if (not isinstance(company_id, str) or not company_id
+                or configured != company_id
+                or (config.get("company_id") and config.get("id")
+                    and config["company_id"] != config["id"])):
+            raise PermissionError("AR payment preview tenant not verified")
+        if not isinstance(self._qb, QBOnlineAdapter):
+            raise RuntimeError("QuickBooks Online sandbox connection unavailable")
+        if not isinstance(as_of, date) or isinstance(as_of, datetime):
+            raise ValueError("AR payment preview requires an as-of date")
+
+        # QBO query pagination and successive Invoice/Payment reads do NOT
+        # provide a transactionally consistent snapshot. Two independently
+        # complete, bounded source reads can at least detect observed drift.
+        # This remains a manual staging-only, non-certified preview.
+        currency_context = await self._qb.get_ar_currency_context_read_only()
+        invoice_count_before = await self._qb.get_ar_source_count_read_only("Invoice")
+        payment_count_before = await self._qb.get_ar_source_count_read_only("Payment")
+        invoices = await self._qb.get_ar_invoice_evidence_read_only(
+            currency_context=currency_context,
+        )
+        payments = await self._qb.get_ar_payment_evidence_read_only(
+            currency_context=currency_context,
+        )
+        # Reverse read order to bracket the cross-source reconciliation.
+        payments_check = await self._qb.get_ar_payment_evidence_read_only(
+            currency_context=currency_context,
+        )
+        invoices_check = await self._qb.get_ar_invoice_evidence_read_only(
+            currency_context=currency_context,
+        )
+        currency_context_check = await self._qb.get_ar_currency_context_read_only()
+        invoice_count_after = await self._qb.get_ar_source_count_read_only("Invoice")
+        payment_count_after = await self._qb.get_ar_source_count_read_only("Payment")
+        if (not isinstance(currency_context, dict)
+                or currency_context_check != currency_context):
+            raise ARPaymentEvidenceInvalid("AR currency preferences changed during comparison")
+        # Pagination may end cleanly but silently miss a moving page. Compare
+        # both passes against QBO's independent entity COUNT query; a
+        # QueryResponse.totalCount on SELECT * only counts that page.
+        if (type(invoice_count_before) is not int
+                or type(invoice_count_after) is not int
+                or type(payment_count_before) is not int
+                or type(payment_count_after) is not int
+                or invoice_count_before != invoice_count_after
+                or payment_count_before != payment_count_after
+                or len(invoices) != invoice_count_before
+                or len(invoices_check) != invoice_count_after
+                or len(payments) != payment_count_before
+                or len(payments_check) != payment_count_after):
+            raise ARPaymentEvidenceInvalid("AR provider document count changed or incomplete")
+        assert_stable_ar_source_view(invoices, invoices_check, source="invoice")
+        assert_stable_ar_source_view(payments, payments_check, source="payment")
+        # Stamp the tenant only *after* validating the adapter's configuration,
+        # not from client-supplied provider rows.
+        return compare_ar_payment_allocations(
+            [{**item, "company_id": company_id} for item in invoices],
+            [{**item, "company_id": company_id} for item in payments],
+            company_id=company_id, as_of=as_of,
+            invoices_complete=True, payments_complete=True,
+        )
 
     async def get_qbo_profit_loss_read_only(self, date_from: date, date_to: date) -> dict:
         """A sandbox-only, GET-only ledger report for the staging finance gate."""

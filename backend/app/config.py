@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # explicitly. These values are not secrets; never reuse Lyo or production.
     secretaryai_deployment_env: str = ""
     secretaryai_expected_supabase_project_ref: str = ""
+    # Disabled until explicitly enabled on an isolated staging deployment;
+    # the AR preview performs only authorized read-side sandbox comparisons.
+    secretaryai_ar_payment_preview_enabled: bool = False
     # Explicit opt-in; staging acceptance must not contact customer devices.
     secretaryai_push_delivery_enabled: bool = False
     secretaryai_email_delivery_mode: str = "disabled"

@@ -78,6 +78,9 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
 
     main_not_in_candidate = sorted(main - candidate)
     main_not_in_linked = sorted(main - linked)
+    linked_not_in_main = sorted(linked - main)
+    linked_not_in_candidate = sorted(linked - candidate)
+    candidate_not_in_linked = sorted(candidate - linked)
     main_not_in_branch = sorted(main - branch)
     branch_not_in_main = sorted(branch - main)
     candidate_not_applied = sorted(candidate - main)
@@ -98,6 +101,10 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         errors.append("main_migration_versions_missing_in_candidate")
     if main_not_in_linked:
         errors.append("main_migration_versions_missing_in_linked_git")
+    if linked_not_in_main:
+        errors.append("linked_git_versions_not_in_main")
+    if linked_not_in_candidate or candidate_not_in_linked:
+        errors.append("linked_git_history_not_equal_to_candidate")
     if snapshot.get("branch_status") not in SUCCESS_STATES:
         errors.append("branch_not_migration_ready")
 
@@ -115,6 +122,9 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         "missing_baseline_relations": missing_relations,
         "main_versions_missing_in_candidate": main_not_in_candidate,
         "main_versions_missing_in_linked_git": main_not_in_linked,
+        "linked_git_versions_not_in_main": linked_not_in_main,
+        "linked_git_versions_not_in_candidate": linked_not_in_candidate,
+        "candidate_versions_not_in_linked_git": candidate_not_in_linked,
         "main_versions_missing_in_branch": main_not_in_branch,
         "branch_versions_not_in_main": branch_not_in_main,
         "candidate_versions_missing_in_branch": candidate_not_in_branch,

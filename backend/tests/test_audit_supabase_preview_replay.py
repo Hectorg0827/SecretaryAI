@@ -41,6 +41,18 @@ def healthy():
             "tables": 3, "views": 0, "functions": 1,
             "triggers": 1, "rls_policies": 1,
         },
+        "main_schema_digests": {
+            kind: "a" * 32 for kind in (
+                "columns", "constraints", "indexes", "functions",
+                "triggers", "policies", "rls_flags", "grants",
+            )
+        },
+        "branch_schema_digests": {
+            kind: "a" * 32 for kind in (
+                "columns", "constraints", "indexes", "functions",
+                "triggers", "policies", "rls_flags", "grants",
+            )
+        },
         "branch_relations": {
             "companies": True,
             "users": True,
@@ -283,4 +295,28 @@ def test_inconsistent_schema_table_counts_are_invalid_input(tmp_path):
     snapshot = healthy()
     snapshot["branch_schema_objects"]["tables"] = 99
     with pytest.raises(ValueError, match="contradicts public table count"):
+        diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+
+
+def test_same_schema_object_counts_with_changed_column_definition_are_blocked(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_schema_digests"]["columns"] = "b" * 32
+    report = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert not report["ready_for_staging"]
+    assert "public_schema_definition_or_grant_drift" in report["issues"]
+    assert report["mismatched_schema_definition_or_grant_kinds"] == ["columns"]
+
+
+def test_same_object_counts_with_broader_privileges_are_blocked(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_schema_digests"]["grants"] = "b" * 32
+    report = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert "public_schema_definition_or_grant_drift" in report["issues"]
+    assert report["mismatched_schema_definition_or_grant_kinds"] == ["grants"]
+
+
+def test_missing_or_invalid_schema_fingerprint_cannot_pass(tmp_path):
+    snapshot = healthy()
+    del snapshot["branch_schema_digests"]["policies"]
+    with pytest.raises(ValueError, match="branch_schema_digests"):
         diagnose(snapshot, migrations(tmp_path, "20240101000000"))

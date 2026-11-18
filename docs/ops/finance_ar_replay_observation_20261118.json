@@ -78,7 +78,7 @@
     "stock_warehouses": false
   },
   "branch_status": "MIGRATIONS_FAILED",
-  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included. Linked Git blob SHA-1 values identify migration source files; these are Git file fingerprints, not secrets or proof of equivalence to the live database.",
+  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included. Linked Git blob SHA-1 values identify migration source files; these are Git file fingerprints, not secrets or proof of equivalence to the live database. Read-only catalog counts: main 25 functions / 14 noninternal triggers / 43 RLS policies, isolated preview zero of each; same object count does not prove identical object definitions.",
   "main_versions_without_sql": [
     "20240101000000",
     "20240601000000",
@@ -105,5 +105,19 @@
     "20250325000003": "9d15a86f43884a1ec8e03212aa3747196331ecb2",
     "20250325000004": "b2266cac0254e970bc0c14e65ca5a8e04ddd55ee",
     "20250325000005": "204b5194251ce469c8ab3f4e642ec9e3d4466100"
+  },
+  "main_schema_objects": {
+    "tables": 78,
+    "views": 0,
+    "functions": 25,
+    "triggers": 14,
+    "rls_policies": 43
+  },
+  "branch_schema_objects": {
+    "tables": 0,
+    "views": 0,
+    "functions": 0,
+    "triggers": 0,
+    "rls_policies": 0
   }
 }

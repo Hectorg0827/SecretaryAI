@@ -21,6 +21,10 @@ from typing import Any
 MIGRATION_NAME = re.compile(r"^(\d{14})_[a-z0-9_]+\.sql$")
 REQUIRED_BASELINE = ("companies", "users", "stock_warehouses")
 SCHEMA_OBJECT_KINDS = ("tables", "views", "functions", "triggers", "rls_policies")
+SCHEMA_DIGEST_KINDS = (
+    "columns", "constraints", "indexes", "functions",
+    "triggers", "policies", "rls_flags", "grants",
+)
 SUCCESS_STATES = {"FUNCTIONS_DEPLOYED", "MIGRATIONS_APPLIED", "READY", "SUCCESS"}
 
 
@@ -83,6 +87,16 @@ def _schema_object_counts(value: Any, label: str) -> dict[str, int]:
     return value
 
 
+def _schema_digests(value: Any, label: str) -> dict[str, str]:
+    if (not isinstance(value, dict)
+            or set(value) != set(SCHEMA_DIGEST_KINDS)
+            or any(not isinstance(value[k], str)
+                   or not re.fullmatch(r"[0-9a-f]{32}", value[k])
+                   for k in SCHEMA_DIGEST_KINDS)):
+        raise ValueError(label + " must specify eight lowercase MD5 values")
+    return value
+
+
 def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, Any]:
     """Return source-only evidence. Never extrapolate source parity into a pass."""
     if not isinstance(snapshot, dict):
@@ -124,6 +138,16 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
     if (main_objects["tables"] != main_count
             or branch_objects["tables"] != public_count):
         raise ValueError("schema object table count contradicts public table count")
+    main_digests = _schema_digests(
+        snapshot.get("main_schema_digests"), "main_schema_digests"
+    )
+    branch_digests = _schema_digests(
+        snapshot.get("branch_schema_digests"), "branch_schema_digests"
+    )
+    digest_drift = [
+        kind for kind in SCHEMA_DIGEST_KINDS
+        if main_digests[kind] != branch_digests[kind]
+    ]
 
     relations = snapshot.get("branch_relations")
     if not isinstance(relations, dict) or any(
@@ -158,6 +182,8 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         errors.append("public_table_count_mismatch")
     if main_objects != branch_objects:
         errors.append("public_schema_object_count_mismatch")
+    if digest_drift:
+        errors.append("public_schema_definition_or_grant_drift")
     if main_not_in_branch or branch_not_in_main:
         errors.append("branch_migration_versions_not_equal_to_main")
     if candidate_not_in_branch or branch_not_in_candidate:
@@ -193,6 +219,7 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         "missing_baseline_relations": missing_relations,
         "main_schema_objects": main_objects,
         "branch_schema_objects": branch_objects,
+        "mismatched_schema_definition_or_grant_kinds": digest_drift,
         "mismatched_schema_object_kinds": [
             kind for kind in SCHEMA_OBJECT_KINDS
             if main_objects[kind] != branch_objects[kind]

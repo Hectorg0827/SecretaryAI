@@ -78,5 +78,19 @@
     "stock_warehouses": false
   },
   "branch_status": "MIGRATIONS_FAILED",
-  "notes": "Metadata only; no user data, schema dumps, tokens or row contents. Check the database again before making deployment decisions."
+  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included.",
+  "main_versions_without_sql": [
+    "20240101000000",
+    "20240601000000",
+    "20240901000000",
+    "20261017000000",
+    "20261017010000"
+  ],
+  "branch_versions_without_sql": [
+    "20240101000000",
+    "20240601000000",
+    "20240901000000",
+    "20261017000000",
+    "20261017010000"
+  ]
 }

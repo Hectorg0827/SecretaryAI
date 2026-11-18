@@ -78,12 +78,18 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
 
     main_not_in_candidate = sorted(main - candidate)
     main_not_in_linked = sorted(main - linked)
+    main_not_in_branch = sorted(main - branch)
+    branch_not_in_main = sorted(branch - main)
     candidate_not_applied = sorted(candidate - main)
 
     if main_count > 0 and public_count == 0 and branch:
         errors.append("applied_history_without_public_schema")
     if missing_relations:
         errors.append("missing_required_baseline_relations")
+    if public_count != main_count:
+        errors.append("public_table_count_mismatch")
+    if main_not_in_branch or branch_not_in_main:
+        errors.append("branch_migration_versions_not_equal_to_main")
     if main_not_in_candidate:
         errors.append("main_migration_versions_missing_in_candidate")
     if main_not_in_linked:
@@ -105,6 +111,8 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         "missing_baseline_relations": missing_relations,
         "main_versions_missing_in_candidate": main_not_in_candidate,
         "main_versions_missing_in_linked_git": main_not_in_linked,
+        "main_versions_missing_in_branch": main_not_in_branch,
+        "branch_versions_not_in_main": branch_not_in_main,
         "candidate_versions_not_in_main_history": candidate_not_applied,
         "branch_status": snapshot.get("branch_status"),
     }

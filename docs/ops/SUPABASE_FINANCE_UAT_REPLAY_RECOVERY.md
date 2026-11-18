@@ -6,10 +6,10 @@
 
 | Boundary | Observation |
 | --- | --- |
-| Existing main Supabase `xerktvdgjvjozvckjyfp` | 78 public base tables; 45 applied migration versions; **5 earliest versions have NULL stored SQL statements**, next 40 have SQL |
+| Existing main Supabase `xerktvdgjvjozvckjyfp` | 78 public tables, 25 functions, 14 noninternal triggers, 43 RLS policies; 45 applied versions; **5 earliest have NULL stored SQL**, next 40 have SQL |
 | Git branch currently linked to Supabase main | `claude/secretaryai-tech-spec-lqBZj`; only 11 root migration files |
 | Finance RC `9d3bf47e` | 30 root migration files; a second, divergent `backend/supabase/migrations` directory exists |
-| Isolated finance UAT preview | `MIGRATIONS_FAILED`; 5 versions marked applied, **0** public base tables; **all five have NULL stored SQL statements** |
+| Isolated finance UAT preview | `MIGRATIONS_FAILED`; 5 versions marked applied; **0** public tables, functions, triggers, or RLS policies; **all five have NULL stored SQL statements** |
 | Failure statement | V6 `purchasing_orders` references `companies`, but `companies` is absent |
 
 The preview marks the initial five versions applied without supplying the schema they should establish. Read-only comparison of `supabase_migrations.schema_migrations.statements` independently confirmed that those same five versions contain no stored SQL on **main** or the preview, while all 40 later main versions have SQL statements. This strongly supports a missing-baseline replay cause, compounded by the mismatched linked Git branch; it does not by itself certify the full cause of every later migration mismatch. Do not infer a working schema from an `ACTIVE_HEALTHY` database process or from migration-history entries alone.

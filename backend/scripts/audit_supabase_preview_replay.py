@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -22,10 +23,17 @@ REQUIRED_BASELINE = ("companies", "users", "stock_warehouses")
 SUCCESS_STATES = {"FUNCTIONS_DEPLOYED", "MIGRATIONS_APPLIED", "READY", "SUCCESS"}
 
 
-def scan_migrations(directory: Path) -> tuple[set[str], list[str]]:
+def _git_blob_sha(content: bytes) -> str:
+    """Match GitHub's blob ID; this is a reproducibility marker, not a secret."""
+    header = b"blob " + str(len(content)).encode("ascii") + b"\x00"
+    return hashlib.sha1(header + content).hexdigest()
+
+
+def scan_migrations(directory: Path) -> tuple[set[str], dict[str, str], list[str]]:
     if not directory.is_dir():
         raise ValueError("Migration directory does not exist")
     versions: set[str] = set()
+    hashes: dict[str, str] = {}
     errors: list[str] = []
     for path in sorted(directory.glob("*.sql")):
         match = MIGRATION_NAME.fullmatch(path.name)
@@ -36,7 +44,12 @@ def scan_migrations(directory: Path) -> tuple[set[str], list[str]]:
         if version in versions:
             errors.append("duplicate_migration_version:" + version)
         versions.add(version)
-    return versions, errors
+        content = path.read_bytes()
+        if len(content) > 5 * 1024 * 1024:
+            errors.append("oversized_migration_file:" + version)
+            continue
+        hashes[version] = _git_blob_sha(content)
+    return versions, hashes, errors
 
 
 def _versions(items: Any, label: str) -> set[str]:
@@ -48,6 +61,16 @@ def _versions(items: Any, label: str) -> set[str]:
     if len(set(items)) != len(items):
         raise ValueError(label + " contains duplicate versions")
     return set(items)
+
+
+def _fingerprints(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or any(
+        not isinstance(version, str) or not re.fullmatch(r"\\d{14}", version)
+        or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+        for version, sha in value.items()
+    ):
+        raise ValueError("linked_git_blob_sha must map versions to Git blob IDs")
+    return value
 
 
 def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, Any]:
@@ -67,7 +90,14 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         raise ValueError("main_versions_without_sql must belong to main_applied")
     if not branch_without_sql.issubset(branch):
         raise ValueError("branch_versions_without_sql must belong to branch_applied")
-    candidate, errors = scan_migrations(candidate_migrations)
+    linked_hashes = _fingerprints(snapshot.get("linked_git_blob_sha"))
+    candidate, candidate_hashes, errors = scan_migrations(candidate_migrations)
+    linked_hash_missing = sorted(linked - linked_hashes.keys())
+    linked_hash_extra = sorted(linked_hashes.keys() - linked)
+    linked_content_mismatch = sorted(
+        version for version in linked & candidate & linked_hashes.keys()
+        if linked_hashes[version] != candidate_hashes.get(version)
+    )
 
     public_count = snapshot.get("branch_public_tables")
     main_count = snapshot.get("main_public_tables")
@@ -117,6 +147,10 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         errors.append("main_migration_versions_missing_in_linked_git")
     if linked_not_in_main:
         errors.append("linked_git_versions_not_in_main")
+    if linked_hash_missing or linked_hash_extra:
+        errors.append("linked_git_fingerprint_coverage_incomplete")
+    if linked_content_mismatch:
+        errors.append("linked_git_sql_content_differs_from_candidate")
     if linked_not_in_candidate or candidate_not_in_linked:
         errors.append("linked_git_history_not_equal_to_candidate")
     if snapshot.get("branch_status") not in SUCCESS_STATES:
@@ -141,6 +175,9 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         "main_versions_missing_in_candidate": main_not_in_candidate,
         "main_versions_missing_in_linked_git": main_not_in_linked,
         "linked_git_versions_not_in_main": linked_not_in_main,
+        "linked_git_fingerprint_missing_versions": linked_hash_missing,
+        "linked_git_fingerprint_extra_versions": linked_hash_extra,
+        "linked_git_sql_content_mismatch_versions": linked_content_mismatch,
         "linked_git_versions_not_in_candidate": linked_not_in_candidate,
         "candidate_versions_not_in_linked_git": candidate_not_in_linked,
         "main_versions_missing_in_branch": main_not_in_branch,

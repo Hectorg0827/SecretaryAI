@@ -65,7 +65,7 @@ def _versions(items: Any, label: str) -> set[str]:
 
 def _fingerprints(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or any(
-        not isinstance(version, str) or not re.fullmatch(r"\\d{14}", version)
+        not isinstance(version, str) or not re.fullmatch(r"\d{14}", version)
         or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
         for version, sha in value.items()
     ):

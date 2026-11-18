@@ -14,7 +14,7 @@
 
 The preview marks the initial five versions applied without supplying the schema they should establish. Read-only comparison of `supabase_migrations.schema_migrations.statements` independently confirmed that those same five versions contain no stored SQL on **main** or the preview, while all 40 later main versions have SQL statements. This strongly supports a missing-baseline replay cause, compounded by the mismatched linked Git branch; it does not by itself certify the full cause of every later migration mismatch. Do not infer a working schema from an `ACTIVE_HEALTHY` database process or from migration-history entries alone.
 
-The source-of-truth problem is broader than one file: **main's actual history, the connected Git branch, and the Finance candidate migration directories disagree**. A new migration dated after V6 will not solve the first failing statement if it is never reached.
+The source-of-truth problem is broader than one file: **main's actual history, the connected Git branch, and the Finance candidate migration directories disagree**. The migration-file content also diverges: **five of the eleven filenames/versions shared by the linked Git branch and Finance RC have different Git blob fingerprints** (the affected versions are `20250322000000`, `20250325000000`, `20250325000001`, `20250325000002`, `20250325000003`). Version parity alone cannot prove equivalent SQL. A new migration dated after V6 will not solve the first failing statement if it is never reached.
 
 ## Automated, non-destructive preflight
 
@@ -26,7 +26,7 @@ python backend/scripts/audit_supabase_preview_replay.py \
   --migrations supabase/migrations --strict
 ```
 
-This uses only the checked-in, **credential-free metadata** snapshot. It is expected to exit **2** and show missing schema and migration-version divergence until the incident is repaired. Refresh the observation from **read-only** queries before relying on it; do not consider an old snapshot an acceptance test.
+This uses only the checked-in, **credential-free metadata** snapshot and local Git blob hashes of candidate migration SQL files. The checker requires both version and same-version content parity across the linked branch and candidate; hashes are source fingerprints, not cryptographic approval or an RLS/schema equivalence proof. It is expected to exit **2** and show missing schema and migration-version divergence until the incident is repaired. Refresh the observation from **read-only** queries before relying on it; do not consider an old snapshot an acceptance test.
 
 Read-only SQL for each named project, never querying tenant data:
 

@@ -2,6 +2,7 @@
 
 Synthetic fixtures only; no database, credentials, migrations, or network.
 """
+import hashlib
 import json
 
 import pytest
@@ -19,9 +20,14 @@ def migrations(tmp_path, *versions):
 
 def healthy():
     version = "20240101000000"
+    content = b"select 1;"
+    git_blob_sha = hashlib.sha1(
+        b"blob " + str(len(content)).encode("ascii") + b"\\x00" + content
+    ).hexdigest()
     return {
         "main_applied": [version],
         "linked_git_versions": [version],
+        "linked_git_blob_sha": {version: git_blob_sha},
         "branch_applied": [version],
         "main_versions_without_sql": [],
         "branch_versions_without_sql": [],
@@ -215,4 +221,33 @@ def test_missing_sql_metadata_is_required_to_prove_replay(field, tmp_path):
     snapshot = healthy()
     del snapshot[field]
     with pytest.raises(ValueError, match=field):
+        diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+
+
+def test_same_migration_version_with_different_sql_is_release_blocker(tmp_path):
+    snapshot = healthy()
+    folder = migrations(tmp_path, "20240101000000")
+    (folder / "20240101000000_fixture.sql").write_text("select 2;")
+    result = diagnose(snapshot, folder)
+    assert not result["ready_for_staging"]
+    assert "linked_git_sql_content_differs_from_candidate" in result["issues"]
+    assert result["linked_git_sql_content_mismatch_versions"] == [
+        "20240101000000",
+    ]
+
+
+def test_missing_linked_git_blob_fingerprint_fails_closed(tmp_path):
+    snapshot = healthy()
+    snapshot["linked_git_blob_sha"] = {}
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert "linked_git_fingerprint_coverage_incomplete" in result["issues"]
+    assert result["linked_git_fingerprint_missing_versions"] == [
+        "20240101000000",
+    ]
+
+
+def test_invalid_fingerprint_metadata_rejected(tmp_path):
+    snapshot = healthy()
+    snapshot["linked_git_blob_sha"]["20240101000000"] = "invalid"
+    with pytest.raises(ValueError, match="linked_git_blob_sha"):
         diagnose(snapshot, migrations(tmp_path, "20240101000000"))

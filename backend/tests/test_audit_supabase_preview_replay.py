@@ -33,6 +33,14 @@ def healthy():
         "branch_versions_without_sql": [],
         "main_public_tables": 3,
         "branch_public_tables": 3,
+        "main_schema_objects": {
+            "tables": 3, "views": 0, "functions": 1,
+            "triggers": 1, "rls_policies": 1,
+        },
+        "branch_schema_objects": {
+            "tables": 3, "views": 0, "functions": 1,
+            "triggers": 1, "rls_policies": 1,
+        },
         "branch_relations": {
             "companies": True,
             "users": True,
@@ -52,7 +60,12 @@ def test_clean_replay_is_eligible_for_follow_on_staging_checks(tmp_path):
 def test_marked_initial_migrations_with_zero_schema_are_release_blocker(tmp_path):
     snapshot = healthy()
     snapshot["main_public_tables"] = 78
+    snapshot["main_schema_objects"]["tables"] = 78
     snapshot["branch_public_tables"] = 0
+    snapshot["branch_schema_objects"] = {
+        "tables": 0, "views": 0, "functions": 0,
+        "triggers": 0, "rls_policies": 0,
+    }
     snapshot["branch_relations"]["companies"] = False
     snapshot["branch_relations"]["users"] = False
     snapshot["branch_relations"]["stock_warehouses"] = False
@@ -122,6 +135,7 @@ def test_strict_cli_reports_drift_as_failed_check_not_success(tmp_path, capsys):
 def test_partially_replayed_nonempty_schema_is_not_ready(tmp_path):
     snapshot = healthy()
     snapshot["main_public_tables"] = 78
+    snapshot["main_schema_objects"]["tables"] = 78
     snapshot["branch_public_tables"] = 3
     result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
     assert result["ready_for_staging"] is False
@@ -250,4 +264,23 @@ def test_invalid_fingerprint_metadata_rejected(tmp_path):
     snapshot = healthy()
     snapshot["linked_git_blob_sha"]["20240101000000"] = "invalid"
     with pytest.raises(ValueError, match="linked_git_blob_sha"):
+        diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+
+
+def test_function_trigger_or_policy_drift_blocks_even_equal_table_count(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_schema_objects"]["functions"] = 0
+    snapshot["branch_schema_objects"]["rls_policies"] = 0
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert result["ready_for_staging"] is False
+    assert "public_schema_object_count_mismatch" in result["issues"]
+    assert result["mismatched_schema_object_kinds"] == [
+        "functions", "rls_policies",
+    ]
+
+
+def test_inconsistent_schema_table_counts_are_invalid_input(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_schema_objects"]["tables"] = 99
+    with pytest.raises(ValueError, match="contradicts public table count"):
         diagnose(snapshot, migrations(tmp_path, "20240101000000"))

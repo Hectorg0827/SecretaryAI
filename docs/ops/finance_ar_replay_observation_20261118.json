@@ -78,7 +78,7 @@
     "stock_warehouses": false
   },
   "branch_status": "MIGRATIONS_FAILED",
-  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included.",
+  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included. Linked Git blob SHA-1 values identify migration source files; these are Git file fingerprints, not secrets or proof of equivalence to the live database.",
   "main_versions_without_sql": [
     "20240101000000",
     "20240601000000",
@@ -92,5 +92,18 @@
     "20240901000000",
     "20261017000000",
     "20261017010000"
-  ]
+  ],
+  "linked_git_blob_sha": {
+    "20240101000000": "e5517a55a666d4a4f2214c764c6f571c44f326d5",
+    "20240601000000": "9512d6eed7d474be65ca2ad89416195a7c0567c1",
+    "20240901000000": "cbee99cc987798356a8af11dde95f2fc5d493521",
+    "20250322000000": "b040fd5d437492094a445833f13cef727a22ddbb",
+    "20250322000001": "6b70f6aec7f05994d5088f4dde66d962a747a80b",
+    "20250325000000": "333bc6938b3e246247e0c813b1474988a5be4bdb",
+    "20250325000001": "ef7b3d67ed2f0b890786e567e5855d4c9afc6072",
+    "20250325000002": "88b56d70e59c9816abea81ab696bde9e3cf2f736",
+    "20250325000003": "9d15a86f43884a1ec8e03212aa3747196331ecb2",
+    "20250325000004": "b2266cac0254e970bc0c14e65ca5a8e04ddd55ee",
+    "20250325000005": "204b5194251ce469c8ab3f4e642ec9e3d4466100"
+  }
 }

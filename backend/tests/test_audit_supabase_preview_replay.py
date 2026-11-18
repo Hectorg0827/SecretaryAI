@@ -22,7 +22,7 @@ def healthy():
     version = "20240101000000"
     content = b"select 1;"
     git_blob_sha = hashlib.sha1(
-        b"blob " + str(len(content)).encode("ascii") + b"\\x00" + content
+        b"blob " + str(len(content)).encode("ascii") + b"\x00" + content
     ).hexdigest()
     return {
         "main_applied": [version],

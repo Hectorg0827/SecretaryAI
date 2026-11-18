@@ -23,6 +23,8 @@ def healthy():
         "main_applied": [version],
         "linked_git_versions": [version],
         "branch_applied": [version],
+        "main_versions_without_sql": [],
+        "branch_versions_without_sql": [],
         "main_public_tables": 3,
         "branch_public_tables": 3,
         "branch_relations": {
@@ -182,3 +184,35 @@ def test_unapplied_candidate_version_missing_from_linked_git_blocks(tmp_path):
     assert result["ready_for_staging"] is False
     assert "linked_git_history_not_equal_to_candidate" in result["issues"]
     assert result["candidate_versions_not_in_linked_git"] == ["20261024041419"]
+
+
+def test_metadata_with_missing_sql_definitions_blocks_branch_release(tmp_path):
+    snapshot = healthy()
+    snapshot["main_versions_without_sql"] = ["20240101000000"]
+    snapshot["branch_versions_without_sql"] = ["20240101000000"]
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert result["ready_for_staging"] is False
+    assert "main_migration_history_missing_sql_definitions" in result["issues"]
+    assert "branch_migration_history_missing_sql_definitions" in result["issues"]
+    assert result["counts"]["main_without_stored_sql"] == 1
+    assert result["counts"]["branch_without_stored_sql"] == 1
+
+
+@pytest.mark.parametrize("field", [
+    "main_versions_without_sql", "branch_versions_without_sql",
+])
+def test_missing_sql_versions_must_exist_in_respective_history(field, tmp_path):
+    snapshot = healthy()
+    snapshot[field] = ["20261024041419"]
+    with pytest.raises(ValueError, match="must belong"):
+        diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+
+
+@pytest.mark.parametrize("field", [
+    "main_versions_without_sql", "branch_versions_without_sql",
+])
+def test_missing_sql_metadata_is_required_to_prove_replay(field, tmp_path):
+    snapshot = healthy()
+    del snapshot[field]
+    with pytest.raises(ValueError, match=field):
+        diagnose(snapshot, migrations(tmp_path, "20240101000000"))

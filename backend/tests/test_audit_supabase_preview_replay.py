@@ -139,3 +139,25 @@ def test_branch_extra_history_is_not_silently_trusted(tmp_path):
     assert result["ready_for_staging"] is False
     assert "branch_migration_versions_not_equal_to_main" in result["issues"]
     assert result["branch_versions_not_in_main"] == ["20261017000000"]
+
+
+def test_candidate_extra_migration_requires_preview_replay_even_if_main_matches(
+    tmp_path,
+):
+    # Regression from independent Codex review: a branch cannot be declared
+    # ready when one new candidate migration has not run, despite a healthy
+    # baseline and an otherwise exact matching main/linked history.
+    snapshot = healthy()
+    folder = migrations(tmp_path, "20240101000000", "20261024041419")
+    result = diagnose(snapshot, folder)
+    assert result["ready_for_staging"] is False
+    assert "preview_migration_versions_not_equal_to_candidate" in result["issues"]
+    assert result["candidate_versions_missing_in_branch"] == ["20261024041419"]
+
+
+def test_preview_migration_not_in_candidate_is_review_blocker(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_applied"].append("20261024041419")
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert "preview_migration_versions_not_equal_to_candidate" in result["issues"]
+    assert result["branch_versions_not_in_candidate"] == ["20261024041419"]

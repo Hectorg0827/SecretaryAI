@@ -57,6 +57,16 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
     main = _versions(snapshot.get("main_applied"), "main_applied")
     linked = _versions(snapshot.get("linked_git_versions"), "linked_git_versions")
     branch = _versions(snapshot.get("branch_applied"), "branch_applied")
+    main_without_sql = _versions(
+        snapshot.get("main_versions_without_sql"), "main_versions_without_sql"
+    )
+    branch_without_sql = _versions(
+        snapshot.get("branch_versions_without_sql"), "branch_versions_without_sql"
+    )
+    if not main_without_sql.issubset(main):
+        raise ValueError("main_versions_without_sql must belong to main_applied")
+    if not branch_without_sql.issubset(branch):
+        raise ValueError("branch_versions_without_sql must belong to branch_applied")
     candidate, errors = scan_migrations(candidate_migrations)
 
     public_count = snapshot.get("branch_public_tables")
@@ -89,6 +99,10 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
 
     if main_count > 0 and public_count == 0 and branch:
         errors.append("applied_history_without_public_schema")
+    if main_without_sql:
+        errors.append("main_migration_history_missing_sql_definitions")
+    if branch_without_sql:
+        errors.append("branch_migration_history_missing_sql_definitions")
     if missing_relations:
         errors.append("missing_required_baseline_relations")
     if public_count != main_count:
@@ -113,13 +127,17 @@ def diagnose(snapshot: dict[str, Any], candidate_migrations: Path) -> dict[str, 
         "issues": sorted(set(errors)),
         "counts": {
             "main_applied": len(main),
+            "main_without_stored_sql": len(main_without_sql),
             "main_public_tables": main_count,
             "linked_git_files": len(linked),
             "candidate_migration_files": len(candidate),
             "branch_applied": len(branch),
+            "branch_without_stored_sql": len(branch_without_sql),
             "branch_public_tables": public_count,
         },
         "missing_baseline_relations": missing_relations,
+        "main_versions_without_sql": sorted(main_without_sql),
+        "branch_versions_without_sql": sorted(branch_without_sql),
         "main_versions_missing_in_candidate": main_not_in_candidate,
         "main_versions_missing_in_linked_git": main_not_in_linked,
         "linked_git_versions_not_in_main": linked_not_in_main,

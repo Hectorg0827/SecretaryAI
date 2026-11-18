@@ -161,3 +161,24 @@ def test_preview_migration_not_in_candidate_is_review_blocker(tmp_path):
     result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
     assert "preview_migration_versions_not_equal_to_candidate" in result["issues"]
     assert result["branch_versions_not_in_candidate"] == ["20261024041419"]
+
+
+def test_unexpected_linked_git_migration_cannot_pass_three_way_replay(tmp_path):
+    # Regression from Codex P2 review: matching main and candidate files
+    # cannot override an extra migration on Supabase's linked Git branch.
+    snapshot = healthy()
+    snapshot["linked_git_versions"].append("20261024041419")
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert result["ready_for_staging"] is False
+    assert "linked_git_versions_not_in_main" in result["issues"]
+    assert "linked_git_history_not_equal_to_candidate" in result["issues"]
+    assert result["linked_git_versions_not_in_candidate"] == ["20261024041419"]
+
+
+def test_unapplied_candidate_version_missing_from_linked_git_blocks(tmp_path):
+    snapshot = healthy()
+    folder = migrations(tmp_path, "20240101000000", "20261024041419")
+    result = diagnose(snapshot, folder)
+    assert result["ready_for_staging"] is False
+    assert "linked_git_history_not_equal_to_candidate" in result["issues"]
+    assert result["candidate_versions_not_in_linked_git"] == ["20261024041419"]

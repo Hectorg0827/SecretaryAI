@@ -78,7 +78,7 @@
     "stock_warehouses": false
   },
   "branch_status": "MIGRATIONS_FAILED",
-  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included. Linked Git blob SHA-1 values identify migration source files; these are Git file fingerprints, not secrets or proof of equivalence to the live database. Read-only catalog counts: main 25 functions / 14 noninternal triggers / 43 RLS policies, isolated preview zero of each; same object count does not prove identical object definitions.",
+  "notes": "Read-only metadata only; 5 earliest main/preview migration records have NULL statements arrays; main has 40 subsequent records with statements, preview has none. Do not equate migration-history rows to executed DDL. No row data, tokens, or connection credentials included. Linked Git blob SHA-1 values identify migration source files; these are Git file fingerprints, not secrets or proof of equivalence to the live database. Read-only catalog counts: main 25 functions / 14 noninternal triggers / 43 RLS policies, isolated preview zero of each; same object count does not prove identical object definitions. Main and failed-branch schema object digests computed from ordered public Postgres catalog definitions; differences require review. MD5 used solely for non-security equality checks, not as a cryptographic authorization.",
   "main_versions_without_sql": [
     "20240101000000",
     "20240601000000",
@@ -119,5 +119,25 @@
     "functions": 0,
     "triggers": 0,
     "rls_policies": 0
+  },
+  "main_schema_digests": {
+    "columns": "730a523d2f27c8e5a23e78a618b25ea2",
+    "constraints": "6eff2174f4848a09fac083c6ef279fca",
+    "indexes": "d27bcd5497fc0f6089c89540eac407a8",
+    "functions": "9d242c5df1c5b5296dee6e83384d2988",
+    "triggers": "f0d2a78ff5419ad03c8aa770fa793498",
+    "policies": "ecd0bf8717574e21221b5f6c9a79ea44",
+    "rls_flags": "09a6ae93f21d12ca3f243bd611b3383b",
+    "grants": "8fc1d193071e31bedebc7258b9334768"
+  },
+  "branch_schema_digests": {
+    "columns": "d41d8cd98f00b204e9800998ecf8427e",
+    "constraints": "d41d8cd98f00b204e9800998ecf8427e",
+    "indexes": "d41d8cd98f00b204e9800998ecf8427e",
+    "functions": "d41d8cd98f00b204e9800998ecf8427e",
+    "triggers": "d41d8cd98f00b204e9800998ecf8427e",
+    "policies": "d41d8cd98f00b204e9800998ecf8427e",
+    "rls_flags": "d41d8cd98f00b204e9800998ecf8427e",
+    "grants": "d41d8cd98f00b204e9800998ecf8427e"
   }
 }

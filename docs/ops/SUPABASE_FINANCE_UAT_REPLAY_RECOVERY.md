@@ -65,3 +65,27 @@ The existing Railway staging patch `cf6ac083-7e09-4eff-a5a0-1a4d15a0096a` is unr
 - Explicit rollback, feature re-disable and finance/security human signoff. **Production NO-GO until then.**
 
 References: [Supabase migration failure guidance](https://supabase.com/kb/troubleshooting/branch-in-migrations-failed-status), [branch troubleshooting](https://supabase.com/docs/guides/deployment/branching/troubleshooting), [CLI v3 hosted-targeting change](https://supabase.com/changelog/supabase-cli-v3).
+
+
+## Transactional full-chain replay evidence — November 18, 2026
+
+An actual rollback-only test against the isolated Finance UAT Postgres branch, with the application and provider credentials disconnected, successfully executed:
+
+- Five original baseline definitions from `supabase/migrations` in Finance RC `9d3bf47e`.
+- Forty definitions from main's `supabase_migrations.schema_migrations.statements` (the other five had no stored SQL).
+- Three legacy `BEGIN/COMMIT` wrappers were **stripped only in the temporary test copy** so the entire replay could be enclosed in one outer `BEGIN; ... ROLLBACK;`. Those archival SQL records were not changed.
+- Result: **78 public tables, 25 functions, 14 noninternal triggers, 43 RLS policies**. The previously failing V6 `purchasing_orders` creation succeeded.
+- Eight deterministic catalog fingerprint categories compared to main: constraints, indexes, functions, triggers, RLS policies and RLS flags were **identical**; columns and table grants initially differed.
+- Column divergence was exactly `companies.qbo_token_refreshed_at`, which exists in main but is absent from its 45 recorded migration definitions. Replaying the **already-existing** candidate `20261106030900_qbo_token_refresh_timestamp.sql` at its chronological position made the **full column fingerprint equal** to main.
+- Permission divergence: main has 675 recorded grants on `anon`, `authenticated`, `service_role` (from this catalog query); replay has 454. The **221 missing grants are present only on main**, not vice versa. **Do not automatically copy those permissions**. [Supabase branching documentation](https://supabase.com/docs/guides/deployment/branching/working-with-branches#default-privileges-on-branches) explains new branches default to **no privileges on public objects**. A security reviewer must decide the minimum grants needed for the application's role and RLS model.
+- Separate post-transaction read verified the isolated branch remained unchanged: **zero tables, zero policies, five migration-history rows**. No shared-main writes, no production data, no OAuth token access, and no persistent isolated DB mutation.
+
+Credential-free evidence with hash comparisons: [finance_ar_full_replay_evidence_20261118.json](finance_ar_full_replay_evidence_20261118.json). Hashes are comparison fingerprints, **not** a security signature or proof of exact environment equivalence. Other schemas, privileges and PostgreSQL settings require additional validation.
+
+### Controlled repair decision
+
+A **reproducible schema** has now been demonstrated in a rollback-only isolated test; the **hosted branch creation pipeline is still broken**. Do not confuse these.
+
+The next deployment-impacting change is to rebuild the canonical migration history through [Supabase's supported schema baseline and remote-history workflow](https://supabase.com/kb/troubleshooting/new-branch-doesnt-copy-database), using a reviewed `db pull --remote` / `migration fetch --remote` process. CLI v3 requires explicit hosted-targeting and confirmation. Main's five history rows with NULL SQL and divergent linked Git migrations must be reconciled. `migration repair` updates migration **tracking** only, not SQL; it cannot be used to claim schema DDL was executed.
+
+**Do not** manually `UPDATE supabase_migrations.schema_migrations` on shared main, introduce backdated unreviewed migrations, run broad `GRANT` commands copying main's default privileges, or reset the existing Finance branch until the baseline repair is independently reviewed and the rollback plan signed. Afterwards, reset/recreate only the isolated branch, confirm clean replay, and proceed to Owner-authenticated **Intuit sandbox** acceptance. Independent approval remains open.

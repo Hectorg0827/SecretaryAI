@@ -109,3 +109,33 @@ def test_strict_cli_reports_drift_as_failed_check_not_success(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert code == 2
     assert "branch_not_migration_ready" in report["issues"]
+
+
+def test_partially_replayed_nonempty_schema_is_not_ready(tmp_path):
+    snapshot = healthy()
+    snapshot["main_public_tables"] = 78
+    snapshot["branch_public_tables"] = 3
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert result["ready_for_staging"] is False
+    assert "public_table_count_mismatch" in result["issues"]
+    assert "applied_history_without_public_schema" not in result["issues"]
+
+
+def test_branch_migration_subset_cannot_be_accepted_even_if_tables_match(tmp_path):
+    snapshot = healthy()
+    snapshot["main_applied"].append("20261017000000")
+    snapshot["linked_git_versions"].append("20261017000000")
+    folder = migrations(tmp_path, "20240101000000", "20261017000000")
+    result = diagnose(snapshot, folder)
+    assert result["ready_for_staging"] is False
+    assert "branch_migration_versions_not_equal_to_main" in result["issues"]
+    assert result["main_versions_missing_in_branch"] == ["20261017000000"]
+
+
+def test_branch_extra_history_is_not_silently_trusted(tmp_path):
+    snapshot = healthy()
+    snapshot["branch_applied"].append("20261017000000")
+    result = diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+    assert result["ready_for_staging"] is False
+    assert "branch_migration_versions_not_equal_to_main" in result["issues"]
+    assert result["branch_versions_not_in_main"] == ["20261017000000"]

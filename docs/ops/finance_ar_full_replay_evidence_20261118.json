@@ -1,0 +1,84 @@
+{
+  "observed_utc_date": "2026-11-18",
+  "project_scope": {
+    "source": "xerktvdgjvjozvckjyfp",
+    "isolated_transactional_target": "djfcginvavwuyfxxlyjv"
+  },
+  "replay_method": {
+    "baseline_files": 5,
+    "main_stored_migrations": 40,
+    "extra_reviewed_candidate_migrations": [
+      "20261106030900_qbo_token_refresh_timestamp.sql"
+    ],
+    "transaction": "BEGIN ... ROLLBACK; no persistence",
+    "test_only_removed_transaction_wrappers": [
+      "20261102092256",
+      "20261102232409",
+      "20261103022426"
+    ],
+    "shared_database_writes": false,
+    "isolated_database_persistent_writes": false
+  },
+  "observed_schema_counts": {
+    "main": {
+      "tables": 78,
+      "views": 0,
+      "functions": 25,
+      "triggers": 14,
+      "rls_policies": 43
+    },
+    "historical_replay_without_extra": {
+      "tables": 78,
+      "functions": 25,
+      "triggers": 14,
+      "rls_policies": 43
+    }
+  },
+  "hashes": {
+    "main": {
+      "columns": "730a523d2f27c8e5a23e78a618b25ea2",
+      "constraints": "6eff2174f4848a09fac083c6ef279fca",
+      "indexes": "d27bcd5497fc0f6089c89540eac407a8",
+      "functions": "9d242c5df1c5b5296dee6e83384d2988",
+      "triggers": "f0d2a78ff5419ad03c8aa770fa793498",
+      "policies": "ecd0bf8717574e21221b5f6c9a79ea44",
+      "rls_flags": "09a6ae93f21d12ca3f243bd611b3383b",
+      "grants": "8fc1d193071e31bedebc7258b9334768"
+    },
+    "historic_replay": {
+      "columns": "ee3d4962bb763fc226d02d620f6a8936",
+      "constraints": "6eff2174f4848a09fac083c6ef279fca",
+      "indexes": "d27bcd5497fc0f6089c89540eac407a8",
+      "functions": "9d242c5df1c5b5296dee6e83384d2988",
+      "triggers": "f0d2a78ff5419ad03c8aa770fa793498",
+      "policies": "ecd0bf8717574e21221b5f6c9a79ea44",
+      "rls_flags": "09a6ae93f21d12ca3f243bd611b3383b",
+      "grants": "f7698390e30b95c6d533a8aeda467e8c"
+    },
+    "historic_plus_qbo_column": {
+      "columns": "730a523d2f27c8e5a23e78a618b25ea2"
+    }
+  },
+  "discrepancy": {
+    "column_missing_from_historic_replay": [
+      "companies.qbo_token_refreshed_at"
+    ],
+    "columns_after_existing_qbo_migration": "matched",
+    "main_role_table_grants": 675,
+    "historic_replay_role_table_grants": 454,
+    "grants_present_only_in_main": 221,
+    "grants_present_only_in_replay": 0,
+    "grant_scope": [
+      "anon",
+      "authenticated",
+      "service_role"
+    ],
+    "grant_policy": "REVIEW; DO NOT AUTO-GRANT"
+  },
+  "branch_unchanged_after_rollbacks": {
+    "public_tables": 0,
+    "public_policies": 0,
+    "history_rows": 5
+  },
+  "release_decision": "NO-GO; definition-level grants diff, canonical SQL history repair, clean branch replay, authenticated Intuit sandbox UAT, and human approval remain open"
+}

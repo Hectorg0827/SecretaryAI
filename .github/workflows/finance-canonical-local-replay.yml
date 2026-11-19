@@ -56,6 +56,11 @@ jobs:
           cd "$RUNNER_TEMP/finance-canonical-clean"
           supabase db reset
           supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/assert_schema.sql" 
+      - name: Synthetic role and cross-tenant RLS rollback tests
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/finance-canonical-clean"
+          supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/tenant_rls_rollback.sql"
       - name: Clean up ephemeral local stack
         if: always()
         run: |

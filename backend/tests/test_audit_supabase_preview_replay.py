@@ -388,11 +388,12 @@ def test_candidate_migration_is_allowed_only_with_expected_schema(tmp_path):
     data["branch_schema_objects"]["tables"] = 4
     data["candidate_schema_objects"] = dict(data["branch_schema_objects"])
     data["candidate_schema_digests"] = dict(data["branch_schema_digests"])
-    result = diagnose(data, migrations(tmp_path, "20240101000000", version))
+    folder = migrations(tmp_path, "20240101000000", version)
+    result = diagnose(data, folder)
     assert result["ready_for_staging"] is True
     assert result["candidate_versions_not_in_linked_git"] == []
     del data["candidate_schema_digests"]
-    no_proof = diagnose(data, migrations(tmp_path, "20240101000000", version))
+    no_proof = diagnose(data, folder)
     assert "candidate_schema_expectations_missing" in no_proof["issues"]
 
 

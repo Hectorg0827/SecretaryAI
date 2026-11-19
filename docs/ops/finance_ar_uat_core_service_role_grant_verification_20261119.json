@@ -1,0 +1,95 @@
+{
+  "observed_date": "2026-11-19",
+  "environment": {
+    "scope": "isolated Finance UAT only",
+    "project_ref": "toujmmvlgktprabjbccq",
+    "branch_name": "lionbi-finance-ar-isolated-uat-20261118",
+    "shared_main_project_ref_untouched": "xerktvdgjvjozvckjyfp"
+  },
+  "source_context": {
+    "application_files": [
+      "backend/app/api/auth.py",
+      "backend/app/api/deps.py"
+    ],
+    "service_role_usage": [
+      "company and owner registration",
+      "QBO OAuth token connection/disconnection",
+      "user session lookup/refresh"
+    ],
+    "candidate_pr": 208
+  },
+  "applied_migration": {
+    "version": "20261119063136",
+    "name": "finance_uat_backend_company_user_role_minimum_20261119",
+    "sql": "GRANT SELECT, INSERT, UPDATE ON TABLE public.companies, public.users TO service_role;",
+    "supabase_apply_migration_success": true,
+    "stored_statement_count": 1,
+    "stored_sql_md5": "76b29847c811dbc3730e4fb2c7d9c4ea"
+  },
+  "verified_postconditions": {
+    "company_service_role": {
+      "select": true,
+      "insert": true,
+      "update": true,
+      "delete": false
+    },
+    "users_service_role": {
+      "select": true,
+      "insert": true,
+      "update": true,
+      "delete": false
+    },
+    "anonymous_companies_select": false,
+    "authenticated_users_select": false,
+    "companies_rls_enabled": true,
+    "public_tables": 78,
+    "company_rows": 0,
+    "app_user_rows": 0,
+    "total_migration_versions": 52,
+    "supabase_branch_status": "FUNCTIONS_DEPLOYED",
+    "security_advisor": {
+      "name": "rls_enabled_no_policy",
+      "level": "INFO",
+      "count": 35
+    }
+  },
+  "rollback": "REVOKE SELECT, INSERT, UPDATE ON TABLE public.companies, public.users FROM service_role;",
+  "rollback_caveat": "Only after verifying no later independent grants or dependencies rely on these permissions; not executed.",
+  "known_limits": [
+    "Not an application-token/API test",
+    "Not an authenticated Owner/employee cross-tenant test",
+    "Not a clean-from-zero hosted migration replay",
+    "Five historic NULL SQL migration rows remain",
+    "Other service_role tables may still be denied",
+    "No Intuit sandbox credentials or finance transactions were accessed",
+    "No permission was granted to anon or authenticated",
+    "No Railway or production deployment or shared main migration change"
+  ],
+  "production_release": "NO_GO",
+  "rollback_only_runtime_probe": {
+    "scope": "isolated Supabase UAT, inside explicit BEGIN / SET LOCAL ROLE service_role / ROLLBACK; no external providers",
+    "synthetic_operations": [
+      "INSERT one company (name-only)",
+      "INSERT owner user referencing synthetic company, with example.invalid address and invalid password hash",
+      "UPDATE company's qb_connection_status",
+      "SELECT own probe row counts"
+    ],
+    "in_transaction_results": {
+      "company_probe_rows": 1,
+      "owner_user_probe_rows": 1
+    },
+    "after_rollback_read_only_verification": {
+      "residual_company_probes": 0,
+      "residual_user_probes": 0,
+      "total_company_rows": 0,
+      "total_user_rows": 0
+    },
+    "interpretation": "Postgres service_role can perform the core backend registration and company update SQL operations; no test rows remained",
+    "not_proven": [
+      "HTTP/API OAuth and JWT authentication",
+      "employee/foreign-tenant RLS",
+      "Intuit sandbox calls",
+      "Railway application deployment"
+    ]
+  }
+}

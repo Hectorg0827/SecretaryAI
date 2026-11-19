@@ -89,3 +89,18 @@ A **reproducible schema** has now been demonstrated in a rollback-only isolated 
 The next deployment-impacting change is to rebuild the canonical migration history through [Supabase's supported schema baseline and remote-history workflow](https://supabase.com/kb/troubleshooting/new-branch-doesnt-copy-database), using a reviewed `db pull --remote` / `migration fetch --remote` process. CLI v3 requires explicit hosted-targeting and confirmation. Main's five history rows with NULL SQL and divergent linked Git migrations must be reconciled. `migration repair` updates migration **tracking** only, not SQL; it cannot be used to claim schema DDL was executed.
 
 **Do not** manually `UPDATE supabase_migrations.schema_migrations` on shared main, introduce backdated unreviewed migrations, run broad `GRANT` commands copying main's default privileges, or reset the existing Finance branch until the baseline repair is independently reviewed and the rollback plan signed. Afterwards, reset/recreate only the isolated branch, confirm clean replay, and proceed to Owner-authenticated **Intuit sandbox** acceptance. Independent approval remains open.
+
+
+## Canonical deduplicated replay — November 18, 2026
+
+All **22 Finance candidate migration files absent from main's version history** have been compared with main's stored SQL:
+
+- **20 have byte-equal source SQL** to already recorded migrations under different timestamps. The explicit version-to-version map is [finance_ar_migration_alias_manifest_20261118.json](finance_ar_migration_alias_manifest_20261118.json).
+- Candidate `20261112043000_lola_conversation_owner_scope.sql` is a **semantic overlap**, not byte-equal, with archived main `20261112043411`: the same `conversation_owner_scope` policy would be created twice. A rollback-only attempt with both versions correctly failed with duplicate-policy error.
+- Candidate `20261106030900_qbo_token_refresh_timestamp.sql` adds the *sole distinct* missing schema column `companies.qbo_token_refreshed_at`. Its existence was confirmed on main, but none of the 45 main stored migrations defines it.
+- A **chronologically ordered 46-definition replay** (five repository baselines + forty archived main SQL definitions + the one QBO timestamp migration) completed in a single transaction on the isolated branch. It reproduced **78 tables, 25 functions, 14 noninternal triggers, 43 RLS policies**, the token timestamp column, and Lola's authenticated owner-scoped conversation policy. Test-only removal of three historical transaction wrappers enabled the final `ROLLBACK`. No database objects persisted.
+- Structural catalog hashes match main for constraints, indexes, functions, triggers, RLS policy definitions and RLS flags. Historical 45-migration replay lacked one QBO column; adding it resolves the column fingerprint discrepancy. **28 tables still have role-grant differences** from main: do not copy permissive grants until independent security review.
+
+[Complete credential-free 46-definition replay evidence](finance_ar_canonical_46_replay_evidence_20261118.json) is a proof of *transactional reproducibility*, **not** a deployed clean Supabase branch. The branch itself remains `MIGRATIONS_FAILED` with five initial migration versions whose stored SQL is NULL. Main migration-history repair still requires Supabase-supported workflow and separate authorization.
+
+---

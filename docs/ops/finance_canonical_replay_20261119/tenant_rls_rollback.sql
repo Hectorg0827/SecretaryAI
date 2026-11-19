@@ -1,5 +1,11 @@
 -- Synthetic tenant isolation test, scoped to local-only Supabase Postgres.
 -- All test rows and temporary GRANTs are rolled back. NOT an HTTP/signed-JWT test.
+-- Capture privileges before the temporary GRANT; local Supabase defaults can be
+-- broader than least-privilege hosted preview without implying new exposure.
+CREATE TEMP TABLE finance_rls_initial_acl AS
+SELECT pg_catalog.has_table_privilege('authenticated','public.conversations','SELECT') AS conversations_select,
+       pg_catalog.has_table_privilege('authenticated','public.accounts','SELECT') AS accounts_select,
+       pg_catalog.has_table_privilege('authenticated','public.users','SELECT') AS users_select;
 BEGIN;
 INSERT INTO public.companies(id,name) VALUES
 ('11111111-1111-4111-8111-111111111110','__rls_tenant_A'),
@@ -76,10 +82,11 @@ BEGIN
  (SELECT count(*) FROM public.users)<>0 OR
  (SELECT count(*) FROM public.accounts)<>0 OR
  (SELECT count(*) FROM public.conversations)<>0 OR
- pg_catalog.has_table_privilege('authenticated','public.conversations','SELECT') OR
- pg_catalog.has_table_privilege('authenticated','public.accounts','SELECT') OR
- pg_catalog.has_table_privilege('authenticated','public.users','SELECT') THEN
+ pg_catalog.has_table_privilege('authenticated','public.conversations','SELECT') IS DISTINCT FROM (SELECT conversations_select FROM finance_rls_initial_acl) OR
+ pg_catalog.has_table_privilege('authenticated','public.accounts','SELECT') IS DISTINCT FROM (SELECT accounts_select FROM finance_rls_initial_acl) OR
+ pg_catalog.has_table_privilege('authenticated','public.users','SELECT') IS DISTINCT FROM (SELECT users_select FROM finance_rls_initial_acl) THEN
  RAISE EXCEPTION 'Synthetic RLS test failed to roll back rows or grants';
  END IF;
  RAISE NOTICE 'PASS: two tenants, three employees, cross-tenant read/write denial, owner scope, missing claims, rollback';
 END $cleanup$;
+DROP TABLE finance_rls_initial_acl;

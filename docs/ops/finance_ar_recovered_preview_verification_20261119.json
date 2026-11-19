@@ -97,5 +97,16 @@
     "No independent human database/security approval or authenticated Intuit sandbox QA",
     "Do not merge this branch into main, reset either preview, enable Finance flag, or deploy production based on this observation"
   ],
-  "release_state": "ISOLATED_SCHEMA_RECONSTRUCTED_MAIN_HISTORY_UNREPAIRED_PRODUCTION_NO_GO"
+  "release_state": "ISOLATED_SCHEMA_RECONSTRUCTED_MAIN_HISTORY_UNREPAIRED_PRODUCTION_NO_GO",
+  "historical_sql_comparison": {
+    "shared_nonempty_migrations": 40,
+    "shared_versions": 45,
+    "main_representation": "one SQL text block per non-empty version",
+    "recovered_preview_representation": "multiple parsed SQL statements per non-empty version",
+    "exact_stored_bytes_equal_count": 0,
+    "separator_and_whitespace_insensitive_digest_equal_count": 40,
+    "normalization": "regexp_replace(array_to_string(statements,''),'[;[:space:]]+','','g') then MD5; comparison-only evidence",
+    "interpretation": "all 40 normalized SQL histories correspond under separator-and-whitespace-insensitive comparison; this transformation is not a security signature or exact proof of SQL semantic equality, especially around SQL string literals",
+    "remaining_gate": "canonical original source plus clean hosted replay independently reviewed"
+  }
 }

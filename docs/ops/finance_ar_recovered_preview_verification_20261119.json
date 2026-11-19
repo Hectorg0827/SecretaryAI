@@ -1,0 +1,101 @@
+{
+  "observed_date": "2026-11-19",
+  "scope": "read-only Supabase catalog evidence; no tenant rows, OAuth tokens, secrets or mutations",
+  "shared_main": {
+    "project_ref": "xerktvdgjvjozvckjyfp",
+    "project_name": "SecretaryAI-Staging",
+    "migration_rows": 45,
+    "sql_less_migration_rows": 5,
+    "public_tables": 78,
+    "functions": 25,
+    "triggers": 14,
+    "policies": 43,
+    "grants_anon_authenticated_service_role": 675,
+    "schema_fingerprints": {
+      "columns": "fdf6e1eeb1cc2165a79441c1d40a19be",
+      "constraints": "5ed30a132b367ae4b46f9a04f7be4b0d",
+      "indexes": "156240329b43bcb837babc630810be74",
+      "functions": "b7f9434e696df921fa4cfc0788c66f04",
+      "triggers": "a73156c43d0267dec19a9108cce1ed0c",
+      "policies": "fbe8b89b7f93c92a6f2cd61330ebe825",
+      "rls_flags": "0d176a51cab245614c4e2a1d2a1d8901",
+      "grants": "5ad108013a21886b8a58d36890c03fe0"
+    }
+  },
+  "older_failed_finance_preview": {
+    "project_ref": "djfcginvavwuyfxxlyjv",
+    "branch_id": "e0219f4e-fa9d-4ee8-a15b-590751c653a9",
+    "status": "MIGRATIONS_FAILED",
+    "migration_rows": 5,
+    "sql_less_migration_rows": 5,
+    "public_tables": 0
+  },
+  "newer_recovered_finance_preview": {
+    "project_ref": "toujmmvlgktprabjbccq",
+    "branch_id": "c01108fa-cd91-4d52-9447-f22a7a2d5c34",
+    "branch_name": "lionbi-finance-ar-isolated-uat-20261118",
+    "status": "FUNCTIONS_DEPLOYED",
+    "with_data": false,
+    "migration_rows": 51,
+    "sql_less_migration_rows": 5,
+    "public_tables": 78,
+    "functions": 25,
+    "triggers": 14,
+    "rls_policies": 43,
+    "qbo_token_refreshed_at": true,
+    "six_additive_history_records": [
+      "20261118190805",
+      "20261118190823",
+      "20261118190827",
+      "20261118190830",
+      "20261118190834",
+      "20261118191121"
+    ],
+    "schema_fingerprints": {
+      "columns": "fdf6e1eeb1cc2165a79441c1d40a19be",
+      "constraints": "5ed30a132b367ae4b46f9a04f7be4b0d",
+      "indexes": "156240329b43bcb837babc630810be74",
+      "functions": "b7f9434e696df921fa4cfc0788c66f04",
+      "triggers": "a73156c43d0267dec19a9108cce1ed0c",
+      "policies": "fbe8b89b7f93c92a6f2cd61330ebe825",
+      "rls_flags": "0d176a51cab245614c4e2a1d2a1d8901",
+      "grants": "9c41e85fd4d02ad7604601177f283152"
+    },
+    "selected_app_row_counts": {
+      "companies": 0,
+      "users": 0,
+      "auth_users": 0,
+      "conversations": 0,
+      "lola_employee_whatsapp_connections": 0,
+      "lola_memories": 0
+    },
+    "security_advisor": {
+      "rls_enabled_no_policy_info_count": 35,
+      "source": "https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy"
+    }
+  },
+  "permissions_comparison": {
+    "additional_grants_on_main": 221,
+    "additional_grants_on_new_preview": 0,
+    "tables_with_differences": 28,
+    "by_role_main": {
+      "anon": 105,
+      "authenticated": 134,
+      "service_role": 436
+    },
+    "by_role_new_preview": {
+      "anon": 45,
+      "authenticated": 74,
+      "service_role": 335
+    },
+    "decision": "do not copy additional shared-main grants without per-role review and cross-tenant tests"
+  },
+  "important_limits": [
+    "Matching public catalogs do not prove fresh from-scratch hosted migration replay or other schemas' parity",
+    "Five historical SQL-less versions remain on shared main and on the newer preview",
+    "Six recovery migration rows are later than main's 45 historic versions; inspect their provenance and replay ordering before declaring the canonical shared history fixed",
+    "No independent human database/security approval or authenticated Intuit sandbox QA",
+    "Do not merge this branch into main, reset either preview, enable Finance flag, or deploy production based on this observation"
+  ],
+  "release_state": "ISOLATED_SCHEMA_RECONSTRUCTED_MAIN_HISTORY_UNREPAIRED_PRODUCTION_NO_GO"
+}

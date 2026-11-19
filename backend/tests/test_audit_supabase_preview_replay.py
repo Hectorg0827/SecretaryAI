@@ -53,13 +53,13 @@ def healthy():
                 "columns", "constraints", "indexes", "functions",
                 "triggers", "policies", "rls_flags", "grants",
                 "views", "sequences", "sequence_acls",
-                "views", "sequences", "sequence_acls",
             )
         },
         "branch_schema_digests": {
             kind: "a" * 32 for kind in (
                 "columns", "constraints", "indexes", "functions",
                 "triggers", "policies", "rls_flags", "grants",
+                "views", "sequences", "sequence_acls",
             )
         },
         "branch_relations": {

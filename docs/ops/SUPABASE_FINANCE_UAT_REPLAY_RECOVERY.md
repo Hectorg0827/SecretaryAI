@@ -12,6 +12,16 @@ functions, triggers, policies and RLS flags. Selected application/auth
 table row counts were all zero, including companies, users, auth users,
 conversations, employee WhatsApp connections and Lola memories.
 
+Historical SQL provenance follow-up: main stores the 40 non-empty
+migration definitions as one text block per version; the newer preview stores
+each version as multiple parsed statements. Raw archived SQL MD5 hashes
+therefore differ. **All 40** match after stripping statement separators and
+whitespace, and their resulting public schema fingerprints match main.
+This comparison is useful corroborating evidence but **not exact byte
+identity** or a formal equivalence proof (a normalization can also alter
+semicolons inside SQL literals). Retain source SQL, parser configuration,
+version manifest and a fresh-from-zero replay proof before signoff.
+
 The newer preview contains **51** migration-history records: all 45 versions
 present on shared main plus six subsequent Finance restoration/refresh
 migrations (`20261118190805`, `20261118190823`, `20261118190827`,

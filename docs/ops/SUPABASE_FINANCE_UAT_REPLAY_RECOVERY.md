@@ -104,3 +104,61 @@ All **22 Finance candidate migration files absent from main's version history** 
 [Complete credential-free 46-definition replay evidence](finance_ar_canonical_46_replay_evidence_20261118.json) is a proof of *transactional reproducibility*, **not** a deployed clean Supabase branch. The branch itself remains `MIGRATIONS_FAILED` with five initial migration versions whose stored SQL is NULL. Main migration-history repair still requires Supabase-supported workflow and separate authorization.
 
 ---
+
+
+## Read-only preflight v2 — explicit evidence binding (Nov 18, 2026)
+
+The preflight now fails closed for *stale or unbound* observations, archived-main
+SQL fingerprint mismatches, candidate-specific schema drift, unexpected
+view/sequence definitions or ACLs, and unreviewed grant differences. It also
+recognizes `MIGRATIONS_PASSED` as migration replay success while keeping
+**staging readiness blocked** until function deployment finishes.
+
+**Archived snapshots are historical evidence, not valid release certificates.**
+The original `finance_ar_replay_observation_20261118.json` predates several new
+requirements. Its failure under `--strict` is expected, and must not be
+"repaired" by substituting guesses or fabricating current observations.
+
+For a *new* read-only observation generated from the exact live project IDs,
+current linked Git ref and candidate commit, require:
+- `observed_at`: exact UTC ISO-8601 timestamp, no older than 1 hour.
+- `source_main_project_ref`, `source_preview_project_ref`,
+  `linked_github_branch`, `candidate_commit`: all non-empty and independently
+  bound to operator-supplied expected values.
+- `main_sql_blob_sha`: Git blob SHA-1 fingerprints over **exact reconstructed
+  stored SQL bytes** for every non-null main migration. Do not claim exact
+  equality where the storage representation cannot be reconstructed; missing
+  proof blocks release.
+- `main_schema_objects` / `branch_schema_objects`: include `sequences`;
+  `main_schema_digests` / `branch_schema_digests`: also include `views`,
+  `sequences`, `sequence_acls` using **identical deterministic catalog query
+  definitions in both environments**. Count equality alone cannot validate
+  view security or sequence grants.
+- If the candidate intentionally adds migration versions absent from main,
+  capture independently checked `candidate_schema_objects` and
+  `candidate_schema_digests`; compare the preview against the *candidate*,
+  while retaining main migration/history provenance checks.
+- If least-privilege public-schema grants intentionally differ from main,
+  `grant_review` must name the independent reviewer, link the review, and
+  specify the precise approved branch grants digest. The operator must also
+  explicitly supply the matching `--approved-grant-review-url`. The CLI
+  matching this metadata is **not** cryptographic verification of approval;
+  independently inspect the linked review before relying on the exception.
+
+Example strict invocation, once a *new* complete snapshot is captured
+and source SQL fingerprints are independently verified:
+
+```bash
+python backend/scripts/audit_supabase_preview_replay.py \
+  --snapshot /path/to/fresh-no-secrets-snapshot.json \
+  --migrations supabase/migrations \
+  --expect-main-project xerktvdgjvjozvckjyfp \
+  --expect-preview-project djfcginvavwuyfxxlyjv \
+  --expect-linked-git claude/secretaryai-tech-spec-lqBZj \
+  --expect-candidate-commit <exact-reviewed-commit-sha> \
+  --strict
+```
+
+Do not accept this preflight's *metadata* as a substitute for a successful
+clean Supabase hosted preview replay, tested role access, independent human
+security approval, or authenticated QuickBooks sandbox UAT.

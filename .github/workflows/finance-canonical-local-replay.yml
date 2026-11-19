@@ -41,7 +41,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/finance-canonical-clean"
           (cd "$RUNNER_TEMP/finance-canonical-clean" && supabase init)
           python3 docs/ops/finance_canonical_replay_20261119/materialize.py --target "$RUNNER_TEMP/finance-canonical-clean"
-          test ! -d "$RUNNER_TEMP/finance-canonical-clean/supabase/.temp"
+          # supabase init legitimately creates a local .temp directory.
+          test ! -f "$RUNNER_TEMP/finance-canonical-clean/supabase/.temp/project-ref"
           test "$(find "$RUNNER_TEMP/finance-canonical-clean/supabase/migrations" -maxdepth 1 -name '*.sql' | wc -l)" -eq 46
       - name: Replay from pristine local Supabase database
         run: |

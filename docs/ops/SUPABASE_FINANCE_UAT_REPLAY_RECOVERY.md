@@ -1,5 +1,48 @@
 # Supabase Finance AR preview replay recovery — review gate
 
+## Update — November 19, 2026: newer isolated Finance preview reconstructed
+
+**Supabase project `toujmmvlgktprabjbccq`, branch
+`lionbi-finance-ar-isolated-uat-20261118`, status `FUNCTIONS_DEPLOYED`**
+now exists independently of failed older preview `djfcginvavwuyfxxlyjv`.
+Read-only live catalog comparisons against shared main `xerktvdgjvjozvckjyfp`
+confirm 78 public tables, 25 functions, 14 triggers, 43 RLS policies and
+matching deterministic fingerprints for columns, constraints, indexes,
+functions, triggers, policies and RLS flags. Selected application/auth
+table row counts were all zero, including companies, users, auth users,
+conversations, employee WhatsApp connections and Lola memories.
+
+The newer preview contains **51** migration-history records: all 45 versions
+present on shared main plus six subsequent Finance restoration/refresh
+migrations (`20261118190805`, `20261118190823`, `20261118190827`,
+`20261118190830`, `20261118190834`, `20261118191121`). **Five original
+history entries still have no stored SQL** on both shared main and new
+preview. A functioning current preview **does not prove that a new branch
+can now replay cleanly** from shared main. The older preview remains
+`MIGRATIONS_FAILED` with 0 public tables. A separate from-scratch replay
+certificate / supported main rebaseline is still necessary.
+
+Main has **675** grants to `anon`, `authenticated`, `service_role`, whereas
+the newer preview has **454**. The exactly **221 additional main grants**
+affect 28 tables (main vs UAT role counts: anon 105 vs 45,
+authenticated 134 vs 74, service_role 436 vs 335). The UAT has no
+unexpected additional grant entries. Do not widen isolated privileges
+merely to match main; determine minimal operational privileges and
+verify RLS, cross-tenant access and privileged functions.
+
+**Decision:** Use the new isolated preview as a schema-parity starting point
+for further security acceptance. Do not reset it, merge into main, or
+rewrite shared-main history without a reviewed canonical source and
+proven recovery method. User authorized continuing history recovery;
+that approval alone does not constitute independent technical signoff.
+Railway and QuickBooks sandbox acceptance remain separate gates.
+
+[Source-only verification evidence](finance_ar_recovered_preview_verification_20261119.json).
+Official Supabase documentation: [repair a failed branch](https://supabase.com/kb/troubleshooting/branch-in-migrations-failed-status)
+and [restore missing branch schema](https://supabase.com/kb/troubleshooting/new-branch-doesnt-copy-database).
+
+---
+
 **Status:** blocked / no production changes permitted. Evidence: [issue #211](https://github.com/Hectorg0827/SecretaryAI/issues/211). This is a *schema reproducibility incident*, not a QuickBooks provider failure. The isolated Supabase preview `djfcginvavwuyfxxlyjv` costs **$0.01344/hour** until deleted.
 
 ## Confirmed source observations — November 18, 2026

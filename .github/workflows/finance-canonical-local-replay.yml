@@ -49,13 +49,13 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP/finance-canonical-clean"
           supabase start
-          supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/assert_schema.sql" --read-only --output table
+          supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/assert_schema.sql" 
       - name: Reset only local database and replay again
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/finance-canonical-clean"
           supabase db reset
-          supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/assert_schema.sql" --read-only --output table
+          supabase db query --file "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/assert_schema.sql" 
       - name: Clean up ephemeral local stack
         if: always()
         run: |

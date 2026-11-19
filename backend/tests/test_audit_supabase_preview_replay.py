@@ -4,6 +4,7 @@ Synthetic fixtures only; no database, credentials, migrations, or network.
 """
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -25,6 +26,12 @@ def healthy():
         b"blob " + str(len(content)).encode("ascii") + b"\x00" + content
     ).hexdigest()
     return {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "source_main_project_ref": "main-fixture",
+        "source_preview_project_ref": "preview-fixture",
+        "linked_github_branch": "fixture-branch",
+        "candidate_commit": "fixture-commit",
+        "main_sql_blob_sha": {version: git_blob_sha},
         "main_applied": [version],
         "linked_git_versions": [version],
         "linked_git_blob_sha": {version: git_blob_sha},
@@ -34,17 +41,19 @@ def healthy():
         "main_public_tables": 3,
         "branch_public_tables": 3,
         "main_schema_objects": {
-            "tables": 3, "views": 0, "functions": 1,
+            "tables": 3, "views": 0, "sequences": 0, "functions": 1,
             "triggers": 1, "rls_policies": 1,
         },
         "branch_schema_objects": {
-            "tables": 3, "views": 0, "functions": 1,
+            "tables": 3, "views": 0, "sequences": 0, "functions": 1,
             "triggers": 1, "rls_policies": 1,
         },
         "main_schema_digests": {
             kind: "a" * 32 for kind in (
                 "columns", "constraints", "indexes", "functions",
                 "triggers", "policies", "rls_flags", "grants",
+                "views", "sequences", "sequence_acls",
+                "views", "sequences", "sequence_acls",
             )
         },
         "branch_schema_digests": {
@@ -75,7 +84,7 @@ def test_marked_initial_migrations_with_zero_schema_are_release_blocker(tmp_path
     snapshot["main_schema_objects"]["tables"] = 78
     snapshot["branch_public_tables"] = 0
     snapshot["branch_schema_objects"] = {
-        "tables": 0, "views": 0, "functions": 0,
+        "tables": 0, "views": 0, "sequences": 0, "functions": 0,
         "triggers": 0, "rls_policies": 0,
     }
     snapshot["branch_relations"]["companies"] = False
@@ -320,3 +329,157 @@ def test_missing_or_invalid_schema_fingerprint_cannot_pass(tmp_path):
     del snapshot["branch_schema_digests"]["policies"]
     with pytest.raises(ValueError, match="branch_schema_digests"):
         diagnose(snapshot, migrations(tmp_path, "20240101000000"))
+
+
+def test_main_sql_provenance_mismatch_blocks_even_when_candidate_equals_git(tmp_path):
+    data = healthy()
+    data["main_sql_blob_sha"]["20240101000000"] = "f" * 40
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert "main_stored_sql_content_differs_from_candidate" in report["issues"]
+    assert report["ready_for_staging"] is False
+
+
+def test_missing_main_sql_provenance_blocks(tmp_path):
+    data = healthy()
+    data["main_sql_blob_sha"] = {}
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert "main_stored_sql_fingerprint_coverage_incomplete" in report["issues"]
+
+
+def test_stale_observation_is_not_ready(tmp_path):
+    data = healthy()
+    data["observed_at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=3)
+    ).isoformat()
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert "stale_or_future_observation" in report["issues"]
+
+
+def test_missing_timestamp_and_identity_fail_closed(tmp_path):
+    data = healthy()
+    data.pop("observed_at")
+    data.pop("source_main_project_ref")
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert "utc_observation_timestamp_missing" in report["issues"]
+    assert "snapshot_identity_missing:source_main_project_ref" in report["issues"]
+
+
+def test_expected_identity_mismatch_is_not_ready(tmp_path):
+    data = healthy()
+    report = diagnose(
+        data, migrations(tmp_path, "20240101000000"),
+        expected_identity={
+            "source_main_project_ref": "wrong",
+            "source_preview_project_ref": "preview-fixture",
+            "linked_github_branch": "fixture-branch",
+            "candidate_commit": "fixture-commit",
+        },
+    )
+    assert "snapshot_identity_mismatch:source_main_project_ref" in report["issues"]
+
+
+def test_candidate_migration_is_allowed_only_with_expected_schema(tmp_path):
+    data = healthy()
+    version = "20261024041419"
+    data["linked_git_versions"].append(version)
+    data["linked_git_blob_sha"][version] = data["linked_git_blob_sha"]["20240101000000"]
+    data["branch_applied"].append(version)
+    data["branch_public_tables"] = 4
+    data["branch_schema_objects"]["tables"] = 4
+    data["candidate_schema_objects"] = dict(data["branch_schema_objects"])
+    data["candidate_schema_digests"] = dict(data["branch_schema_digests"])
+    result = diagnose(data, migrations(tmp_path, "20240101000000", version))
+    assert result["ready_for_staging"] is True
+    assert result["candidate_versions_not_in_linked_git"] == []
+    del data["candidate_schema_digests"]
+    no_proof = diagnose(data, migrations(tmp_path, "20240101000000", version))
+    assert "candidate_schema_expectations_missing" in no_proof["issues"]
+
+
+@pytest.mark.parametrize("kind", ["views", "sequences", "sequence_acls"])
+def test_changed_view_or_sequence_definitions_do_not_pass(tmp_path, kind):
+    data = healthy()
+    data["branch_schema_digests"][kind] = "b" * 32
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert kind in report["mismatched_schema_definition_or_grant_kinds"]
+    assert not report["ready_for_staging"]
+
+
+def test_sequence_count_drift_fails_even_when_schema_digests_match(tmp_path):
+    data = healthy()
+    data["branch_schema_objects"]["sequences"] = 1
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert "sequences" in report["mismatched_schema_object_kinds"]
+
+
+def test_grant_exception_requires_matching_explicit_review(tmp_path):
+    data = healthy()
+    data["branch_schema_digests"]["grants"] = "b" * 32
+    data["grant_review"] = {
+        "review_url": "https://github.com/example/repo/pull/9",
+        "reviewer": "independent-reviewer",
+        "approved_branch_grants_md5": "b" * 32,
+    }
+    folder = migrations(tmp_path, "20240101000000")
+    denied = diagnose(data, folder)
+    assert not denied["grant_exception_accepted"]
+    assert "branch_grant_difference_requires_independent_approval" in denied["issues"]
+    accepted = diagnose(
+        data, folder,
+        approved_grant_review_url=data["grant_review"]["review_url"],
+    )
+    assert accepted["grant_exception_accepted"]
+    assert accepted["ready_for_staging"]
+
+
+def test_migrations_passed_is_not_misreported_as_failed_replay(tmp_path):
+    data = healthy()
+    data["branch_status"] = "MIGRATIONS_PASSED"
+    report = diagnose(data, migrations(tmp_path, "20240101000000"))
+    assert report["migration_replay_reported_success"]
+    assert "branch_not_migration_ready" not in report["issues"]
+    assert "branch_functions_not_deployed" in report["issues"]
+    assert not report["ready_for_staging"]
+
+
+@pytest.mark.parametrize("status", [[], {}, 0, None])
+def test_malformed_status_rejected_without_traceback(tmp_path, status):
+    data = healthy()
+    data["branch_status"] = status
+    with pytest.raises(ValueError, match="branch_status"):
+        diagnose(data, migrations(tmp_path, "20240101000000"))
+
+
+def test_oversized_migration_rejected_before_memory_read(tmp_path, monkeypatch):
+    folder = migrations(tmp_path, "20240101000000")
+    migration = folder / "20240101000000_fixture.sql"
+    migration.write_bytes(b"a" * (5 * 1024 * 1024 + 1))
+    original = type(migration).read_bytes
+    def protected_read(path):
+        if path == migration:
+            raise AssertionError("oversized migration must not be loaded")
+        return original(path)
+    monkeypatch.setattr(type(migration), "read_bytes", protected_read)
+    report = diagnose(healthy(), folder)
+    assert "oversized_migration_file:20240101000000" in report["issues"]
+    assert not report["ready_for_staging"]
+
+
+def test_strict_cli_requires_externally_bound_project_identity(tmp_path, capsys):
+    data = healthy()
+    path = migrations(tmp_path, "20240101000000")
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps(data))
+    failed = main([
+        "--snapshot", str(snapshot), "--migrations", str(path), "--strict",
+    ])
+    assert failed == 2
+    capsys.readouterr()
+    passed = main([
+        "--snapshot", str(snapshot), "--migrations", str(path), "--strict",
+        "--expect-main-project", "main-fixture",
+        "--expect-preview-project", "preview-fixture",
+        "--expect-linked-git", "fixture-branch",
+        "--expect-candidate-commit", "fixture-commit",
+    ])
+    assert passed == 0

@@ -1,0 +1,390 @@
+{
+  "created_on": "2026-11-19",
+  "status": "Source reconstruction for isolated local CI replay only; not deployed or applied to hosted main",
+  "source_main_project_ref": "xerktvdgjvjozvckjyfp",
+  "source_finance_commit": "9d3bf47eb49c947e5eec3ae3a1691eebcfb36bbf",
+  "counts": {
+    "historical_main_versions": 45,
+    "original_repository_baselines_without_stored_main_sql": 5,
+    "main_stored_sql_versions": 40,
+    "unique_qbo_timestamp_migration": 1,
+    "canonical_versions": 46
+  },
+  "sha_caveat": "main SQL MD5 is a provenance checksum only; SQL may be formatted differently from already-installed UAT parsed statements",
+  "migrations": [
+    {
+      "version": "20240101000000",
+      "filename": "20240101000000_initial_schema.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20240101000000_initial_schema.sql",
+      "git_blob_sha": "e5517a55a666d4a4f2214c764c6f571c44f326d5",
+      "bytes": 11929
+    },
+    {
+      "version": "20240601000000",
+      "filename": "20240601000000_v2_additions.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20240601000000_v2_additions.sql",
+      "git_blob_sha": "9512d6eed7d474be65ca2ad89416195a7c0567c1",
+      "bytes": 7319
+    },
+    {
+      "version": "20240901000000",
+      "filename": "20240901000000_v3_integrations.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20240901000000_v3_integrations.sql",
+      "git_blob_sha": "cbee99cc987798356a8af11dde95f2fc5d493521",
+      "bytes": 279
+    },
+    {
+      "version": "20261017000000",
+      "filename": "20261017000000_connector_install_secret_digest.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20261017000000_connector_install_secret_digest.sql",
+      "git_blob_sha": "8d4eb1b1cba9dab240852d31b889458a4b34d5c2",
+      "bytes": 1039
+    },
+    {
+      "version": "20261017010000",
+      "filename": "20261017010000_stock_ledger.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20261017010000_stock_ledger.sql",
+      "git_blob_sha": "f39d5fe8dfa766f5dcf2238903d413eac8c3d815",
+      "bytes": 10322
+    },
+    {
+      "version": "20261024041419",
+      "filename": "20261024041419_secretaryai_v6_purchasing_receiving.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "e3cffdf469357cbd28f9298c63cef038",
+      "stored_sql_bytes": 21044
+    },
+    {
+      "version": "20261024041432",
+      "filename": "20261024041432_secretaryai_v7_purchasing_evidence.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "2299416a341c49b8540e7e32b1714f8e",
+      "stored_sql_bytes": 6583
+    },
+    {
+      "version": "20261024041434",
+      "filename": "20261024041434_secretaryai_v8_evidence_integrity.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "17d1684be5df6cc46c623c194f0e435d",
+      "stored_sql_bytes": 5588
+    },
+    {
+      "version": "20261024041436",
+      "filename": "20261024041436_secretaryai_v9_malware_review.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "201240d575fbf33d13050f226e1a1b07",
+      "stored_sql_bytes": 8360
+    },
+    {
+      "version": "20261024041442",
+      "filename": "20261024041442_secretaryai_v10_agent_execution_ledger.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "f92693d87b8a6751206e80695d8416af",
+      "stored_sql_bytes": 4460
+    },
+    {
+      "version": "20261024041444",
+      "filename": "20261024041444_secretaryai_v11_atomic_agent_execution_claims.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "d03f4e8aec8dcdb4b52935ae72a74131",
+      "stored_sql_bytes": 4613
+    },
+    {
+      "version": "20261024041446",
+      "filename": "20261024041446_secretaryai_v12_dedicated_execution_role.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "afcdcbf98c45f7fb9a513d20394b5cf4",
+      "stored_sql_bytes": 1209
+    },
+    {
+      "version": "20261024041453",
+      "filename": "20261024041453_secretaryai_v13_atomic_durable_draft_approval.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "130a14d84e562a3dfcf638471ea626ab",
+      "stored_sql_bytes": 3070
+    },
+    {
+      "version": "20261024041455",
+      "filename": "20261024041455_secretaryai_v14_immutable_approved_email_payload.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "cdf44e586a0d3893d8301e51d021f214",
+      "stored_sql_bytes": 5903
+    },
+    {
+      "version": "20261024041457",
+      "filename": "20261024041457_secretaryai_v15_staging_email_allowlist_claim.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "bc7aa8baa0ba1cde1b3b07d4a0b25065",
+      "stored_sql_bytes": 2264
+    },
+    {
+      "version": "20261024041616",
+      "filename": "20261024041616_secretaryai_v16_trigger_function_search_paths.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "a039be73ccc092cd2fefda7c4e7494ac",
+      "stored_sql_bytes": 631
+    },
+    {
+      "version": "20261024050017",
+      "filename": "20261024050017_secretaryai_legacy_draft_expiry_secure.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "fe1d72e09b0e43406f602132aecd3f12",
+      "stored_sql_bytes": 733
+    },
+    {
+      "version": "20261024050020",
+      "filename": "20261024050020_secretaryai_legacy_ingested_file_hash.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "bb6cc2ce09e7a1bd8809fac1cad18206",
+      "stored_sql_bytes": 410
+    },
+    {
+      "version": "20261024050021",
+      "filename": "20261024050021_secretaryai_legacy_reports_tenant_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "96b9fc589bcf086e62ccba886529c75d",
+      "stored_sql_bytes": 1550
+    },
+    {
+      "version": "20261024050023",
+      "filename": "20261024050023_secretaryai_legacy_memory_tenant_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "1850efb73af88fd27196f9b3ca0c87a1",
+      "stored_sql_bytes": 1810
+    },
+    {
+      "version": "20261024050032",
+      "filename": "20261024050032_secretaryai_legacy_feed_events_tenant_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "9ca01e1ecfe038cabed00c9c9a1d2cd1",
+      "stored_sql_bytes": 1459
+    },
+    {
+      "version": "20261024050034",
+      "filename": "20261024050034_secretaryai_legacy_workflows_tenant_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "cff9cdfa2ea5f7856324baeb471617a4",
+      "stored_sql_bytes": 2400
+    },
+    {
+      "version": "20261024050036",
+      "filename": "20261024050036_secretaryai_legacy_connector_fields.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "4d7224df8db096602aab46b87caf0856",
+      "stored_sql_bytes": 880
+    },
+    {
+      "version": "20261024050041",
+      "filename": "20261024050041_secretaryai_legacy_conductor_end_user.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "db6c5595819f737d684abdce26829f6e",
+      "stored_sql_bytes": 360
+    },
+    {
+      "version": "20261024050559",
+      "filename": "20261024050559_secretaryai_staging_billing_backend_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "d05d63c2f4f74ecb0a6c7c19b5fbe768",
+      "stored_sql_bytes": 2860
+    },
+    {
+      "version": "20261024050601",
+      "filename": "20261024050601_secretaryai_staging_compliance_tenant_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "a0b8632c1c4594662f31b9bca5f71dd8",
+      "stored_sql_bytes": 7021
+    },
+    {
+      "version": "20261024050603",
+      "filename": "20261024050603_secretaryai_staging_hardened_ingestion_queues.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "ab13b599349e9c7fbe62451888f033c4",
+      "stored_sql_bytes": 4128
+    },
+    {
+      "version": "20261024050605",
+      "filename": "20261024050605_secretaryai_staging_hardened_computer_use_queue.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "d1ee06ecc4f3d5aee8d334ad7ab66a38",
+      "stored_sql_bytes": 2743
+    },
+    {
+      "version": "20261024051615",
+      "filename": "20261024051615_secretaryai_staging_phase1_private_control_plane.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "6e7446c0a6736cd0b1d78f77c48d1dcf",
+      "stored_sql_bytes": 20620
+    },
+    {
+      "version": "20261024051620",
+      "filename": "20261024051620_secretaryai_staging_phase4_capability_routes.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "9fd027ea3fa006233393f29c46a6e8b0",
+      "stored_sql_bytes": 1215
+    },
+    {
+      "version": "20261024051622",
+      "filename": "20261024051622_secretaryai_staging_procurement_cycles_read_only.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "db9def43bc2a27d0e2936fd0ed87e899",
+      "stored_sql_bytes": 1674
+    },
+    {
+      "version": "20261024051624",
+      "filename": "20261024051624_secretaryai_staging_qbo_token_expiry.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "47b212beccb8e642a66b405ba4d1cc37",
+      "stored_sql_bytes": 414
+    },
+    {
+      "version": "20261024051626",
+      "filename": "20261024051626_secretaryai_staging_private_morning_briefings.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "8ca72bcdc6383ba0c2ad788b35b597ab",
+      "stored_sql_bytes": 931
+    },
+    {
+      "version": "20261102092256",
+      "filename": "20261102092256_secretaryai_stripe_billing_safety.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "a159fb8f5193666f9304e5f5384324f5",
+      "stored_sql_bytes": 12532
+    },
+    {
+      "version": "20261102232409",
+      "filename": "20261102232409_billing_checkout_historical_invoice_safety.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "fe1d67032eadd3078d41a1ecf7316a36",
+      "stored_sql_bytes": 8919
+    },
+    {
+      "version": "20261103022426",
+      "filename": "20261103022426_onboarding_audit_consistency.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "d17931ff8adc109af63ac93fae36df8b",
+      "stored_sql_bytes": 614
+    },
+    {
+      "version": "20261106030900",
+      "filename": "20261106030900_qbo_token_refresh_timestamp.sql",
+      "origin": "github-finance-rc",
+      "source_path": "supabase/migrations/20261106030900_qbo_token_refresh_timestamp.sql",
+      "git_blob_sha": "42a8706d71377751ae65202acbff2ddebedd95cb",
+      "bytes": 613
+    },
+    {
+      "version": "20261108034956",
+      "filename": "20261108034956_provisional_purchasing_cost_assessments.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "4ef61e8bdac1e6d315d4c27c4f8add14",
+      "stored_sql_bytes": 6817
+    },
+    {
+      "version": "20261111005641",
+      "filename": "20261111005641_logistics_journey.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "c82e8787dd98a66c7a26d605eec9407e",
+      "stored_sql_bytes": 2344
+    },
+    {
+      "version": "20261111005840",
+      "filename": "20261111005840_lola_core.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "0267f5a87f8654a2fab2785fd91e69a1",
+      "stored_sql_bytes": 8518
+    },
+    {
+      "version": "20261111010558",
+      "filename": "20261111010558_gate6b_finance_department_roles.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "771705bc702cc2568a8ee4dd2db4ce80",
+      "stored_sql_bytes": 1543
+    },
+    {
+      "version": "20261112043411",
+      "filename": "20261112043411_lola_conversation_owner_rls_staging.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "076098656522e3d104d181cbb80e0782",
+      "stored_sql_bytes": 388
+    },
+    {
+      "version": "20261114033708",
+      "filename": "20261114033708_lola_employee_private_intelligence.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "1952c009c9c63a423b03b40c78c2061a",
+      "stored_sql_bytes": 7022
+    },
+    {
+      "version": "20261114041719",
+      "filename": "20261114041719_lola_whatsapp_consent_and_ownership.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "fc8cd1acc72ae26ca095245de85ce34c",
+      "stored_sql_bytes": 2179
+    },
+    {
+      "version": "20261114162323",
+      "filename": "20261114162323_pricing_pricebook_cost_basis_staging_20261114.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "08964e6ea78bec04e081120c3a7ed65d",
+      "stored_sql_bytes": 5726
+    },
+    {
+      "version": "20261114163243",
+      "filename": "20261114163243_pricing_pricebook_fk_indexes_staging_20261114.sql",
+      "origin": "main-supabase-migration-history",
+      "project_ref": "xerktvdgjvjozvckjyfp",
+      "stored_sql_md5": "9e32ea74a46b7b5b3fd0623a5063571d",
+      "stored_sql_bytes": 460
+    }
+  ],
+  "limits": [
+    "Only public-schema historical source; does not prove all managed schemas or grants",
+    "No hosted-history mutation or customer data",
+    "Requires successful clean Supabase local replay and independent review before a hosted change",
+    "SQL-less main version rows are not altered by this Git commit"
+  ]
+}

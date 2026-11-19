@@ -1,0 +1,136 @@
+{
+  "observed_date": "2026-11-18",
+  "source_main_project_ref": "xerktvdgjvjozvckjyfp",
+  "finance_candidate_commit": "9d3bf47eb49c947e5eec3ae3a1691eebcfb36bbf",
+  "manifest_status": "read-only diagnostic; not a repair or deployment authorization",
+  "main_history_versions": 45,
+  "finance_candidate_migration_files": 30,
+  "candidate_extra_versions": 22,
+  "exact_duplicate_version_aliases": [
+    {
+      "candidate_version": "20261017020000",
+      "main_applied_version": "20261024041419",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261017030000",
+      "main_applied_version": "20261024041432",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261017040000",
+      "main_applied_version": "20261024041434",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261017050000",
+      "main_applied_version": "20261024041436",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024015157",
+      "main_applied_version": "20261024041442",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024015412",
+      "main_applied_version": "20261024041444",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024020218",
+      "main_applied_version": "20261024041446",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024021157",
+      "main_applied_version": "20261024041453",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024023612",
+      "main_applied_version": "20261024041455",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024025115",
+      "main_applied_version": "20261024041457",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024041600",
+      "main_applied_version": "20261024041616",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20261024053100",
+      "main_applied_version": "20261024051626",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250322000000",
+      "main_applied_version": "20261024050017",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250322000001",
+      "main_applied_version": "20261024050020",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000000",
+      "main_applied_version": "20261024050021",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000001",
+      "main_applied_version": "20261024050023",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000002",
+      "main_applied_version": "20261024050032",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000003",
+      "main_applied_version": "20261024050034",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000004",
+      "main_applied_version": "20261024050036",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    },
+    {
+      "candidate_version": "20250325000005",
+      "main_applied_version": "20261024050041",
+      "evidence": "source SQL strings byte-for-byte equal after newline-normalization and trim"
+    }
+  ],
+  "semantic_overlap": [
+    {
+      "candidate_version": "20261112043000",
+      "main_applied_version": "20261112043411",
+      "object": "public.conversations conversation_owner_scope RLS policy",
+      "evidence": "candidate drops both prior policies then creates owner policy; main archive creates equivalent policy after dropping company_isolation; applying both in version order caused duplicate-policy error",
+      "resolution": "review as migration alias; preserve verified policy semantics and avoid duplicate creation"
+    }
+  ],
+  "not_represented_in_main_history": [
+    {
+      "candidate_version": "20261106030900",
+      "name": "qbo_token_refresh_timestamp",
+      "evidence": "adds existing public.companies.qbo_token_refreshed_at column absent from all 45 archived migration SQL definitions",
+      "resolution": "review as additive migration after canonical historical replay"
+    }
+  ],
+  "expected_distinct_schema_changes_after_deduplication": 46,
+  "rollout_constraints": [
+    "Do not execute both alias versions",
+    "Do not manipulate Supabase main migration metadata before separate review and authorization",
+    "Do not copy broad main anon/authenticated grants blindly",
+    "Clean-clone replay, RLS/privilege parity and human security/finance approval still required"
+  ],
+  "note": "This is a provenance map, not a version-repair script, and does not prove full schema parity or authenticated QBO acceptance."
+}

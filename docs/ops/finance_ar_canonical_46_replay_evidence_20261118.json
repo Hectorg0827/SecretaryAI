@@ -1,0 +1,49 @@
+{
+  "observed_date": "2026-11-18",
+  "status": "PASS — isolated rollback-only canonical schema replay; NOT a hosted-branch repair",
+  "source_main_supabase_project": "xerktvdgjvjozvckjyfp",
+  "isolated_supabase_branch": "djfcginvavwuyfxxlyjv",
+  "finance_candidate_commit": "9d3bf47eb49c947e5eec3ae3a1691eebcfb36bbf",
+  "canonical_plan": {
+    "main_history_versions": 45,
+    "baseline_definitions_from_repo": 5,
+    "archived_main_definitions": 40,
+    "only_distinct_candidate_addition": "20261106030900_qbo_token_refresh_timestamp.sql",
+    "distinct_migration_definitions_replayed": 46,
+    "candidate_sql_aliases_identical_to_main": 20,
+    "lola_policy_semantic_overlap": 1,
+    "transaction_wrappers_removed_test_only": [
+      "20261102092256",
+      "20261102232409",
+      "20261103022426"
+    ]
+  },
+  "isolated_transaction_evidence": {
+    "transaction": "BEGIN; 46 ordered definitions; read-only schema verification; ROLLBACK",
+    "public_tables": 78,
+    "public_functions": 25,
+    "public_triggers": 14,
+    "rls_policies": 43,
+    "qbo_token_refreshed_at_column_present": true,
+    "conversations_policy_name": "conversation_owner_scope",
+    "conversations_policy_roles": [
+      "authenticated"
+    ],
+    "conversations_policy_restricts_user_id_to_auth_uid": true,
+    "persistent_changes": false
+  },
+  "known_schema_differences": {
+    "historical_45_without_qbo_column": "companies.qbo_token_refreshed_at absent",
+    "historical_plus_qbo_column": "matched main columns by catalog hash",
+    "role_grants": "28 tables differ between clean replay and main; main has broader anon/authenticated/service_role grants; review for least privilege, DO NOT AUTO-GRANT"
+  },
+  "remaining_gates": [
+    "Recovery of Supabase's 5 empty historical SQL statement entries through supported, independently reviewed workflow",
+    "Reconcile linked Git branch migration versions with source of truth",
+    "Approved clean preview branch replay and schema privilege review",
+    "Current CI, CodeQL and independent security signoff",
+    "Owner-authenticated Intuit sandbox invoice/payment reconciliation",
+    "Separate production release approval"
+  ],
+  "do_not_infer": "Equal catalog counts do not prove authorization safety. This test did not certify the hosted branch, main database migrations or QuickBooks provider data."
+}

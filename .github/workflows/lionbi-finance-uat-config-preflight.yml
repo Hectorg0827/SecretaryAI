@@ -1,0 +1,26 @@
+name: Finance AR isolated UAT configuration preflight
+
+on:
+  pull_request:
+    paths:
+      - "scripts/check_finance_uat_env.py"
+      - "scripts/test_check_finance_uat_env.py"
+      - ".github/workflows/lionbi-finance-uat-config-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  name-only-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Syntax and no-secrets regression tests
+        run: |
+          python -m compileall -q scripts/check_finance_uat_env.py scripts/test_check_finance_uat_env.py
+          python -m unittest discover -s scripts -p test_check_finance_uat_env.py -v

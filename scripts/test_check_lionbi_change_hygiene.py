@@ -28,6 +28,34 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertIn("active-migrations", surfaces)
 
+    def test_invalid_calendar_timestamp_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20261301120000_invalid_month.sql"),
+                 ("A", "backend/supabase/migrations/20260230093000_invalid_day.sql"),
+                 ("A", "supabase/migrations/20261119246000_invalid_hour.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 3)
+            self.assertTrue(all("invalid YYYYMMDDHHMMSS" in error for error in errors))
+
+    def test_noncanonical_timestamp_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/00000101000000_invalid_year.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("invalid YYYYMMDDHHMMSS", errors[0])
+
+    def test_leap_day_timestamp_is_allowed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20240229093000_leap_day.sql")],
+                Path(temp),
+            )
+            self.assertEqual(errors, [])
+
     def test_duplicate_migration_version_is_blocked(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp) / "supabase" / "migrations"

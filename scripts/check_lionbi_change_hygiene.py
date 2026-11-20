@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from datetime import datetime
 from pathlib import Path
 
 ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/")
@@ -49,6 +50,13 @@ def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str]
             errors.append(f"{path}: added migration must use YYYYMMDDHHMMSS_description.sql")
             continue
         version = match.group("version")
+        try:
+            parsed = datetime.strptime(version, "%Y%m%d%H%M%S")
+            if parsed.strftime("%Y%m%d%H%M%S") != version:
+                raise ValueError("non-canonical timestamp")
+        except ValueError:
+            errors.append(f"{path}: invalid YYYYMMDDHHMMSS migration timestamp")
+            continue
         migrations_dir = root / active_root
         if migrations_dir.is_dir():
             conflicts = sorted(

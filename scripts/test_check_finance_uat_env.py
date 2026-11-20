@@ -65,6 +65,32 @@ class FinanceUATNameGateTests(unittest.TestCase):
             self.assertIn("MISSING: SECRET_KEY", stdout.getvalue())
             self.assertIn("NO-GO", stdout.getvalue())
 
+    def test_required_backend_settings_are_covered_by_boot_contract(self):
+        # Parse source without importing the app or loading any .env secrets.
+        # A new mandatory Settings field must update this preflight as well.
+        import ast
+
+        config_path = (Path(__file__).resolve().parents[1] /
+                       "backend" / "app" / "config.py")
+        tree = ast.parse(config_path.read_text(encoding="utf-8"))
+        settings = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Settings"
+        )
+        required = {
+            node.target.id.upper()
+            for node in settings.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is None
+        }
+        self.assertTrue(required, "Settings must define mandatory fields")
+        missing = sorted(required - REQUIRED_BOOT)
+        self.assertFalse(
+            missing,
+            f"New mandatory backend Settings not in Finance boot preflight: {missing}",
+        )
+
     def test_cli_pass_is_not_false_financial_clearance(self):
         with tempfile.TemporaryDirectory() as temp:
             a, b = self._inputs(temp, sorted(REQUIRED_SANDBOX), [])

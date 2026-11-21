@@ -57,6 +57,15 @@ class FastGateTests(unittest.TestCase):
             )
             self.assertEqual(len(errors), 1)
 
+    def test_unicode_decimal_digits_in_version_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/２０２６１１１９１２００００_unicode.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("YYYYMMDDHHMMSS", errors[0])
+
     def test_migration_archive_is_not_treated_as_active(self):
         with tempfile.TemporaryDirectory() as temp:
             errors, surfaces = check_changes(

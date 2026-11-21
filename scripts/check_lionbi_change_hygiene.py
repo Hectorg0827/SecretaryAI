@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/")
-MIGRATION_NAME = re.compile(r"^(?P<version>\d{14})_[a-z0-9_]+\.sql$")
+MIGRATION_NAME = re.compile(r"^(?P<version>[0-9]{14})_[a-z0-9_]+\.sql$")
 
 
 def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str], set[str]]:

@@ -40,6 +40,15 @@ REQUIRED_SANDBOX = REQUIRED_BOOT | frozenset({
 })
 
 
+# Mirrors config.Settings._validate partial-provider OAuth groups.
+# This remains name-presence only; the real settings validator checks values.
+OAUTH_NAME_GROUPS = (
+    frozenset({"INTUIT_CLIENT_ID", "INTUIT_CLIENT_SECRET", "INTUIT_REDIRECT_URI"}),
+    frozenset({"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"}),
+    frozenset({"MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_REDIRECT_URI"}),
+)
+
+
 def load_variable_names(path: Path) -> set[str]:
     """Accept a sanitized JSON array of variable names only, never a value map."""
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -71,6 +80,11 @@ def check_names(
         required.update({"STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"})
     if "ENCRYPTION_KEY_PREVIOUS" in effective:
         required.add("ENCRYPTION_KEY")
+    # A single surviving OAuth variable activates Settings' all-or-nothing
+    # configuration check. A staged deletion must not leave a false PASS.
+    for group in OAUTH_NAME_GROUPS:
+        if group & effective:
+            required.update(group)
     return sorted(required - effective)
 
 

@@ -17,28 +17,30 @@ class FinanceUATNameGateTests(unittest.TestCase):
         b = Path(folder) / "staged.json"
         a.write_text(json.dumps(live), encoding="utf-8")
         b.write_text(json.dumps(staged), encoding="utf-8")
-        return a, b
+        c = Path(folder) / "removed.json"
+        c.write_text("[]", encoding="utf-8")
+        return a, b, c
 
     def test_all_required_boot_names_pass_when_split_across_layers(self):
         live = {"SECRET_KEY", "DATABASE_URL"}
         staged = set(REQUIRED_BOOT) - live
-        self.assertEqual(check_names(live, staged, "boot"), [])
+        self.assertEqual(check_names(live, staged, "boot", billing_enabled=False, debug=False), [])
 
     def test_missing_required_secret_names_fail_closed(self):
         missing = {"SECRET_KEY", "DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
                    "ANTHROPIC_API_KEY"}
         present = set(REQUIRED_BOOT) - missing
-        self.assertEqual(check_names(set(), present, "boot"), sorted(missing))
+        self.assertEqual(check_names(set(), present, "boot", billing_enabled=False, debug=False), sorted(missing))
 
     def test_sandbox_requires_real_provider_configuration_names(self):
         self.assertEqual(
-            check_names(set(REQUIRED_BOOT), set(), "sandbox"),
+            check_names(set(REQUIRED_BOOT), set(), "sandbox", billing_enabled=False, debug=False),
             sorted(REQUIRED_SANDBOX - REQUIRED_BOOT),
         )
 
     def test_unknown_mode_is_rejected(self):
         with self.assertRaises(ValueError):
-            check_names(set(), set(), "production")
+            check_names(set(), set(), "production", billing_enabled=False, debug=False)
 
     def test_rejects_value_maps_even_if_keys_look_valid(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -50,17 +52,74 @@ class FinanceUATNameGateTests(unittest.TestCase):
     def test_rejects_nonvariable_strings_and_nonstring_elements(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "vars.json"
-            for bad in (["PASSWORD=secret"], ["TEST", 123], ["test"], "SECRET_KEY"):
+            for bad in (["PASSWORD=secret"], ["TEST", 123], "SECRET_KEY"):
                 path.write_text(json.dumps(bad), encoding="utf-8")
                 with self.assertRaises(ValueError):
                     load_variable_names(path)
 
+    def test_staged_delete_removes_live_required_name(self):
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot", removed={"SECRET_KEY"},
+                        billing_enabled=False, debug=False),
+            ["SECRET_KEY"],
+        )
+
+    def test_staged_add_and_delete_conflict_is_blocked(self):
+        with self.assertRaises(ValueError):
+            check_names(set(), {"SECRET_KEY"}, "boot", removed={"secret_key"},
+                        billing_enabled=False, debug=False)
+
+    def test_conditional_stripe_keys_required_only_when_billing_active(self):
+        expected = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=True, debug=False),
+            expected,
+        )
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=False, debug=False), [],
+        )
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=True, debug=True), [],
+        )
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT) | set(expected), set(), "boot",
+                        billing_enabled=True, debug=False), [],
+        )
+
+    def test_encryption_key_rotation_requires_current_key(self):
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT) | {"ENCRYPTION_KEY_PREVIOUS"},
+                        set(), "boot", billing_enabled=False, debug=False),
+            ["ENCRYPTION_KEY"],
+        )
+
+    def test_mixed_case_variable_names_are_normalized(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "names.json"
+            path.write_text('["secret_key", "DbUrl", "SUPABASE_URL"]', encoding="utf-8")
+            self.assertEqual(load_variable_names(path),
+                             {"SECRET_KEY", "DBURL", "SUPABASE_URL"})
+        self.assertEqual(
+            check_names({name.lower() for name in REQUIRED_BOOT}, set(),
+                        "boot", billing_enabled=False, debug=False), [],
+        )
+
+    def test_unverified_non_secret_safety_flags_cannot_pass(self):
+        with self.assertRaises(ValueError):
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=None, debug=False)
+
     def test_cli_exits_one_and_names_missing_without_value_exposure(self):
         with tempfile.TemporaryDirectory() as temp:
-            a, b = self._inputs(temp, [], sorted(REQUIRED_BOOT - {"SECRET_KEY"}))
+            a, b, c = self._inputs(temp, [], sorted(REQUIRED_BOOT - {"SECRET_KEY"}))
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = main(["--live-names", str(a), "--staged-names", str(b)])
+                rc = main(["--live-names", str(a), "--staged-names", str(b),
+                           "--staged-removed-names", str(c),
+                           "--billing-enabled", "false", "--debug", "false"])
             self.assertEqual(rc, 1)
             self.assertIn("MISSING: SECRET_KEY", stdout.getvalue())
             self.assertIn("NO-GO", stdout.getvalue())
@@ -93,10 +152,12 @@ class FinanceUATNameGateTests(unittest.TestCase):
 
     def test_cli_pass_is_not_false_financial_clearance(self):
         with tempfile.TemporaryDirectory() as temp:
-            a, b = self._inputs(temp, sorted(REQUIRED_SANDBOX), [])
+            a, b, c = self._inputs(temp, sorted(REQUIRED_SANDBOX), [])
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
                 rc = main(["--live-names", str(a), "--staged-names", str(b),
+                           "--staged-removed-names", str(c),
+                           "--billing-enabled", "false", "--debug", "false",
                            "--mode", "sandbox"])
             self.assertEqual(rc, 0)
             self.assertIn("UNVERIFIED", stdout.getvalue())
@@ -107,9 +168,13 @@ class FinanceUATNameGateTests(unittest.TestCase):
             b = Path(temp) / "good.json"
             a.write_text('{"SECRET_KEY":"highly-sensitive-canary"}', encoding="utf-8")
             b.write_text("[]", encoding="utf-8")
+            c = Path(temp) / "removed.json"
+            c.write_text("[]", encoding="utf-8")
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                rc = main(["--live-names", str(a), "--staged-names", str(b)])
+                rc = main(["--live-names", str(a), "--staged-names", str(b),
+                           "--staged-removed-names", str(c),
+                           "--billing-enabled", "false", "--debug", "false"])
             self.assertEqual(rc, 2)
             self.assertNotIn("highly-sensitive-canary", stdout.getvalue())
 

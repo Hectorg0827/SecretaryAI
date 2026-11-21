@@ -84,6 +84,32 @@ class ARPaymentPreviewResponse(BaseModel):
 
     @model_validator(mode="after")
     def validate_invoice_count_relationships(self) -> "ARPaymentPreviewResponse":
+        # The comparator returns either fully assessed aggregates or
+        # intentionally no counts when source coverage is incomplete.
+        # Never label missing or contradictory evidence as "aligned".
+        counts = (
+            self.invoice_count,
+            self.linked_invoice_count,
+            self.variance_invoice_count,
+            self.partially_paid_invoice_count,
+            self.unapplied_payment_count,
+        )
+        if self.status == "not_assessed":
+            if (self.reason != "complete_source_coverage_unverified"
+                    or any(value is not None for value in counts)):
+                raise ValueError("AR unassessed evidence state inconsistent")
+            return self
+
+        if any(value is None for value in counts):
+            raise ValueError("AR assessed evidence missing aggregate count")
+        if self.status == "aligned_not_certified":
+            if self.reason is not None or self.variance_invoice_count != 0:
+                raise ValueError("AR aligned evidence contradicts variance")
+        elif (self.status == "variance_detected"
+                and (self.reason != "other_adjustments_or_missing_links_possible"
+                     or self.variance_invoice_count == 0)):
+            raise ValueError("AR variance evidence state inconsistent")
+
         # The QBO comparator counts linked invoice IDs and walks the same
         # invoice set to compute variances and partially paid invoices.
         # An inconsistent provider result is unverified evidence, not a

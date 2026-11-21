@@ -223,6 +223,7 @@ async def test_invalid_aggregate_count_fails_closed_and_no_financial_write(
 def test_partial_evidence_may_explicitly_omit_aggregate_counts():
     source = dict(evidence())
     source.update({field: None for field in COUNT_FIELDS})
+    source.update(status="not_assessed", reason="complete_source_coverage_unverified")
     valid = ARPaymentPreviewResponse.model_validate({
         **source,
         "source_system": "qbo_sandbox",
@@ -273,6 +274,10 @@ def test_invoice_aggregate_subset_boundaries_accept_valid_partial_evidence():
         "variance_invoice_count": 2,
         "partially_paid_invoice_count": 2,
     })
+    source.update(
+        status="variance_detected",
+        reason="other_adjustments_or_missing_links_possible",
+    )
     accepted = ARPaymentPreviewResponse.model_validate({
         **source,
         "source_system": "qbo_sandbox",
@@ -282,3 +287,56 @@ def test_invoice_aggregate_subset_boundaries_accept_valid_partial_evidence():
     assert accepted.linked_invoice_count == accepted.invoice_count == 2
     assert accepted.accounting_reconciled is False
     assert accepted.financial_write_authorized is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contradiction", [
+    {"status": "aligned_not_certified", "variance_invoice_count": 1},
+    {"status": "aligned_not_certified",
+     "reason": "other_adjustments_or_missing_links_possible"},
+    {"status": "aligned_not_certified", "invoice_count": None},
+    {"status": "aligned_not_certified", "unapplied_payment_count": None},
+    {"status": "variance_detected", "variance_invoice_count": 0,
+     "reason": "other_adjustments_or_missing_links_possible"},
+    {"status": "variance_detected", "variance_invoice_count": 1,
+     "reason": None},
+    {"status": "not_assessed", "reason": "complete_source_coverage_unverified"},
+    {"status": "not_assessed", "reason": "other_adjustments_or_missing_links_possible",
+     **{name: None for name in COUNT_FIELDS}},
+    {"status": "not_assessed", "reason": None,
+     **{name: None for name in COUNT_FIELDS}},
+])
+async def test_contradictory_assessment_status_fails_closed(contradiction):
+    source = dict(evidence())
+    source.update(contradiction)
+    qb = SimpleNamespace(
+        _config={"qbo_realm_id": "fixture-sandbox-realm"},
+        get_qbo_ar_payment_match_preview_read_only=AsyncMock(return_value=source),
+        create_payment=AsyncMock(),
+    )
+    with patch("app.api.finance_ar_preview.get_settings", return_value=settings()), \
+         patch("app.api.finance_ar_preview._current_role", return_value="owner"), \
+         patch("app.api.finance_ar_preview.get_qbo_ar_preview_adapter", return_value=qb):
+        with pytest.raises(HTTPException) as failure:
+            await get_ar_payment_preview(Response(), user=user(), db=MagicMock())
+    assert failure.value.status_code == 503
+    assert failure.value.headers["Cache-Control"] == "private, no-store"
+    assert failure.value.detail == "AR payment evidence unavailable or unverified"
+    qb.get_qbo_ar_payment_match_preview_read_only.assert_awaited_once()
+    qb.create_payment.assert_not_awaited()
+
+
+def test_assessed_variance_evidence_accepts_consistent_source():
+    source = dict(evidence())
+    source.update(
+        status="variance_detected",
+        reason="other_adjustments_or_missing_links_possible",
+        variance_invoice_count=1,
+    )
+    valid = ARPaymentPreviewResponse.model_validate({
+        **source, "source_system": "qbo_sandbox",
+        "source_quality": "partial", "as_of": "2026-11-20",
+    })
+    assert valid.status == "variance_detected"
+    assert valid.accounting_reconciled is False
+    assert valid.financial_write_authorized is False

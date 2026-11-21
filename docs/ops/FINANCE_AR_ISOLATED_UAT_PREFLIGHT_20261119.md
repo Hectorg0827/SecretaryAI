@@ -2,7 +2,14 @@
 
 **Scope:** name-only inventory, offline test coverage and evidence. No Railway deployment, Supabase DDL or external provider calls.
 
-## Exact observed state
+## Exact observed state (historical 2026-11-19 snapshot, NOT current)
+
+The state below is preserved for provenance only. Later isolated staging operations
+staged Redis, explicit safe flags, a branch-specific anon key and an independent
+signing key. Re-read the exact environment and patch **immediately before**
+any deployment decision; do not use the historical 24-change count for clearance.
+
+## Original observed state
 
 - Railway project: `LionBI-FinanceAR-Isolated-UAT`; environment: `finance-uat`; service: `FinanceAR-Backend-Preview`.
 - One staged, **unapplied** patch with 24 changes. No previous deployment was found for the service.
@@ -14,12 +21,46 @@ These findings are **name-presence only**. A present variable may still have an 
 
 ## Check the proposed Railway environment without reading secrets
 
-1. Read Railway `list_variables` and extract **only** `variableNames` (no `variables` values). Save this list to `live-names.json` outside the repository.
-2. Read Railway `get_staged_changes` and extract only added/updated **environment variable names**, excluding other fields such as Branch, Repo or Healthcheck. Save the array as `staged-names.json`.
-3. Run `python scripts/check_finance_uat_env.py --live-names live-names.json --staged-names staged-names.json --mode boot`.
-4. For later sandbox readiness, run the same command with `--mode sandbox`. Nonzero means do not deploy. Passing means names are present, **not** that credentials, values, or authorization are valid.
+1. Read Railway `list_variables` and extract **only** `variableNames`
+   (no variable values) to an ephemeral `live-names.json` outside the repository.
+2. Read Railway `get_staged_changes`. Record environment ID, patch ID and
+   patch update timestamp; extract **only** added/updated variable names to
+   `staged-names.json` and **deleted** variable names to
+   `staged-removed-names.json` (JSON `[]` when none). Never infer names from
+   unrelated fields such as Repo, Branch or Healthcheck.
+3. Independently verify the effective non-secret `BILLING_ENABLED` and
+   `DEBUG` values from Railway's targeted environment, respecting pending
+   updates and avoiding exposure of credentials. If these cannot be verified,
+   **do not run a PASS-bearing preflight or deploy**.
+4. Run (for a deliberately free, non-debug isolated UAT deployment):
 
-**Do not commit these input files or store secret values in them.** The script rejects value dictionaries; the CI regression suite uses synthetic names only.
+   ```sh
+   python scripts/check_finance_uat_env.py \
+     --live-names live-names.json \
+     --staged-names staged-names.json \
+     --staged-removed-names staged-removed-names.json \
+     --billing-enabled false --debug false --mode boot
+   ```
+
+   If billing is actually enabled and debug disabled, pass
+   `--billing-enabled true --debug false`; the preflight then also requires
+   `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` by name. For later QBO
+   sandbox readiness, use `--mode sandbox` with the same current inventory.
+   The guard also blocks a staged deletion of a required name and requires
+   `ENCRYPTION_KEY` if `ENCRYPTION_KEY_PREVIOUS` is present.
+5. **Immediately before a separately approved Railway patch commit**, re-read
+   `get_staged_changes` and `list_variables`; compare environment ID,
+   current patch ID, patch update timestamp, and the full name sets with the
+   inputs used above. If any changed, discard inputs and rerun. Serialize
+   operator changes during this interval. Because this is an offline name-only
+   tool, it **cannot** independently prove freshness or prevent a later
+   time-of-check/time-of-use race. The operator must recheck at the actual
+   deployment boundary.
+
+**Never commit the input files or store secret values in them.** Passing this
+preflight proves only that required *names* are present in a claimed snapshot.
+It does **not** establish valid secret contents, project ID isolation,
+safe runtime flag values, authenticated access or authorization to deploy.
 
 ## Required second-stage controls (not automated here)
 

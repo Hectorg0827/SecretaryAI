@@ -16,7 +16,7 @@ from threading import BoundedSemaphore
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.deps import (
     claim_qbo_ar_preview_window,
@@ -81,6 +81,29 @@ class ARPaymentPreviewResponse(BaseModel):
     unapplied_payment_count: StrictCount | None
     accounting_reconciled: Literal[False]
     financial_write_authorized: Literal[False]
+
+    @model_validator(mode="after")
+    def validate_invoice_count_relationships(self) -> "ARPaymentPreviewResponse":
+        # The QBO comparator counts linked invoice IDs and walks the same
+        # invoice set to compute variances and partially paid invoices.
+        # An inconsistent provider result is unverified evidence, not a
+        # plausible non-certified cash-application preview.
+        if self.invoice_count is not None:
+            for name in (
+                "linked_invoice_count",
+                "variance_invoice_count",
+                "partially_paid_invoice_count",
+            ):
+                count = getattr(self, name)
+                if count is not None and count > self.invoice_count:
+                    raise ValueError("AR aggregate invoice counts inconsistent")
+        # Every partially paid invoice necessarily has at least one linked
+        # payment; preserve this invariant even if invoice_count is None.
+        if (self.linked_invoice_count is not None
+                and self.partially_paid_invoice_count is not None
+                and self.partially_paid_invoice_count > self.linked_invoice_count):
+            raise ValueError("AR partial payments exceed linked invoices")
+        return self
 
 
 @router.get("/ar-payment-preview", response_model=ARPaymentPreviewResponse)

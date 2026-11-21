@@ -107,6 +107,60 @@ class FinanceUATNameGateTests(unittest.TestCase):
                         "boot", billing_enabled=False, debug=False), [],
         )
 
+    def test_oauth_partial_configuration_blocks_boot(self):
+        # Each provider group is all-or-nothing at backend startup, even
+        # though the Finance sandbox mode always needs the Intuit group.
+        groups = (
+            {"INTUIT_CLIENT_ID", "INTUIT_CLIENT_SECRET", "INTUIT_REDIRECT_URI"},
+            {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"},
+            {"MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_REDIRECT_URI"},
+        )
+        for group in groups:
+            for removed_name in group:
+                with self.subTest(group=sorted(group), deleted=removed_name):
+                    live = set(REQUIRED_BOOT) | group
+                    missing = check_names(
+                        live, set(), "boot", removed={removed_name},
+                        billing_enabled=False, debug=False,
+                    )
+                    self.assertEqual(missing, [removed_name])
+
+    def test_complete_and_absent_oauth_groups_remain_valid(self):
+        groups = (
+            {"INTUIT_CLIENT_ID", "INTUIT_CLIENT_SECRET", "INTUIT_REDIRECT_URI"},
+            {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"},
+            {"MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_REDIRECT_URI"},
+        )
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=False, debug=False), [],
+        )
+        for group in groups:
+            with self.subTest(group=sorted(group)):
+                self.assertEqual(
+                    check_names(set(REQUIRED_BOOT) | group, set(), "boot",
+                                billing_enabled=False, debug=False), [],
+                )
+
+    def test_oauth_partial_staged_addition_is_not_ready(self):
+        present = set(REQUIRED_BOOT) | {"GOOGLE_CLIENT_ID"}
+        self.assertEqual(
+            check_names(present, set(), "boot",
+                        billing_enabled=False, debug=False),
+            ["GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"],
+        )
+
+    def test_boot_vs_sandbox_qbo_requirements(self):
+        self.assertEqual(
+            check_names(set(REQUIRED_BOOT), set(), "boot",
+                        billing_enabled=False, debug=False), [],
+        )
+        self.assertIn(
+            "INTUIT_CLIENT_SECRET",
+            check_names(set(REQUIRED_BOOT) | {"INTUIT_CLIENT_ID"}, set(),
+                        "sandbox", billing_enabled=False, debug=False),
+        )
+
     def test_unverified_non_secret_safety_flags_cannot_pass(self):
         with self.assertRaises(ValueError):
             check_names(set(REQUIRED_BOOT), set(), "boot",

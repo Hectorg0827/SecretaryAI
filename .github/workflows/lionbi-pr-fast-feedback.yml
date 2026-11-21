@@ -8,6 +8,7 @@ on:
       - "backend/**"
       - "frontend/**"
       - "supabase/migrations/**"
+      - "staging_supabase/supabase/migrations/**"
       - "scripts/check_lionbi_change_hygiene.py"
       - "scripts/test_check_lionbi_change_hygiene.py"
       - ".github/workflows/lionbi-pr-fast-feedback.yml"
@@ -29,7 +30,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Rapid Python syntax check (no application imports or credentials)
-        run: python -m compileall -q backend/app scripts/check_lionbi_change_hygiene.py
+        run: python -m compileall -q backend scripts/check_lionbi_change_hygiene.py
       - name: Run focused guard regression tests
         run: python -m unittest discover -s scripts -p test_check_lionbi_change_hygiene.py -v
       - name: Check active migration files changed by PR
@@ -37,5 +38,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "$GITHUB_BASE_REF"
           git diff --name-status --no-renames "origin/$GITHUB_BASE_REF"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
-          python scripts/check_lionbi_change_hygiene.py --changes "$RUNNER_TEMP/lionbi-changes.txt" --root .
+          git ls-tree -r --name-only "origin/$GITHUB_BASE_REF" -- \
+            supabase/migrations backend/supabase/migrations staging_supabase/supabase/migrations \
+            > "$RUNNER_TEMP/lionbi-latest-base-files.txt"
+          python scripts/check_lionbi_change_hygiene.py --changes "$RUNNER_TEMP/lionbi-changes.txt" --root . \
+            --base-files "$RUNNER_TEMP/lionbi-latest-base-files.txt"

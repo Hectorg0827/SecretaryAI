@@ -28,6 +28,34 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertIn("active-migrations", surfaces)
 
+    def test_invalid_calendar_timestamp_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20261301120000_invalid_month.sql"),
+                 ("A", "backend/supabase/migrations/20260230093000_invalid_day.sql"),
+                 ("A", "supabase/migrations/20261119246000_invalid_hour.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 3)
+            self.assertTrue(all("invalid YYYYMMDDHHMMSS" in error for error in errors))
+
+    def test_noncanonical_timestamp_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/00000101000000_invalid_year.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("invalid YYYYMMDDHHMMSS", errors[0])
+
+    def test_leap_day_timestamp_is_allowed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20240229093000_leap_day.sql")],
+                Path(temp),
+            )
+            self.assertEqual(errors, [])
+
     def test_duplicate_migration_version_is_blocked(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp) / "supabase" / "migrations"
@@ -65,6 +93,87 @@ class FastGateTests(unittest.TestCase):
             )
             self.assertEqual(errors, [])
             self.assertNotIn("active-migrations", surfaces)
+
+    def test_staging_migration_history_is_protected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, touched = check_changes(
+                [
+                    ("M", "staging_supabase/supabase/migrations/20240101000000_initial_schema.sql"),
+                    ("A", "staging_supabase/supabase/migrations/20261301120000_bad.sql"),
+                ],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 2)
+            self.assertIn("historical migration", errors[0])
+            self.assertIn("invalid YYYYMMDDHHMMSS", errors[1])
+            self.assertIn("active-migrations", touched)
+
+    def test_unicode_decimal_version_is_not_valid_ascii_migration_name(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/٢٠٢٦١١٢١١٢٠٠٠٠_unicode.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("must use YYYYMMDDHHMMSS", errors[0])
+
+    def test_nested_migration_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "staging_supabase/supabase/migrations/nested/20261121120000_bad.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("must be a direct child", errors[0])
+
+    def test_latest_base_version_collision_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20261121120000_new.sql")],
+                Path(temp),
+                base_paths=["supabase/migrations/20261121120000_other.sql"],
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("latest base already contains", errors[0])
+
+    def test_latest_base_same_filename_collision_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = "backend/supabase/migrations/20261121120000_new.sql"
+            errors, _ = check_changes(
+                [("A", path)], Path(temp), base_paths=[path],
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("latest base already contains", errors[0])
+
+    def test_base_collisions_are_scoped_to_migration_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "staging_supabase/supabase/migrations/20261121120000_new.sql")],
+                Path(temp),
+                base_paths=["supabase/migrations/20261121120000_other.sql"],
+            )
+            self.assertEqual(errors, [])
+
+    def test_staging_migration_valid_addition_passes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "staging_supabase" / "supabase" / "migrations"
+            directory.mkdir(parents=True)
+            (directory / "20261121120000_new.sql").write_text("-- new", encoding="utf-8")
+            errors, surfaces = check_changes(
+                [("A", "staging_supabase/supabase/migrations/20261121120000_new.sql")],
+                Path(temp), base_paths=[],
+            )
+            self.assertEqual(errors, [])
+            self.assertIn("active-migrations", surfaces)
+
+    def test_base_nested_nonmigration_does_not_match(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20261121120000_new.sql")],
+                Path(temp),
+                base_paths=["supabase/migrations/archive/20261121120000_old.sql"],
+            )
+            self.assertEqual(errors, [])
 
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])

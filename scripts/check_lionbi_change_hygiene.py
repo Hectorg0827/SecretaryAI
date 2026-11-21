@@ -12,11 +12,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/")
-MIGRATION_NAME = re.compile(r"^(?P<version>\d{14})_[a-z0-9_]+\.sql$")
+ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/", "staging_supabase/supabase/migrations/")
+MIGRATION_NAME = re.compile(r"^(?P<version>[0-9]{14})_[a-z0-9_]+\.sql$")
 
 
-def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str], set[str]]:
+def check_changes(
+    changes: list[tuple[str, str]], root: Path,
+    *, base_paths: list[str] | None = None,
+) -> tuple[list[str], set[str]]:
     errors: list[str] = []
     touched: set[str] = set()
 
@@ -44,6 +47,12 @@ def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str]
             continue
         if operation != "A":
             continue
+        relative_name = path[len(active_root):]
+        if "/" in relative_name:
+            errors.append(
+                f"{path}: migration SQL must be a direct child of {active_root}"
+            )
+            continue
         name = Path(path).name
         match = MIGRATION_NAME.fullmatch(name)
         if not match:
@@ -57,6 +66,22 @@ def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str]
         except ValueError:
             errors.append(f"{path}: invalid YYYYMMDDHHMMSS migration timestamp")
             continue
+        # A branch can pass against its own checkout while the base changes.
+        # Compare new versions with *the latest remote base tree*, not merely
+        # the merge-base diff; still require serialized pre-merge validation.
+        if base_paths is not None:
+            base_conflicts = sorted(
+                item for item in base_paths
+                if item.startswith(active_root)
+                and "/" not in item[len(active_root):]
+                and item[len(active_root):].startswith(version + "_")
+                and item.endswith(".sql")
+            )
+            if base_conflicts:
+                errors.append(
+                    f"{path}: latest base already contains migration version "
+                    f"{version} in {active_root}: " + ", ".join(base_conflicts)
+                )
         migrations_dir = root / active_root
         if migrations_dir.is_dir():
             conflicts = sorted(
@@ -87,10 +112,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--changes", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--base-files", type=Path,
+        help="Latest fetched base branch file list (git ls-tree -r --name-only)",
+    )
     args = parser.parse_args()
 
     changes = parse_change_list(args.changes.read_text(encoding="utf-8"))
-    errors, touched = check_changes(changes, args.root)
+    base_paths = (
+        args.base_files.read_text(encoding="utf-8").splitlines()
+        if args.base_files is not None else None
+    )
+    errors, touched = check_changes(changes, args.root, base_paths=base_paths)
     print(f"PR fast preflight: {len(changes)} changed files; surfaces: {', '.join(sorted(touched)) or 'none'}")
     if errors:
         for error in errors:

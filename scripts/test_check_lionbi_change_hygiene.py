@@ -66,6 +66,57 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertIn("YYYYMMDDHHMMSS", errors[0])
 
+
+    def test_staging_migration_edit_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, surfaces = check_changes(
+                [("M", "staging_supabase/supabase/migrations/20261119120000_existing.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("active-migrations", surfaces)
+
+    def test_staging_duplicate_version_is_blocked(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "staging_supabase/supabase/migrations"
+            directory.mkdir(parents=True)
+            (directory / "20261119120000_one.sql").write_text("-- existing", encoding="utf-8")
+            (directory / "20261119120000_two.sql").write_text("-- new", encoding="utf-8")
+            errors, _ = check_changes(
+                [("A", "staging_supabase/supabase/migrations/20261119120000_two.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("duplicate version", errors[0])
+
+    def test_nested_migration_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/subdir/20261119120000_nested.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("direct child", errors[0])
+
+    def test_impossible_calendar_timestamp_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for version in ("20261301120000", "20260230010101", "20261119246000"):
+                with self.subTest(version=version):
+                    errors, _ = check_changes(
+                        [("A", f"supabase/migrations/{version}_invalid.sql")],
+                        Path(temp),
+                    )
+                    self.assertEqual(len(errors), 1)
+                    self.assertIn("real calendar date/time", errors[0])
+
+    def test_valid_leap_day_timestamp_is_accepted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("A", "supabase/migrations/20240229010101_valid.sql")],
+                Path(temp),
+            )
+            self.assertEqual(errors, [])
+
     def test_migration_archive_is_not_treated_as_active(self):
         with tempfile.TemporaryDirectory() as temp:
             errors, surfaces = check_changes(

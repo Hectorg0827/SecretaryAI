@@ -1,4 +1,6 @@
 """Focused regression coverage for the fast PR migration-change preflight."""
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -169,6 +171,116 @@ class FastGateTests(unittest.TestCase):
         pr_events = workflow.split("  pull_request:", 1)[1].split("  merge_group:", 1)[0]
         self.assertNotIn("paths:", pr_events)
         self.assertNotIn("paths-ignore:", pr_events)
+
+    def test_ci_and_codeql_run_on_merge_groups(self):
+        # Merge queues run checks on synthetic merge refs, not ordinary PR refs.
+        workflow_root = Path(__file__).resolve().parents[1] / ".github/workflows"
+        for workflow_name in ("ci.yml", "codeql.yml"):
+            with self.subTest(workflow=workflow_name):
+                workflow = (workflow_root / workflow_name).read_text(encoding="utf-8")
+                trigger_block = workflow.split("on:" + chr(10), 1)[1]
+                self.assertIn("  merge_group:" + chr(10), trigger_block)
+
+    def test_merge_group_diff_guard_rejects_historical_edits(self):
+        # A synthetic merge group can have a valid final tree despite rewriting
+        # an applied migration. The group must run the same change guard as PRs.
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("M", "supabase/migrations/20240101000000_initial_schema.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("historical migration", errors[0])
+
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/lionbi-pr-fast-feedback.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("github.event_name == 'merge_group'", workflow)
+        self.assertIn("github.event.merge_group.base_sha", workflow)
+        self.assertIn("python scripts/check_lionbi_change_hygiene.py --changes", workflow)
+
+    def test_synthetic_merge_group_cli_rejects_historical_rewrite(self):
+        # Simulate a synthetic merge-group HEAD based on an earlier Git commit.
+        # This is local-only: no actual merge queue, provider or remote DB.
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = Path(temp)
+            migration = checkout / "supabase/migrations/20240101000000_initial_schema.sql"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("-- previously applied migration", encoding="utf-8")
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=checkout, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Synthetic CI Fixture")
+            git("config", "user.email", "ci-fixture@example.invalid")
+            git("add", ".")
+            git("commit", "-qm", "historical base")
+            base_sha = git("rev-parse", "HEAD")
+            migration.write_text("-- illicit historical rewrite", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "synthetic merge-group head")
+            changes = git("diff", "--name-status", "--no-renames", base_sha + "...HEAD")
+            change_file = checkout / "changes.txt"
+            change_file.write_text(changes + chr(10), encoding="utf-8")
+
+            script = Path(__file__).with_name("check_lionbi_change_hygiene.py")
+            completed = subprocess.run(
+                [sys.executable, str(script), "--changes", str(change_file),
+                 "--check-tree", "--root", str(checkout)],
+                cwd=checkout, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("historical migration modified/deleted/renamed", completed.stdout)
+
+    def test_two_individually_green_branches_collide_on_synthetic_merge(self):
+        # Actual local Git merges reproduce a collision not visible to either
+        # individual branch; the combined tree must fail closed.
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = Path(temp)
+            (checkout / "README.md").write_text("synthetic integration fixture", encoding="utf-8")
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=checkout, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Synthetic CI Fixture")
+            git("config", "user.email", "ci-fixture@example.invalid")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base_sha = git("rev-parse", "HEAD")
+            directory = checkout / "supabase/migrations"
+            directory.mkdir(parents=True)
+
+            for branch_name, filename in (
+                ("independent-alpha", "20261122120000_alpha.sql"),
+                ("independent-beta", "20261122120000_beta.sql"),
+            ):
+                git("checkout", "-qb", branch_name, base_sha)
+                # Git removes the now-empty directory when switching branches.
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / filename).write_text("-- independent", encoding="utf-8")
+                git("add", ".")
+                git("commit", "-qm", "add one versioned migration")
+                self.assertEqual(check_migration_tree(checkout), [])
+
+            git("checkout", "-qb", "synthetic-integration", base_sha)
+            git("merge", "--no-ff", "--no-edit", "independent-alpha")
+            git("merge", "--no-ff", "--no-edit", "independent-beta")
+            script = Path(__file__).with_name("check_lionbi_change_hygiene.py")
+            completed = subprocess.run(
+                [sys.executable, str(script), "--check-tree", "--root", str(checkout)],
+                cwd=checkout, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("duplicate migration version 20261122120000", completed.stdout)
 
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])

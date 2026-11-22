@@ -1,0 +1,47 @@
+# Lightweight PR feedback; NOT a substitute for full CI, CodeQL,
+# authenticated provider acceptance, or independent approval.
+name: Lion BI PR fast feedback
+
+on:
+  # Required check: always run on PRs, including docs-only changes.
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-preflight:
+    name: Python syntax and additive migration guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Rapid Python syntax check (no application imports or credentials)
+        run: python -m compileall -q backend scripts/check_lionbi_change_hygiene.py
+      - name: Run focused guard regression tests
+        run: python -m unittest discover -s scripts -p test_check_lionbi_change_hygiene.py -v
+      - name: Validate complete migration tree in PR or merge-queue checkout
+        run: python scripts/check_lionbi_change_hygiene.py --check-tree --root .
+      - name: Check historical migration edits on PR and merge-group deltas
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            test -n "$MERGE_GROUP_BASE_SHA"
+            git cat-file -e "${MERGE_GROUP_BASE_SHA}^{commit}"
+            git diff --name-status --no-renames "$MERGE_GROUP_BASE_SHA"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
+          else
+            git diff --name-status --no-renames "origin/$GITHUB_BASE_REF"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
+          fi
+          python scripts/check_lionbi_change_hygiene.py --changes "$RUNNER_TEMP/lionbi-changes.txt" --root .

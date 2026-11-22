@@ -170,6 +170,15 @@ class FastGateTests(unittest.TestCase):
         self.assertNotIn("paths:", pr_events)
         self.assertNotIn("paths-ignore:", pr_events)
 
+    def test_ci_and_codeql_run_on_merge_groups(self):
+        # Merge queues run checks on synthetic merge refs, not ordinary PR refs.
+        workflow_root = Path(__file__).resolve().parents[1] / ".github/workflows"
+        for workflow_name in ("ci.yml", "codeql.yml"):
+            with self.subTest(workflow=workflow_name):
+                workflow = (workflow_root / workflow_name).read_text(encoding="utf-8")
+                trigger_block = workflow.split("on:\\n", 1)[1]
+                self.assertIn("  merge_group:\\n", trigger_block)
+
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])
         with self.assertRaises(ValueError):

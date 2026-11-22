@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_lionbi_change_hygiene import check_changes, parse_change_list
+from check_lionbi_change_hygiene import check_changes, check_migration_tree, parse_change_list
 
 
 class FastGateTests(unittest.TestCase):
@@ -125,6 +125,27 @@ class FastGateTests(unittest.TestCase):
             )
             self.assertEqual(errors, [])
             self.assertNotIn("active-migrations", surfaces)
+
+    def test_integration_tree_rejects_collisions_from_two_green_prs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "supabase/migrations"
+            directory.mkdir(parents=True)
+            first = "20261121120000_alpha.sql"
+            second = "20261121120000_beta.sql"
+            (directory / first).write_text("-- first PR", encoding="utf-8")
+            self.assertEqual(check_migration_tree(Path(temp)), [])
+            (directory / second).write_text("-- independently green second PR", encoding="utf-8")
+            errors = check_migration_tree(Path(temp))
+            self.assertEqual(len(errors), 1)
+            self.assertIn("duplicate migration version 20261121120000", errors[0])
+
+    def test_integration_tree_scopes_collisions_per_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for active in ("supabase/migrations", "staging_supabase/supabase/migrations"):
+                directory = Path(temp) / active
+                directory.mkdir(parents=True)
+                (directory / "20261121120000_additive.sql").write_text("-- independent", encoding="utf-8")
+            self.assertEqual(check_migration_tree(Path(temp)), [])
 
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])

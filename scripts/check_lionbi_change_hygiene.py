@@ -8,10 +8,11 @@ human release approval.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import re
 from pathlib import Path
 
-ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/")
+ACTIVE_ROOTS = ("supabase/migrations/", "backend/supabase/migrations/", "staging_supabase/supabase/migrations/")
 MIGRATION_NAME = re.compile(r"^(?P<version>[0-9]{14})_[a-z0-9_]+\.sql$")
 
 
@@ -43,12 +44,21 @@ def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str]
             continue
         if operation != "A":
             continue
+        relative_path = path[len(active_root):]
+        if "/" in relative_path:
+            errors.append(f"{path}: migration SQL must be a direct child of {active_root}")
+            continue
         name = Path(path).name
         match = MIGRATION_NAME.fullmatch(name)
         if not match:
             errors.append(f"{path}: added migration must use YYYYMMDDHHMMSS_description.sql")
             continue
         version = match.group("version")
+        try:
+            datetime.strptime(version, "%Y%m%d%H%M%S")
+        except ValueError:
+            errors.append(f"{path}: migration timestamp is not a real calendar date/time")
+            continue
         migrations_dir = root / active_root
         if migrations_dir.is_dir():
             conflicts = sorted(

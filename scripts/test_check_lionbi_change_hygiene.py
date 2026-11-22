@@ -179,6 +179,25 @@ class FastGateTests(unittest.TestCase):
                 trigger_block = workflow.split("on:" + chr(10), 1)[1]
                 self.assertIn("  merge_group:" + chr(10), trigger_block)
 
+    def test_merge_group_diff_guard_rejects_historical_edits(self):
+        # A synthetic merge group can have a valid final tree despite rewriting
+        # an applied migration. The group must run the same change guard as PRs.
+        with tempfile.TemporaryDirectory() as temp:
+            errors, _ = check_changes(
+                [("M", "supabase/migrations/20240101000000_initial_schema.sql")],
+                Path(temp),
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn("historical migration", errors[0])
+
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/lionbi-pr-fast-feedback.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("github.event_name == 'merge_group'", workflow)
+        self.assertIn("github.event.merge_group.base_sha", workflow)
+        self.assertIn("python scripts/check_lionbi_change_hygiene.py --changes", workflow)
+
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])
         with self.assertRaises(ValueError):

@@ -237,6 +237,49 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
             self.assertIn("historical migration modified/deleted/renamed", completed.stdout)
 
+    def test_two_individually_green_branches_collide_on_synthetic_merge(self):
+        # Actual local Git merges reproduce a collision not visible to either
+        # individual branch; the combined tree must fail closed.
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = Path(temp)
+            (checkout / "README.md").write_text("synthetic integration fixture", encoding="utf-8")
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=checkout, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Synthetic CI Fixture")
+            git("config", "user.email", "ci-fixture@example.invalid")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base_sha = git("rev-parse", "HEAD")
+            directory = checkout / "supabase/migrations"
+            directory.mkdir(parents=True)
+
+            for branch_name, filename in (
+                ("independent-alpha", "20261122120000_alpha.sql"),
+                ("independent-beta", "20261122120000_beta.sql"),
+            ):
+                git("checkout", "-qb", branch_name, base_sha)
+                (directory / filename).write_text("-- independent", encoding="utf-8")
+                git("add", ".")
+                git("commit", "-qm", "add one versioned migration")
+                self.assertEqual(check_migration_tree(checkout), [])
+
+            git("checkout", "-qb", "synthetic-integration", base_sha)
+            git("merge", "--no-ff", "--no-edit", "independent-alpha")
+            git("merge", "--no-ff", "--no-edit", "independent-beta")
+            script = Path(__file__).with_name("check_lionbi_change_hygiene.py")
+            completed = subprocess.run(
+                [sys.executable, str(script), "--check-tree", "--root", str(checkout)],
+                cwd=checkout, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("duplicate migration version 20261122120000", completed.stdout)
+
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])
         with self.assertRaises(ValueError):

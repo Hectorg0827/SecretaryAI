@@ -1,4 +1,6 @@
 """Focused regression coverage for the fast PR migration-change preflight."""
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -197,6 +199,43 @@ class FastGateTests(unittest.TestCase):
         self.assertIn("github.event_name == 'merge_group'", workflow)
         self.assertIn("github.event.merge_group.base_sha", workflow)
         self.assertIn("python scripts/check_lionbi_change_hygiene.py --changes", workflow)
+
+    def test_synthetic_merge_group_cli_rejects_historical_rewrite(self):
+        # Simulate a synthetic merge-group HEAD based on an earlier Git commit.
+        # This is local-only: no actual merge queue, provider or remote DB.
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = Path(temp)
+            migration = checkout / "supabase/migrations/20240101000000_initial_schema.sql"
+            migration.parent.mkdir(parents=True)
+            migration.write_text("-- previously applied migration", encoding="utf-8")
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=checkout, check=True, capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Synthetic CI Fixture")
+            git("config", "user.email", "ci-fixture@example.invalid")
+            git("add", ".")
+            git("commit", "-qm", "historical base")
+            base_sha = git("rev-parse", "HEAD")
+            migration.write_text("-- illicit historical rewrite", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "synthetic merge-group head")
+            changes = git("diff", "--name-status", "--no-renames", base_sha + "...HEAD")
+            change_file = checkout / "changes.txt"
+            change_file.write_text(changes + chr(10), encoding="utf-8")
+
+            script = Path(__file__).with_name("check_lionbi_change_hygiene.py")
+            completed = subprocess.run(
+                [sys.executable, str(script), "--changes", str(change_file),
+                 "--check-tree", "--root", str(checkout)],
+                cwd=checkout, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            self.assertIn("historical migration modified/deleted/renamed", completed.stdout)
 
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])

@@ -176,8 +176,8 @@ class FastGateTests(unittest.TestCase):
         for workflow_name in ("ci.yml", "codeql.yml"):
             with self.subTest(workflow=workflow_name):
                 workflow = (workflow_root / workflow_name).read_text(encoding="utf-8")
-                trigger_block = workflow.split("on:\\n", 1)[1]
-                self.assertIn("  merge_group:\\n", trigger_block)
+                trigger_block = workflow.split("on:" + chr(10), 1)[1]
+                self.assertIn("  merge_group:" + chr(10), trigger_block)
 
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])

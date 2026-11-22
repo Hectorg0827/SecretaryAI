@@ -139,6 +139,17 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertIn("duplicate migration version 20261121120000", errors[0])
 
+    def test_merge_group_tree_rejects_nested_sql_without_diff(self):
+        # A merge_group job does not run the PR name-status diff guard.
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "staging_supabase/supabase/migrations/archive"
+            directory.mkdir(parents=True)
+            (directory / "20261121120000_hidden.sql").write_text("-- not applied", encoding="utf-8")
+            errors = check_migration_tree(Path(temp))
+            self.assertEqual(len(errors), 1)
+            self.assertIn("direct child", errors[0])
+            self.assertIn("archive/20261121120000_hidden.sql", errors[0])
+
     def test_integration_tree_scopes_collisions_per_root(self):
         with tempfile.TemporaryDirectory() as temp:
             for active in ("supabase/migrations", "staging_supabase/supabase/migrations"):

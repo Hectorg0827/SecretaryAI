@@ -3,16 +3,8 @@
 name: Lion BI PR fast feedback
 
 on:
+  # Required check: always run on PRs, including docs-only changes.
   pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "supabase/migrations/**"
-      - "backend/supabase/migrations/**"
-      - "staging_supabase/supabase/migrations/**"
-      - "scripts/check_lionbi_change_hygiene.py"
-      - "scripts/test_check_lionbi_change_hygiene.py"
-      - ".github/workflows/lionbi-pr-fast-feedback.yml"
   merge_group:
     types: [checks_requested]
   workflow_dispatch:

@@ -264,6 +264,8 @@ class FastGateTests(unittest.TestCase):
                 ("independent-beta", "20261122120000_beta.sql"),
             ):
                 git("checkout", "-qb", branch_name, base_sha)
+                # Git removes the now-empty directory when switching branches.
+                directory.mkdir(parents=True, exist_ok=True)
                 (directory / filename).write_text("-- independent", encoding="utf-8")
                 git("add", ".")
                 git("commit", "-qm", "add one versioned migration")

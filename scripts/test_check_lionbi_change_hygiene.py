@@ -282,6 +282,20 @@ class FastGateTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
             self.assertIn("duplicate migration version 20261122120000", completed.stdout)
 
+    def test_success_message_does_not_require_unavailable_merge_queue(self):
+        # Personal-account repositories cannot enable GitHub merge queues.
+        # Successful local checks must not imply a nonexistent platform gate.
+        with tempfile.TemporaryDirectory() as temp:
+            script = Path(__file__).with_name("check_lionbi_change_hygiene.py")
+            completed = subprocess.run(
+                [sys.executable, str(script), "--check-tree", "--root", temp],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertIn("strict up-to-date integration checks", completed.stdout)
+            self.assertIn("independent review still required", completed.stdout)
+            self.assertNotIn("Merge queue", completed.stdout)
+
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])
         with self.assertRaises(ValueError):

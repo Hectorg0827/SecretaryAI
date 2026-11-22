@@ -158,6 +158,18 @@ class FastGateTests(unittest.TestCase):
                 (directory / "20261121120000_additive.sql").write_text("-- independent", encoding="utf-8")
             self.assertEqual(check_migration_tree(Path(temp)), [])
 
+    def test_required_fast_feedback_is_not_pr_path_filtered(self):
+        # Required status checks must report on docs-only and mixed PRs too.
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/lionbi-pr-fast-feedback.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("  pull_request:", workflow)
+        self.assertIn("  merge_group:", workflow)
+        pr_events = workflow.split("  pull_request:", 1)[1].split("  merge_group:", 1)[0]
+        self.assertNotIn("paths:", pr_events)
+        self.assertNotIn("paths-ignore:", pr_events)
+
     def test_git_change_lines(self):
         self.assertEqual(parse_change_list("A\tsupabase/migrations/abc.sql\n"), [("A", "supabase/migrations/abc.sql")])
         with self.assertRaises(ValueError):

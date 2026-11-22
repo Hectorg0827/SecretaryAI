@@ -30,10 +30,18 @@ jobs:
         run: python -m unittest discover -s scripts -p test_check_lionbi_change_hygiene.py -v
       - name: Validate complete migration tree in PR or merge-queue checkout
         run: python scripts/check_lionbi_change_hygiene.py --check-tree --root .
-      - name: Check active migration files changed by PR
-        if: github.event_name == 'pull_request'
+      - name: Check historical migration edits on PR and merge-group deltas
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         shell: bash
+        env:
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          git diff --name-status --no-renames "origin/$GITHUB_BASE_REF"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            test -n "$MERGE_GROUP_BASE_SHA"
+            git cat-file -e "${MERGE_GROUP_BASE_SHA}^{commit}"
+            git diff --name-status --no-renames "$MERGE_GROUP_BASE_SHA"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
+          else
+            git diff --name-status --no-renames "origin/$GITHUB_BASE_REF"...HEAD > "$RUNNER_TEMP/lionbi-changes.txt"
+          fi
           python scripts/check_lionbi_change_hygiene.py --changes "$RUNNER_TEMP/lionbi-changes.txt" --root .

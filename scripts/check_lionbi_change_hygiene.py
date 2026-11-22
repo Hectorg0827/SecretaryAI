@@ -86,6 +86,14 @@ def check_migration_tree(root: Path) -> list[str]:
         migration_dir = root / active_root
         if not migration_dir.is_dir():
             continue
+        # merge_group skips the PR diff check, so inspect nested SQL too.
+        # Supabase only replays direct children of its migrations directory.
+        for nested in sorted(migration_dir.rglob("*.sql")):
+            if nested.parent != migration_dir:
+                relative = nested.relative_to(migration_dir).as_posix()
+                errors.append(
+                    f"{active_root}{relative}: migration SQL must be a direct child of {active_root}"
+                )
         versions: dict[str, list[str]] = {}
         for sql in sorted(migration_dir.glob("*.sql")):
             match = MIGRATION_NAME.fullmatch(sql.name)

@@ -77,9 +77,10 @@ def check_changes(changes: list[tuple[str, str]], root: Path) -> tuple[list[str]
 def check_migration_tree(root: Path) -> list[str]:
     """Verify version uniqueness across each complete integration checkout.
 
-    Checking all migration files (not just the PR diff) makes a merge-queue
-    synthetic merge detect colliding versions from independently green PRs.
-    A passing PR-head check is not a substitute for merge-queue enforcement.
+    Checking all migration files (not just the PR diff) makes a combined
+    integration checkout detect colliding versions from independently green PRs.
+    A passing PR-head check is not a substitute for strict required checks,
+    independently approved integration, or authenticated database acceptance.
     """
     errors: list[str] = []
     for active_root in ACTIVE_ROOTS:
@@ -146,7 +147,7 @@ def main() -> int:
             print("BLOCKED: " + error)
         print("This fast check is not approval to edit historical applied migrations.")
         return 1
-    print("PASS: migration hygiene. Merge queue, full CI and independent review still required.")
+    print("PASS: migration hygiene only. Full CI, CodeQL, strict up-to-date integration checks, and independent review still required.")
     return 0
 
 

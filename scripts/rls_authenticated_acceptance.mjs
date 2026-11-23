@@ -65,6 +65,17 @@ try {
   assert.ok(other.ok && other.data.length===0,'Company B must not read A');
   const anonymous=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon);
   assert.ok(anonymous.ok && anonymous.data.length===0,'Anonymous client must not read A');
+  const ownInsert=await request('/rest/v1/accounts',anon,'POST',{company_id:a,name:'RLS-OWN-'+tag},ta);
+  assert.ok(ownInsert.ok && Array.isArray(ownInsert.data) && ownInsert.data.length===1,
+    'Company A must be able to create its own account');
+  accounts.push(ownInsert.data[0].id);
+  const foreignInsert=await request('/rest/v1/accounts',anon,'POST',{company_id:b,name:'RLS-FOREIGN-'+tag},ta);
+  assert.ok(!foreignInsert.ok || (Array.isArray(foreignInsert.data) && foreignInsert.data.length===0),
+    'Company A must not create an account in Company B');
+  const ownUpdate=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'PATCH',
+    {name:'RLS-UPDATED-'+tag},ta);
+  assert.ok(ownUpdate.ok && Array.isArray(ownUpdate.data) && ownUpdate.data.length===1,
+    'Company A must be able to update its own account');
   const reassignment=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'PATCH',{company_id:b},ta);
   assert.ok(!reassignment.ok || reassignment.data.length===0,'Tenant reassignment must be rejected');
   const crossDelete=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'DELETE',undefined,tb);
@@ -72,7 +83,9 @@ try {
   const after=await must('/rest/v1/accounts?id=eq.'+account+'&select=id,company_id',service,'GET');
   assert.equal(after.length,1,'Protected record must still exist after forbidden operations');
   assert.equal(after[0].company_id,a,'Protected record must retain original company ownership');
-  console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete, persisted ownership');
+  assert.equal((await must('/rest/v1/accounts?name=eq.RLS-FOREIGN-'+tag+'&select=id',service,'GET')).length,0,
+    'Foreign tenant insert must not persist any record');
+  console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete, own insert/update, foreign insert, persisted ownership');
 } finally {
   const failures=[];
   for(const id of accounts) { const r=await request('/rest/v1/accounts?id=eq.'+id,service,'DELETE'); if(!r.ok) failures.push('account'); }

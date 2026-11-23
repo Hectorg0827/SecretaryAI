@@ -1,0 +1,27 @@
+name: Tenant RLS harness static checks
+on:
+  pull_request:
+    paths:
+      - 'scripts/rls_authenticated_acceptance.mjs'
+      - '.github/workflows/tenant-rls-harness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check runner syntax
+        run: node --check scripts/rls_authenticated_acceptance.mjs
+      - name: Assert runner fails closed without disposable opt-in
+        run: |
+          if node scripts/rls_authenticated_acceptance.mjs > /tmp/rls-harness-out 2>&1; then
+            echo "ERROR: runner started without opt-in"
+            exit 1
+          fi
+          grep -q "Explicit disposable-test opt-in required" /tmp/rls-harness-out

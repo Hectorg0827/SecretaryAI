@@ -12,7 +12,7 @@ assert.equal(process.env.ALLOW_DISPOSABLE_AUTH_TESTS, 'yes', 'Explicit disposabl
 assert.ok(base && service && anon, 'Missing Supabase environment configuration');
 const host = new URL(base);
 assert.equal(host.protocol, 'https:');
-assert.ok(!['xerktvdgjvjozvckjyfp', 'gpeytsazslopipmplixe'].some(ref => host.hostname.includes(ref)),
+assert.ok(!['xerktvdgjvjozvckjyfp', 'gpeytsazslopipmplixe', 'toujmmvlgktprabjbccq', 'djfcginvavwuyfxxlyjv', 'keopiqwmcrftydjvztev'].some(ref => host.hostname.includes(ref)),
   'Parent staging and production are forbidden');
 assert.ok(process.env.EXPECTED_DISPOSABLE_PROJECT_REF && host.hostname.startsWith(process.env.EXPECTED_DISPOSABLE_PROJECT_REF + '.'),
   'URL must match an explicitly designated disposable branch');
@@ -70,6 +70,9 @@ try {
     'Company A must be able to create its own account');
   accounts.push(ownInsert.data[0].id);
   const foreignInsert=await request('/rest/v1/accounts',anon,'POST',{company_id:b,name:'RLS-FOREIGN-'+tag},ta);
+  if (foreignInsert.ok && Array.isArray(foreignInsert.data)) {
+    for (const row of foreignInsert.data) if (row.id) accounts.push(row.id);
+  }
   assert.ok(!foreignInsert.ok || (Array.isArray(foreignInsert.data) && foreignInsert.data.length===0),
     'Company A must not create an account in Company B');
   const ownUpdate=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'PATCH',
@@ -88,9 +91,13 @@ try {
   console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete, own insert/update, foreign insert, persisted ownership');
 } finally {
   const failures=[];
-  for(const id of accounts) { const r=await request('/rest/v1/accounts?id=eq.'+id,service,'DELETE'); if(!r.ok) failures.push('account'); }
-  for(const id of users) { const r=await request('/auth/v1/admin/users/'+id,service,'DELETE'); if(!r.ok) failures.push('user'); }
-  for(const id of companies) { const r=await request('/rest/v1/companies?id=eq.'+id,service,'DELETE'); if(!r.ok) failures.push('company'); }
+  async function cleanup(path, kind) {
+    try { const r=await request(path,service,'DELETE'); if(!r.ok) failures.push(kind); }
+    catch { failures.push(kind); }
+  }
+  for(const id of accounts) await cleanup('/rest/v1/accounts?id=eq.'+id,'account');
+  for(const id of users) await cleanup('/auth/v1/admin/users/'+id,'user');
+  for(const id of companies) await cleanup('/rest/v1/companies?id=eq.'+id,'company');
   if(failures.length) { console.error('Fixture cleanup failed for '+failures.join(',')+'; disposable branch must be deleted.'); process.exitCode=1; }
   else console.log('Fixture deletion requests completed; delete disposable branch after verification.');
 }

@@ -65,14 +65,19 @@ try {
   assert.ok(other.ok && other.data.length===0,'Company B must not read A');
   const anonymous=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon);
   assert.ok(anonymous.ok && anonymous.data.length===0,'Anonymous client must not read A');
-  const reassignment=await request('/rest/v1/accounts?id=eq.'+account,anon,'PATCH',{company_id:b},ta);
+  const reassignment=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'PATCH',{company_id:b},ta);
   assert.ok(!reassignment.ok || reassignment.data.length===0,'Tenant reassignment must be rejected');
-  const crossDelete=await request('/rest/v1/accounts?id=eq.'+account,anon,'DELETE',undefined,tb);
+  const crossDelete=await request('/rest/v1/accounts?id=eq.'+account+'&select=id',anon,'DELETE',undefined,tb);
   assert.ok(!crossDelete.ok || crossDelete.data.length===0,'Cross-tenant DELETE must be rejected');
-  console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete');
+  const after=await must('/rest/v1/accounts?id=eq.'+account+'&select=id,company_id',service,'GET');
+  assert.equal(after.length,1,'Protected record must still exist after forbidden operations');
+  assert.equal(after[0].company_id,a,'Protected record must retain original company ownership');
+  console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete, persisted ownership');
 } finally {
-  for(const id of accounts) await request('/rest/v1/accounts?id=eq.'+id,service,'DELETE');
-  for(const id of users) await request('/auth/v1/admin/users/'+id,service,'DELETE');
-  for(const id of companies) await request('/rest/v1/companies?id=eq.'+id,service,'DELETE');
-  console.log('Cleanup attempted for all created fixtures; verify disposable branch before deletion.');
+  const failures=[];
+  for(const id of accounts) { const r=await request('/rest/v1/accounts?id=eq.'+id,service,'DELETE'); if(!r.ok) failures.push('account'); }
+  for(const id of users) { const r=await request('/auth/v1/admin/users/'+id,service,'DELETE'); if(!r.ok) failures.push('user'); }
+  for(const id of companies) { const r=await request('/rest/v1/companies?id=eq.'+id,service,'DELETE'); if(!r.ok) failures.push('company'); }
+  if(failures.length) { console.error('Fixture cleanup failed for '+failures.join(',')+'; disposable branch must be deleted.'); process.exitCode=1; }
+  else console.log('Fixture deletion requests completed; delete disposable branch after verification.');
 }

@@ -106,6 +106,19 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # Tauri embeds frontendDist at compile time. This non-release job
+      # builds a development-mode UI without weakening the production URL guard.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build desktop UI for native compilation
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build -- --mode development
+          test -f dist/index.html
       - name: rustfmt
         working-directory: desktop/src-tauri
         run: cargo fmt --all --check

@@ -6,6 +6,7 @@
 // Never prints secrets, tokens or customer data.
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
+import { cleanupFixtures } from './rls_fixture_cleanup.mjs';
 
 const { SUPABASE_URL: base, SUPABASE_SERVICE_ROLE_KEY: service, SUPABASE_ANON_KEY: anon } = process.env;
 assert.equal(process.env.ALLOW_DISPOSABLE_AUTH_TESTS, 'yes', 'Explicit disposable-test opt-in required');
@@ -90,14 +91,13 @@ try {
     'Foreign tenant insert must not persist any record');
   console.log('PASS: real Auth sessions, own read, foreign read, anonymous read, reassignment, foreign delete, own insert/update, foreign insert, persisted ownership');
 } finally {
-  const failures=[];
-  async function cleanup(path, kind) {
-    try { const r=await request(path,service,'DELETE'); if(!r.ok) failures.push(kind); }
-    catch { failures.push(kind); }
-  }
-  for(const id of accounts) await cleanup('/rest/v1/accounts?id=eq.'+id,'account');
-  for(const id of users) await cleanup('/auth/v1/admin/users/'+id,'user');
-  for(const id of companies) await cleanup('/rest/v1/companies?id=eq.'+id,'company');
-  if(failures.length) { console.error('Fixture cleanup failed for '+failures.join(',')+'; disposable branch must be deleted.'); process.exitCode=1; }
-  else console.log('Fixture deletion requests completed; delete disposable branch after verification.');
+  const failures = await cleanupFixtures({
+    accounts, users, companies,
+    request: (path, method) => request(path, service, method)
+  });
+  if (failures.length) {
+    console.error('Fixture cleanup verification failed (' + failures.length + '): ' +
+      failures.map(f => f.split(':')[0]).join(',') + '; disposable branch must be deleted.');
+    process.exitCode = 1;
+  } else console.log('PASS: fixture IDs deleted and absence verified; delete disposable branch after verification.');
 }

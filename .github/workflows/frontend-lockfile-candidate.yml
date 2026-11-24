@@ -7,7 +7,6 @@ on:
       - 'frontend/package-lock.json'
 permissions:
   contents: read
-  actions: read
 jobs:
   candidate:
     runs-on: ubuntu-latest
@@ -27,19 +26,10 @@ jobs:
           npm install --global npm@11.19.1
           node --version
           npm --version
-      - name: Retrieve exact validated artifact
-        uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 45419182989
-          artifact-ids: 14931779332
-          path: frontend
-          merge-multiple: true
-      - name: Verify exact candidate and export transfer chunks
+      - name: Verify committed dependency files
         run: |
           echo '18ea46f411b7eb8f005be57d8f98bff53a4af4014925985af7c13cb4c1c47e77  package.json' | sha256sum -c
           echo '1f512960d07416f600fa79b641e979a3f41d76395f1e8f5a8e11284d5eae8cfd  package-lock.json' | sha256sum -c
-          node -e "for(const f of ['package.json','package-lock.json']) {const b=require('fs').readFileSync(f).toString('base64'); for(let i=0;i<b.length;i+=4096) console.log('TRANSFER:'+f+':'+i+':'+b.slice(i,i+4096))}"
       - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run typecheck

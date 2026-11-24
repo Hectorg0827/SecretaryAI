@@ -34,6 +34,7 @@ jobs:
           run-id: 45419182989
           artifact-ids: 14931779332
           path: frontend
+          merge-multiple: true
       - name: Verify exact candidate and export transfer chunks
         run: |
           echo '18ea46f411b7eb8f005be57d8f98bff53a4af4014925985af7c13cb4c1c47e77  package.json' | sha256sum -c

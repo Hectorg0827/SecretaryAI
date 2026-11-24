@@ -24,7 +24,9 @@ jobs:
       - name: Generate explicit security upgrade candidate
         run: |
           npm install --package-lock-only --ignore-scripts --save-dev vite@8.3.8 @vitejs/plugin-react@latest happy-dom@'>21.0.3'
-          npm update --package-lock-only --ignore-scripts brace-expansion browserslist lodash nanoid source-map-js
+          npm install --package-lock-only --ignore-scripts --save-exact react-router-dom@7.18.0
+          npm install --package-lock-only --ignore-scripts --save-dev --save-exact vitest@4.1.12 @typescript-eslint/eslint-plugin@8.72.3 @typescript-eslint/parser@8.72.3
+          npm update --package-lock-only --ignore-scripts brace-expansion browserslist lodash nanoid source-map-js @humanfs/node minimatch postcss-selector-parser
           npm audit fix --package-lock-only --ignore-scripts --audit-level=high || test "$?" -eq 1
       - name: Validate candidate installation
         run: npm ci --ignore-scripts
@@ -43,6 +45,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
-      - name: Enforce high-severity audit
+      - name: Enforce zero known vulnerabilities
         if: always()
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=low

@@ -7,6 +7,7 @@ on:
       - 'frontend/package-lock.json'
 permissions:
   contents: read
+  actions: read
 jobs:
   candidate:
     runs-on: ubuntu-latest
@@ -26,44 +27,21 @@ jobs:
           npm install --global npm@11.19.1
           node --version
           npm --version
-      - name: Generate explicit security upgrade candidate
-        run: |
-          eslint_version="$(npm view @typescript-eslint/eslint-plugin@latest version)"
-          npm view "@typescript-eslint/parser@$eslint_version" version
-          npm pkg set 'dependencies.react-router-dom=7.18.6' 'devDependencies.vite=8.3.8' 'devDependencies.@vitejs/plugin-react=^6.0.0' 'devDependencies.happy-dom=>21.0.3' 'devDependencies.vitest=4.1.12' "devDependencies.@typescript-eslint/eslint-plugin=$eslint_version" "devDependencies.@typescript-eslint/parser=$eslint_version"
-          npm view '@vitejs/plugin-react@^6.0.0' peerDependencies
-          npm install --package-lock-only --ignore-scripts --prefer-online --strict-peer-deps
-          npm audit fix --package-lock-only --ignore-scripts --audit-level=low || test "$?" -eq 1
-      - name: Record candidate before validation
-        run: npm audit --json > audit-candidate.json || test "$?" -eq 1
-      - name: Preserve diagnostic candidate
-        uses: actions/upload-artifact@v4
+      - name: Retrieve exact validated artifact
+        uses: actions/download-artifact@v4
         with:
-          name: frontend-lockfile-diagnostic
-          path: |
-            frontend/package.json
-            frontend/package-lock.json
-            frontend/audit-candidate.json
-      - name: Validate candidate installation
+          github-token: ${{ github.token }}
+          run-id: 45419182989
+          artifact-ids: 14931779332
+          path: frontend
+      - name: Verify exact candidate and export transfer chunks
         run: |
-          test -s package-lock.json
-          npm ci --ignore-scripts
-          node -e "const p=require('./package.json'), l=require('./package-lock.json'); for(const k of ['dependencies','devDependencies']) for(const [n,v] of Object.entries(p[k]||{})) if(l.packages[''][k]?.[n]!==v) throw Error('Lockfile mismatch: '+n)"
-      - name: Record remaining advisories
-        run: npm audit --json > audit-candidate.json || test "$?" -eq 1
-      - name: Preserve candidate for independent review
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-lockfile-candidate
-          path: |
-            frontend/package.json
-            frontend/package-lock.json
-            frontend/audit-candidate.json
-          retention-days: 7
+          echo '18ea46f411b7eb8f005be57d8f98bff53a4af4014925985af7c13cb4c1c47e77  package.json' | sha256sum -c
+          echo '1f512960d07416f600fa79b641e979a3f41d76395f1e8f5a8e11284d5eae8cfd  package-lock.json' | sha256sum -c
+          node -e "for(const f of ['package.json','package-lock.json']) {const b=require('fs').readFileSync(f).toString('base64'); for(let i=0;i<b.length;i+=4096) console.log('TRANSFER:'+f+':'+i+':'+b.slice(i,i+4096))}"
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
-      - name: Enforce zero known vulnerabilities
-        if: success()
-        run: npm audit --audit-level=low
+      - run: npm audit --audit-level=low

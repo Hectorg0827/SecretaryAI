@@ -28,7 +28,9 @@ jobs:
           npm --version
       - name: Generate explicit security upgrade candidate
         run: |
-          npm pkg set 'dependencies.react-router-dom=7.18.6' 'devDependencies.vite=8.3.8' 'devDependencies.@vitejs/plugin-react=latest' 'devDependencies.happy-dom=>21.0.3' 'devDependencies.vitest=4.1.12' 'devDependencies.@typescript-eslint/eslint-plugin=8.72.3' 'devDependencies.@typescript-eslint/parser=8.72.3'
+          eslint_version="$(npm view @typescript-eslint/eslint-plugin@latest version)"
+          npm view "@typescript-eslint/parser@$eslint_version" version
+          npm pkg set 'dependencies.react-router-dom=7.18.6' 'devDependencies.vite=8.3.8' 'devDependencies.@vitejs/plugin-react=latest' 'devDependencies.happy-dom=>21.0.3' 'devDependencies.vitest=4.1.12' "devDependencies.@typescript-eslint/eslint-plugin=$eslint_version" "devDependencies.@typescript-eslint/parser=$eslint_version"
           npm install --package-lock-only --ignore-scripts --prefer-online
           npm audit fix --package-lock-only --ignore-scripts --audit-level=low || test "$?" -eq 1
       - name: Validate candidate installation

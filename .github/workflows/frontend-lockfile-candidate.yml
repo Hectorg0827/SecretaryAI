@@ -20,9 +20,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Generate non-breaking lockfile candidate
-        run: npm audit fix --package-lock-only --ignore-scripts --audit-level=high || test "$?" -eq 1
+          node-version: '22.22.0'
+      - name: Generate explicit security upgrade candidate
+        run: |
+          npm install --package-lock-only --ignore-scripts --save-dev vite@8.3.8 @vitejs/plugin-react@latest happy-dom@'>21.0.3'
+          npm update --package-lock-only --ignore-scripts brace-expansion browserslist lodash nanoid source-map-js
+          npm audit fix --package-lock-only --ignore-scripts --audit-level=high || test "$?" -eq 1
       - name: Validate candidate installation
         run: npm ci --ignore-scripts
       - name: Record remaining advisories
@@ -36,9 +39,10 @@ jobs:
             frontend/package-lock.json
             frontend/audit-candidate.json
           retention-days: 7
-      - name: Enforce high-severity audit
-        run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - name: Enforce high-severity audit
+        if: always()
+        run: npm audit --audit-level=high

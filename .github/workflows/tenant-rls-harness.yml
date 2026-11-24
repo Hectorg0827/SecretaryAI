@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'scripts/rls_authenticated_acceptance.mjs'
+      - 'scripts/rls_fixture_cleanup.mjs'
+      - 'scripts/rls_fixture_cleanup.test.mjs'
       - '.github/workflows/tenant-rls-harness.yml'
   workflow_dispatch:
 permissions:
@@ -18,6 +20,8 @@ jobs:
           node-version: '22'
       - name: Check runner syntax
         run: node --check scripts/rls_authenticated_acceptance.mjs
+      - name: Run provider-free fixture cleanup regression
+        run: node --test scripts/rls_fixture_cleanup.test.mjs
       - name: Assert runner fails closed without disposable opt-in
         run: |
           if node scripts/rls_authenticated_acceptance.mjs > /tmp/rls-harness-out 2>&1; then

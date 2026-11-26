@@ -1,0 +1,36 @@
+name: Desktop dependency remediation candidate
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-lockfile-candidate.yml'
+      - 'desktop/package*.json'
+      - 'desktop/vite.config.ts'
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - run: npm install --global npm@11.19.1
+      - name: Verify committed candidate checksums
+        run: |
+          echo '64121324d514a0cdfac2e2cd7dff3803d14a022e4fa631c845fc352e96145f77  package.json' | sha256sum -c
+          echo '95a70589bd73041e9391e6dba235e52e152aa30f98ba413b31ba51ab26cdf126  package-lock.json' | sha256sum -c
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build -- --mode development
+      - name: Audit candidate even if build fails
+        if: always()
+        run: npm audit --audit-level=low

@@ -298,7 +298,8 @@ async def login(body: LoginRequest, _=Depends(require_rate_limit(login_limiter))
 
     # ── Second-step: pre_auth_token + totp_code (mobile 2FA) ─────────────────
     if body.pre_auth_token and body.totp_code:
-        from jose import jwt as jose_jwt, JWTError
+        import jwt as jose_jwt
+        from jwt import InvalidTokenError as JWTError
         try:
             payload = jose_jwt.decode(
                 body.pre_auth_token,
@@ -451,7 +452,8 @@ async def refresh_token(body: RefreshRequest):
       token is issued, so a captured token can't be replayed for a second refresh
       (reuse detection).
     """
-    from jose import jwt as jose_jwt, JWTError
+    import jwt as jose_jwt
+    from jwt import InvalidTokenError as JWTError
     from app.auth.jwt import is_token_revoked, blacklist_jti
 
     try:

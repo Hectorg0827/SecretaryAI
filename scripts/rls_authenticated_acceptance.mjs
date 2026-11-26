@@ -61,6 +61,7 @@ try {
   assert.notEqual(ea.id,eb.id);
   validateIdentity(ta,a,ea.id,await must('/auth/v1/user',anon,'GET',undefined,ta));
   validateIdentity(tb,b,eb.id,await must('/auth/v1/user',anon,'GET',undefined,tb));
+  const controls=[];
   for (const [company,token] of [[a,ta],[b,tb]]) {
     const id=randomUUID(); accounts.push(id);
     const p='/rest/v1/accounts?id=eq.'+id+'&select=id,company_id';
@@ -68,6 +69,24 @@ try {
     assert.equal(created[0].id,id);
     assert.equal((await must(p,anon,'GET',undefined,token))[0].company_id,company);
     assert.equal((await must(p,anon,'PATCH',{name:'RLS-CONTROL-UPDATED-'+tag},token))[0].id,id);
+    controls.push({id,company,token});
+  }
+  for (const [owner,other] of [[controls[0],controls[1]],[controls[1],controls[0]]]) {
+    const p='/rest/v1/accounts?id=eq.'+owner.id+'&select=id,company_id,name';
+    const read=await request(p,anon,'GET',undefined,other.token);
+    assert.ok(read.ok && Array.isArray(read.data) && read.data.length===0);
+    for(const [method,body] of [['PATCH',{name:'RLS-DENIED-'+tag}],['DELETE',undefined]]) {
+      const denied=await request(p,anon,method,body,other.token);
+      assert.ok([401,403].includes(denied.status) || (denied.ok && Array.isArray(denied.data) && denied.data.length===0));
+    }
+    const id=randomUUID(); accounts.push(id);
+    const denied=await request('/rest/v1/accounts',anon,'POST',{id,company_id:owner.company,name:'RLS-DENIED-'+tag},other.token);
+    assert.ok([401,403].includes(denied.status) || (denied.ok && Array.isArray(denied.data) && denied.data.length===0));
+    assertAbsent(await must('/rest/v1/accounts?id=eq.'+id+'&select=id',service,'GET'));
+    const persisted=await must(p,service,'GET');
+    assert.equal(persisted.length,1);
+    assert.equal(persisted[0].company_id,owner.company);
+    assert.equal(persisted[0].name,'RLS-CONTROL-UPDATED-'+tag);
   }
   // This acceptance test requires a verified trusted JWT company_id hook.
   // App metadata alone does NOT automatically create a top-level JWT claim.
@@ -137,6 +156,13 @@ try {
   try {
     for(const table of ['accounts','companies']) assertAbsent(await must('/rest/v1/'+table+'?select=id&name=like.*'+tag+'*',service,'GET'));
     assertAbsent(await must('/rest/v1/accounts?select=id&id=eq.'+foreignId,service,'GET'));
+    for(let page=1;;page++) {
+      const result=await must('/auth/v1/admin/users?page='+page+'&per_page=100',service,'GET');
+      assert.ok(Array.isArray(result.users));
+      assertAbsent(result.users.filter(u=>emails.includes(u.email)));
+      if(result.users.length<100) break;
+      assert.ok(page<1000,'Final user absence pagination limit');
+    }
   } catch { failures.push('absence:failed'); }
   if (failures.length) {
     console.error('Fixture cleanup verification failed (' + failures.length + '): ' +

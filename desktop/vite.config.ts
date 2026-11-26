@@ -39,7 +39,8 @@ export default defineConfig(({ command, mode }) => {
     sourcemap: false,
     // Tauri targets modern WebViews — skip legacy transpilation.
     target: 'es2021',
-    minify: 'esbuild',
+    // Use the installed Vite version's supported default minifier.
+    minify: true,
   },
   };
 });

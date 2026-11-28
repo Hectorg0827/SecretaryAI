@@ -738,6 +738,28 @@ async def delete_conversation(
 
 # ─── Voice Transcription ───────────────────────────────────────────────────────
 
+_WHISPER_LANGUAGES = {
+    "es": "es",
+    "spanish": "es",
+    "español": "es",
+    "espanol": "es",
+    "en": "en",
+    "english": "en",
+    "inglés": "en",
+    "ingles": "en",
+}
+
+
+def _whisper_language(preferred_language: str | None) -> str | None:
+    """Map company/user language preference to ISO-639-1 code for Whisper, or auto-detect."""
+    if not isinstance(preferred_language, str):
+        return None
+    normalized = preferred_language.strip().lower()
+    if not normalized:
+        return None
+    return _WHISPER_LANGUAGES.get(normalized)
+
+
 @router.post("/transcribe")
 async def transcribe_audio(
     audio: UploadFile,
@@ -764,12 +786,15 @@ async def transcribe_audio(
         import io
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = audio.filename or "audio.m4a"
-        transcript = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language="en",
-        )
+        language = _whisper_language(user.get("preferred_language"))
+        create_kwargs = {
+            "model": "whisper-1",
+            "file": audio_file,
+        }
+        if language:
+            create_kwargs["language"] = language
+        transcript = await client.audio.transcriptions.create(**create_kwargs)
         return {"text": transcript.text}
-    except Exception as exc:
+    except Exception:
         log.exception("Whisper transcription failed")
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+        raise HTTPException(status_code=500, detail="Transcription failed. Please try again.")

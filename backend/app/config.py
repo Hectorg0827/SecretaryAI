@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # the separately reviewed private SQL and scoped login are provisioned.
     secretaryai_restricted_registrar_enabled: bool = False
     secretaryai_registrar_database_url: str = ""
+    # Opt-in fail-closed startup gate verifying DATABASE_URL authenticates as the
+    # least-privilege secretary_runtime role without BYPASSRLS, superuser,
+    # ownership, or destructive privileges on companies / logistics_events.
+    secretaryai_enforce_runtime_db_role_audit: bool = False
 
     # A separately deployed staging stack must name its Supabase project
     # explicitly. These values are not secrets; never reuse Lyo or production.
@@ -183,10 +187,23 @@ class Settings(BaseSettings):
                     # Do not echo credentials, URLs or passwords in errors.
                     errors.append("Restricted registrar credentials or project invalid")
 
+        if self.secretaryai_enforce_runtime_db_role_audit:
+            try:
+                from app.auth.runtime_role_audit import validate_runtime_dsn_scope
+                validate_runtime_dsn_scope(
+                    self.database_url,
+                    expected_project_ref=self.secretaryai_expected_supabase_project_ref.strip(),
+                )
+            except (ValueError, RuntimeError):
+                # Never echo credentials, URLs, or passwords in validation errors.
+                errors.append(
+                    "Runtime database identity audit requires a scoped secretary_runtime DATABASE_URL"
+                )
+
         # Staging is an isolated control plane: reject cross-project credentials
         # before any database connection, email call or worker startup. Supabase
         # direct URLs have the project ref in the hostname; pooler URLs encode
-        # it in the username (postgres.<project-ref>).
+        # it in the username (postgres.<project-ref> or secretary_runtime.<project-ref>).
         if self.secretaryai_deployment_env.strip().lower() == "staging":
             ref = self.secretaryai_expected_supabase_project_ref.strip()
             if not re.fullmatch(r"[a-z0-9]{20}", ref):
@@ -211,7 +228,7 @@ class Settings(BaseSettings):
                     matches_direct = db_host == f"db.{ref}.supabase.co"
                     matches_pooler = (
                         db_host.endswith(".pooler.supabase.com")
-                        and db_user == f"postgres.{ref}"
+                        and db_user in (f"postgres.{ref}", f"secretary_runtime.{ref}")
                     )
                     if (db.scheme not in ("postgresql", "postgres")
                             or not (matches_direct or matches_pooler)):

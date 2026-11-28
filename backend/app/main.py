@@ -132,6 +132,17 @@ def _scrub_sentry_event(event: dict) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("SecretaryAI API starting up")
+    current_settings = get_settings()
+    if current_settings.secretaryai_enforce_runtime_db_role_audit:
+        from app.auth.runtime_role_audit import require_safe_runtime_database_role
+        evidence = await require_safe_runtime_database_role(
+            database_url=current_settings.database_url,
+            expected_project_ref=current_settings.secretaryai_expected_supabase_project_ref.strip(),
+        )
+        log.info(
+            "Runtime database identity audit passed for role=%s",
+            evidence.current_role,
+        )
     yield
     log.info("SecretaryAI API shut down")
 

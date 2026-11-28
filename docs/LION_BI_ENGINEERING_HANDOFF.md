@@ -112,7 +112,7 @@ Four unmerged engineering stacks currently exist and **must be reconciled onto a
 > - Item 2 DONE: security stack `#228–#232` merged; this branch was already ahead on PyJWT/bcrypt/FastAPI/Vite 8, so its side was kept. Adopted typescript-eslint 8.74.0 and `--audit-level=low`. `pip-audit` + `npm audit` (frontend, desktop) = 0 vulnerabilities.
 > - Item 3 VERIFIED: the 7 `20261115*` Compliance migrations are already in the 54-migration parity clone (`finance-canonical-local-replay.yml`, green on `#234`) and `scripts/validate_schema.sh` passed twice locally on fresh PostgreSQL 16. Registrar RPC, atomic registration, parent-cascade revoke and runtime-identity audit integration scripts all PASS locally. Live cutover remains operator-gated (secrets + lawful-erasure decision); the revoke SQL stays REVIEW_ONLY.
 > - Item 5 EXPANDED: Lola eval suite now has 6 categories, adding morning-briefing proactive alerts (dedup, new vs still-open, never hiding unresolved critical, tenant-scoped history, injection-safe names, bounded size). `$0.00` spend.
-> - Item 4 still awaiting operator cost approval.
+> - Item 4 DONE (2026-11-28): hosted disposable replay, least-privilege bootstrap, SQL tenant RLS and real-Auth acceptance (`#232`) all PASS on PostgreSQL 17.12; branch deleted. See `docs/ops/finance_canonical_replay_20261119/HOSTED_EVIDENCE_20261128.md`.
 
 
 1. **Verify Exact-Head CI & Local Postgres Replay on PR `#233`:** Confirm `Finance canonical 46-migration replay (local only)`, `Disposable replay regression`, `CI`, and `CodeQL` pass on the hardened `hosted_replay.py` + `hosted_post_replay_least_privilege.py` commit.

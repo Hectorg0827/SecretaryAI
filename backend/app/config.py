@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     database_url: str
 
+    # Staging-only opt-in for the restricted registration identity.
+    # No ordinary DATABASE_URL fallback when enabled; do not enable until
+    # the separately reviewed private SQL and scoped login are provisioned.
+    secretaryai_restricted_registrar_enabled: bool = False
+    secretaryai_registrar_database_url: str = ""
+
     # A separately deployed staging stack must name its Supabase project
     # explicitly. These values are not secrets; never reuse Lyo or production.
     secretaryai_deployment_env: str = ""
@@ -160,6 +166,22 @@ class Settings(BaseSettings):
             errors.append("ENCRYPTION_KEY must be different from SECRET_KEY")
         if self.encryption_key_previous and not self.encryption_key:
             errors.append("ENCRYPTION_KEY_PREVIOUS requires ENCRYPTION_KEY")
+
+        if self.secretaryai_restricted_registrar_enabled:
+            # This candidate is permitted only in isolated staging until an
+            # independent security/DB review approves production operation.
+            if self.secretaryai_deployment_env.strip().lower() != "staging":
+                errors.append("Restricted registrar pilot requires isolated staging")
+            else:
+                try:
+                    from app.auth.registrar_rpc import validate_registrar_dsn
+                    validate_registrar_dsn(
+                        self.secretaryai_registrar_database_url,
+                        expected_project_ref=self.secretaryai_expected_supabase_project_ref,
+                    )
+                except (ValueError, RuntimeError):
+                    # Do not echo credentials, URLs or passwords in errors.
+                    errors.append("Restricted registrar credentials or project invalid")
 
         # Staging is an isolated control plane: reject cross-project credentials
         # before any database connection, email call or worker startup. Supabase

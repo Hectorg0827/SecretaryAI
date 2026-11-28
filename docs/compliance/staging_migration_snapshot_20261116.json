@@ -1,0 +1,208 @@
+{
+  "schema_version": "lionbi.compliance.staging-read-only-evidence.v1",
+  "evidence_date": "2026-11-16",
+  "project_label": "SecretaryAI-Staging",
+  "project_ref": "xerktvdgjvjozvckjyfp",
+  "repository": "Hectorg0827/SecretaryAI",
+  "source_parent_sha": "4a1e5aa7da8537603ff0e57a53fdbe38ad3b03cf",
+  "method": "Supabase connected read-only list_migrations and catalog SELECT. SQL-body Git blob SHA-1 computed from remotely stored migration statements[1] and checked against GitHub historical blobs or canonical files. This is a point-in-time snapshot, not a future-drift guard.",
+  "recorded_count": 45,
+  "previous_baseline_count": 33,
+  "previous_baseline_version_name_matches": 33,
+  "post_baseline_count": 12,
+  "latest_recorded_version": "20261114163243",
+  "post_baseline_migrations": [
+    {
+      "version": "20261102092256",
+      "name": "secretaryai_stripe_billing_safety",
+      "recorded_statement_git_blob_sha1": "987e56d4b579b8e9a6c4040da2ee8c963a3400f2",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261102232409",
+      "name": "billing_checkout_historical_invoice_safety",
+      "recorded_statement_git_blob_sha1": "37766a4a27fb37ca1b2ed1950340cef2b9c8a2b2",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261103022426",
+      "name": "onboarding_audit_consistency",
+      "recorded_statement_git_blob_sha1": "de7f86d86437b6f2c3a4e04ef06e0d967ef965e3",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261108034956",
+      "name": "provisional_purchasing_cost_assessments",
+      "recorded_statement_git_blob_sha1": "e2bddfdf5d00a6b4c94ec5ca6f0076aec5fcc158",
+      "repo_source_evidence": "canonical_file_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261111005641",
+      "name": "logistics_journey",
+      "recorded_statement_git_blob_sha1": "6217603a2368553274f6b153f64f874895cfa15c",
+      "repo_source_evidence": "no_matching_git_blob_found",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261111005840",
+      "name": "lola_core",
+      "recorded_statement_git_blob_sha1": "720c77d71ef6da610f37bdb2044e579942f3d691",
+      "repo_source_evidence": "no_matching_git_blob_found",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261111010558",
+      "name": "gate6b_finance_department_roles",
+      "recorded_statement_git_blob_sha1": "c55634d08b4603fa9fc46e4b7bf2f8c7523a47ff",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261112043411",
+      "name": "lola_conversation_owner_rls_staging",
+      "recorded_statement_git_blob_sha1": "bbab56fab25e63944a67f6ebfd63e7a023a77e96",
+      "repo_source_evidence": "no_matching_git_blob_found",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261114033708",
+      "name": "lola_employee_private_intelligence",
+      "recorded_statement_git_blob_sha1": "61bf614bc5f1e12c3ccee97fe8caa93e64985d29",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261114041719",
+      "name": "lola_whatsapp_consent_and_ownership",
+      "recorded_statement_git_blob_sha1": "43671b0628171cd43b6faa9a884c484374a4b3ce",
+      "repo_source_evidence": "historical_git_blob_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261114162323",
+      "name": "pricing_pricebook_cost_basis_staging_20261114",
+      "recorded_statement_git_blob_sha1": "98291feb008c4b235fd03015253eeca3e86e63b1",
+      "repo_source_evidence": "canonical_file_match",
+      "remote_recorded": true
+    },
+    {
+      "version": "20261114163243",
+      "name": "pricing_pricebook_fk_indexes_staging_20261114",
+      "recorded_statement_git_blob_sha1": "c50d38393c7b7feb9ff4721694e451e851d94ac2",
+      "repo_source_evidence": "canonical_file_match",
+      "remote_recorded": true
+    }
+  ],
+  "pending_compliance": [
+    {
+      "version": "20261115000000",
+      "name": "compliance_atomic_policy_audit",
+      "source_path": "backend/supabase/migrations/20261115000000_compliance_atomic_policy_audit.sql",
+      "source_git_blob_sha1": "bd9fa3c6d8e3e692c9d150c308292de4d9b9a726",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115010000",
+      "name": "compliance_price_posting_rulebook",
+      "source_path": "backend/supabase/migrations/20261115010000_compliance_price_posting_rulebook.sql",
+      "source_git_blob_sha1": "4832621ecc30833cf29f3558daa95fb830bb3774",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115020000",
+      "name": "price_posting_human_attestation",
+      "source_path": "backend/supabase/migrations/20261115020000_price_posting_human_attestation.sql",
+      "source_git_blob_sha1": "6ce5e96778ba8d2309e5c642c7848a88176f5077",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115030000",
+      "name": "price_posting_preparation_ledger",
+      "source_path": "backend/supabase/migrations/20261115030000_price_posting_preparation_ledger.sql",
+      "source_git_blob_sha1": "7cb75a441a15666923ece2a4e71d8108aac1cb9f",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115040000",
+      "name": "price_posting_specific_policy_guard",
+      "source_path": "backend/supabase/migrations/20261115040000_price_posting_specific_policy_guard.sql",
+      "source_git_blob_sha1": "555b118fdf05e187f8cef5c0b0b04b809726602d",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115050000",
+      "name": "price_posting_accounting_observations",
+      "source_path": "backend/supabase/migrations/20261115050000_price_posting_accounting_observations.sql",
+      "source_git_blob_sha1": "e8b1cb1803ed89c42c308c23ddb77c44c22801da",
+      "remote_recorded": false
+    },
+    {
+      "version": "20261115060000",
+      "name": "price_posting_capture_bindings",
+      "source_path": "backend/supabase/migrations/20261115060000_price_posting_capture_bindings.sql",
+      "source_git_blob_sha1": "f82f2c836e76684118f4bf245853a95d03f3e07b",
+      "remote_recorded": false
+    }
+  ],
+  "important_existing_versions": [
+    {
+      "version": "20261114162323",
+      "name": "pricing_pricebook_cost_basis_staging_20261114",
+      "recorded": true,
+      "must_not_reapply": true
+    },
+    {
+      "version": "20261114163243",
+      "name": "pricing_pricebook_fk_indexes_staging_20261114",
+      "recorded": true,
+      "must_not_reapply": true
+    }
+  ],
+  "live_catalog_checks": {
+    "pricing_foundation_tables_present_with_rls": [
+      "pricing_cost_snapshots",
+      "pricing_cost_lines",
+      "pricing_price_book"
+    ],
+    "compliance_new_tables_absent": [
+      "compliance_price_posting_rule_versions",
+      "compliance_price_posting_rule_reviews",
+      "compliance_price_posting_preparations",
+      "compliance_price_posting_external_references",
+      "pricing_accounting_price_observations",
+      "pricing_accounting_capture_bindings"
+    ],
+    "legacy_policy_and_audit_tables_present": [
+      "policy_rules",
+      "audit_events"
+    ],
+    "unmatched_statement_footprint_present": [
+      "logistics_events",
+      "lola_action_receipts",
+      "lola_delegations",
+      "lola_memories",
+      "lola_org_members",
+      "conversations:conversation_owner_scope_policy"
+    ]
+  },
+  "unresolved": [
+    "Three recorded SQL statement blobs not found in linked repository: logistics_journey, lola_core, lola_conversation_owner_rls_staging",
+    "Source and repository verification is point-in-time; independently repeat before any deployment",
+    "Missing staged Supabase CLI bundle for seven unrecorded Compliance SQL files",
+    "Live staging schema not compared field-by-field to a disposable candidate clone",
+    "Independent finance, legal and authenticated owner/manager staging acceptance missing",
+    "Explicit staging-only migration approval missing"
+  ],
+  "release_status": "NO_GO",
+  "actions_performed": [
+    "read-only database/catalog inspection",
+    "repository SQL/blob inspection"
+  ],
+  "database_changes_made": false,
+  "deployment_authorized": false,
+  "regulatory_filing_authorized": false
+}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { FileText, Tag, Shield, Plus, Trash2, Upload, X } from 'lucide-react';
+import { FileText, Tag, Shield, Plus, Upload, X } from 'lucide-react';
 import { StateLicense, BrandRegistration, FederalPermit, api } from '../../lib/api';
 import { CsvImportModal } from './CsvImportModal';
 import toast from 'react-hot-toast';
@@ -457,39 +457,6 @@ export function LicenseRegistry({
     { id: 'federal',  label: 'Federal Permits',       count: federalPermits.length,      icon: Shield   },
   ];
 
-  async function handleDeleteLicense(id: string) {
-    if (!confirm('Delete this license?')) return;
-    try {
-      await api.compliance.deleteLicense(id);
-      toast.success('License deleted.');
-      onRefresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete license.');
-    }
-  }
-
-  async function handleDeleteBrandRegistration(id: string) {
-    if (!confirm('Delete this brand registration?')) return;
-    try {
-      await api.compliance.deleteBrandRegistration(id);
-      toast.success('Brand registration deleted.');
-      onRefresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete brand registration.');
-    }
-  }
-
-  async function handleDeleteFederalPermit(id: string) {
-    if (!confirm('Delete this federal permit?')) return;
-    try {
-      await api.compliance.deleteFederalPermit(id);
-      toast.success('Federal permit deleted.');
-      onRefresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete federal permit.');
-    }
-  }
-
   if (loading) {
     return (
       <div className="p-6 space-y-2">
@@ -587,6 +554,10 @@ export function LicenseRegistry({
       </div>
 
       <div className="p-6">
+        <p className="mb-4 text-xs text-slate-500" role="note">
+          Compliance records are retained for audit history. Deletion is disabled;
+          corrections and archival require a separate reviewed workflow.
+        </p>
         {/* State Licenses */}
         {subTab === 'licenses' && (
           licenses.length === 0
@@ -601,7 +572,6 @@ export function LicenseRegistry({
                     <th className="text-left pb-2 font-medium">Expires</th>
                     <th className="text-left pb-2 font-medium">Status</th>
                     <th className="text-right pb-2 font-medium">Annual Fee</th>
-                    <th className="pb-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -624,15 +594,6 @@ export function LicenseRegistry({
                       <td className="py-2.5 text-right text-slate-600">
                         {lic.annual_fee ? `$${lic.annual_fee.toLocaleString()}` : '—'}
                       </td>
-                      <td className="py-2.5 pl-2">
-                        <button
-                          onClick={() => handleDeleteLicense(lic.id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -653,7 +614,6 @@ export function LicenseRegistry({
                     <th className="text-left pb-2 font-medium">Reg #</th>
                     <th className="text-left pb-2 font-medium">Expires</th>
                     <th className="text-left pb-2 font-medium">Status</th>
-                    <th className="pb-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -672,15 +632,6 @@ export function LicenseRegistry({
                         )}>
                           {reg.status}
                         </span>
-                      </td>
-                      <td className="py-2.5 pl-2">
-                        <button
-                          onClick={() => handleDeleteBrandRegistration(reg.id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
                       </td>
                     </tr>
                   ))}
@@ -701,7 +652,6 @@ export function LicenseRegistry({
                     <th className="text-left pb-2 font-medium">Permit #</th>
                     <th className="text-left pb-2 font-medium">Expires</th>
                     <th className="text-left pb-2 font-medium">Status</th>
-                    <th className="pb-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -724,15 +674,6 @@ export function LicenseRegistry({
                         )}>
                           {permit.status}
                         </span>
-                      </td>
-                      <td className="py-2.5 pl-2">
-                        <button
-                          onClick={() => handleDeleteFederalPermit(permit.id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
                       </td>
                     </tr>
                   ))}

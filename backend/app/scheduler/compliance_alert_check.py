@@ -26,8 +26,7 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
     -------
     dict with keys: critical, warning, info, deadlines, stored
     """
-    from app.intelligence.compliance.compliance_module import ComplianceModule, ComplianceConfig
-    from app.intelligence.compliance.entity_registry import EntityRegistry
+    from app.api.compliance import _get_compliance_module
 
     result: dict = {
         "critical": 0,
@@ -39,17 +38,21 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
     }
 
     try:
-        # Build the module and load entity data from Supabase
-        config = ComplianceConfig(company_id=company_id)
-        module = ComplianceModule(company_id=company_id, config=config)
-        _load_registry_from_db(module._registry, db, company_id)
+        # Use the same tenant-scoped, fail-closed source as the compliance API.
+        # The former scheduler-only loader silently ignored read and schema errors.
+        module = _get_compliance_module({"company_id": company_id}, db)
 
-        # Generate alerts
-        alerts = module.get_alerts(days_ahead=90)
-        deadlines = module.get_deadlines(days_ahead=30)
+        # Expiration reminders can be drawn from persisted document dates.
+        alerts = module.get_alerts(lookahead_days=90)
+
+        # Regulatory filing and price-posting dates in the legacy state_matrix
+        # are NOT human-verified. Do not turn those estimates into reminders.
+        # The verified-rulebook workstream will supply these deadlines later.
+        deadlines = []
 
         for alert in alerts:
             priority = getattr(alert, "priority", None)
+            priority = getattr(priority, "value", priority)
             if priority == "critical":
                 result["critical"] += 1
             elif priority == "warning":
@@ -66,7 +69,7 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
                 "days_until", "message", "action_required", "estimated_fee",
             ):
                 val = getattr(a, field, None)
-                d[field] = val
+                d[field] = getattr(val, "value", val)
             expiry = getattr(a, "expiry_date", None)
             d["expiry_date"] = expiry.isoformat() if expiry else None
             d["renewal_url"] = getattr(a, "renewal_url", None)
@@ -89,10 +92,11 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
             "deadline_count": result["deadlines"],
             "alerts": [_serialise_alert(a) for a in alerts],
             "deadlines": [_serialise_deadline(d) for d in deadlines],
+            "regulatory_deadlines_status": "verification_required",
         }
 
         # Upsert to report_snapshots — one row per (company, report_type)
-        db.table("report_snapshots").upsert(
+        written = db.table("report_snapshots").upsert(
             {
                 "company_id": company_id,
                 "report_type": "compliance_alerts",
@@ -102,6 +106,12 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
             },
             on_conflict="company_id,report_type",
         ).execute()
+        from app.api.compliance_integrity import observed_rows
+        saved_rows = observed_rows(written)
+        if (len(saved_rows) != 1
+                or str(saved_rows[0].get("company_id")) != str(company_id)
+                or saved_rows[0].get("report_type") != "compliance_alerts"):
+            raise ValueError("Compliance snapshot write was not confirmed")
 
         result["stored"] = True
         log.info(
@@ -119,148 +129,3 @@ async def check_compliance_alerts(company_id: str, db) -> dict:
 
     return result
 
-
-def _load_registry_from_db(registry, db, company_id: str) -> None:
-    """
-    Populate an EntityRegistry from the compliance_* Supabase tables.
-    Each table row is mapped to the corresponding dataclass.
-    """
-    from datetime import date
-    from app.intelligence.compliance.models import (
-        AlcoholProduct,
-        FederalPermit,
-        StateLicense,
-        BrandRegistration,
-        DistributorRelationship,
-        ProductType,
-        LicenseStatus,
-        FederalPermitType,
-        BrandRegStatus,
-    )
-
-    def _parse_date(val) -> date | None:
-        if not val:
-            return None
-        try:
-            return date.fromisoformat(str(val)[:10])
-        except ValueError:
-            return None
-
-    # Federal permits
-    try:
-        rows = (
-            db.table("compliance_federal_permits")
-            .select("*")
-            .eq("company_id", company_id)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            registry.add_federal_permit(FederalPermit(
-                id=row["id"],
-                permit_type=FederalPermitType(row.get("permit_type", "importer")),
-                permit_number=row.get("permit_number", ""),
-                issue_date=_parse_date(row.get("issue_date")) or date.today(),
-                expiration_date=_parse_date(row.get("expiration_date")) or date.today(),
-                status=LicenseStatus(row.get("status", "active")),
-                company_id=company_id,
-            ))
-    except Exception as exc:
-        log.warning("Failed to load federal permits for %s: %s", company_id, exc)
-
-    # State licenses
-    try:
-        rows = (
-            db.table("compliance_licenses")
-            .select("*")
-            .eq("company_id", company_id)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            registry.add_license(StateLicense(
-                id=row["id"],
-                state_code=row.get("state_code", ""),
-                license_type=row.get("license_type", "importer"),
-                license_number=row.get("license_number", ""),
-                product_types=[ProductType(pt) for pt in (row.get("product_types") or [])],
-                issue_date=_parse_date(row.get("issue_date")) or date.today(),
-                expiration_date=_parse_date(row.get("expiration_date")) or date.today(),
-                annual_fee=float(row.get("annual_fee") or 0),
-                status=LicenseStatus(row.get("status", "active")),
-                company_id=company_id,
-            ))
-    except Exception as exc:
-        log.warning("Failed to load state licenses for %s: %s", company_id, exc)
-
-    # Products
-    try:
-        rows = (
-            db.table("compliance_products")
-            .select("*")
-            .eq("company_id", company_id)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            registry.add_product(AlcoholProduct(
-                id=row["id"],
-                sku=row.get("sku", ""),
-                name=row.get("name", ""),
-                product_type=ProductType(row.get("product_type", "spirits")),
-                abv_pct=float(row.get("abv_pct") or 0),
-                container_size_ml=int(row.get("container_size_ml") or 750),
-                units_per_case=int(row.get("units_per_case") or 12),
-                country_of_origin=row.get("country_of_origin", ""),
-                company_id=company_id,
-            ))
-    except Exception as exc:
-        log.warning("Failed to load compliance products for %s: %s", company_id, exc)
-
-    # Brand registrations
-    try:
-        rows = (
-            db.table("compliance_brand_registrations")
-            .select("*")
-            .eq("company_id", company_id)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            registry.add_brand_registration(BrandRegistration(
-                id=row["id"],
-                product_id=row.get("product_id", ""),
-                state_code=row.get("state_code", ""),
-                registration_number=row.get("registration_number", ""),
-                registration_date=_parse_date(row.get("registration_date")) or date.today(),
-                expiration_date=_parse_date(row.get("expiration_date")),
-                registration_fee=float(row.get("registration_fee") or 0),
-                status=BrandRegStatus(row.get("status", "active")),
-                company_id=company_id,
-            ))
-    except Exception as exc:
-        log.warning("Failed to load brand registrations for %s: %s", company_id, exc)
-
-    # Distributors
-    try:
-        rows = (
-            db.table("compliance_distributors")
-            .select("*")
-            .eq("company_id", company_id)
-            .execute()
-            .data or []
-        )
-        for row in rows:
-            registry.add_distributor(DistributorRelationship(
-                id=row["id"],
-                state_code=row.get("state_code", ""),
-                distributor_name=row.get("distributor_name", ""),
-                territory=row.get("territory", ""),
-                contract_start_date=_parse_date(row.get("contract_start_date")) or date.today(),
-                contract_renewal_date=_parse_date(row.get("contract_renewal_date")),
-                franchise_law_applies=bool(row.get("franchise_law_applies", False)),
-                termination_restriction=row.get("termination_restriction", ""),
-                company_id=company_id,
-            ))
-    except Exception as exc:
-        log.warning("Failed to load distributors for %s: %s", company_id, exc)

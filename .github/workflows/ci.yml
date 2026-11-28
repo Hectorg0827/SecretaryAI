@@ -331,6 +331,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Compliance migration source preflight (read only, NO-GO)
+        run: |
+          python3 -m unittest discover -s scripts -p test_compliance_migration_release_preflight.py -v
+          python3 scripts/compliance_migration_release_preflight.py --report compliance-release-preflight.json
+          echo "::warning::Compliance Phase 1 is not cleared for staging; see compliance-release-preflight.json. A green CI run is not migration authorization."
+      - name: Verify staging history snapshot and pending SQL sources (read only)
+        run: |
+          python3 -m unittest discover -s scripts -p test_verify_compliance_staging_snapshot.py -v
+          python3 scripts/verify_compliance_staging_snapshot.py --report compliance-staging-snapshot-check.json
+          echo "::warning::Staging Compliance release remains NO-GO. Historical evidence is a point-in-time read-only snapshot, not a live clearance."
       - name: Validate schema applies cleanly
         run: bash scripts/validate_schema.sh
       - name: Export disposable schema for read-only staging comparison
@@ -340,13 +350,46 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: disposable-schema-manifest
-          path: schema-manifest.json
+          path: |
+            schema-manifest.json
+            compliance-release-preflight.json
+            compliance-staging-snapshot-check.json
           retention-days: 14
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Exercise private registrar review-only SQL in disposable PostgreSQL
+        run: |
+          psql -v ON_ERROR_STOP=1 -f docs/compliance/sql-proposals/registrar_rpc_REVIEW_ONLY.sql
+          psql -v ON_ERROR_STOP=1 -f scripts/test_registrar_privileges.sql
+          # CI fixture ONLY. The reviewed proposal deliberately creates a
+          # NOLOGIN role; no real staging credential is provisioned here.
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE secretary_registrar LOGIN PASSWORD 'CI_local_registrar_only_20261116'"
       - name: Install pinned PostgreSQL integration driver
         run: python -m pip install asyncpg==0.29.0
+      - name: Verify dedicated registrar and atomic owner registration in disposable PostgreSQL
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: |
+          python scripts/test_registrar_rpc_integration.py
+          python scripts/test_atomic_owner_registration_integration.py
+      - name: Exercise parent-company cascade revocation in isolated PostgreSQL
+        run: |
+          # Applies ONLY to the GitHub Actions disposable PostgreSQL 17.
+          # No Supabase staging or production connection is available here.
+          psql -v ON_ERROR_STOP=1 -f docs/compliance/sql-proposals/parent_company_runtime_revoke_REVIEW_ONLY.sql
+          psql -v ON_ERROR_STOP=1 -c "ALTER ROLE service_role LOGIN PASSWORD 'CI_local_service_role_only_20261116'"
+      - name: Verify registrar + ordinary-service principal against live CI privileges
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: python scripts/test_registrar_and_runtime_parent_delete_integration.py
+      - name: Prove authenticated runtime DB identity lacks destructive/elevated grants
+        env:
+          SECRETARYAI_TEST_DATABASE_ONLY: "1"
+          PYTHONPATH: backend
+        run: python scripts/test_runtime_db_role_audit_integration.py
       - name: Run V13 disposable PostgreSQL execution integration
         env:
           SECRETARYAI_TEST_DATABASE_ONLY: "1"

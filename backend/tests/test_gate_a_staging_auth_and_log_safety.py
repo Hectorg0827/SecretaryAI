@@ -90,75 +90,60 @@ async def test_profile_reads_staging_full_name_column():
 
 @pytest.mark.asyncio
 async def test_registration_writes_staging_user_columns():
-    db = MagicMock()
-    users_table = MagicMock()
-    companies_table = MagicMock()
-    db.table.side_effect = lambda name: {
-        "users": users_table,
-        "companies": companies_table,
-    }[name]
-    users_table.select.return_value.eq.return_value.execute.return_value.data = []
-    users_table.insert.return_value.execute.return_value.data = [{
-        "id": "synthetic-owner",
-    }]
-    companies_table.insert.return_value.execute.return_value.data = [{
-        "id": "synthetic-tenant",
-    }]
-
-    with patch("supabase.create_client", return_value=db), \
-         patch.object(auth, "hash_password", return_value="synthetic-hash"), \
-         patch.object(auth, "create_access_token", return_value="synthetic-jwt"), \
-         patch.object(auth, "_seed_company_defaults", new_callable=AsyncMock) as seed, \
-         patch("app.utils.audit.write_audit_event"):
+    """The endpoint passes the supported user columns to one atomic DB writer."""
+    row = {"id": "synthetic-owner", "company_id": "synthetic-tenant"}
+    with (patch("app.auth.registration.create_company_owner_transactionally",
+                new_callable=AsyncMock, return_value=row) as create,
+          patch.object(auth, "hash_password", return_value="synthetic-hash"),
+          patch.object(auth, "create_access_token", return_value="synthetic-jwt"),
+          patch.object(auth, "password_session_version", return_value="synthetic-pwd-session"),
+          patch("supabase.create_client", return_value=MagicMock()),
+          patch("app.utils.audit.write_audit_event"),
+          patch.object(auth, "_seed_company_defaults", new_callable=AsyncMock) as legacy_seed):
         response = await auth.register(
             auth.RegisterRequest(
                 company_name="Synthetic Company", email="owner@example.test",
                 password="SyntheticPass123", full_name="Sample Owner",
-            ),
-            _=None,
+            ), _=None,
         )
 
-    record = users_table.insert.call_args.args[0]
-    assert record["hashed_password"] == "synthetic-hash"
-    assert record["full_name"] == "Sample Owner"
-    assert "password_hash" not in record and "name" not in record
-    seed.assert_awaited_once_with("synthetic-tenant", db)
+    create.assert_awaited_once()
+    args = create.await_args.kwargs
+    assert args["hashed_password"] == "synthetic-hash"
+    assert args["full_name"] == "Sample Owner"
+    assert args["email"] == "owner@example.test"
+    assert args["company_name"] == "Synthetic Company"
+    assert args["policy_rules_factory"].__name__ == "_default_rules"
+    assert "password_hash" not in args and "name" not in args
+    legacy_seed.assert_not_awaited()
     assert response["company_id"] == "synthetic-tenant"
+    assert response["access_token"] == "synthetic-jwt"
 
 
 @pytest.mark.asyncio
 async def test_registration_rejects_partial_safety_setup_before_creating_owner():
+    """Rollback happens in the atomic writer; no service-role company DELETE."""
     db = MagicMock()
-    users_table = MagicMock()
-    companies_table = MagicMock()
-    db.table.side_effect = lambda name: {
-        "users": users_table,
-        "companies": companies_table,
-    }[name]
-    users_table.select.return_value.eq.return_value.execute.return_value.data = []
-    companies_table.insert.return_value.execute.return_value.data = [
-        {"id": "synthetic-tenant"},
-    ]
-
-    with patch("supabase.create_client", return_value=db), \
-         patch.object(auth, "hash_password", return_value="synthetic-hash"), \
-         patch.object(auth, "_seed_company_defaults", new_callable=AsyncMock,
-                      side_effect=RuntimeError("policy database error")):
+    with (patch("app.auth.registration.create_company_owner_transactionally",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("policy database error")) as create,
+          patch.object(auth, "hash_password", return_value="synthetic-hash"),
+          patch.object(auth, "create_access_token") as mint_token,
+          patch("supabase.create_client", return_value=db) as client):
         with pytest.raises(HTTPException) as caught:
             await auth.register(
                 auth.RegisterRequest(
                     company_name="Synthetic Company", email="owner@example.test",
                     password="aaaaaaaa1",
-                ),
-                _=None,
+                ), _=None,
             )
 
+    create.assert_awaited_once()
     assert caught.value.status_code == 503
     assert "policy database error" not in caught.value.detail
-    users_table.insert.assert_not_called()
-    companies_table.delete.return_value.eq.assert_called_once_with(
-        "id", "synthetic-tenant"
-    )
+    mint_token.assert_not_called()
+    client.assert_not_called()
+    db.table.return_value.delete.assert_not_called()
 
 
 @pytest.mark.parametrize("module_path", [

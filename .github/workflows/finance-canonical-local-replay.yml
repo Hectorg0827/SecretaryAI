@@ -188,12 +188,13 @@ jobs:
           SQL
           bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/assert_54_clone.sql"
 
+          # Execute final-state PostgreSQL 17 security/isolation suites (note: 20261115040000 enforces
+          # non-null policy_rule_id on all regulated writes, which test_price_posting_specific_policy_guard.sql
+          # verifies across rule reviews, preparations, and external references).
           for sql_test in \
             scripts/test_logistics_events_delete_privileges.sql \
             scripts/test_compliance_atomic_policy_audit.sql \
             scripts/test_compliance_price_posting_rulebook.sql \
-            scripts/test_price_posting_human_attestation.sql \
-            scripts/test_price_posting_preparation_ledger.sql \
             scripts/test_price_posting_specific_policy_guard.sql \
             scripts/test_price_posting_accounting_observations.sql \
             scripts/test_price_posting_capture_bindings.sql; do

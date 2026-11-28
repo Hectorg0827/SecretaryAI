@@ -1,8 +1,8 @@
 # Lion BI (SecretaryAI) — Engineering Baseline & Live Handoff
 
-**Last updated:** 2026-11-27  
-**Active branch:** `recovery/disposable-hosted-replay-20261126` (Draft PR `#233` → `#217` → `#208`)  
-**Release Status:** **`NO-GO`** (Mandatory hosted acceptance, stack integration, privilege separation, and provider certification gates remain open)
+**Last updated:** 2026-11-27 (Cycle 2 — Unified Release-Candidate Foundation)  
+**Active branch:** `rc/lionbi-unified-foundation-20261127` (stacked on verified Draft PR `#233` `c589429d`)  
+**Release Status:** **`NO-GO`** (Mandatory hosted disposable replay, live QBO sandbox reconciliation, and independent security signoff gates remain open)
 
 ---
 
@@ -84,7 +84,7 @@ Four unmerged engineering stacks currently exist and **must be reconciled onto a
 | **DB-233-2** | **P1** | `hosted_replay.py` | **Fixed (2026-11-27):** Unconditional `ON CONFLICT(version) DO UPDATE` across all 46 rows could mask unexpected ledger collisions. Replaced with guarded `ROW_COUNT = 1` `UPDATE` for the 5 empty baseline rows and strict `INSERT` (no `ON CONFLICT`) for the remaining 41 versions + byte-length provenance verification. | **FIXED in PR #233** |
 | **DB-233-3** | **P1** | `hosted_preflight.py` | **Fixed (2026-11-27):** Hardcoded defunct ref `ontqkqgofkghsdgtqwsm`, failed to find `psql` outside `/bin:/usr/bin` (`os.defpath`), and ran a passive `SELECT` that exited `0` even on non-empty databases. Added `EXPECTED_DISPOSABLE_PROJECT_REF` validation with hardcoded `FORBIDDEN_PROJECT_REFS` denylist, `shutil.which("psql")` resolution prior to `PG*` env isolation, and fail-closed PL/pgSQL assertions. | **FIXED in PR #233** |
 | **SEC-215-1** | **P0** | Clean Branch Grants & Auth Hook (`#215`, `#227`, `#232`) | **Mitigated for Disposable Acceptance (2026-11-27):** Clean canonical replay lacked explicit table grants on V1–V2 tables, inherited 30 client-role `TRUNCATE` grants from default ACLs, and lacked a GoTrue Custom Access Token Hook to populate top-level `auth.jwt() ->> 'company_id'` without client `user_metadata` spoofing. Added `hosted_post_replay_least_privilege.py` (`finance-uat` and `rls-acceptance` modes) + `secretary_internal.custom_access_token_hook(jsonb)` while preserving all 7 `public` catalog fingerprints. Hosted disposable execution pending branch provisioning. | **READY FOR HOSTED REPLAY** |
-| **INT-001** | **P0** | Branch Stack Divergence | Stack 2 (`#228–#232`, zero-advisory lockfiles + authenticated RLS runner) is based on `79b05284` instead of staging candidate `65751b10` / Stack 1 (`#208/#217/#233`), and Stack 3 (`#199–#210`, privilege separation + 7 compliance migrations) is separate. | **OPEN (Next Cycle)** |
+| **INT-001** | **P0** | Branch Stack Divergence | **Unified on RC Candidate (2026-11-27):** Integrated Stack 1 (`#208/#217/#233`), `#219` + `#221` Finance AR preflight/count guards, Stack 2 RLS harness (`#228–#232` `scripts/rls_*` + fail-closed `ci.yml` `dependency-audit`), Stack 3 (`#199–#210` `secretary_registrar`, `secretary_runtime`, `logistics_events` delete revoke, 7 `20261115*` Compliance migrations, erasure validators), and Stack 4 (`#218–#227` fast hygiene + default ACL gate) onto `rc/lionbi-unified-foundation-20261127` with 54-migration CLI v3 parity replay. | **UNIFIED ON RC BRANCH** |
 | **SEC-206-1** | **P0** | Shared Staging `service_role` | Shared staging `xerktvdgjvjozvckjyfp` still grants `DELETE` on `public.companies` (`ON DELETE CASCADE`) and `public.logistics_events` to `service_role`, and Railway backend still uses shared privileged credentials. | **OPEN (`#206` / `#210`)** |
 
 ---

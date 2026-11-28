@@ -1,4 +1,4 @@
-# Finance AR migration replay in an ephemeral local Docker stack only.
+# Finance AR + Compliance 54-migration replay in an ephemeral local Docker stack only.
 # No linked project, remote SQL, Supabase access token, or hosted DB mutation.
 name: Finance canonical 46-migration replay (local only)
 
@@ -6,6 +6,10 @@ on:
   pull_request:
     paths:
       - "docs/ops/finance_canonical_replay_20261119/**"
+      - "backend/supabase/migrations/2026111*.sql"
+      - "scripts/test_*price_posting*.sql"
+      - "scripts/test_compliance_*.sql"
+      - "scripts/test_logistics_events_delete_privileges.sql"
       - ".github/workflows/finance-canonical-local-replay.yml"
   workflow_dispatch:
 
@@ -61,6 +65,135 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP/finance-canonical-clean"
           bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/tenant_rls_rollback.sql"
+      - name: Prove hosted_replay.py broken-5-row recovery, single-tx rollback atomicity, and post-replay least privilege
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s docs/ops/finance_canonical_replay_20261119 -p test_hosted_replay.py -v
+          python3 docs/ops/finance_canonical_replay_20261119/hosted_replay.py \
+            --project-ref ontqkqgofkghsdgtqwsm \
+            --output "$RUNNER_TEMP/hosted_replay.sql"
+          python3 docs/ops/finance_canonical_replay_20261119/hosted_post_replay_least_privilege.py \
+            --project-ref ontqkqgofkghsdgtqwsm \
+            --mode finance-uat \
+            --output "$RUNNER_TEMP/post_finance_uat.sql"
+          python3 docs/ops/finance_canonical_replay_20261119/hosted_post_replay_least_privilege.py \
+            --project-ref ontqkqgofkghsdgtqwsm \
+            --mode rls-acceptance \
+            --output "$RUNNER_TEMP/post_rls_acceptance.sql"
+
+          # Reproduce Issue #211 exact broken preview state: 0 public tables + 5 SQL-less baseline rows.
+          rm -f "$RUNNER_TEMP/finance-canonical-clean/supabase/migrations/"*.sql
+          (cd "$RUNNER_TEMP/finance-canonical-clean" && supabase db reset)
+          cat > "$RUNNER_TEMP/seed_broken_5.sql" <<'SQL'
+          TRUNCATE supabase_migrations.schema_migrations;
+          INSERT INTO supabase_migrations.schema_migrations(version, name, statements) VALUES
+            ('20240101000000', 'initial_schema', NULL),
+            ('20240601000000', 'v2_additions', ARRAY[]::text[]),
+            ('20240901000000', 'v3_integrations', NULL),
+            ('20261017000000', 'connector_install_secret_digest', NULL),
+            ('20261017010000', 'stock_ledger', ARRAY[]::text[]);
+          SQL
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/seed_broken_5.sql"
+
+          # 1. Atomicity proof: replace final COMMIT; with an exception and prove 0 tables persist!
+          python3 - "$RUNNER_TEMP/hosted_replay.sql" "$RUNNER_TEMP/hosted_replay_abort.sql" <<'PY'
+          from pathlib import Path
+          import sys
+          src = Path(sys.argv[1]).read_text()
+          assert src.endswith("\nCOMMIT;\n")
+          Path(sys.argv[2]).write_text(
+              "SET app.disposable_project_ref = 'ontqkqgofkghsdgtqwsm';\n"
+              + src[:-len("COMMIT;\n")]
+              + "DO $$ BEGIN RAISE EXCEPTION 'simulated_post_replay_abort'; END $$;\nCOMMIT;\n"
+          )
+          PY
+          if bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/hosted_replay_abort.sql"; then
+            echo "ERROR: simulated abort unexpectedly succeeded"
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/assert_still_empty.sql" <<'SQL'
+          DO $$
+          BEGIN
+            IF (SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname = 'public') <> 0 THEN
+              RAISE EXCEPTION 'Atomicity failure: public tables persisted after aborted replay';
+            END IF;
+            IF (SELECT count(*) FROM supabase_migrations.schema_migrations) <> 5
+               OR EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE coalesce(cardinality(statements), 0) <> 0) THEN
+              RAISE EXCEPTION 'Atomicity failure: schema_migrations mutated after aborted replay';
+            END IF;
+          END $$;
+          SQL
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/assert_still_empty.sql"
+
+          # 2. Clean atomic replay from 5-row broken state + finance-uat & rls-acceptance verification!
+          {
+            echo "SET app.disposable_project_ref = 'ontqkqgofkghsdgtqwsm';"
+            cat "$RUNNER_TEMP/hosted_replay.sql"
+          } > "$RUNNER_TEMP/hosted_replay_exec.sql"
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/hosted_replay_exec.sql"
+
+          python3 - "$RUNNER_TEMP/post_finance_uat.sql" "$RUNNER_TEMP/post_finance_uat_rollback.sql" <<'PY'
+          from pathlib import Path
+          import sys
+          src = Path(sys.argv[1]).read_text()
+          assert src.endswith("\nCOMMIT;\n")
+          Path(sys.argv[2]).write_text(
+              "SET app.disposable_project_ref = 'ontqkqgofkghsdgtqwsm';\n"
+              + src[:-len("COMMIT;\n")]
+              + "ROLLBACK;\n"
+          )
+          PY
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/post_finance_uat_rollback.sql"
+
+          {
+            echo "SET app.disposable_project_ref = 'ontqkqgofkghsdgtqwsm';"
+            cat "$RUNNER_TEMP/post_rls_acceptance.sql"
+          } > "$RUNNER_TEMP/post_rls_exec.sql"
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/post_rls_exec.sql"
+      - name: Prove 54-migration forward parity clone (46 canonical + logistics delete revoke + 7 Compliance migrations)
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/finance-canonical-clean/supabase/migrations/"*.sql
+          python3 docs/ops/finance_canonical_replay_20261119/materialize.py --target "$RUNNER_TEMP/finance-canonical-clean"
+          cp backend/supabase/migrations/20261114230000_logistics_events_service_delete_revoke.sql \
+             backend/supabase/migrations/202611150*.sql \
+             "$RUNNER_TEMP/finance-canonical-clean/supabase/migrations/"
+          test "$(find "$RUNNER_TEMP/finance-canonical-clean/supabase/migrations" -maxdepth 1 -name '*.sql' | wc -l)" -eq 54
+          (cd "$RUNNER_TEMP/finance-canonical-clean" && supabase db reset)
+
+          cat > "$RUNNER_TEMP/assert_54_clone.sql" <<'SQL'
+          DO $parity_54$
+          DECLARE
+            ntables integer;
+            nrls integer;
+            nmigrations integer;
+          BEGIN
+            SELECT count(*) INTO ntables FROM pg_catalog.pg_tables WHERE schemaname = 'public';
+            SELECT count(*) INTO nrls
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity;
+            SELECT count(*) INTO nmigrations FROM supabase_migrations.schema_migrations;
+            IF ntables <> 84 OR nrls <> 84 OR nmigrations <> 54 THEN
+              RAISE EXCEPTION '54-migration parity drift: tables=%, rls_enabled=%, migrations=%', ntables, nrls, nmigrations;
+            END IF;
+            RAISE NOTICE 'PASS: 54-migration clean parity clone verified (84/84 RLS-enabled public tables)';
+          END $parity_54$;
+          SQL
+          bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$RUNNER_TEMP/assert_54_clone.sql"
+
+          for sql_test in \
+            scripts/test_logistics_events_delete_privileges.sql \
+            scripts/test_compliance_atomic_policy_audit.sql \
+            scripts/test_compliance_price_posting_rulebook.sql \
+            scripts/test_price_posting_human_attestation.sql \
+            scripts/test_price_posting_preparation_ledger.sql \
+            scripts/test_price_posting_specific_policy_guard.sql \
+            scripts/test_price_posting_accounting_observations.sql \
+            scripts/test_price_posting_capture_bindings.sql; do
+            echo "── running $sql_test against 54-migration parity clone"
+            bash "$GITHUB_WORKSPACE/docs/ops/finance_canonical_replay_20261119/run_local_sql.sh" "$GITHUB_WORKSPACE/$sql_test"
+          done
       - name: Clean up ephemeral local stack
         if: always()
         run: |

@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validateIdentity,reconcileUser,assertAbsent} from './rls_identity.mjs';
+const token=(claims)=>'x.'+Buffer.from(JSON.stringify(claims)).toString('base64url')+'.x';
+const claims={company_id:'a',sub:'u',role:'authenticated'};
+test('valid identity',()=>validateIdentity(token(claims),'a','u',{id:'u'}));
+test('wrong tenant',()=>assert.throws(()=>validateIdentity(token(claims),'b','u',{id:'u'})));
+test('wrong authenticated user',()=>assert.throws(()=>validateIdentity(token(claims),'a','u',{id:'v'})));
+test('wrong subject or role',()=>{assert.throws(()=>validateIdentity(token({...claims,sub:'v'}),'a','u',{id:'u'}));assert.throws(()=>validateIdentity(token({...claims,role:'anon'}),'a','u',{id:'u'}));});
+test('recover missing creation response by email',()=>assert.equal(reconcileUser([{email:'fixture',id:'u'}],'fixture'),'u'));
+test('ambiguous identity fails closed',()=>assert.throws(()=>reconcileUser([{email:'fixture',id:'u'},{email:'fixture',id:'v'}],'fixture')));
+test('residual fixture fails closed',()=>{assert.throws(()=>assertAbsent([{id:'u'}]));assert.throws(()=>assertAbsent(null));assertAbsent([]);});

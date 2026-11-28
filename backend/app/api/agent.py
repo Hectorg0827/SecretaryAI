@@ -141,8 +141,8 @@ async def trigger_sync(
             "counts": counts,
         }
     except Exception as exc:
-        log.error("QB sync failed for %s: %s", company_id, exc)
-        raise HTTPException(status_code=502, detail=f"QB sync failed: {exc}")
+        log.error("QB sync failed for %s: %s", company_id, type(exc).__name__)
+        raise HTTPException(status_code=502, detail="QuickBooks sync failed. Please try again.")
 
 
 # ── Report upload — desktop file watcher calls this when a new file is detected ─

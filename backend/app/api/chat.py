@@ -493,6 +493,51 @@ def _verified_logistics_chat_context(user: dict, db, question: str) -> str:
     }, ensure_ascii=False, default=str)
 
 
+def _verified_finance_chat_context(user: dict, db) -> str:
+    """Load only role-scoped cached finance workspace counts for Lola (read-only).
+
+    Fails closed when the caller lacks a finance scope, when live DB role
+    verification fails, or when the company's cached snapshot is missing/stale.
+    """
+    from app.api.finance_workspace import _current_role, build_finance_workspace
+    from app.domain.finance_access import finance_scopes_for_role
+    from app.scheduler.dashboard_snapshot import SnapshotReadUnavailable, read_snapshot
+
+    if not finance_scopes_for_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="No finance workspace access for this role")
+    verified_role = _current_role(db, user)
+    try:
+        snapshot = read_snapshot(db, user["company_id"], "dashboard_summary")
+        workspace = build_finance_workspace(role=verified_role, snapshot=snapshot)
+    except (SnapshotReadUnavailable, ValueError) as exc:
+        log.warning("Lola finance workspace lookup unavailable: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Verified finance snapshot is unavailable or stale. No receivables or ledger figures were inferred.",
+        ) from None
+    except Exception as exc:
+        log.warning("Lola finance workspace lookup failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Verified finance snapshot is unavailable or stale. No receivables or ledger figures were inferred.",
+        ) from None
+
+    return json.dumps({
+        "source": "tenant_scoped_finance_workspace_snapshot",
+        "role": workspace["role"],
+        "authorized_scopes": workspace["authorized_scopes"],
+        "snapshot_generated_at": workspace["snapshot_generated_at"],
+        "source_quality": workspace["source_quality"],
+        "currency_verified": workspace["currency_verified"],
+        "ledger_reconciled": workspace["ledger_reconciled"],
+        "sections": workspace["sections"],
+        "guardrail": (
+            "Aggregate staging snapshot counts only; balances are NOT GL-reconciled "
+            "and external collection communications require human approval (DRAFT AND WAIT)."
+        ),
+    }, ensure_ascii=False, default=str)
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/message")
@@ -564,6 +609,10 @@ async def send_message(
         bool(ui_context and ui_context.workspace == "logistics")
         and intent == "general_question"
     )
+    finance_lookup = intent in {"receivables_aging", "collections_priority"} or (
+        bool(ui_context and ui_context.workspace == "finance")
+        and intent == "general_question"
+    )
     if role == "sales_rep" and intent == "general_question":
         data_summary = build_query_context(intent, {})
     elif intent == "compliance_check":
@@ -571,6 +620,8 @@ async def send_message(
         data_summary = build_query_context(intent, data)
     elif logistics_lookup:
         data_summary = _verified_logistics_chat_context(user, db, focus + request.message)
+    elif finance_lookup:
+        data_summary = _verified_finance_chat_context(user, db)
     else:
         data = await _fetch_data_for_intent(intent, focus + request.message, adapter)
         data_summary = build_query_context(intent, data)

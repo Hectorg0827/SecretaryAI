@@ -144,8 +144,8 @@ def _connector_health(db, company_id: str) -> dict:
             "total":     len(rows),
         }
     except Exception as exc:
-        log.warning("connector_health query failed: %s", exc)
-        return {"error": str(exc)}
+        log.warning("connector_health query failed: %s", type(exc).__name__)
+        return {"error": "unavailable"}
 
 
 def _workflow_health(db, company_id: str, since: str) -> dict:
@@ -170,8 +170,8 @@ def _workflow_health(db, company_id: str, since: str) -> dict:
             "total_24h":          len(rows),
         }
     except Exception as exc:
-        log.warning("workflow_health query failed: %s", exc)
-        return {"error": str(exc)}
+        log.warning("workflow_health query failed: %s", type(exc).__name__)
+        return {"error": "unavailable"}
 
 
 def _cu_health(db, company_id: str, since: str) -> dict:
@@ -196,8 +196,8 @@ def _cu_health(db, company_id: str, since: str) -> dict:
             "total_24h": len(rows),
         }
     except Exception as exc:
-        log.warning("cu_health query failed: %s", exc)
-        return {"error": str(exc)}
+        log.warning("cu_health query failed: %s", type(exc).__name__)
+        return {"error": "unavailable"}
 
 
 def _ingestion_health(db, company_id: str, since: str) -> dict:
@@ -222,8 +222,8 @@ def _ingestion_health(db, company_id: str, since: str) -> dict:
             "total_24h":  len(rows),
         }
     except Exception as exc:
-        log.warning("ingestion_health query failed: %s", exc)
-        return {"error": str(exc)}
+        log.warning("ingestion_health query failed: %s", type(exc).__name__)
+        return {"error": "unavailable"}
 
 
 def _audit_count(db, company_id: str, since: str) -> int:

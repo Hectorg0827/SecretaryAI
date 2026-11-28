@@ -13,10 +13,10 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import BoundedSemaphore
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.deps import (
     claim_qbo_ar_preview_window,
@@ -58,6 +58,11 @@ def _submit_ar_preview_cooldown(*, company_id: str):
     return future
 
 
+# Aggregate source counts must never accept negative, bool or coerced string
+# values. Keep None for deliberately unavailable counts in partial evidence.
+StrictCount = Annotated[int, Field(ge=0, strict=True)]
+
+
 class ARPaymentPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -69,13 +74,62 @@ class ARPaymentPreviewResponse(BaseModel):
         "other_adjustments_or_missing_links_possible",
         "complete_source_coverage_unverified",
     ] | None
-    invoice_count: int | None
-    linked_invoice_count: int | None
-    variance_invoice_count: int | None
-    partially_paid_invoice_count: int | None
-    unapplied_payment_count: int | None
+    invoice_count: StrictCount | None
+    linked_invoice_count: StrictCount | None
+    variance_invoice_count: StrictCount | None
+    partially_paid_invoice_count: StrictCount | None
+    unapplied_payment_count: StrictCount | None
     accounting_reconciled: Literal[False]
     financial_write_authorized: Literal[False]
+
+    @model_validator(mode="after")
+    def validate_invoice_count_relationships(self) -> "ARPaymentPreviewResponse":
+        # The comparator returns either fully assessed aggregates or
+        # intentionally no counts when source coverage is incomplete.
+        # Never label missing or contradictory evidence as "aligned".
+        counts = (
+            self.invoice_count,
+            self.linked_invoice_count,
+            self.variance_invoice_count,
+            self.partially_paid_invoice_count,
+            self.unapplied_payment_count,
+        )
+        if self.status == "not_assessed":
+            if (self.reason != "complete_source_coverage_unverified"
+                    or any(value is not None for value in counts)):
+                raise ValueError("AR unassessed evidence state inconsistent")
+            return self
+
+        if any(value is None for value in counts):
+            raise ValueError("AR assessed evidence missing aggregate count")
+        if self.status == "aligned_not_certified":
+            if self.reason is not None or self.variance_invoice_count != 0:
+                raise ValueError("AR aligned evidence contradicts variance")
+        elif (self.status == "variance_detected"
+                and (self.reason != "other_adjustments_or_missing_links_possible"
+                     or self.variance_invoice_count == 0)):
+            raise ValueError("AR variance evidence state inconsistent")
+
+        # The QBO comparator counts linked invoice IDs and walks the same
+        # invoice set to compute variances and partially paid invoices.
+        # An inconsistent provider result is unverified evidence, not a
+        # plausible non-certified cash-application preview.
+        if self.invoice_count is not None:
+            for name in (
+                "linked_invoice_count",
+                "variance_invoice_count",
+                "partially_paid_invoice_count",
+            ):
+                count = getattr(self, name)
+                if count is not None and count > self.invoice_count:
+                    raise ValueError("AR aggregate invoice counts inconsistent")
+        # Every partially paid invoice necessarily has at least one linked
+        # payment; preserve this invariant even if invoice_count is None.
+        if (self.linked_invoice_count is not None
+                and self.partially_paid_invoice_count is not None
+                and self.partially_paid_invoice_count > self.linked_invoice_count):
+            raise ValueError("AR partial payments exceed linked invoices")
+        return self
 
 
 @router.get("/ar-payment-preview", response_model=ARPaymentPreviewResponse)

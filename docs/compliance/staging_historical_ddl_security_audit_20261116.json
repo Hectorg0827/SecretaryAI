@@ -1,0 +1,88 @@
+{
+  "schema_version": "lionbi.staging.historical-ddl-audit.v1",
+  "audit_date": "2026-11-16",
+  "project_ref": "xerktvdgjvjozvckjyfp",
+  "project_label": "SecretaryAI-Staging",
+  "evidence_scope": "read-only live pg_catalog and migration statements, no records or personal data",
+  "status": "NO_GO",
+  "source_verified_historical_git_blobs": false,
+  "historical_recorded_versions": [
+    {
+      "version": "20261111005641",
+      "name": "logistics_journey",
+      "recorded_sql_git_blob_sha1": "6217603a2368553274f6b153f64f874895cfa15c",
+      "git_blob_not_found": true,
+      "table": "public.logistics_events",
+      "rls_enabled": true,
+      "anon_select": false,
+      "authenticated_select": false,
+      "service_role_select": true,
+      "service_role_insert": true,
+      "service_role_update": false,
+      "service_role_delete": true,
+      "delete_trigger_active": false,
+      "update_trigger_active": true,
+      "delete_protection": "FAILED",
+      "installed_update_guard_sha256": "4c7bd3b4f5915121facf9d89c61b0bc176327ec11db8a3de399b787272fb436f"
+    },
+    {
+      "version": "20261111005840",
+      "name": "lola_core",
+      "recorded_sql_git_blob_sha1": "720c77d71ef6da610f37bdb2044e579942f3d691",
+      "git_blob_not_found": true,
+      "tables_with_rls": [
+        "public.lola_action_receipts",
+        "public.lola_delegations",
+        "public.lola_memories",
+        "public.lola_org_members"
+      ],
+      "service_role_receipts_delete": false,
+      "active_before_delete_receipt_trigger": true,
+      "installed_receipt_guard_sha256": "1928efe45bd08b1bd2dd82187ca25b7368bf7c71da81e35414519eb37f11cc19",
+      "receipt_delete_protection": "PARTIAL_CATALOG_VERIFIED"
+    },
+    {
+      "version": "20261112043411",
+      "name": "lola_conversation_owner_rls_staging",
+      "recorded_sql_git_blob_sha1": "bbab56fab25e63944a67f6ebfd63e7a023a77e96",
+      "git_blob_not_found": true,
+      "table": "public.conversations",
+      "policy": "conversation_owner_scope",
+      "policy_command": "ALL",
+      "policy_permissive": true,
+      "roles": [
+        "authenticated"
+      ],
+      "authenticated_policies_found": 1,
+      "using_requires_company_jwt_claim": true,
+      "using_requires_auth_uid_equals_user_id": true,
+      "with_check_same_tenant_and_owner": true,
+      "jwt_claim_provenance_not_verified": true,
+      "security_classification": "PREDICATE_PRESENT_CLAIM_PROVENANCE_OPEN"
+    }
+  ],
+  "critical_release_blocker": {
+    "id": "LOGISTICS_LEDGER_DELETE_NOT_BLOCKED",
+    "severity": "high",
+    "description": "service_role has DELETE on logistics_events; only UPDATE is rejected, so backend-key deletes are not database-blocked",
+    "live_fixed": false,
+    "proposal_path": "docs/compliance/sql-proposals/logistics_events_prevent_delete_REVIEW_ONLY.sql",
+    "proposal_not_executable_by_release_preflight": true,
+    "test_path": "scripts/test_logistics_delete_guard_proposal.sql",
+    "requires_independent_retention_review": true,
+    "requires_new_canonical_migration": true,
+    "requires_separate_staging_authorization": true
+  },
+  "remaining_gates": [
+    "review logistics retention/deletion contract",
+    "create newly versioned additive migration with pinned Supabase CLI after approval",
+    "test future migration on disposable clone of actual staging schema",
+    "review other two historical SQL provenance gaps",
+    "verify tenant ID JWT claim provenance and policy composition",
+    "complete seven Compliance migrations plan and legal/accounting review"
+  ],
+  "live_database_write": false,
+  "migration_history_modified": false,
+  "production_accessed": false,
+  "deployment_permitted": false
+}

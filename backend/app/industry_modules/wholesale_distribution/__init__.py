@@ -632,6 +632,7 @@ class WholesaleDistributionModule(IndustryModule):
             "inventory_check": "asking about case levels, supply, stock, or depletion rates",
             "account_status": "asking about a specific account, retailer, or customer",
             "sales_report": "requesting sales data, revenue trends, or period comparisons",
+            "receivables_aging": "asking about accounts receivable aging, overdue balances, collections priority, or past-due invoices",
             "po_inquiry": "asking about purchase orders, containers, or supplier orders",
             "customs_status": "asking about shipments, container status, or customs clearance",
             "alert_check": "asking about alerts, warnings, or issues flagged by the system",

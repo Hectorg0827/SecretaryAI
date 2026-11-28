@@ -18,10 +18,11 @@ import { ShipmentChecker }         from '../components/compliance/ShipmentChecke
 import { LicenseRegistry }         from '../components/compliance/LicenseRegistry';
 import { ComplianceStatusBadge }   from '../components/compliance/ComplianceStatusBadge';
 import { ComplianceSetupWizard }   from '../components/compliance/ComplianceSetupWizard';
+import { PricePostingReviewPanel } from '../components/compliance/PricePostingReviewPanel';
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 
-type TabId = 'status' | 'alerts' | 'deadlines' | 'licenses' | 'check';
+type TabId = 'status' | 'alerts' | 'deadlines' | 'licenses' | 'check' | 'price-posting';
 
 const TABS: { id: TabId; label: string; icon: LionUIIconKind }[] = [
   { id: 'status',    label: 'Status',          icon: 'compliance' },
@@ -29,6 +30,7 @@ const TABS: { id: TabId; label: string; icon: LionUIIconKind }[] = [
   { id: 'deadlines', label: 'Deadlines',       icon: 'calendar' },
   { id: 'licenses',  label: 'Licenses',        icon: 'document' },
   { id: 'check',     label: 'Check Shipment',  icon: 'search' },
+  { id: 'price-posting', label: 'Price Posting', icon: 'document' },
 ];
 
 // ─── State status grid ────────────────────────────────────────────────────────
@@ -376,6 +378,9 @@ export function Compliance() {
 
           {/* Check Shipment tab */}
           {activeTab === 'check' && <ShipmentChecker loading={false} />}
+
+          {/* Versioned regulatory-source review; no agency filing or price writes */}
+          {activeTab === 'price-posting' && <PricePostingReviewPanel />}
         </div>
       </div>
     </div>

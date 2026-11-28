@@ -1,11 +1,18 @@
 """Morning briefing task — sends daily summary to all active companies."""
 import asyncio
 import logging
+from datetime import datetime, timezone
 from celery_app import app
 from tasks.base import get_supabase, get_active_companies, build_adapter, task_lock, locked_task
 from app.scheduler.morning_briefing import generate_morning_briefing
 from app.scheduler.dashboard_snapshot import compute_dashboard_payload, store_snapshot
 from app.ai.data_summarizer import build_query_context
+from app.scheduler.briefing_alerts import (
+    alerts_to_text,
+    build_briefing_alerts,
+    load_alert_history,
+    save_alert_history,
+)
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +45,22 @@ def send_morning_briefing_all(self, company_id: str | None = None):
 
             # Build text summary for the briefing email
             data_summary = _payload_to_text(dashboard_payload, company["name"])
+
+            # Proactive alerts: merge duplicates and mark what is new since
+            # the last briefing vs. still open. Nothing is hidden.
+            alert_result = None
+            try:
+                now = datetime.now(timezone.utc)
+                alert_result = build_briefing_alerts(
+                    dashboard_payload.get("inventory_alerts", []),
+                    company_id=company["id"],
+                    now=now,
+                    history=load_alert_history(db, company["id"], now=now),
+                )
+                data_summary = f"{data_summary}\n\n{alerts_to_text(alert_result)}"
+            except Exception:
+                log.warning("Briefing alert section skipped for %s", company["id"])
+
             asyncio.run(
                 generate_morning_briefing(
                     company_id=company["id"],
@@ -47,6 +70,9 @@ def send_morning_briefing_all(self, company_id: str | None = None):
                     recipient_email=company.get("alert_email", ""),
                 )
             )
+            # Only after the briefing was produced: remember what it reported.
+            if alert_result is not None:
+                save_alert_history(db, company["id"], alert_result)
             log.info(
                 "Morning briefing + dashboard snapshot stored for company %s",
                 company["id"],

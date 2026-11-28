@@ -108,6 +108,13 @@ Four unmerged engineering stacks currently exist and **must be reconciled onto a
 
 ## 6. Ordered Next Engineering Actions
 
+> **Status update (2026-11-28, branch `claude/charming-pasteur-lcflqm`):**
+> - Item 2 DONE: security stack `#228–#232` merged; this branch was already ahead on PyJWT/bcrypt/FastAPI/Vite 8, so its side was kept. Adopted typescript-eslint 8.74.0 and `--audit-level=low`. `pip-audit` + `npm audit` (frontend, desktop) = 0 vulnerabilities.
+> - Item 3 VERIFIED: the 7 `20261115*` Compliance migrations are already in the 54-migration parity clone (`finance-canonical-local-replay.yml`, green on `#234`) and `scripts/validate_schema.sh` passed twice locally on fresh PostgreSQL 16. Registrar RPC, atomic registration, parent-cascade revoke and runtime-identity audit integration scripts all PASS locally. Live cutover remains operator-gated (secrets + lawful-erasure decision); the revoke SQL stays REVIEW_ONLY.
+> - Item 5 EXPANDED: Lola eval suite now has 6 categories, adding morning-briefing proactive alerts (dedup, new vs still-open, never hiding unresolved critical, tenant-scoped history, injection-safe names, bounded size). `$0.00` spend.
+> - Item 4 still awaiting operator cost approval.
+
+
 1. **Verify Exact-Head CI & Local Postgres Replay on PR `#233`:** Confirm `Finance canonical 46-migration replay (local only)`, `Disposable replay regression`, `CI`, and `CodeQL` pass on the hardened `hosted_replay.py` + `hosted_post_replay_least_privilege.py` commit.
 2. **Unify Security Stack 2 (`#228–#232`) with Staging/Finance Candidate (`65751b10` / `#208`):** Port the vetted zero-vulnerability `backend/requirements.txt`, `frontend/package-lock.json`, `desktop/package-lock.json`, mandatory `ci.yml` dependency-audit enforcement (`continue-on-error: false`), and `scripts/rls_authenticated_acceptance.mjs` onto an isolated integration branch stacked cleanly on the canonical staging candidate.
 3. **Integrate Runtime Privilege Separation & Compliance Migrations (`#199–#210`):** Validate the 7 additive `20261115*` Compliance migrations and `secretary_registrar` / `secretary_runtime` SQL migrations on top of the 46-migration canonical baseline in local Supabase CLI v3 replay.

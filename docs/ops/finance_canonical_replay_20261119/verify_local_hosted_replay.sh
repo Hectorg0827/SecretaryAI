@@ -36,6 +36,12 @@ run_psql() {
 
 # Seed exact Issue #211 broken preview state: 0 public tables + 5 empty baseline rows.
 run_psql <<'SQL'
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+  version text NOT NULL PRIMARY KEY,
+  statements text[],
+  name text
+);
 TRUNCATE supabase_migrations.schema_migrations;
 INSERT INTO supabase_migrations.schema_migrations(version, name, statements) VALUES
   ('20240101000000', 'initial_schema', NULL),

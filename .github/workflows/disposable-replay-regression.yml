@@ -1,0 +1,15 @@
+name: Disposable replay regression
+on:
+  pull_request:
+    paths:
+      - 'docs/ops/finance_canonical_replay_20261119/**'
+      - '.github/workflows/disposable-replay-regression.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s docs/ops/finance_canonical_replay_20261119 -p test_hosted_replay.py -v

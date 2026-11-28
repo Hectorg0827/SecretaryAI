@@ -90,3 +90,97 @@ BEGIN
  RAISE NOTICE 'PASS: two tenants, three employees, cross-tenant read/write denial, owner scope, missing claims, rollback';
 END $cleanup$;
 DROP TABLE finance_rls_initial_acl;
+
+-- Rolled-back verification of post-replay TRUNCATE revocation and GoTrue Custom Access Token Hook
+-- (validates Issue #215 and PR #232/#233 auth claim safety on live Supabase PostgreSQL 17).
+BEGIN;
+REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+CREATE OR REPLACE FUNCTION secretary_internal.custom_access_token_hook(event jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $auth_hook$
+DECLARE
+  claims jsonb := coalesce(event -> 'claims', '{}'::jsonb) - 'company_id';
+  raw_company text := event #>> '{claims,app_metadata,company_id}';
+  raw_user text := coalesce(event ->> 'user_id', event #>> '{claims,sub}');
+  v_company_id uuid;
+  v_user_id uuid;
+BEGIN
+  IF raw_company IS NULL
+     OR raw_company !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN
+    RETURN jsonb_set(event, '{claims}', claims, true);
+  END IF;
+  v_company_id := raw_company::uuid;
+  IF NOT EXISTS (SELECT 1 FROM public.companies c WHERE c.id = v_company_id) THEN
+    RETURN jsonb_set(event, '{claims}', claims, true);
+  END IF;
+  IF raw_user IS NOT NULL
+     AND raw_user ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' THEN
+    v_user_id := raw_user::uuid;
+    IF EXISTS (
+      SELECT 1 FROM public.users u
+       WHERE u.id = v_user_id
+         AND (u.is_active IS DISTINCT FROM TRUE OR u.company_id IS DISTINCT FROM v_company_id)
+    ) THEN
+      RETURN jsonb_set(event, '{claims}', claims, true);
+    END IF;
+  END IF;
+  claims := jsonb_set(claims, '{company_id}', to_jsonb(v_company_id::text), true);
+  RETURN jsonb_set(event, '{claims}', claims, true);
+END;
+$auth_hook$;
+REVOKE ALL ON FUNCTION secretary_internal.custom_access_token_hook(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+
+DO $hook_and_truncate_verify$
+DECLARE
+  trunc_grants integer;
+  out_valid jsonb;
+  out_inactive jsonb;
+  out_spoofed jsonb;
+BEGIN
+  SELECT count(*) INTO trunc_grants
+    FROM information_schema.role_table_grants
+   WHERE table_schema = 'public'
+     AND privilege_type = 'TRUNCATE'
+     AND grantee IN ('PUBLIC', 'anon', 'authenticated');
+  IF trunc_grants <> 0 THEN
+    RAISE EXCEPTION 'Expected 0 client TRUNCATE grants after revocation, found %', trunc_grants;
+  END IF;
+
+  INSERT INTO public.companies(id, name) VALUES ('11111111-1111-4111-8111-111111111110', '__hook_co');
+  INSERT INTO public.users(id, company_id, email, hashed_password, role, is_active) VALUES
+    ('10000000-0000-4000-8000-000000000009', '11111111-1111-4111-8111-111111111110', 'inactive@example.invalid', 'invalid-hash', 'viewer', false);
+
+  out_valid := secretary_internal.custom_access_token_hook(
+    '{"user_id":"10000000-0000-4000-8000-000000000001","claims":{"sub":"10000000-0000-4000-8000-000000000001","app_metadata":{"company_id":"11111111-1111-4111-8111-111111111110"}}}'::jsonb
+  );
+  IF out_valid #>> '{claims,company_id}' <> '11111111-1111-4111-8111-111111111110' THEN
+    RAISE EXCEPTION 'Auth hook failed to propagate valid company_id: %', out_valid;
+  END IF;
+
+  out_inactive := secretary_internal.custom_access_token_hook(
+    '{"user_id":"10000000-0000-4000-8000-000000000009","claims":{"sub":"10000000-0000-4000-8000-000000000009","app_metadata":{"company_id":"11111111-1111-4111-8111-111111111110"}}}'::jsonb
+  );
+  IF (out_inactive -> 'claims') ? 'company_id' THEN
+    RAISE EXCEPTION 'Auth hook failed to withhold company_id for deactivated employee';
+  END IF;
+
+  out_spoofed := secretary_internal.custom_access_token_hook(
+    '{"user_id":"10000000-0000-4000-8000-000000000001","claims":{"sub":"10000000-0000-4000-8000-000000000001","company_id":"11111111-1111-4111-8111-111111111110","user_metadata":{"company_id":"11111111-1111-4111-8111-111111111110"}}}'::jsonb
+  );
+  IF (out_spoofed -> 'claims') ? 'company_id' THEN
+    RAISE EXCEPTION 'Auth hook failed to strip unverified/user_metadata company_id';
+  END IF;
+END $hook_and_truncate_verify$;
+ROLLBACK;
+
+DO $post_hook_cleanup$
+BEGIN
+  IF (SELECT count(*) FROM public.companies) <> 0 OR (SELECT count(*) FROM public.users) <> 0 THEN
+    RAISE EXCEPTION 'Hook verification transaction failed to roll back rows';
+  END IF;
+  RAISE NOTICE 'PASS: client TRUNCATE revocation and custom_access_token_hook verified and rolled back';
+END $post_hook_cleanup$;

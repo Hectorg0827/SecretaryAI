@@ -256,6 +256,7 @@ jobs:
         run: |
           npm ci
           npm run build -- --mode development
+          test -f dist/index.html
       - name: rustfmt
         working-directory: desktop/src-tauri
         run: cargo fmt --all --check
@@ -426,17 +427,17 @@ jobs:
         id: frontend_runtime
         working-directory: frontend
         continue-on-error: true
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=low
       - name: Audit full frontend dependencies
         id: frontend_all
         working-directory: frontend
         continue-on-error: true
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=low
       - name: Audit desktop dependencies
         id: desktop_all
         working-directory: desktop
         continue-on-error: true
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=low
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
